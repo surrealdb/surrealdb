@@ -32,9 +32,6 @@ jobs:
 
       - name: Extract baseline
         run: cp -r target/criterion /tmp/criterion
-      
-      - name: Reset cargo registry
-        run: rm -rf $CARGO_HOME/registry
 
       - name: Checkout changes
         uses: actions/checkout@v3

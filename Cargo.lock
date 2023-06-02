@@ -3738,7 +3738,7 @@ dependencies = [
 [[package]]
 name = "rquickjs"
 version = "0.1.7"
-source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#501009bc24dc47ee183ab37b7bc5ec3ea57ac636"
+source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#2b4723f099c78a12af90919f67d36ae832c38afa"
 dependencies = [
  "rquickjs-core",
  "rquickjs-macro",
@@ -3747,7 +3747,7 @@ dependencies = [
 [[package]]
 name = "rquickjs-core"
 version = "0.1.7"
-source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#501009bc24dc47ee183ab37b7bc5ec3ea57ac636"
+source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#2b4723f099c78a12af90919f67d36ae832c38afa"
 dependencies = [
  "async-lock",
  "relative-path",
@@ -3757,7 +3757,7 @@ dependencies = [
 [[package]]
 name = "rquickjs-macro"
 version = "0.1.7"
-source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#501009bc24dc47ee183ab37b7bc5ec3ea57ac636"
+source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#2b4723f099c78a12af90919f67d36ae832c38afa"
 dependencies = [
  "darling",
  "fnv",
@@ -3774,7 +3774,7 @@ dependencies = [
 [[package]]
 name = "rquickjs-sys"
 version = "0.1.7"
-source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#501009bc24dc47ee183ab37b7bc5ec3ea57ac636"
+source = "git+https://github.com/DelSkayn/rquickjs.git?branch=async#2b4723f099c78a12af90919f67d36ae832c38afa"
 dependencies = [
  "bindgen 0.60.1",
  "cc",
