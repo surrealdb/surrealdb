@@ -36,7 +36,7 @@ impl<'a> Document<'a> {
 					if !val.is_none() {
 						val = val.coerce_to(kind).map_err(|e| match e {
 							// There was a conversion error
-							Error::ConvertTo {
+							Error::CoerceTo {
 								from,
 								..
 							} => Error::FieldCheck {

@@ -57,7 +57,7 @@ impl FromArg for Array {
 
 impl FromArg for Bytes {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_bytes()
+		arg.coerce_to_bytes()
 	}
 }
 

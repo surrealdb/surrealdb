@@ -369,10 +369,17 @@ pub enum Error {
 	},
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert from {from} into a {into}")]
+	#[error("Expected a {into} but cannot convert {from} into a {into}")]
 	ConvertTo {
 		from: Value,
 		into: Cow<'static, str>,
+	},
+
+	/// Unable to coerce to a value to another value
+	#[error("Expected a {kind} but the array had {size} items")]
+	LengthInvalid {
+		kind: Cow<'static, str>,
+		size: usize,
 	},
 
 	/// Cannot perform addition

@@ -1136,7 +1136,7 @@ impl Value {
 				let mut val = self;
 				for k in k {
 					match val.coerce_to(k) {
-						Err(Error::ConvertTo {
+						Err(Error::CoerceTo {
 							from,
 							..
 						}) => val = from,
@@ -1144,7 +1144,7 @@ impl Value {
 						Ok(v) => return Ok(v),
 					}
 				}
-				Err(Error::ConvertTo {
+				Err(Error::CoerceTo {
 					from: val,
 					into: kind.to_string().into(),
 				})
@@ -1153,10 +1153,10 @@ impl Value {
 		// Check for any conversion errors
 		match res {
 			// There was a conversion error
-			Err(Error::ConvertTo {
+			Err(Error::CoerceTo {
 				from,
 				..
-			}) => Err(Error::ConvertTo {
+			}) => Err(Error::CoerceTo {
 				from,
 				into: kind.to_string().into(),
 			}),
@@ -1179,13 +1179,13 @@ impl Value {
 				// The Decimal can be represented as an i64
 				Some(v) => Ok(v),
 				// The Decimal is out of bounds
-				_ => Err(Error::ConvertTo {
+				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "i64".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "i64".into(),
 			}),
@@ -1204,13 +1204,13 @@ impl Value {
 				// The Decimal can be represented as an u64
 				Some(v) => Ok(v),
 				// The Decimal is out of bounds
-				_ => Err(Error::ConvertTo {
+				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "u64".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "u64".into(),
 			}),
@@ -1229,13 +1229,13 @@ impl Value {
 				// The Decimal can be represented as a f64
 				Some(v) => Ok(v),
 				// Ths Decimal loses precision
-				None => Err(Error::ConvertTo {
+				None => Err(Error::CoerceTo {
 					from: self,
 					into: "f64".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "f64".into(),
 			}),
@@ -1248,7 +1248,7 @@ impl Value {
 			// Allow any boolean value
 			Value::Bool(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "bool".into(),
 			}),
@@ -1267,13 +1267,13 @@ impl Value {
 				// The Decimal can be represented as an Int
 				Some(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
-				_ => Err(Error::ConvertTo {
+				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "int".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "int".into(),
 			}),
@@ -1292,13 +1292,13 @@ impl Value {
 				// The Decimal can be represented as a Float
 				Some(v) => Ok(Number::Float(v)),
 				// Ths BigDecimal loses precision
-				None => Err(Error::ConvertTo {
+				None => Err(Error::CoerceTo {
 					from: self,
 					into: "float".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "float".into(),
 			}),
@@ -1315,7 +1315,7 @@ impl Value {
 				// The Int can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
 				// Ths Int does not convert to a Decimal
-				None => Err(Error::ConvertTo {
+				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
 				}),
@@ -1325,13 +1325,13 @@ impl Value {
 				// The Float can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
 				// Ths Float does not convert to a Decimal
-				None => Err(Error::ConvertTo {
+				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
 				}),
 			},
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "decimal".into(),
 			}),
@@ -1344,7 +1344,7 @@ impl Value {
 			// Allow any number
 			Value::Number(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "number".into(),
 			}),
@@ -1361,7 +1361,7 @@ impl Value {
 			// Allow any string value
 			Value::Strand(v) => Ok(v.as_string()),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "string".into(),
 			}),
@@ -1378,7 +1378,7 @@ impl Value {
 			// Allow any string value
 			Value::Strand(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "string".into(),
 			}),
@@ -1391,7 +1391,7 @@ impl Value {
 			// Uuids are allowed
 			Value::Uuid(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "uuid".into(),
 			}),
@@ -1404,7 +1404,7 @@ impl Value {
 			// Datetimes are allowed
 			Value::Datetime(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "datetime".into(),
 			}),
@@ -1417,7 +1417,7 @@ impl Value {
 			// Durations are allowed
 			Value::Duration(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "duration".into(),
 			}),
@@ -1430,7 +1430,7 @@ impl Value {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "bytes".into(),
 			}),
@@ -1443,7 +1443,7 @@ impl Value {
 			// Objects are allowed
 			Value::Object(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "object".into(),
 			}),
@@ -1456,7 +1456,7 @@ impl Value {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "array".into(),
 			}),
@@ -1469,7 +1469,7 @@ impl Value {
 			// Geometry points are allowed
 			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "point".into(),
 			}),
@@ -1482,7 +1482,7 @@ impl Value {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "record".into(),
 			}),
@@ -1495,7 +1495,7 @@ impl Value {
 			// Geometries are allowed
 			Value::Geometry(v) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "geometry".into(),
 			}),
@@ -1508,7 +1508,7 @@ impl Value {
 			// Records are allowed if correct type
 			Value::Thing(v) if self.is_record_type(val) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "record".into(),
 			}),
@@ -1521,7 +1521,7 @@ impl Value {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
+			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "geometry".into(),
 			}),
@@ -1563,9 +1563,9 @@ impl Value {
 				e => e,
 			})
 			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::CoerceTo {
-					from: v.into(),
-					into: format!("array<{kind}, {len}>").into(),
+				v if v > *len as usize => Err(Error::LengthInvalid {
+					kind: format!("array<{kind}, {len}>").into(),
+					size: v,
 				}),
 				_ => Ok(v),
 			})
@@ -1608,9 +1608,9 @@ impl Value {
 				e => e,
 			})
 			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::CoerceTo {
-					from: v.into(),
-					into: format!("set<{kind}, {len}>").into(),
+				v if v > *len as usize => Err(Error::LengthInvalid {
+					kind: format!("set<{kind}, {len}>").into(),
+					size: v,
 				}),
 				_ => Ok(v),
 			})
@@ -2124,9 +2124,9 @@ impl Value {
 				e => e,
 			})
 			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::ConvertTo {
-					from: v.into(),
-					into: format!("array<{kind}, {len}>").into(),
+				v if v > *len as usize => Err(Error::LengthInvalid {
+					kind: format!("array<{kind}, {len}>").into(),
+					size: v,
 				}),
 				_ => Ok(v),
 			})
@@ -2169,9 +2169,9 @@ impl Value {
 				e => e,
 			})
 			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::ConvertTo {
-					from: v.into(),
-					into: format!("set<{kind}, {len}>").into(),
+				v if v > *len as usize => Err(Error::LengthInvalid {
+					kind: format!("set<{kind}, {len}>").into(),
+					size: v,
 				}),
 				_ => Ok(v),
 			})
