@@ -970,12 +970,13 @@ async fn define_statement_search_index() -> Result<(), Error> {
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
+		ANALYZE INDEX blog_title ON blog;
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 7);
+	assert_eq!(res.len(), 8);
 	//
 	for _ in 0..6 {
 		let tmp = res.remove(0).result;
@@ -989,6 +990,17 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) ORDER 100 HIGHLIGHTS' },
+		}",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			doc_ids: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
+			terms: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
+			doc_lengths: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
+			postings: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 }
 		}",
 	);
 	assert_eq!(tmp, val);

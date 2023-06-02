@@ -7,6 +7,7 @@ use crate::sql::common::colons;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::fmt::Pretty;
+use crate::sql::statements::analyze::{analyze, AnalyzeStatement};
 use crate::sql::statements::begin::{begin, BeginStatement};
 use crate::sql::statements::cancel::{cancel, CancelStatement};
 use crate::sql::statements::commit::{commit, CommitStatement};
@@ -74,6 +75,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum Statement {
+	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
 	Cancel(CancelStatement),
 	Commit(CommitStatement),
@@ -112,6 +114,7 @@ impl Statement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Self::Analyze(_) => false,
 			Self::Create(v) => v.writeable(),
 			Self::Define(_) => true,
 			Self::Delete(v) => v.writeable(),
@@ -141,6 +144,7 @@ impl Statement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Analyze(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Create(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Delete(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
@@ -164,6 +168,7 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
+			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Cancel(v) => write!(Pretty::from(f), "{v}"),
 			Self::Commit(v) => write!(Pretty::from(f), "{v}"),
@@ -192,6 +197,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 	delimited(
 		mightbespace,
 		alt((
+			map(analyze, Statement::Analyze),
 			map(begin, Statement::Begin),
 			map(cancel, Statement::Cancel),
 			map(commit, Statement::Commit),
