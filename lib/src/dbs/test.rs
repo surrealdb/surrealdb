@@ -10,7 +10,7 @@ use uuid::Uuid;
 impl Default for Options {
 	fn default() -> Self {
 		Options {
-			id: Arc::new(Uuid::default()),
+			id: Uuid::default(),
 			ns: None,
 			db: None,
 			dive: 0,
