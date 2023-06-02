@@ -159,14 +159,19 @@ impl From<&SqlTokenizer> for Splitter {
 
 impl Splitter {
 	fn should_split(&mut self, c: char) -> bool {
-		let new_state = match &self.t {
-			SqlTokenizer::Blank => Self::blank_state(c),
-			SqlTokenizer::Case => Self::case_state(c),
-			SqlTokenizer::Class => Self::class_state(c),
-		};
-		if new_state != self.state {
+		match &self.t {
+			SqlTokenizer::Blank => self.blank_state(c),
+			SqlTokenizer::Camel => self.camel_state(c),
+			SqlTokenizer::Class => self.class_state(c),
+			SqlTokenizer::Punct => self.punct_state(c),
+		}
+	}
+
+	#[inline]
+	fn state_check(&mut self, s: u8) -> bool {
+		if s != self.state {
 			let res = self.state != 0;
-			self.state = new_state;
+			self.state = s;
 			res
 		} else {
 			false
@@ -174,28 +179,18 @@ impl Splitter {
 	}
 
 	#[inline]
-	fn blank_state(c: char) -> u8 {
-		if c.is_whitespace() {
+	fn blank_state(&mut self, c: char) -> bool {
+		let s = if c.is_whitespace() {
 			1
 		} else {
 			9
-		}
+		};
+		self.state_check(s)
 	}
 
 	#[inline]
-	fn case_state(c: char) -> u8 {
-		if c.is_lowercase() {
-			1
-		} else if c.is_uppercase() {
-			2
-		} else {
-			9
-		}
-	}
-
-	#[inline]
-	fn class_state(c: char) -> u8 {
-		if c.is_alphabetic() {
+	fn class_state(&mut self, c: char) -> bool {
+		let s = if c.is_alphabetic() {
 			1
 		} else if c.is_numeric() {
 			2
@@ -205,6 +200,29 @@ impl Splitter {
 			4
 		} else {
 			9
+		};
+		self.state_check(s)
+	}
+
+	#[inline]
+	fn punct_state(&mut self, c: char) -> bool {
+		c.is_ascii_punctuation()
+	}
+
+	#[inline]
+	fn camel_state(&mut self, c: char) -> bool {
+		let s = if c.is_lowercase() {
+			1
+		} else if c.is_uppercase() {
+			2
+		} else {
+			9
+		};
+		if s != self.state {
+			self.state = s;
+			s == 2
+		} else {
+			false
 		}
 	}
 }
@@ -214,13 +232,60 @@ mod tests {
 	use crate::idx::ft::analyzer::tests::test_analyser;
 
 	#[test]
-	fn test_split() {
+	fn test_tokenize_blank_class() {
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
 			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
 			&[
 				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
 				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456",
+			],
+		);
+	}
+
+	#[test]
+	fn test_tokenize_source_code() {
+		test_analyser(
+			"DEFINE ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
+			r#"struct MyRectangle {
+    // specified by corners
+    top_left: Point,
+    bottom_right: Point,
+}
+static LANGUAGE: &str = "Rust";"#,
+			&[
+				"struct",
+				"my",
+				"rectangle",
+				"{",
+				"/",
+				"/",
+				"specified",
+				"by",
+				"corners",
+				"top",
+				"_",
+				"left",
+				":",
+				"point",
+				",",
+				"bottom",
+				"_",
+				"right",
+				":",
+				"point",
+				",",
+				"}",
+				"static",
+				"language",
+				":",
+				"&",
+				"str",
+				"=",
+				"\"",
+				"rust",
+				"\"",
+				";",
 			],
 		);
 	}

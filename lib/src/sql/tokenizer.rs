@@ -12,17 +12,18 @@ use std::fmt::Display;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Tokenizer {
 	Blank,
-	Case,
+	Camel,
 	Class,
-	// Add new variants here
+	Punct,
 }
 
 impl Display for Tokenizer {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
 			Self::Blank => "BLANK",
-			Self::Case => "CASE",
+			Self::Camel => "CAMEL",
 			Self::Class => "CLASS",
+			Self::Punct => "PUNCT",
 		})
 	}
 }
@@ -30,8 +31,9 @@ impl Display for Tokenizer {
 fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
 	let (i, t) = alt((
 		map(tag_no_case("BLANK"), |_| Tokenizer::Blank),
-		map(tag_no_case("CASE"), |_| Tokenizer::Case),
+		map(tag_no_case("CAMEL"), |_| Tokenizer::Camel),
 		map(tag_no_case("CLASS"), |_| Tokenizer::Class),
+		map(tag_no_case("PUNCT"), |_| Tokenizer::Punct),
 	))(i)?;
 	Ok((i, t))
 }
