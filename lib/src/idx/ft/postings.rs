@@ -1,10 +1,9 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, BTreeIterator, KeyProvider, NodeId, Payload, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
-use crate::key::bf::Bf;
 use crate::kvs::{Key, Transaction};
 
 pub(super) type TermFrequency = u64;
@@ -68,12 +67,6 @@ impl Postings {
 		self.btree.delete::<TrieKeys>(tx, key).await
 	}
 
-	pub(super) fn new_postings_iterator(&self, term_id: TermId) -> PostingsIterator {
-		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
-		let i = self.btree.search_by_prefix(prefix_key);
-		PostingsIterator::new(i)
-	}
-
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		self.btree.statistics::<TrieKeys>(tx).await
 	}
@@ -100,52 +93,12 @@ impl KeyProvider for PostingsKeyProvider {
 	}
 }
 
-pub(super) struct PostingsIterator {
-	btree_iterator: BTreeIterator<PostingsKeyProvider>,
-}
-
-impl PostingsIterator {
-	fn new(btree_iterator: BTreeIterator<PostingsKeyProvider>) -> Self {
-		Self {
-			btree_iterator,
-		}
-	}
-
-	pub(super) async fn next(
-		&mut self,
-		tx: &mut Transaction,
-	) -> Result<Option<(DocId, Payload)>, Error> {
-		Ok(self.btree_iterator.next::<TrieKeys>(tx).await?.map(|(k, p)| {
-			let posting_key: Bf = (&k).into();
-			(posting_key.doc_id, p)
-		}))
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::Payload;
-	use crate::idx::ft::docids::DocId;
-	use crate::idx::ft::postings::{Postings, PostingsIterator};
+	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Transaction};
-	use std::collections::HashMap;
+	use crate::kvs::Datastore;
 	use test_log::test;
-
-	async fn check_postings(
-		mut i: PostingsIterator,
-		tx: &mut Transaction,
-		e: Vec<(DocId, Payload)>,
-	) {
-		let mut map = HashMap::new();
-		while let Some((d, p)) = i.next(tx).await.unwrap() {
-			map.insert(d, p);
-		}
-		assert_eq!(map.len(), e.len());
-		for (k, p) in e {
-			assert_eq!(map.get(&k), Some(&p));
-		}
-	}
 
 	#[test(tokio::test)]
 	async fn test_postings() {
@@ -171,8 +124,8 @@ mod tests {
 			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
-		let i = p.new_postings_iterator(1);
-		check_postings(i, &mut tx, vec![(2, 3), (4, 5)]).await;
+		assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));
+		assert_eq!(p.get_term_frequency(&mut tx, 1, 4).await.unwrap(), Some(5));
 
 		// Check removal of doc 2
 		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));

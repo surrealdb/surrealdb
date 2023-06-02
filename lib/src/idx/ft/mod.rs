@@ -17,7 +17,7 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{Array, Thing};
+use crate::sql::{Array, Object, Thing, Value};
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -47,11 +47,22 @@ impl Default for Bm25Params {
 	}
 }
 
-pub(super) struct Statistics {
+pub(crate) struct Statistics {
 	doc_ids: btree::Statistics,
 	terms: btree::Statistics,
 	doc_lengths: btree::Statistics,
 	postings: btree::Statistics,
+}
+
+impl From<Statistics> for Value {
+	fn from(stats: Statistics) -> Self {
+		let mut res = Object::default();
+		res.insert("doc_ids".to_owned(), Value::from(stats.doc_ids));
+		res.insert("terms".to_owned(), Value::from(stats.terms));
+		res.insert("doc_lengths".to_owned(), Value::from(stats.doc_lengths));
+		res.insert("postings".to_owned(), Value::from(stats.postings));
+		Value::from(res)
+	}
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -292,7 +303,7 @@ impl FtIndex {
 		Ok(false)
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		// TODO do parallel execution
 		Ok(Statistics {
 			doc_ids: self.doc_ids(tx).await?.statistics(tx).await?,

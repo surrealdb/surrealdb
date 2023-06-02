@@ -10,7 +10,7 @@ use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::key::bc::Bc;
 use crate::key::bd::Bd;
-use crate::key::bf::{Bf, BfPrefix};
+use crate::key::bf::Bf;
 use crate::key::bi::Bi;
 use crate::key::bk::Bk;
 use crate::key::bl::Bl;
@@ -124,17 +124,6 @@ impl IndexKeyBase {
 			self.inner.ix.as_str(),
 			term_id,
 			doc_id,
-		)
-		.into()
-	}
-
-	fn new_bf_prefix_key(&self, term_id: TermId) -> Key {
-		BfPrefix::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			term_id,
 		)
 		.into()
 	}

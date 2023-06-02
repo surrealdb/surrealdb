@@ -3,11 +3,12 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::ft::FtIndex;
+use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::index::Index;
-use crate::sql::object::Object;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
@@ -41,21 +42,27 @@ impl AnalyzeStatement {
 				let mut run = run.lock().await;
 				// Read the index
 				let ix = run.get_ix(opt.ns(), opt.db(), tb.as_str(), idx.as_str()).await?;
+				let ikb = IndexKeyBase::new(opt, &ix);
+
 				// Index operation dispatching
-				match &ix.index {
-					Index::Uniq => todo!(),
-					Index::Idx => todo!(),
+				let stats = match &ix.index {
 					Index::Search {
 						az,
-						sc,
-						hl,
 						order,
-					} => {}
+						..
+					} => {
+						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
+						let ft = FtIndex::new(&mut *run, az, ikb, *order).await?;
+						ft.statistics(&mut run).await?
+					}
+					_ => {
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "Statistics on unique and non-unique indexes.",
+						})
+					}
 				};
-				// Create the result set
-				let res = Object::default();
-				// Ok all good
-				Value::from(res).ok()
+				// Return the result object
+				Value::from(stats).ok()
 			}
 		}
 	}

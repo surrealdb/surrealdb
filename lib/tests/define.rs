@@ -3,7 +3,8 @@ use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::Idiom;
+use surrealdb::sql::{Part, Value};
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -995,14 +996,38 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			doc_ids: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
-			terms: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
-			doc_lengths: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 },
-			postings: { keys_count: 0, max_depth: 0, nodes_count: 0, total_size: 0 }
-		}",
-	);
-	assert_eq!(tmp, val);
+
+	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(72)));
+
+	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(59)));
+
+	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
+
+	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
+
 	Ok(())
+}
+
+fn check_path<F>(val: &Value, path: &[&str], check: F)
+where
+	F: Fn(Value),
+{
+	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
+	let res = val.walk(&part);
+	for (i, v) in res {
+		assert_eq!(Idiom(part.clone()), i);
+		check(v);
+	}
 }
