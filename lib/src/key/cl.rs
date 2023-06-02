@@ -13,10 +13,6 @@ pub struct Cl {
 	pub nd: Uuid,
 }
 
-pub fn new(nd: &Uuid) -> Cl {
-	Cl::new(nd.to_owned())
-}
-
 impl Cl {
 	pub fn new(nd: Uuid) -> Self {
 		Self {

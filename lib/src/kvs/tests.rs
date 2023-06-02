@@ -81,7 +81,7 @@ pub(crate) mod transaction {
 				Inner::RocksDB(ds) => {
 					let (send, recv) = channel::bounded(100);
 					Datastore {
-						id: Arc::new(Uuid::default()),
+						id: Uuid::default(),
 						inner: Inner::RocksDB(ds.clone()),
 						send,
 						recv,
