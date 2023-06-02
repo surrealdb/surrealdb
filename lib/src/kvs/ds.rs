@@ -29,6 +29,8 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
+	#[cfg(feature = "kv-speedb")]
+	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -45,8 +47,10 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
+			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
@@ -107,7 +111,6 @@ impl Datastore {
 					info!(target: LOG, "Started kvs store in {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-mem"))]
 				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -124,7 +127,6 @@ impl Datastore {
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -141,9 +143,24 @@ impl Datastore {
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate an SpeeDB database
+			s if s.starts_with("speedb:") => {
+				#[cfg(feature = "kv-speedb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("speedb://");
+					let s = s.trim_start_matches("speedb:");
+					let v = super::speedb::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::SpeeDB(v),
+					});
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+				#[cfg(not(feature = "kv-speedb"))]
+				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -158,7 +175,6 @@ impl Datastore {
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-indxdb"))]
 				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -175,7 +191,6 @@ impl Datastore {
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-tikv"))]
 				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -192,7 +207,6 @@ impl Datastore {
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-fdb"))]
 				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -230,6 +244,11 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
+			}
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SpeeDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {

@@ -80,6 +80,10 @@ pub(crate) mod transaction {
 				Inner::RocksDB(ds) => Datastore {
 					inner: Inner::RocksDB(ds.clone()),
 				},
+				#[cfg(feature = "kv-speedb")]
+				Inner::SpeeDB(ds) => Datastore {
+					inner: Inner::SpeeDB(ds.clone()),
+				},
 				#[cfg(feature = "kv-tikv")]
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-fdb")]

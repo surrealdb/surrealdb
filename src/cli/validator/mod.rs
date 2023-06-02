@@ -7,6 +7,7 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		"memory" => Ok(v.to_string()),
 		v if v.starts_with("file:") => Ok(v.to_string()),
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
+		v if v.starts_with("speedb:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database path parameter")),
