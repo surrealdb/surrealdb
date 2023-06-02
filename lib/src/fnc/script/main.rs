@@ -16,10 +16,6 @@ use js::CatchResultExt;
 use js::Function;
 use js::Module;
 
-fn is_send<T: Send>(s: T) -> T {
-	s
-}
-
 pub async fn run(
 	ctx: &Context<'_>,
 	_opt: &Options,
@@ -35,16 +31,17 @@ pub async fn run(
 	// Create an JavaScript context
 	let run = js::AsyncRuntime::new().unwrap();
 	// Explicitly set max stack size to 256 KiB
-	is_send(run.set_max_stack_size(262_144)).await;
+	run.set_max_stack_size(262_144).await;
 	// Explicitly set max memory size to 2 MB
-	is_send(run.set_memory_limit(2_000_000)).await;
+	run.set_memory_limit(2_000_000).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = ctx.cancellation();
-	is_send(run.set_interrupt_handler(Some(Box::new(move || cancellation.is_done())))).await;
+	let handler = Box::new(move || cancellation.is_done());
+	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
 	let ctx = js::AsyncContext::full(&run).await.unwrap();
 	// Set the module resolver and loader
-	is_send(run.set_loader(resolver(), loader())).await;
+	run.set_loader(resolver(), loader()).await;
 	// Create the main function structure
 	let src = format!(
 		"export default async function() {{ try {{ {src} }} catch(e) {{ return (e instanceof Error) ? e : new Error(e); }} }}"

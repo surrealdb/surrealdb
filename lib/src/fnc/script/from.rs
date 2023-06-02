@@ -49,9 +49,8 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is an error
 				if v.is_error() {
 					let e: String = v.get("message")?;
-					// Ignore error since ok and err ar both Error::Exception.
-					Exception::from_message(ctx, &e).map(|x| x.throw()).ok();
-					return Err(Error::Exception);
+					let (Ok(e) | Err(e)) = Exception::from_message(ctx, &e).map(|x| x.throw());
+					return Err(e);
 				}
 				// Check to see if this object is a record
 				if (v).instance_of::<classes::record::record::Record>() {
