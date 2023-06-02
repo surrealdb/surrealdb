@@ -7,7 +7,7 @@ pub mod response {
 
 	use super::super::blob::blob::Blob;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
 	#[quickjs(class)]
@@ -62,23 +62,23 @@ pub mod response {
 		}
 
 		// Returns a promise with the response body as a Blob
-		pub async fn blob(self, args: Rest<Value>) -> js::Result<Blob> {
-			Err(throw!("Not yet implemented"))
+		pub async fn blob(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Blob> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the response body as FormData
-		pub async fn formData(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn formData(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the response body as JSON
-		pub async fn json(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn json(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the response body as text
-		pub async fn text(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn text(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// ------------------------------
@@ -86,13 +86,13 @@ pub mod response {
 		// ------------------------------
 
 		// Returns a new response representing a network error
-		pub fn error(args: Rest<Value>) -> js::Result<Response> {
-			Err(throw!("Not yet implemented"))
+		pub fn error(ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Response> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Creates a new response with a different URL
-		pub fn redirect(args: Rest<Value>) -> js::Result<Response> {
-			Err(throw!("Not yet implemented"))
+		pub fn redirect(ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Response> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 	}
 }

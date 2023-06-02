@@ -5,7 +5,7 @@
 #[allow(clippy::module_inception)]
 pub mod blob {
 
-	use js::Rest;
+	use js::function::Rest;
 	use js::Value;
 
 	#[derive(Clone)]

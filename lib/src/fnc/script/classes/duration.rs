@@ -7,7 +7,7 @@ pub mod duration {
 
 	use crate::sql::duration;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
 	#[quickjs(class)]

@@ -7,6 +7,7 @@ use crate::sql::Id;
 use chrono::{TimeZone, Utc};
 use js::Ctx;
 use js::Error;
+use js::Exception;
 use js::FromAtom;
 use js::FromJs;
 
@@ -48,12 +49,9 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is an error
 				if v.is_error() {
 					let e: String = v.get("message")?;
-					return Err(Error::Exception {
-						line: -1,
-						message: e,
-						file: String::new(),
-						stack: String::new(),
-					});
+					// Ignore error since ok and err ar both Error::Exception.
+					Exception::from_message(ctx, &e).map(|x| x.throw()).ok();
+					return Err(Error::Exception);
 				}
 				// Check to see if this object is a record
 				if (v).instance_of::<classes::record::record::Record>() {
@@ -87,7 +85,7 @@ impl<'js> FromJs<'js> for Value {
 				let date: js::Object = ctx.globals().get("Date")?;
 				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
-					let m: i64 = f.call((js::This(v),))?;
+					let m: i64 = f.call((js::prelude::This(v),))?;
 					let d = Utc.timestamp_millis_opt(m).unwrap();
 					return Ok(Datetime::from(d).into());
 				}
