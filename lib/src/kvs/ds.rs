@@ -1,11 +1,3 @@
-use std::fmt;
-use std::sync::Arc;
-
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use tracing::instrument;
-
 use crate::ctx::Context;
 use crate::dbs::cl::Timestamp;
 use crate::dbs::Attach;
@@ -21,7 +13,12 @@ use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
-use tracing::callsite::register;
+use channel::Receiver;
+use channel::Sender;
+use futures::lock::Mutex;
+use std::fmt;
+use std::sync::Arc;
+use tracing::instrument;
 use uuid::Uuid;
 
 use super::tx::Transaction;
