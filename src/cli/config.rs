@@ -1,7 +1,6 @@
+use crate::net::client_ip::ClientIp;
 use once_cell::sync::OnceCell;
 use std::{net::SocketAddr, path::PathBuf};
-
-use crate::net::client_ip::ClientIp;
 
 pub static CF: OnceCell<Config> = OnceCell::new();
 

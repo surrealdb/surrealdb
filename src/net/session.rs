@@ -35,7 +35,7 @@ async fn process(
 ) -> Result<Session, warp::Rejection> {
 	// Create session
 	#[rustfmt::skip]
-	let mut session = Session { ip: ip, or, id, ns, db, ..Default::default() };
+	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
 	// Parse the authentication header
 	match au {
 		// Basic authentication data was supplied
