@@ -419,7 +419,7 @@ impl Rpc {
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, None, opt.ds_opts).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -465,7 +465,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -486,7 +486,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -513,7 +513,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -544,7 +544,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -575,7 +575,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -606,7 +606,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -637,7 +637,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -667,7 +667,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.ds_opts).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -690,7 +690,7 @@ impl Rpc {
 		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var, opt.ds_opts).await?;
 		// Return the result to the client
 		Ok(res)
 	}
@@ -704,7 +704,7 @@ impl Rpc {
 		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var, opt.ds_opts).await?;
 		// Return the result to the client
 		Ok(res)
 	}

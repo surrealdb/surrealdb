@@ -10,8 +10,10 @@ use crate::iam;
 use crate::net;
 use clap::Args;
 use ipnet::IpNet;
+use surrealdb::kvs::DsOpts;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -35,6 +37,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "The maximum duration of any query")]
+	#[arg(env = "SURREAL_QUERY_TIMEOUT", long)]
+	#[arg(value_parser = super::validator::duration)]
+	query_timeout: Option<Duration>,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
 	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
 	#[arg(value_parser = super::validator::key_valid)]
@@ -89,6 +95,7 @@ pub async fn init(
 		username: user,
 		password: pass,
 		listen_addresses,
+		query_timeout,
 		web,
 		strict,
 		log: CustomEnvFilter(log),
@@ -106,7 +113,10 @@ pub async fn init(
 	}
 	// Setup the cli options
 	let _ = config::CF.set(Config {
-		strict,
+		ds_opts: DsOpts{
+			strict,
+			query_timeout,
+		},
 		bind: listen_addresses.first().cloned().unwrap(),
 		path,
 		user,

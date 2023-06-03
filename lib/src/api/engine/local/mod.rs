@@ -46,6 +46,7 @@ use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::kvs::DsOpts;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Query;
@@ -407,6 +408,7 @@ async fn router(
 	strict: bool,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
+	let ds_opts = DsOpts::default().strict(strict);
 
 	match method {
 		Method::Use => {
@@ -431,42 +433,42 @@ async fn router(
 		Method::Create => {
 			let statement = create_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Create(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Update => {
 			let (one, statement) = update_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Patch => {
 			let (one, statement) = patch_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Merge => {
 			let (one, statement) = merge_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Select => {
 			let (one, statement) = select_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Select(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Delete => {
 			let (one, statement) = delete_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Delete(statement)]));
-			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone()), ds_opts).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -475,7 +477,7 @@ async fn router(
 				Some((query, mut bindings)) => {
 					let mut vars = vars.clone();
 					vars.append(&mut bindings);
-					kvs.process(query, &*session, Some(vars), strict).await?
+					kvs.process(query, &*session, Some(vars), ds_opts).await?
 				}
 				None => unreachable!(),
 			};
@@ -585,7 +587,7 @@ async fn router(
 				}
 				.into());
 			}
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone()), strict).await?;
+			let responses = kvs.execute(&statements, &*session, Some(vars.clone()), ds_opts).await?;
 			for response in responses {
 				response.result?;
 			}
@@ -615,7 +617,7 @@ async fn router(
 			let mut vars = BTreeMap::new();
 			vars.insert("table".to_owned(), table);
 			let response = kvs
-				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars), strict)
+				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars), ds_opts)
 				.await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
@@ -628,7 +630,7 @@ async fn router(
 			let mut vars = BTreeMap::new();
 			vars.insert("id".to_owned(), id);
 			let response =
-				kvs.execute("KILL type::string($id)", &*session, Some(vars), strict).await?;
+				kvs.execute("KILL type::string($id)", &*session, Some(vars), ds_opts).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}

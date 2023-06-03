@@ -50,7 +50,7 @@ async fn handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
+	match db.execute(sql, &session, params.parse().into(), opt.ds_opts).await {
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
@@ -79,7 +79,7 @@ async fn socket(ws: WebSocket, session: Session) {
 				// Get local copy of options
 				let opt = CF.get().unwrap();
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None, opt.strict).await {
+				let _ = match db.execute(sql, &session, None, opt.ds_opts).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

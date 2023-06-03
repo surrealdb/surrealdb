@@ -169,7 +169,7 @@ async fn select_all(
 		String::from("table") => Value::from(table),
 	};
 	// Execute the query and return the result
-	match db.execute(sql.as_str(), &session, Some(vars), opt.strict).await {
+	match db.execute(sql.as_str(), &session, Some(vars), opt.ds_opts).await {
 		Ok(ref res) => match output.as_ref() {
 			// Simple serialization
 			"application/json" => Ok(output::json(&output::simplify(res))),
@@ -210,7 +210,7 @@ async fn create_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -254,7 +254,7 @@ async fn update_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -298,7 +298,7 @@ async fn modify_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -335,7 +335,7 @@ async fn delete_all(
 		=> params.parse()
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars), opt.strict).await {
+	match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
 			"application/json" => Ok(output::json(&output::simplify(res))),
@@ -378,7 +378,7 @@ async fn select_one(
 		String::from("id") => rid,
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars), opt.strict).await {
+	match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
 			"application/json" => Ok(output::json(&output::simplify(res))),
@@ -426,7 +426,7 @@ async fn create_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -477,7 +477,7 @@ async fn update_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -528,7 +528,7 @@ async fn modify_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars), opt.strict).await {
+			match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
@@ -572,7 +572,7 @@ async fn delete_one(
 		=> params.parse()
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars), opt.strict).await {
+	match db.execute(sql, &session, Some(vars), opt.ds_opts).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
 			"application/json" => Ok(output::json(&output::simplify(res))),

@@ -54,7 +54,7 @@ pub async fn sc(
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars, opt.strict).await {
+					match kvs.compute(val, &sess, vars, opt.ds_opts).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned

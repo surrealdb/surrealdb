@@ -13,6 +13,7 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
+use std::time::Duration;
 use std::fmt;
 use std::sync::Arc;
 use tracing::instrument;
@@ -58,6 +59,23 @@ impl fmt::Display for Datastore {
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
+	}
+}
+
+/// Options passed to [`Datastore`] when executing queries or computing values
+#[derive(Copy, Clone, Debug, Default)]
+pub struct DsOpts {
+	/// Whether to execute in strict mode
+	pub strict: bool,
+	/// Global query timeout
+	pub query_timeout: Option<Duration>,
+}
+
+impl DsOpts {
+	/// Set strict mode
+	pub fn strict(mut self, strict: bool) -> Self {
+		self.strict = strict;
+		self
 	}
 }
 
@@ -298,14 +316,18 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
+		DsOpts{strict, query_timeout}: DsOpts,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -348,14 +370,18 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
+		DsOpts{strict, query_timeout}: DsOpts,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -397,7 +423,7 @@ impl Datastore {
 		val: Value,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
+		DsOpts{strict, query_timeout}: DsOpts,
 	) -> Result<Value, Error> {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
@@ -406,7 +432,11 @@ impl Datastore {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables

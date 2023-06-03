@@ -38,7 +38,7 @@ async fn handler(
 			// Convert the body to a byte slice
 			let sql = bytes_to_utf8(&sql)?;
 			// Execute the sql query in the database
-			match db.execute(sql, &session, None, opt.strict).await {
+			match db.execute(sql, &session, None, opt.ds_opts).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),

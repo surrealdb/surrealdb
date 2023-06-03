@@ -1,11 +1,12 @@
 use once_cell::sync::OnceCell;
+use surrealdb::kvs::DsOpts;
 use std::{net::SocketAddr, path::PathBuf};
 
 pub static CF: OnceCell<Config> = OnceCell::new();
 
 #[derive(Clone, Debug)]
 pub struct Config {
-	pub strict: bool,
+	pub ds_opts: DsOpts,
 	pub bind: SocketAddr,
 	pub path: String,
 	pub user: String,
