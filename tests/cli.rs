@@ -285,4 +285,47 @@ mod cli_integration {
 		let output = server.kill().output().unwrap_err();
 		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
+
+	#[test]
+	#[ignore = "only runs in CI"]
+	fn start_timeout() {
+		let mut rng = thread_rng();
+
+		let port: u16 = rng.gen_range(13000..14000);
+		let addr = format!("127.0.0.1:{port}");
+
+		let pass = rng.gen::<u64>().to_string();
+
+		let start_args = format!(
+			"start --bind {addr} --user root --pass {pass} memory --log info --query-timeout 50ms"
+		);
+
+		println!("starting server with args: {start_args}");
+
+		let _server = run(&start_args);
+
+		std::thread::sleep(std::time::Duration::from_millis(500));
+
+		// Create a record
+		{
+			let args =
+				format!("sql --conn http://{addr} --user root --pass {pass} --ns N --db D --json");
+			assert_eq!(
+				run(&args).input("CREATE thing:one;\n").output(),
+				Ok("[{\"id\":\"thing:one\"}]\n\n".to_owned()),
+				"failed to send sql: {args}"
+			);
+		}
+
+		// Create lots of records
+		{
+			let args =
+				format!("sql --conn http://{addr} --user root --pass {pass} --ns N --db D --json");
+			assert_eq!(
+				run(&args).input("SLEEP 100ms;\n").output(),
+				Ok("There was a problem with the database: The query was not executed because it exceeded the timeout\n\n".to_owned()),
+				"failed to send sql: {args}"
+			);
+		}
+	}
 }

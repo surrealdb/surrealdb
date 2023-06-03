@@ -306,12 +306,17 @@ impl<'a> Executor<'a> {
 										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
 										// Process the statement
-										stm.compute(&ctx, &opt, &self.txn(), None).await
+										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+										// Catch statement timeout
+										match ctx.is_timedout() {
+											true => Err(Error::QueryTimedout),
+											false => res,
+										}
 									}
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
-								// Catch global or statement timeout
+								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
 									false => res,
