@@ -11,7 +11,7 @@ pub static DB: OnceCell<Datastore> = OnceCell::new();
 const LOG: &str = "surrealdb::dbs";
 
 #[derive(Args, Debug)]
-pub struct StartCommandDsOptions {
+pub struct StartCommandDbsOptions {
 	#[arg(help = "The maximum duration of any query")]
 	#[arg(env = "SURREAL_QUERY_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
@@ -19,9 +19,9 @@ pub struct StartCommandDsOptions {
 }
 
 pub async fn init(
-	StartCommandDsOptions {
+	StartCommandDbsOptions {
 		query_timeout,
-	}: StartCommandDsOptions,
+	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
