@@ -2,7 +2,7 @@ mod parse;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
+use surrealdb::kvs::{DsOpts, Datastore};
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -17,7 +17,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, DsOpts::default().strict(true)).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -75,7 +75,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, DsOpts::default().strict(true)).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -128,7 +128,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, DsOpts::default().strict(true)).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -176,7 +176,7 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, DsOpts::default().strict(true)).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -215,7 +215,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;

@@ -13,7 +13,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -38,7 +38,7 @@ async fn define_statement_database() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -67,7 +67,7 @@ async fn define_statement_function() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -100,7 +100,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -131,7 +131,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -163,7 +163,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -197,7 +197,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -237,7 +237,7 @@ async fn define_statement_event() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -294,7 +294,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -351,7 +351,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -400,7 +400,7 @@ async fn define_statement_field() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -432,7 +432,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -464,7 +464,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -496,7 +496,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -528,7 +528,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -564,7 +564,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -612,7 +612,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -656,7 +656,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -708,7 +708,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -766,7 +766,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result;
@@ -841,7 +841,7 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 6);
 	//
 	for _ in 0..3 {
@@ -888,7 +888,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..4 {
@@ -931,7 +931,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -974,7 +974,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..6 {

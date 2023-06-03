@@ -306,7 +306,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let ast = "USE NS test DB test; SELECT * FROM person;";
-	///     let res = ds.execute(ast, &ses, None, false).await?;
+	///     let res = ds.execute(ast, &ses, None, Default::default()).await?;
 	///     Ok(())
 	/// }
 	/// ```
@@ -363,7 +363,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
-	///     let res = ds.process(ast, &ses, None, false).await?;
+	///     let res = ds.process(ast, &ses, None, Default::default()).await?;
 	///     Ok(())
 	/// }
 	/// ```
@@ -419,7 +419,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.compute(val, &ses, None, false).await?;
+	///     let res = ds.compute(val, &ses, None, Default::default()).await?;
 	///     Ok(())
 	/// }
 	/// ```

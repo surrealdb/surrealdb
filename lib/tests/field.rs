@@ -20,7 +20,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -86,7 +86,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -135,7 +135,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -189,7 +189,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -241,7 +241,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, Default::default()).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
