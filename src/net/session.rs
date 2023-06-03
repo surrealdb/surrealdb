@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
 use crate::iam::TOKEN;
-use std::net::SocketAddr;
+use crate::net::client_ip;
 use surrealdb::dbs::Session;
 use warp::Filter;
 
@@ -10,9 +10,7 @@ pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + C
 	// Enable on any path
 	let conf = warp::any();
 	// Add remote ip address
-	let conf = conf.and(warp::filters::addr::remote());
-	// Add remote ip address
-	let conf = conf.map(|addr: Option<SocketAddr>| addr.map(|v| v.to_string()));
+	let conf = conf.and(client_ip::build());
 	// Add authorization header
 	let conf = conf.and(warp::header::optional::<String>("authorization"));
 	// Add http origin header
@@ -37,7 +35,7 @@ async fn process(
 ) -> Result<Session, warp::Rejection> {
 	// Create session
 	#[rustfmt::skip]
-	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
+	let mut session = Session { ip: ip, or, id, ns, db, ..Default::default() };
 	// Parse the authentication header
 	match au {
 		// Basic authentication data was supplied
