@@ -1,4 +1,8 @@
-use std::{path::{Path, PathBuf}, time::Duration, str::FromStr};
+use std::{
+	path::{Path, PathBuf},
+	str::FromStr,
+	time::Duration,
+};
 
 pub(crate) mod parser;
 

@@ -307,7 +307,6 @@ impl<'a> Executor<'a> {
 										ctx.add_timeout(timeout);
 										// Process the statement
 										stm.compute(&ctx, &opt, &self.txn(), None).await
-										
 									}
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,

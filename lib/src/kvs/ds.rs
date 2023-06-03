@@ -13,9 +13,9 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
-use std::time::Duration;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::instrument;
 
 /// The underlying datastore instance which stores the dataset.
@@ -316,7 +316,10 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Variables,
-		DsOpts{strict, query_timeout}: DsOpts,
+		DsOpts {
+			strict,
+			query_timeout,
+		}: DsOpts,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
@@ -370,7 +373,10 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
-		DsOpts{strict, query_timeout}: DsOpts,
+		DsOpts {
+			strict,
+			query_timeout,
+		}: DsOpts,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
@@ -423,7 +429,10 @@ impl Datastore {
 		val: Value,
 		sess: &Session,
 		vars: Variables,
-		DsOpts{strict, query_timeout}: DsOpts,
+		DsOpts {
+			strict,
+			query_timeout,
+		}: DsOpts,
 	) -> Result<Value, Error> {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;

@@ -587,7 +587,8 @@ async fn router(
 				}
 				.into());
 			}
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone()), ds_opts).await?;
+			let responses =
+				kvs.execute(&statements, &*session, Some(vars.clone()), ds_opts).await?;
 			for response in responses {
 				response.result?;
 			}

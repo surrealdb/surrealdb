@@ -1,6 +1,6 @@
 use once_cell::sync::OnceCell;
-use surrealdb::kvs::DsOpts;
 use std::{net::SocketAddr, path::PathBuf};
+use surrealdb::kvs::DsOpts;
 
 pub static CF: OnceCell<Config> = OnceCell::new();
 

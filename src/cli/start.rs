@@ -10,10 +10,10 @@ use crate::iam;
 use crate::net;
 use clap::Args;
 use ipnet::IpNet;
-use surrealdb::kvs::DsOpts;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use surrealdb::kvs::DsOpts;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -113,7 +113,7 @@ pub async fn init(
 	}
 	// Setup the cli options
 	let _ = config::CF.set(Config {
-		ds_opts: DsOpts{
+		ds_opts: DsOpts {
 			strict,
 			query_timeout,
 		},
