@@ -10,6 +10,7 @@ mod upgrade;
 pub(crate) mod validator;
 mod version;
 
+use self::upgrade::UpgradeCommandAruguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -20,8 +21,6 @@ use isready::IsReadyCommandArguments;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
 use std::process::ExitCode;
-
-use self::upgrade::UpgradeCommandAruguments;
 
 pub const LOG: &str = "surrealdb::cli";
 
