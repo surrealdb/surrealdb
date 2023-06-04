@@ -58,6 +58,7 @@ pub use self::remove::RemoveFieldStatement;
 pub use self::remove::RemoveFunctionStatement;
 pub use self::remove::RemoveIndexStatement;
 pub use self::remove::RemoveLoginStatement;
+pub use self::remove::RemoveUserStatement;
 pub use self::remove::RemoveNamespaceStatement;
 pub use self::remove::RemoveParamStatement;
 pub use self::remove::RemoveScopeStatement;

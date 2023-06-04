@@ -74,7 +74,8 @@ impl DefineStatement {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			// DEFINE LOGIN has been deprecated. Use DEFINE USER instead
+			Self::Login(_) => Err(Error::Deprecated("DEFINE LOGIN has been deprecated. Use DEFINE USER instead".to_string())),
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -408,15 +409,51 @@ pub struct DefineLoginStatement {
 
 impl DefineLoginStatement {
 	/// Process this type returning a computed simple Value
+	#[allow(dead_code)]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
+		opt: &Options,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// DEFINE LOGIN has been deprecated. Use DEFINE USER instead
-		return Err(Error::Deprecated("DEFINE LOGIN has been deprecated. Use DEFINE USER instead".to_string()));
+		match self.base {
+			Base::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Process the statement
+				let key = crate::key::nl::new(opt.ns(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Process the statement
+				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			// Other levels are not supported
+			_ => Err(Error::QueryPermissions),
+		}
 	}
 }
 

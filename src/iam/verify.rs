@@ -586,5 +586,4 @@ mod tests {
 			assert_eq!(user.name.to_string(), "db");
 		}
 	}
-
 }

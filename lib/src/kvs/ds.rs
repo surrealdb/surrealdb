@@ -321,11 +321,6 @@ impl Datastore {
 		opt.db = sess.db();
 		// Set strict config
 		opt.strict = strict;
-
-		debug!(target: LOG, "Executing query: {}", txt);
-		debug!(target: LOG, "Query AST: {:?}", ast);
-		debug!(target: LOG, "Query options: {:?}", opt);
-		debug!(target: LOG, "Query context: {:?}", ctx);
 		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
