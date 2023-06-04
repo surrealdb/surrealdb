@@ -34,7 +34,7 @@ impl UpgradeCommandAruguments {
 			if !response.status().is_success() {
 				return Err(Error::Io(IoError::new(
 					ErrorKind::Other,
-					format!("recieved status {} when fetching version", response.status()),
+					format!("received status {} when fetching version", response.status()),
 				)));
 			}
 			Cow::Owned(response.text().await?.trim().to_owned())
@@ -107,7 +107,7 @@ pub async fn init(args: UpgradeCommandAruguments) -> Result<(), Error> {
 	if !response.status().is_success() {
 		return Err(Error::Io(IoError::new(
 			ErrorKind::Other,
-			format!("recieved status {} when downloading from {url}", response.status()),
+			format!("received status {} when downloading from {url}", response.status()),
 		)));
 	}
 
