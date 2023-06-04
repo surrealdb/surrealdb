@@ -4291,6 +4291,7 @@ dependencies = [
  "serde_json",
  "surrealdb",
  "temp-env",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

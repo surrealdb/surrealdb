@@ -54,6 +54,7 @@ serde_cbor = "0.11.2"
 serde_pack = { version = "1.1.1", package = "rmp-serde" }
 serde_json = "1.0.96"
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
+tempfile = "3.5.0"
 thiserror = "1.0.40"
 tokio = { version = "1.28.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
