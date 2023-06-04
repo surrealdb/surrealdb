@@ -14,7 +14,7 @@ const ROOT: &str = "https://download.surrealdb.com";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandAruguments {
-	/// Install the latest nightly version instead
+	/// Install the latest nightly version
 	#[arg(long, conflicts_with = "version")]
 	nightly: bool,
 	/// Install a specific version
