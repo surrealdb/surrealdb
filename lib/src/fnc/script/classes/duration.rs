@@ -10,10 +10,8 @@ pub mod duration {
 	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Duration {
-		#[quickjs(hide)]
 		pub(crate) value: Option<duration::Duration>,
 	}
 

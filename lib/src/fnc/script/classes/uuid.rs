@@ -10,10 +10,8 @@ pub mod uuid {
 	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Uuid {
-		#[quickjs(hide)]
 		pub(crate) value: Option<uuid::Uuid>,
 	}
 

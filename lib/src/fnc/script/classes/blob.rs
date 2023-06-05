@@ -9,12 +9,9 @@ pub mod blob {
 	use js::Value;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Blob {
-		#[quickjs(hide)]
 		pub(crate) mime: String,
-		#[quickjs(hide)]
 		pub(crate) data: Vec<u8>,
 	}
 

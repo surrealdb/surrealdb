@@ -10,11 +10,9 @@ pub mod response {
 	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
 	pub struct Response {
-		#[quickjs(hide)]
 		pub(crate) url: Option<String>,
 		pub(crate) credentials: Option<String>,
 		pub(crate) headers: Option<String>,

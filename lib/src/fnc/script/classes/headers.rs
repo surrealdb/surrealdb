@@ -13,11 +13,9 @@ pub mod headers {
 	use std::str::FromStr;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
 	pub struct Headers {
-		#[quickjs(hide)]
 		pub(crate) inner: RefCell<HashMap<HeaderName, Vec<String>>>,
 	}
 

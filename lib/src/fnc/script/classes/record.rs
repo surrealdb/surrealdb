@@ -10,10 +10,8 @@ pub mod record {
 	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Record {
-		#[quickjs(hide)]
 		pub(crate) value: thing::Thing,
 	}
 
