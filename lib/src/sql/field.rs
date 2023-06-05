@@ -136,9 +136,17 @@ impl Fields {
 							for (p, x) in res {
 								match p.last().unwrap().alias() {
 									// This is an alias expression part
-									Some(a) => out.set(ctx, opt, txn, a, x).await?,
+									Some(a) => {
+										if let Some(i) = alias {
+											out.set(ctx, opt, txn, i, x.clone()).await?;
+										}
+										out.set(ctx, opt, txn, a, x).await?;
+									}
 									// This is the end of the expression
-									None => out.set(ctx, opt, txn, v, x).await?,
+									None => {
+										out.set(ctx, opt, txn, alias.as_ref().unwrap_or(v), x)
+											.await?
+									}
 								}
 							}
 						}
