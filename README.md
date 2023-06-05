@@ -187,10 +187,10 @@ Docker can be used to manage and run SurrealDB database instances without the ne
 docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
-For just getting started with a development server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging.
+For just getting started with a development server running in memory, you start a Docker container with logging enabled.
 
 ```bash
-docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace memory
 ``` 
 
 <h2><img height="20" src="./img/gettingstarted.svg">&nbsp;&nbsp;Getting started</h2>

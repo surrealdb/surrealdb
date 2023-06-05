@@ -94,11 +94,14 @@ mod cli_integration {
 			fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
 			fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
 
-			extra_args.push_str(format!("--web-crt {crt_path} --web-key {key_path}").as_str());
+			extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
+		}
+		if !auth {
+			extra_args.push_str(" --no-auth");
 		}
 
 		let start_args =
-			format!("start --bind {addr} memory --auth={auth} --no-banner --log info {extra_args}");
+			format!("start --bind {addr} memory --no-banner --log info {extra_args}");
 
 		println!("starting server with args: {start_args}");
 

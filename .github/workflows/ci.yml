@@ -121,7 +121,7 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          (&>/dev/null ./target/debug/surreal start --log trace memory &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
@@ -143,7 +143,7 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          (&>/dev/null ./target/debug/surreal start --log trace memory &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -221,5 +221,5 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          (&>/dev/null ./target/debug/surreal start --log trace memory &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any

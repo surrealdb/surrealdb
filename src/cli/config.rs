@@ -8,7 +8,7 @@ pub struct Config {
 	pub strict: bool,
 	pub bind: SocketAddr,
 	pub path: String,
-	pub auth: bool,
+	pub no_auth: bool,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
 }

@@ -33,7 +33,8 @@ async fn remove_statement_table() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: {}
+			tables: {},
+			users: {}
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -67,7 +68,8 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: {}
+			tables: {},
+			users: {}
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -120,7 +122,7 @@ async fn remove_statement_user_ns() -> Result<(), Error> {
 	assert!(res[1].result.is_ok());
 	assert!(res[2].result.is_ok());
 	assert!(res[3].result.is_ok());
-	assert_eq!(res[4].result.as_ref().unwrap_err().to_string(), "The namespace user 'test' does not exist in 'ns'"); // User was successfully deleted
+	assert_eq!(res[4].result.as_ref().unwrap_err().to_string(), "The user 'test' does not exist in the namespace 'ns'"); // User was successfully deleted
 	
 	// If it tries to remove a NS user without specifying a NS, it should fail.
 	let sql = [
@@ -159,7 +161,7 @@ async fn remove_statement_user_db() -> Result<(), Error> {
 	assert!(res[2].result.is_ok());
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
-	assert_eq!(res[5].result.as_ref().unwrap_err().to_string(), "The database user 'test' does not exist in 'db'"); // User was successfully deleted
+	assert_eq!(res[5].result.as_ref().unwrap_err().to_string(), "The user 'test' does not exist in the database 'db'"); // User was successfully deleted
 	
 	// If it tries to remove a DB user without specifying a DB, it should fail.
 	let sql = [
@@ -197,14 +199,14 @@ async fn remove_statement_user_check_permissions_kv() -> Result<(), Error> {
 		DEFINE USER test_db ON DB PASSWORD 'test';",
 		
 		// Remove users
-		"REMOVE USER test_kv ON KV PASSWORD 'test';
+		"REMOVE USER test_kv ON KV;
 		
 		USE NS ns;
-		REMOVE USER test_ns ON NS PASSWORD 'test';
+		REMOVE USER test_ns ON NS;
 		
 		USE NS ns;
 		USE DB db;
-		REMOVE USER test_db ON DB PASSWORD 'test';"
+		REMOVE USER test_db ON DB;"
 	];
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv();

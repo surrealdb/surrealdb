@@ -171,7 +171,7 @@ fn futures_are_send_and_sync() {
 		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
 			username: "root",
-			password: "root",
+			password: "surrealdb",
 		})
 		.await
 		.unwrap();

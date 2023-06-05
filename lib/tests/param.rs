@@ -32,6 +32,7 @@ async fn define_global_param() -> Result<(), Error> {
 			params: { test: 'DEFINE PARAM $test VALUE 12345' },
 			scopes: {},
 			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);

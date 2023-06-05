@@ -20,9 +20,10 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
-	#[arg(help = "Enable the authentication system")]
-	#[arg(env = "SURREAL_AUTH", long = "auth")]
-	auth: Option<bool>,
+	#[arg(help = "Whether to disable authentication")]
+	#[arg(env = "SURREAL_NO_AUTH", long)]
+	#[arg(default_value_t = false)]
+	no_auth: bool,
 	#[arg(help = "The allowed networks for master authentication")]
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
 	#[arg(default_value = "127.0.0.1/32")]
@@ -82,7 +83,7 @@ struct StartCommandWebTlsOptions {
 pub async fn init(
 	StartCommandArguments {
 		path,
-		auth,
+		no_auth,
 		listen_addresses,
 		web,
 		strict,
@@ -104,7 +105,7 @@ pub async fn init(
 		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
 		path,
-		auth: auth.unwrap_or(true), // Enable auth by default
+		no_auth,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});

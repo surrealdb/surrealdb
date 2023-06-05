@@ -24,6 +24,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -51,6 +52,7 @@ async fn define_statement_database() -> Result<(), Error> {
 			databases: { test: 'DEFINE DATABASE test' },
 			logins: {},
 			tokens: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -86,6 +88,7 @@ async fn define_statement_function() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -117,6 +120,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -148,6 +152,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -183,6 +188,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -214,6 +220,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -954,7 +961,8 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: {}
+			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1014,7 +1022,7 @@ async fn define_statement_user_kv() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let define_str =  tmp.pick(&["ku".into(), "test".into()]).to_string();
+	let define_str =  tmp.pick(&["users".into(), "test".into()]).to_string();
 
 	assert!(define_str.strip_prefix("\"").unwrap().starts_with("DEFINE USER test ON KV PASSHASH '$argon2id$"));
 	Ok(())
@@ -1080,7 +1088,7 @@ async fn define_statement_user_db() -> Result<(), Error> {
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
 	assert!(res[5].result.is_ok());
-	assert_eq!(res[6].result.as_ref().unwrap_err().to_string(), "The namespace user 'test' does not exist in 'ns'"); // User doesn't exist at the NS level
+	assert_eq!(res[6].result.as_ref().unwrap_err().to_string(), "The user 'test' does not exist in the namespace 'ns'"); // User doesn't exist at the NS level
 	
 	assert!(res[3].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
 	assert!(res[4].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));

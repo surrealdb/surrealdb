@@ -252,16 +252,16 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to database `{}` with login `{}`", db, id);
+			trace!(target: LOG, "Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
-			// Get the database login
-			let de = tx.get_dl(&ns, &db, &id).await?;
+			// Get the database user
+			let de = tx.get_db_user(&ns, &db, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			debug!(target: LOG, "Authenticated to database `{}` with login `{}`", db, id);
+			debug!(target: LOG, "Authenticated to database `{}` with user `{}`", db, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -299,16 +299,16 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to namespace `{}` with login `{}`", ns, id);
+			trace!(target: LOG, "Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
-			// Get the namespace login
-			let de = tx.get_nl(&ns, &id).await?;
+			// Get the namespace user
+			let de = tx.get_ns_user(&ns, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			trace!(target: LOG, "Authenticated to namespace `{}` with login `{}`", ns, id);
+			trace!(target: LOG, "Authenticated to namespace `{}` with user `{}`", ns, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());

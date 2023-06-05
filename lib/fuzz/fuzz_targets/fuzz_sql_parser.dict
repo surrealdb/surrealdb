@@ -125,6 +125,7 @@
 "UPDATE"
 "UPPERCASE"
 "USE"
+"USER"
 "VALUE"
 "VALUES"
 "VERSION"
@@ -324,4 +325,3 @@
 "type::table("
 "type::thing("
 # TODO: Add Javascript keywords
-

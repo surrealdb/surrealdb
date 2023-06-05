@@ -233,6 +233,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -243,6 +244,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			databases: { test: 'DEFINE DATABASE test' },
 			logins: {},
 			tokens: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -257,6 +259,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
