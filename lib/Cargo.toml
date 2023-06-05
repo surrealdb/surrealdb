@@ -59,8 +59,9 @@ async-recursion = "1.0.4"
 base64_lib = { version = "0.21.1", package = "base64" }
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.1", features = ["serde", "string-only"] }
-bung = "0.1.0"
 bincode = "1.3.3"
+bitpacking = "0.8.4"
+bung = "0.1.0"
 channel = { version = "1.8.0", package = "async-channel" }
 chrono = { version = "0.4.24", features = ["serde"] }
 derive = { version = "0.8.0", package = "surrealdb-derive" }
