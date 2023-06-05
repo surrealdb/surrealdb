@@ -19,10 +19,10 @@ impl ser::Serializer for Serializer {
 	type SerializeSeq = Impossible<Field, Error>;
 	type SerializeTuple = Impossible<Field, Error>;
 	type SerializeTupleStruct = Impossible<Field, Error>;
-	type SerializeTupleVariant = SerializeValueIdiomTuple;
+	type SerializeTupleVariant = Impossible<Field, Error>;
 	type SerializeMap = Impossible<Field, Error>;
 	type SerializeStruct = Impossible<Field, Error>;
-	type SerializeStructVariant = Impossible<Field, Error>;
+	type SerializeStructVariant = SerializeValueIdiomTuple;
 
 	const EXPECTED: &'static str = "an enum `Field`";
 
@@ -39,47 +39,45 @@ impl ser::Serializer for Serializer {
 		}
 	}
 
-	fn serialize_tuple_variant(
+	fn serialize_struct_variant(
 		self,
 		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
 		_len: usize,
-	) -> Result<Self::SerializeTupleVariant, Self::Error> {
+	) -> Result<Self::SerializeStructVariant, Self::Error> {
 		match variant {
 			"Single" => Ok(SerializeValueIdiomTuple::default()),
-			variant => Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`"))),
+			variant => Err(Error::custom(format!("unexpected struct variant `{name}::{variant}`"))),
 		}
 	}
 }
 
 #[derive(Default)]
 pub(super) struct SerializeValueIdiomTuple {
-	index: usize,
 	value: Option<Value>,
 	idiom: Option<Option<Idiom>>,
 }
 
-impl serde::ser::SerializeTupleVariant for SerializeValueIdiomTuple {
+impl serde::ser::SerializeStructVariant for SerializeValueIdiomTuple {
 	type Ok = Field;
 	type Error = Error;
 
-	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
 	where
 		T: Serialize + ?Sized,
 	{
-		match self.index {
-			0 => {
+		match key {
+			"expr" => {
 				self.value = Some(value.serialize(ser::value::Serializer.wrap())?);
 			}
-			1 => {
+			"alias" => {
 				self.idiom = Some(value.serialize(SerializeOptionIdiom.wrap())?);
 			}
-			index => {
-				return Err(Error::custom(format!("unexpected `Field::Single` index `{index}`")));
+			key => {
+				return Err(Error::custom(format!("unexpected `Field::Single` field `{key}`")));
 			}
 		}
-		self.index += 1;
 		Ok(())
 	}
 
