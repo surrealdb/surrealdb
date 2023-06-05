@@ -3,13 +3,13 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::Base;
 use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::object::Object;
 use crate::sql::value::Value;
+use crate::sql::Base;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -221,7 +221,7 @@ impl InfoStatement {
 				res.insert("indexes".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
-			},
+			}
 			InfoStatement::User(user, base) => {
 				let level = match base {
 					// Get the level from the provided user statement
@@ -261,11 +261,9 @@ impl fmt::Display for InfoStatement {
 			Self::Db => f.write_str("INFO FOR DATABASE"),
 			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
 			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {t}"),
-			Self::User(ref u, ref b) => {
-				match b {
-					Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
-					None => write!(f, "INFO FOR USER {u}"),
-				}
+			Self::User(ref u, ref b) => match b {
+				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
+				None => write!(f, "INFO FOR USER {u}"),
 			},
 		}
 	}

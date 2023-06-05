@@ -105,12 +105,16 @@ async fn post_http_sync_body<B: Into<Body>>(
 	Ok(())
 }
 
-async fn get_http_sync_body(from: &str, user: Option<&str>, pass: Option<&str>) -> Result<Response, Error> {
+async fn get_http_sync_body(
+	from: &str,
+	user: Option<&str>,
+	pass: Option<&str>,
+) -> Result<Response, Error> {
 	let mut req = Client::new()
 		.get(format!("{from}/sync"))
 		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE);
-	
+
 	// Add authentication if needed
 	if let Some(user) = user {
 		req = req.basic_auth(user, pass);

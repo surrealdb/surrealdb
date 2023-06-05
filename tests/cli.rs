@@ -2,11 +2,11 @@ mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
 	use rand::{thread_rng, Rng};
-	use tokio::time;
 	use std::error::Error;
 	use std::fs;
 	use std::path::Path;
 	use std::process::{Command, Stdio};
+	use tokio::time;
 
 	/// Child is a (maybe running) CLI process. It can be killed by dropping it
 	struct Child {
@@ -77,12 +77,15 @@ mod cli_integration {
 		path.to_string_lossy().into_owned()
 	}
 
-	async fn start_server(auth: bool, tls: bool, wait_is_ready: bool) -> Result<(String, Child), Box<dyn Error>> {
+	async fn start_server(
+		auth: bool,
+		tls: bool,
+		wait_is_ready: bool,
+	) -> Result<(String, Child), Box<dyn Error>> {
 		let mut rng = thread_rng();
 
 		let port: u16 = rng.gen_range(13000..14000);
 		let addr = format!("127.0.0.1:{port}");
-
 
 		let mut extra_args = String::default();
 		if tls {
@@ -100,8 +103,7 @@ mod cli_integration {
 			extra_args.push_str(" --no-auth");
 		}
 
-		let start_args =
-			format!("start --bind {addr} memory --no-banner --log info {extra_args}");
+		let start_args = format!("start --bind {addr} memory --no-banner --log info {extra_args}");
 
 		println!("starting server with args: {start_args}");
 
@@ -116,13 +118,13 @@ mod cli_integration {
 		println!("Waiting for server to start...");
 		for _i in 0..10 {
 			interval.tick().await;
-			
+
 			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
 				println!("Server ready!");
 				return Ok((addr, server));
 			}
 		}
-		
+
 		let server_out = server.kill().output().err().unwrap();
 		println!("server output: {server_out}");
 		Err("server failed to start".into())
@@ -155,8 +157,7 @@ mod cli_integration {
 
 		// Create a record
 		{
-			let args =
-				format!("sql --conn http://{addr} --ns N --db D --multi");
+			let args = format!("sql --conn http://{addr} --ns N --db D --multi");
 			assert_eq!(
 				run(&args).input("CREATE thing:one;\n").output(),
 				Ok("[{ id: thing:one }]\n\n".to_owned()),
@@ -166,8 +167,7 @@ mod cli_integration {
 
 		// Export to stdout
 		{
-			let args =
-				format!("export --conn http://{addr} --ns N --db D -");
+			let args = format!("export --conn http://{addr} --ns N --db D -");
 			let output = run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
@@ -176,26 +176,20 @@ mod cli_integration {
 		// Export to file
 		let exported = {
 			let exported = tmp_file("exported.surql");
-			let args = format!(
-				"export --conn http://{addr} --ns N --db D {exported}"
-			);
+			let args = format!("export --conn http://{addr} --ns N --db D {exported}");
 			run(&args).output().expect("failed to run file export: {args}");
 			exported
 		};
 
 		// Import the exported file
 		{
-			let args = format!(
-				"import --conn http://{addr} --ns N --db D2 {exported}"
-			);
+			let args = format!("import --conn http://{addr} --ns N --db D2 {exported}");
 			run(&args).output().expect("failed to run import: {args}");
 		}
 
 		// Query from the import (pretty-printed this time)
 		{
-			let args = format!(
-				"sql --conn http://{addr} --ns N --db D2 --pretty"
-			);
+			let args = format!("sql --conn http://{addr} --ns N --db D2 --pretty");
 			assert_eq!(
 				run(&args).input("SELECT * FROM thing;\n").output(),
 				Ok("[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
@@ -215,9 +209,7 @@ mod cli_integration {
 
 		// Multi-statement (and multi-line) query including error(s) over WS
 		{
-			let args = format!(
-				"sql --conn ws://{addr} --ns N3 --db D3 --multi --pretty"
-			);
+			let args = format!("sql --conn ws://{addr} --ns N3 --db D3 --multi --pretty");
 			let output = run(&args)
 				.input(
 					r#"CREATE thing:success; \
@@ -240,9 +232,7 @@ mod cli_integration {
 
 		// Multi-statement (and multi-line) transaction including error(s) over WS
 		{
-			let args = format!(
-				"sql --conn ws://{addr} --ns N4 --db D4 --multi --pretty"
-			);
+			let args = format!("sql --conn ws://{addr} --ns N4 --db D4 --multi --pretty");
 			let output = run(&args)
 				.input(
 					r#"BEGIN; \
@@ -295,7 +285,7 @@ mod cli_integration {
 	#[ignore = "only runs in CI"]
 	async fn start_tls() {
 		let (_, server) = start_server(false, true, false).await.unwrap();
-		
+
 		std::thread::sleep(std::time::Duration::from_millis(2000));
 		let output = server.kill().output().err().unwrap();
 
@@ -315,10 +305,7 @@ mod cli_integration {
 			let args = format!("{sql_args} {creds}");
 			let input = "INFO FOR KV;";
 			let output = run(&args).input(input).output();
-			assert!(
-				output.is_ok(),
-				"failed to query over HTTP: {}", output.err().unwrap()
-			);
+			assert!(output.is_ok(), "failed to query over HTTP: {}", output.err().unwrap());
 		}
 
 		// Can query /sql over WS
@@ -326,10 +313,7 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 			let input = "INFO FOR KV;";
 			let output = run(&args).input(input).output();
-			assert!(
-				output.is_ok(),
-				"failed to query over WS: {}", output.err().unwrap()
-			);
+			assert!(output.is_ok(), "failed to query over WS: {}", output.err().unwrap());
 		}
 
 		// KV user can do exports
@@ -343,9 +327,7 @@ mod cli_integration {
 
 		// KV user can do imports
 		{
-			let args = format!(
-				"import --conn http://{addr} {creds} --ns N --db D2 {exported}"
-			);
+			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {exported}");
 			run(&args).output().expect(format!("failed to run import: {args}").as_str());
 		}
 
@@ -367,26 +349,34 @@ mod cli_integration {
 		let creds = ""; // Anonymous user
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
-
 		// Can query /sql over HTTP
 		{
 			let args = format!("{sql_args} {creds}");
 			let input = "";
-			assert!(run(&args).input(input).output().is_ok(), "anonymous user should be able to query");
+			assert!(
+				run(&args).input(input).output().is_ok(),
+				"anonymous user should be able to query"
+			);
 		}
 
 		// Can query /sql over HTTP
 		{
 			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 			let input = "";
-			assert!(run(&args).input(input).output().is_ok(), "anonymous user should be able to query");
+			assert!(
+				run(&args).input(input).output().is_ok(),
+				"anonymous user should be able to query"
+			);
 		}
 
 		// Can't do exports
 		{
 			let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
 
-			assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to export");
+			assert!(
+				run(&args).output().err().unwrap().contains("Forbidden"),
+				"anonymous user shouldn't be able to export"
+			);
 		}
 
 		// Can't do imports
@@ -394,7 +384,10 @@ mod cli_integration {
 			let tmp_file = tmp_file("exported.surql");
 			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
 
-			assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to import");
+			assert!(
+				run(&args).output().err().unwrap().contains("Forbidden"),
+				"anonymous user shouldn't be able to import"
+			);
 		}
 
 		// Can't do backups

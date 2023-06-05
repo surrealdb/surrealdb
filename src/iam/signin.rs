@@ -184,7 +184,7 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	match verify_creds(DB.get().unwrap(), Some(&ns),Some(&db), &user, &pass).await {
+	match verify_creds(DB.get().unwrap(), Some(&ns), Some(&db), &user, &pass).await {
 		Ok((au, u)) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());

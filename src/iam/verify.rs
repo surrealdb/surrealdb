@@ -10,11 +10,11 @@ use argon2::Argon2;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
-use surrealdb::kvs::Datastore;
-use surrealdb::sql::statements::DefineUserStatement;
 use std::sync::Arc;
 use surrealdb::dbs::Auth;
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
+use surrealdb::sql::statements::DefineUserStatement;
 use surrealdb::sql::Algorithm;
 use surrealdb::sql::Value;
 
@@ -106,21 +106,21 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 					debug!(target: LOG, "Authenticated as root user '{}'", user);
 					session.au = Arc::new(au);
 					Ok(())
-				},
+				}
 				Ok((au, _)) if au.is_ns() => {
 					debug!(target: LOG, "Authenticated as namespace user '{}'", user);
 					session.au = Arc::new(au);
 					Ok(())
-				},
+				}
 				Ok((au, _)) if au.is_db() => {
 					debug!(target: LOG, "Authenticated as database user '{}'", user);
 					session.au = Arc::new(au);
 					Ok(())
-				},
+				}
 				Ok(_) => Err(Error::InvalidAuth),
 				Err(e) => Err(e),
 			}
-		},
+		}
 		_ => {
 			// Couldn't parse the auth data info
 			Err(Error::InvalidAuth)
@@ -320,8 +320,13 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 	}
 }
 
-
-pub async fn verify_creds(ds: &Datastore, ns: Option<&String>, db: Option<&String>, user: &str, pass: &str) -> Result<(Auth, DefineUserStatement), Error> {
+pub async fn verify_creds(
+	ds: &Datastore,
+	ns: Option<&String>,
+	db: Option<&String>,
+	user: &str,
+	pass: &str,
+) -> Result<(Auth, DefineUserStatement), Error> {
 	if user.is_empty() || pass.is_empty() {
 		return Err(Error::InvalidAuth);
 	}
@@ -341,12 +346,10 @@ pub async fn verify_creds(ds: &Datastore, ns: Option<&String>, db: Option<&Strin
 						Err(_) => {
 							// Try to authenticate as a DB user
 							match db {
-								Some(db) => {
-									match verify_db_creds(ds, ns, db, user, pass).await {
-										Ok(u) => Ok((Auth::Db(ns.to_owned(), db.to_owned()), u)),
-										Err(_) => Err(Error::InvalidAuth),
-									}
-								}
+								Some(db) => match verify_db_creds(ds, ns, db, user, pass).await {
+									Ok(u) => Ok((Auth::Db(ns.to_owned(), db.to_owned()), u)),
+									Err(_) => Err(Error::InvalidAuth),
+								},
 								None => Err(Error::InvalidAuth),
 							}
 						}
@@ -358,30 +361,40 @@ pub async fn verify_creds(ds: &Datastore, ns: Option<&String>, db: Option<&Strin
 	}
 }
 
-async fn verify_kv_creds(ds: &Datastore, user: &str, pass: &str) -> Result<DefineUserStatement, Error> {
+async fn verify_kv_creds(
+	ds: &Datastore,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
 	let mut tx = ds.transaction(false, false).await?;
 	let user_res = tx.get_kv_user(user).await?;
 
 	verify_pass(pass, user_res.hash.as_ref())?;
-	
+
 	Ok(user_res)
 }
 
-async fn verify_ns_creds(ds: &Datastore, ns: &str, user: &str, pass: &str) -> Result<DefineUserStatement, Error> {
+async fn verify_ns_creds(
+	ds: &Datastore,
+	ns: &str,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
 	let mut tx = ds.transaction(false, false).await?;
-	
-	let user_res = match tx.get_ns_user(ns,user).await {
+
+	let user_res = match tx.get_ns_user(ns, user).await {
 		Ok(u) => Ok(u),
-		Err(surrealdb::error::Db::UserNsNotFound { ns: _, value: _ }) => {
-			match tx.get_nl(ns, user).await {
-				Ok(u) => Ok(DefineUserStatement {
-					base: u.base,
-					name: u.name,
-					hash: u.hash,
-					code: u.code,
-				}),
-				Err(e) => Err(e),
-			}
+		Err(surrealdb::error::Db::UserNsNotFound {
+			ns: _,
+			value: _,
+		}) => match tx.get_nl(ns, user).await {
+			Ok(u) => Ok(DefineUserStatement {
+				base: u.base,
+				name: u.name,
+				hash: u.hash,
+				code: u.code,
+			}),
+			Err(e) => Err(e),
 		},
 		Err(e) => Err(e),
 	}?;
@@ -391,21 +404,29 @@ async fn verify_ns_creds(ds: &Datastore, ns: &str, user: &str, pass: &str) -> Re
 	Ok(user_res)
 }
 
-async fn verify_db_creds(ds: &Datastore, ns: &str, db: &str, user: &str, pass: &str) -> Result<DefineUserStatement, Error> {
+async fn verify_db_creds(
+	ds: &Datastore,
+	ns: &str,
+	db: &str,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
 	let mut tx = ds.transaction(false, false).await?;
 
 	let user_res = match tx.get_db_user(ns, db, user).await {
 		Ok(u) => Ok(u),
-		Err(surrealdb::error::Db::UserDbNotFound { ns: _, db: _, value: _ }) => {
-			match tx.get_dl(ns, db, user).await {
-				Ok(u) => Ok(DefineUserStatement {
-					base: u.base,
-					name: u.name,
-					hash: u.hash,
-					code: u.code,
-				}),
-				Err(e) => Err(e),
-			}
+		Err(surrealdb::error::Db::UserDbNotFound {
+			ns: _,
+			db: _,
+			value: _,
+		}) => match tx.get_dl(ns, db, user).await {
+			Ok(u) => Ok(DefineUserStatement {
+				base: u.base,
+				name: u.name,
+				hash: u.hash,
+				code: u.code,
+			}),
+			Err(e) => Err(e),
 		},
 		Err(e) => Err(e),
 	}?;
@@ -437,12 +458,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn token() {}
-	
+
 	#[test]
 	fn test_verify_pass() {
 		let salt = SaltString::generate(&mut rand::thread_rng());
 		let hash = Argon2::default().hash_password("test".as_bytes(), &salt).unwrap().to_string();
-		
+
 		// Verify with the matching password
 		assert!(verify_pass("test", &hash).is_ok());
 
@@ -488,7 +509,7 @@ mod tests {
 		// Define users
 		{
 			let sess = Session::for_kv();
-			
+
 			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
 			ds.execute(&sql, &sess, None, false).await.unwrap();
 
@@ -542,7 +563,7 @@ mod tests {
 		// Define users
 		{
 			let sess = Session::for_kv();
-			
+
 			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
 			ds.execute(&sql, &sess, None, false).await.unwrap();
 

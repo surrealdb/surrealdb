@@ -1022,9 +1022,12 @@ async fn define_statement_user_kv() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let define_str =  tmp.pick(&["users".into(), "test".into()]).to_string();
+	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
 
-	assert!(define_str.strip_prefix("\"").unwrap().starts_with("DEFINE USER test ON KV PASSHASH '$argon2id$"));
+	assert!(define_str
+		.strip_prefix("\"")
+		.unwrap()
+		.starts_with("DEFINE USER test ON KV PASSHASH '$argon2id$"));
 	Ok(())
 }
 
@@ -1032,7 +1035,7 @@ async fn define_statement_user_kv() -> Result<(), Error> {
 async fn define_statement_user_ns() -> Result<(), Error> {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv();
-	
+
 	// Create a NS user and retrieve it.
 	let sql = "
 		USE NS ns;
@@ -1044,17 +1047,35 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 		INFO FOR USER test ON KV;
 	";
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	
+
 	assert!(res[1].result.is_ok());
 	assert!(res[2].result.is_ok());
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
-	assert_eq!(res[5].result.as_ref().unwrap_err().to_string(), "The root user 'test' does not exist"); // User doesn't exist at the NS level
-	
-	assert!(res[2].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[3].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[4].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	
+	assert_eq!(
+		res[5].result.as_ref().unwrap_err().to_string(),
+		"The root user 'test' does not exist"
+	); // User doesn't exist at the NS level
+
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
 		DEFINE USER test ON NS PASSWORD 'test';
@@ -1062,7 +1083,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 
 	assert!(res.remove(0).result.is_err());
-	
+
 	Ok(())
 }
 
@@ -1070,7 +1091,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 async fn define_statement_user_db() -> Result<(), Error> {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv();
-	
+
 	// Create a NS user and retrieve it.
 	let sql = "
 		USE NS ns;
@@ -1083,16 +1104,34 @@ async fn define_statement_user_db() -> Result<(), Error> {
 		INFO FOR USER test ON NS;
 	";
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	
+
 	assert!(res[2].result.is_ok());
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
 	assert!(res[5].result.is_ok());
-	assert_eq!(res[6].result.as_ref().unwrap_err().to_string(), "The user 'test' does not exist in the namespace 'ns'"); // User doesn't exist at the NS level
-	
-	assert!(res[3].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[4].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[5].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"The user 'test' does not exist in the namespace 'ns'"
+	); // User doesn't exist at the NS level
+
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -1132,7 +1171,7 @@ async fn define_statement_user_check_permissions_kv() -> Result<(), Error> {
 		USE DB db;
 		INFO FOR USER test_db;
 		INFO FOR USER test_ns ON NS;
-		INFO FOR USER test_kv ON KV;"
+		INFO FOR USER test_kv ON KV;",
 	];
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv();
@@ -1148,13 +1187,43 @@ async fn define_statement_user_check_permissions_kv() -> Result<(), Error> {
 
 	// Query users
 	let res = &mut dbs.execute(&sql[1], &ses, None, false).await?;
-	
-	assert!(res[0].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
-	assert!(res[2].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[3].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
-	assert!(res[6].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[7].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[8].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+
+	assert!(res[0]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+	assert!(res[6]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[7]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[8]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
 
 	Ok(())
 }
@@ -1182,22 +1251,26 @@ async fn define_statement_user_check_permissions_ns() -> Result<(), Error> {
 		USE DB db;
 		INFO FOR USER test_db;
 		INFO FOR USER test_ns ON NS;
-		INFO FOR USER test_kv ON KV;"
+		INFO FOR USER test_kv ON KV;",
 	];
-		
+
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_ns("ns");
 
-
 	// Test create users with the NS sessions
 	let res = &mut dbs.execute(&sql[0], &ses, None, false).await?;
-	assert_eq!(res[0].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // NS users can't create KV users
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't create KV users
 	assert!(res[1].result.is_ok());
-	assert_eq!(res[2].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // NS users can't create NS users
+	assert_eq!(
+		res[2].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't create NS users
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
 	assert!(res[5].result.is_ok());
-
 
 	// Prepare datastore
 	let dbs = Datastore::new("memory").await?;
@@ -1208,12 +1281,38 @@ async fn define_statement_user_check_permissions_ns() -> Result<(), Error> {
 	let ses = Session::for_ns("ns");
 	let res = &mut dbs.execute(&sql[1], &ses, None, false).await?;
 
-	assert_eq!(res[0].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // NS users can't query KV users
-	assert!(res[1].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[2].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[4].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[5].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
-	assert_eq!(res[6].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // NS users can't query KV users
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't query KV users
+	assert!(res[1]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't query KV users
 
 	Ok(())
 }
@@ -1237,22 +1336,29 @@ async fn define_statement_user_check_permissions_db() -> Result<(), Error> {
 		"INFO FOR USER test_kv ON KV;
 		INFO FOR USER test_ns ON NS;
 		INFO FOR USER test_db;
-		INFO FOR USER test_db ON DB;"
+		INFO FOR USER test_db ON DB;",
 	];
-		
+
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_db("ns", "db");
 
-
 	// Test create users with the NS sessions
 	let res = &mut dbs.execute(&sql[0], &ses, None, false).await?;
-	assert_eq!(res[0].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // DB users can't create KV users
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create KV users
 	assert!(res[1].result.is_ok());
-	assert_eq!(res[2].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // DB users can't create NS users
+	assert_eq!(
+		res[2].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create NS users
 	assert!(res[3].result.is_ok());
 	assert!(res[4].result.is_ok());
-	assert_eq!(res[5].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // DB users can't create DB users
-
+	assert_eq!(
+		res[5].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create DB users
 
 	// Prepare datastore
 	let dbs = Datastore::new("memory").await?;
@@ -1263,10 +1369,26 @@ async fn define_statement_user_check_permissions_db() -> Result<(), Error> {
 	let ses = Session::for_db("ns", "db");
 	let res = &mut dbs.execute(&sql[1], &ses, None, false).await?;
 
-	assert_eq!(res[0].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // DB users can't query KV users
-	assert_eq!(res[1].result.as_ref().unwrap_err().to_string(), "You don't have permission to perform this query type"); // DB users can't query NS users
-	assert!(res[2].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[3].result.as_ref().unwrap().to_string().starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't query KV users
+	assert_eq!(
+		res[1].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't query NS users
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
 
 	Ok(())
 }

@@ -4,7 +4,7 @@ use crate::iam::BASIC;
 use crate::iam::TOKEN;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use surrealdb::dbs::{Session, Auth};
+use surrealdb::dbs::{Auth, Session};
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
@@ -61,7 +61,7 @@ async fn process(
 				session.au = Arc::new(Auth::Kv);
 			}
 			Ok(())
-		},
+		}
 	}?;
 	// Pass the authenticated session through
 	Ok(session)

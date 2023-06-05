@@ -6,9 +6,9 @@ pub mod signup;
 pub mod token;
 pub mod verify;
 
-use surrealdb::dbs::AUTH_ENABLED;
 use crate::cli::CF;
 use crate::err::Error;
+use surrealdb::dbs::AUTH_ENABLED;
 
 pub const BASIC: &str = "Basic ";
 pub const TOKEN: &str = "Bearer ";
@@ -23,7 +23,10 @@ pub async fn init() -> Result<(), Error> {
 	// Check if authentication is enabled
 	if opt.no_auth {
 		warn!(target: LOG, "************************************************************");
-		warn!(target: LOG, "Authentication is disabled! This is not recommended for production use.");
+		warn!(
+			target: LOG,
+			"Authentication is disabled! This is not recommended for production use."
+		);
 		warn!(target: LOG, "************************************************************");
 	} else {
 		info!(target: LOG, "Authentication is enabled");

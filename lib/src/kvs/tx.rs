@@ -1193,12 +1193,10 @@ impl Transaction {
 	}
 
 	/// Retrieve all KV users.
-	pub async fn all_kv_users(
-		&mut self,
-	) -> Result<Arc<[DefineUserStatement]>, Error> {
+	pub async fn all_kv_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
 		let beg = crate::key::ku::prefix();
 		let end = crate::key::ku::suffix();
-		
+
 		let val = self.getr(beg..end, u32::MAX).await?;
 		let val = val.convert().into();
 		Ok(val)
@@ -1353,10 +1351,7 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific user definition from KV.
-	pub async fn get_kv_user(
-		&mut self,
-		user: &str,
-	) -> Result<DefineUserStatement, Error> {
+	pub async fn get_kv_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
 		let key = crate::key::ku::new(user);
 		let val = self.get(key).await?.ok_or(Error::UserKvNotFound {
 			value: user.to_owned(),
@@ -1918,10 +1913,12 @@ impl Transaction {
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
-	use crate::{kvs::Datastore, sql::{statements::DefineUserStatement, Base}};
+	use crate::{
+		kvs::Datastore,
+		sql::{statements::DefineUserStatement, Base},
+	};
 
 	#[tokio::test]
 	async fn test_get_kv_user() {
@@ -1933,7 +1930,7 @@ mod tests {
 		assert_eq!(res.err().unwrap().to_string(), "The root user 'nonexistent' does not exist");
 
 		// Create KV user and retrieve it
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Kv,
 			..Default::default()
@@ -1951,10 +1948,13 @@ mod tests {
 
 		// Retrieve non-existent NS user
 		let res = txn.get_ns_user("ns", "nonexistent").await;
-		assert_eq!(res.err().unwrap().to_string(), "The user 'nonexistent' does not exist in the namespace 'ns'");
+		assert_eq!(
+			res.err().unwrap().to_string(),
+			"The user 'nonexistent' does not exist in the namespace 'ns'"
+		);
 
 		// Create NS user and retrieve it
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Ns,
 			..Default::default()
@@ -1973,10 +1973,13 @@ mod tests {
 
 		// Retrieve non-existent DB user
 		let res = txn.get_db_user("ns", "db", "nonexistent").await;
-		assert_eq!(res.err().unwrap().to_string(), "The user 'nonexistent' does not exist in the database 'db'");
+		assert_eq!(
+			res.err().unwrap().to_string(),
+			"The user 'nonexistent' does not exist in the database 'db'"
+		);
 
 		// Create DB user and retrieve it
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Db,
 			..Default::default()
@@ -1998,7 +2001,7 @@ mod tests {
 		assert_eq!(res.len(), 0);
 
 		// When there are users
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Kv,
 			..Default::default()
@@ -2024,7 +2027,7 @@ mod tests {
 		assert_eq!(res.len(), 0);
 
 		// When there are users
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Ns,
 			..Default::default()
@@ -2050,7 +2053,7 @@ mod tests {
 		assert_eq!(res.len(), 0);
 
 		// When there are users
-		let data = DefineUserStatement{
+		let data = DefineUserStatement {
 			name: "user".into(),
 			base: Base::Db,
 			..Default::default()
@@ -2065,5 +2068,4 @@ mod tests {
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);
 	}
-
 }

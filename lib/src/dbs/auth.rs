@@ -1,4 +1,4 @@
-use std::{fmt};
+use std::fmt;
 
 use once_cell::sync::OnceCell;
 
@@ -35,10 +35,12 @@ impl TryFrom<&str> for Level {
 		match value.to_lowercase().as_str() {
 			"unauthenticated" | "no" => Ok(Level::No),
 			"root" | "kv" => Ok(Level::Kv),
-			"namespace"| "ns" => Ok(Level::Ns),
-			"database"| "db" => Ok(Level::Db),
+			"namespace" | "ns" => Ok(Level::Ns),
+			"database" | "db" => Ok(Level::Db),
 			"scope" | "sc" => Ok(Level::Sc),
-			_ => Err(Error::InvalidLevel{level: value.to_string()}),
+			_ => Err(Error::InvalidLevel {
+				level: value.to_string(),
+			}),
 		}
 	}
 }
@@ -50,7 +52,6 @@ impl TryFrom<String> for Level {
 		Self::try_from(value.as_str())
 	}
 }
-
 
 /// Specifies the current authentication for the datastore execution context.
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd)]

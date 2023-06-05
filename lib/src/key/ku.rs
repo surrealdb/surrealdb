@@ -32,7 +32,7 @@ impl<'a> Ku<'a> {
 			__: b'/',
 			_a: b'!',
 			_b: b'k',
-            _c: b'u',
+			_c: b'u',
 			user,
 		}
 	}
