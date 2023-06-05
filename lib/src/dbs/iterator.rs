@@ -219,36 +219,24 @@ impl Iterator {
 					let vals = Value::from(vals);
 					// Loop over each group clause
 					for field in fields.other() {
-						// Process it if it is a normal field
-						if let Field::Alone(v) = field {
-							match v {
+						// Process the field
+						if let Field::Single {
+							expr,
+							alias,
+						} = field
+						{
+							let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+							match expr {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals
-										.all()
-										.get(ctx, opt, txn, None, v.to_idiom().as_ref())
-										.await?;
+									let x =
+										vals.all().get(ctx, opt, txn, None, idiom.as_ref()).await?;
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
-									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
-									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
-								}
-							}
-						}
-						// Process it if it is a aliased field
-						if let Field::Alias(v, i) = field {
-							match v {
-								Value::Function(f) if f.is_aggregate() => {
-									let x = vals.all().get(ctx, opt, txn, None, i).await?;
-									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
-									obj.set(ctx, opt, txn, i, x).await?;
-								}
-								_ => {
-									let x = vals.first();
-									let x = i.compute(ctx, opt, txn, Some(&x)).await?;
-									obj.set(ctx, opt, txn, i, x).await?;
+									let x = expr.compute(ctx, opt, txn, Some(&x)).await?;
+									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 							}
 						}

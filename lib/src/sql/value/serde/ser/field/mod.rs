@@ -39,25 +39,6 @@ impl ser::Serializer for Serializer {
 		}
 	}
 
-	#[inline]
-	fn serialize_newtype_variant<T>(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		variant: &'static str,
-		value: &T,
-	) -> Result<Self::Ok, Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		match variant {
-			"Alone" => Ok(Field::Alone(value.serialize(ser::value::Serializer.wrap())?)),
-			variant => {
-				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
-			}
-		}
-	}
-
 	fn serialize_tuple_variant(
 		self,
 		name: &'static str,
@@ -66,7 +47,7 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeTupleVariant, Self::Error> {
 		match variant {
-			"Alias" => Ok(SerializeValueIdiomTuple::default()),
+			"Single" => Ok(SerializeValueIdiomTuple::default()),
 			variant => Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`"))),
 		}
 	}
@@ -76,7 +57,7 @@ impl ser::Serializer for Serializer {
 pub(super) struct SerializeValueIdiomTuple {
 	index: usize,
 	value: Option<Value>,
-	idiom: Option<Idiom>,
+	idiom: Option<Option<Idiom>>,
 }
 
 impl serde::ser::SerializeTupleVariant for SerializeValueIdiomTuple {
@@ -92,10 +73,10 @@ impl serde::ser::SerializeTupleVariant for SerializeValueIdiomTuple {
 				self.value = Some(value.serialize(ser::value::Serializer.wrap())?);
 			}
 			1 => {
-				self.idiom = Some(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?));
+				self.idiom = Some(value.serialize(SerializeOptionIdiom.wrap())?);
 			}
 			index => {
-				return Err(Error::custom(format!("unexpected `Field::Alias` index `{index}`")));
+				return Err(Error::custom(format!("unexpected `Field::Single` index `{index}`")));
 			}
 		}
 		self.index += 1;
@@ -104,9 +85,42 @@ impl serde::ser::SerializeTupleVariant for SerializeValueIdiomTuple {
 
 	fn end(self) -> Result<Self::Ok, Self::Error> {
 		match (self.value, self.idiom) {
-			(Some(value), Some(idiom)) => Ok(Field::Alias(value, idiom)),
-			_ => Err(Error::custom("`Field::Alias` missing required value(s)")),
+			(Some(expr), Some(alias)) => Ok(Field::Single {
+				expr,
+				alias,
+			}),
+			_ => Err(Error::custom("`Field::Single` missing required value(s)")),
 		}
+	}
+}
+
+#[derive(Default)]
+struct SerializeOptionIdiom;
+
+impl ser::Serializer for SerializeOptionIdiom {
+	type Ok = Option<Idiom>;
+	type Error = Error;
+
+	type SerializeSeq = Impossible<Self::Ok, Error>;
+	type SerializeTuple = Impossible<Self::Ok, Error>;
+	type SerializeTupleStruct = Impossible<Self::Ok, Error>;
+	type SerializeTupleVariant = Impossible<Self::Ok, Error>;
+	type SerializeMap = Impossible<Self::Ok, Error>;
+	type SerializeStruct = Impossible<Self::Ok, Error>;
+	type SerializeStructVariant = Impossible<Self::Ok, Error>;
+
+	const EXPECTED: &'static str = "an enum `Option<Idiom>`";
+
+	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+		Ok(None)
+	}
+
+	fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		let idiom = Idiom(value.serialize(ser::part::vec::Serializer.wrap())?);
+		Ok(Some(idiom))
 	}
 }
 
@@ -124,14 +138,20 @@ mod tests {
 
 	#[test]
 	fn alone() {
-		let field = Field::Alone(Default::default());
+		let field = Field::Single {
+			expr: Default::default(),
+			alias: None,
+		};
 		let serialized = field.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(field, serialized);
 	}
 
 	#[test]
 	fn alias() {
-		let field = Field::Alias(Default::default(), Default::default());
+		let field = Field::Single {
+			expr: Default::default(),
+			alias: Some(Default::default()),
+		};
 		let serialized = field.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(field, serialized);
 	}
