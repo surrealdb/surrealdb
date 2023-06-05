@@ -235,7 +235,11 @@ impl Iterator {
 								}
 								_ => {
 									let x = vals.first();
-									let x = expr.compute(ctx, opt, txn, Some(&x)).await?;
+									let x = if let Some(alias) = alias {
+										alias.compute(ctx, opt, txn, Some(&x)).await?
+									} else {
+										expr.compute(ctx, opt, txn, Some(&x)).await?
+									};
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 							}
