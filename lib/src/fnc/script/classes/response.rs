@@ -13,12 +13,6 @@ pub mod response {
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
 	pub struct Response {
-		pub(crate) url: Option<String>,
-		pub(crate) credentials: Option<String>,
-		pub(crate) headers: Option<String>,
-		pub(crate) method: Option<String>,
-		pub(crate) mode: Option<String>,
-		pub(crate) referrer: Option<String>,
 	}
 
 	impl Response {
@@ -29,12 +23,6 @@ pub mod response {
 		#[quickjs(constructor)]
 		pub fn new(args: Rest<Value>) -> Self {
 			Self {
-				url: None,
-				credentials: None,
-				headers: None,
-				method: None,
-				mode: None,
-				referrer: None,
 			}
 		}
 
@@ -93,4 +81,10 @@ pub mod response {
 			Err(throw!(ctx, "Not yet implemented"))
 		}
 	}
+}
+
+use response::Response as ResponseClass;
+
+impl ResponseClass{
+	fn from_response(reqwest: Response)
 }

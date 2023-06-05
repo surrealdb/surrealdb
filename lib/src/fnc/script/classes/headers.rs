@@ -7,16 +7,15 @@ pub mod headers {
 
 	use js::function::Rest;
 	use js::Value;
-	use reqwest::header::HeaderName;
+	use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 	use std::cell::RefCell;
-	use std::collections::HashMap;
 	use std::str::FromStr;
 
 	#[derive(Clone)]
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
 	pub struct Headers {
-		pub(crate) inner: RefCell<HashMap<HeaderName, Vec<String>>>,
+		pub(crate) inner: RefCell<HeaderMap>,
 	}
 
 	impl Headers {
@@ -25,10 +24,12 @@ pub mod headers {
 		// ------------------------------
 
 		#[quickjs(constructor)]
-		pub fn new(args: Rest<Value>) -> Self {
-			Self {
-				inner: RefCell::new(HashMap::new()),
-			}
+		pub fn new<'js>(
+			ctx: js::Ctx<'js>,
+			init: js::Value<'js>,
+			args: Rest<Value>,
+		) -> js::Result<Self> {
+			Headers::new_inner(ctx, init)
 		}
 
 		// ------------------------------
@@ -48,12 +49,7 @@ pub mod headers {
 			val: String,
 			args: Rest<Value>,
 		) -> js::Result<()> {
-			// Process and check the header name is valid
-			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
-			// Insert and overwrite the header entry
-			self.inner.borrow_mut().entry(key).or_insert_with(Vec::new).push(val);
-			// Everything ok
-			Ok(())
+			self.append_inner(ctx, &key, &val)
 		}
 
 		// Deletes a header from the header set
@@ -68,16 +64,23 @@ pub mod headers {
 
 		// Returns all header entries in the header set
 		pub fn entries(&self, args: Rest<Value>) -> Vec<(String, String)> {
-			self.inner
-				.borrow()
-				.iter()
-				.map(|(k, v)| {
-					(
-						k.as_str().to_owned(),
-						v.iter().map(|v| v.as_str()).collect::<Vec<&str>>().join(","),
-					)
-				})
-				.collect::<Vec<(String, String)>>()
+			let lock = self.inner.borrow();
+			let mut res = Vec::<(String, String)>::with_capacity(lock.len());
+
+			for (k, v) in lock.iter() {
+				let k = k.as_str();
+				if Some(k) == res.last().map(|x| x.0).as_deref() {
+					let ent = res.last_mut().unwrap();
+					ent.1.push_str(", ");
+					// Header value came from a string, so it should also be able to be cast back
+					// to a string
+					ent.1.push_str(v.to_str().unwrap());
+				} else {
+					res.push((k.to_owned(), v.to_str().unwrap().to_owned()));
+				}
+			}
+
+			res
 		}
 
 		// Returns all values of a header in the header set
@@ -90,11 +93,26 @@ pub mod headers {
 			// Process and check the header name is valid
 			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
 			// Convert the header values to strings
-			Ok(self
-				.inner
+			let all = self.inner.borrow().get_all(&key);
+
+			// Header value came from a string, so it should also be able to be cast back
+			// to a string
+			let all = all.iter().map(|x| x.to_str().unwrap()).collect::<Vec<&str>>().join(", ");
+			if all.is_empty() {
+				return Ok(None);
+			}
+			return Ok(Some(all));
+		}
+
+		#[quickjs(rename = "getSetCookie")]
+		pub fn get_set_cookie(&self, key: String) -> Vec<String> {
+			let key = HeaderKey::from_str("set-cookie");
+			self.inner
 				.borrow()
-				.get(&key)
-				.map(|v| v.iter().map(|v| v.as_str()).collect::<Vec<&str>>().join(",")))
+				.get_all(key)
+				.iter()
+				.map(|x| x.to_str().unwrap().to_owned())
+				.collect()
 		}
 
 		// Checks to see if the header set contains a header
@@ -120,19 +138,135 @@ pub mod headers {
 		) -> js::Result<()> {
 			// Process and check the header name is valid
 			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
+			// Process and check the header name is valid
+			let val = HeaderValue::from_str(&val).map_err(|e| throw!(ctx, e))?;
 			// Insert and overwrite the header entry
-			self.inner.borrow_mut().insert(key, vec![val]);
+			self.inner.borrow_mut().insert(key, val);
 			// Everything ok
 			Ok(())
 		}
 
 		// Returns all header values contained in the header set
 		pub fn values(&self, args: Rest<Value>) -> Vec<String> {
-			self.inner
-				.borrow()
-				.values()
-				.map(|v| v.iter().map(|v| v.as_str()).collect::<Vec<&str>>().join(","))
-				.collect::<Vec<String>>()
+			let lock = self.inner.borrow();
+			let mut res = Vec::<String>::with_capacity(lock.len());
+
+			let mut pref = None;
+			for (k, v) in lock.iter() {
+				if Some(k) == pref {
+					let ent = res.last().unwrap();
+					ent.push_str(", ");
+					ent.push_str(v.to_str().unwrap())
+				} else {
+					pref = Some(k);
+					res.push(v.to_str().unwrap().to_owned());
+				}
+			}
+
+			res
 		}
+	}
+}
+use std::cell::RefCell;
+
+use headers::Headers as HeadersImpl;
+use js::{prelude::Coerced, Ctx};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+
+impl HeadersImpl {
+	pub fn new_inner<'js>(ctx: Ctx<'js>, val: js::Value<'js>) -> js::Result<Self> {
+		static INVALID_ERROR: &str = "Headers constructor: init was not either sequence<sequence<ByteString>> or record<ByteString, ByteString>";
+
+		let res = Self {
+			inner: RefCell::new(HeaderMap::new()),
+		};
+
+		// TODO Set and Map,
+		if let Some(array) = val.as_array() {
+			// a sequence<sequence<String>>;
+			for v in array.iter::<js::Array>() {
+				let v = match v {
+					Ok(x) => x,
+					Err(e) => {
+						if e.is_from_js() {
+							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+						}
+						return Err(e);
+					}
+				};
+				let key = match v.get::<Coerced<String>>(0) {
+					Ok(x) => x,
+					Err(e) => {
+						if e.is_from_js() {
+							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+						}
+						return Err(e);
+					}
+				};
+				let value = match v.get::<Coerced<String>>(1) {
+					Ok(x) => x,
+					Err(e) => {
+						if e.is_from_js() {
+							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+						}
+						return Err(e);
+					}
+				};
+				res.append_inner(ctx, &key, &value)?;
+			}
+		} else if let Some(obj) = val.as_object() {
+			// a record<String,String>;
+			for prop in obj.props::<String, Coerced<String>>() {
+				let (key, value) = match prop {
+					Ok(x) => x,
+					Err(e) => {
+						if e.is_from_js() {
+							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+						}
+						return Err(e);
+					}
+				};
+				res.append_inner(ctx, &key, &value.0)?;
+			}
+		} else {
+			return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+		}
+
+		Ok(res)
+	}
+
+	fn append_inner(&self, ctx: js::Ctx<'_>, key: &str, val: &str) -> js::Result<()> {
+		// Unsure what to do exactly here.
+		// Spec dictates normalizing string before adding it as a header value, i.e. removing
+		// any leading and trailing whitespace:
+		// [`https://fetch.spec.whatwg.org/#concept-header-value-normalize`]
+		// But non of the platforms I tested, normalize, instead they throw an error
+		// with `Invalid header value`. I'll chose to just do what the platforms do.
+
+		let key = match HeaderName::from_bytes(key.as_bytes()) {
+			Ok(x) => x,
+			Err(e) => {
+				return Err(js::Exception::from_message(
+					ctx,
+					&format!("invalid header name {key}"),
+				)?
+				.throw())
+			}
+		};
+		let val = match HeaderValue::from_bytes(val.as_bytes()) {
+			Ok(x) => x,
+			Err(e) => {
+				return Err(js::Exception::from_message(
+					ctx,
+					&format!("invalid header value {val}"),
+				)?
+				.throw())
+			}
+		};
+
+		self.inner.borrow_mut().insert(key, val);
+
+		// Everything ok
+		Ok(())
 	}
 }
