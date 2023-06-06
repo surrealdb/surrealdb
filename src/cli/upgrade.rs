@@ -13,16 +13,19 @@ const LATEST_STABLE_VERSION: &str = "https://version.surrealdb.com/";
 const ROOT: &str = "https://download.surrealdb.com";
 
 #[derive(Args, Debug)]
-pub struct UpgradeCommandAruguments {
+pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
 	#[arg(long, conflicts_with = "version")]
 	nightly: bool,
 	/// Install a specific version
 	#[arg(long, conflicts_with = "nightly")]
 	version: Option<String>,
+	/// Don't actually replace the executable
+	#[arg(long)]
+	dry_run: bool,
 }
 
-impl UpgradeCommandAruguments {
+impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
 		Ok(if self.nightly {
@@ -42,7 +45,7 @@ impl UpgradeCommandAruguments {
 	}
 }
 
-pub async fn init(args: UpgradeCommandAruguments) -> Result<(), Error> {
+pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 
@@ -56,6 +59,15 @@ pub async fn init(args: UpgradeCommandAruguments) -> Result<(), Error> {
 		return Err(Error::Io(IoError::new(
 			ErrorKind::PermissionDenied,
 			"executable is read-only",
+		)));
+	}
+	#[cfg(unix)]
+	if std::os::unix::fs::MetadataExt::uid(&metadata) == 0
+		&& !nix::unistd::Uid::effective().is_root()
+	{
+		return Err(Error::Io(IoError::new(
+			ErrorKind::PermissionDenied,
+			"executable is owned by root; try again with sudo",
 		)));
 	}
 
@@ -145,9 +157,12 @@ pub async fn init(args: UpgradeCommandAruguments) -> Result<(), Error> {
 	println!("installing at {}", exe.display());
 
 	// Replace the running executable
-	replace_exe(&tmp_path, &exe)?;
-
-	println!("SurrealDB successfully upgraded");
+	if args.dry_run {
+		println!("Dry run successfully completed")
+	} else {
+		replace_exe(&tmp_path, &exe)?;
+		println!("SurrealDB successfully upgraded");
+	}
 
 	Ok(())
 }

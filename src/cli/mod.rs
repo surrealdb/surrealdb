@@ -10,7 +10,7 @@ mod upgrade;
 pub(crate) mod validator;
 mod version;
 
-use self::upgrade::UpgradeCommandAruguments;
+use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -59,7 +59,7 @@ enum Commands {
 	#[command(about = "Output the command-line tool version information")]
 	Version,
 	#[command(about = "Upgrade to the latest stable version")]
-	Upgrade(UpgradeCommandAruguments),
+	Upgrade(UpgradeCommandArguments),
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
 	#[command(

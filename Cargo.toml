@@ -66,6 +66,9 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.2"
 warp = { version = "0.3.5", features = ["compression", "tls", "websocket"] }
 
+[target.'cfg(unix)'.dependencies]
+nix = "0.26.2"
+
 [dev-dependencies]
 rcgen = "0.10.0"
 tonic = "0.8.3"
