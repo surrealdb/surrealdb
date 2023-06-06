@@ -1,6 +1,6 @@
 use super::fut;
 use crate::fnc::script::modules::impl_module_def;
-use js::Async;
+use js::prelude::Async;
 
 pub struct Package;
 

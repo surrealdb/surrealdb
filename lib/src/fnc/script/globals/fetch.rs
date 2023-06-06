@@ -1,5 +1,5 @@
 use crate::sql::value::Value;
-use js::Rest;
+use js::prelude::Rest;
 use js::Result;
 
 #[js::bind(object, public)]
