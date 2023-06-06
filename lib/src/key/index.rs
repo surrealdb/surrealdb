@@ -30,7 +30,7 @@ impl<'a> Prefix<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: 0x2a, // *
+			_e: b'*',
 		}
 	}
 }
@@ -54,18 +54,18 @@ struct PrefixIds<'a> {
 impl<'a> PrefixIds<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &Array) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0xa4, // ¤
+			_d: CHAR_INDEX,
 			ix,
-			_e: 0x2a, // *
+			_e: b'*',
 			fd: fd.to_owned(),
-			_f: 0x2a, // *
+			_f: b'*',
 		}
 	}
 }
