@@ -7,14 +7,12 @@ pub mod request {
 
 	use super::super::blob::blob::Blob;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
 	pub struct Request {
-		#[quickjs(hide)]
 		pub(crate) url: Option<String>,
 		pub(crate) credentials: Option<String>,
 		pub(crate) headers: Option<String>,
@@ -62,23 +60,23 @@ pub mod request {
 		}
 
 		// Returns a promise with the request body as a Blob
-		pub async fn blob(self, args: Rest<Value>) -> js::Result<Blob> {
-			Err(throw!("Not yet implemented"))
+		pub async fn blob(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Blob> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the request body as FormData
-		pub async fn formData(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn formData(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the request body as JSON
-		pub async fn json(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn json(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 
 		// Returns a promise with the request body as text
-		pub async fn text(self, args: Rest<Value>) -> js::Result<Value> {
-			Err(throw!("Not yet implemented"))
+		pub async fn text(self, ctx: js::Ctx<'_>, args: Rest<Value>) -> js::Result<Value> {
+			Err(throw!(ctx, "Not yet implemented"))
 		}
 	}
 }

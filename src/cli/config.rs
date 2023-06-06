@@ -1,3 +1,4 @@
+use crate::net::client_ip::ClientIp;
 use once_cell::sync::OnceCell;
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -9,6 +10,7 @@ pub struct Config {
 	pub bind: SocketAddr,
 	pub path: String,
 	pub no_auth: bool,
+	pub client_ip: ClientIp,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
 }
