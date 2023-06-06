@@ -60,6 +60,15 @@ pub(super) struct Offset {
 	end: u32,
 }
 
+impl Offset {
+	pub(super) fn new(start: u32, end: u32) -> Self {
+		Self {
+			start,
+			end,
+		}
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct OffsetsRecord(Vec<Vec<Offset>>);
 

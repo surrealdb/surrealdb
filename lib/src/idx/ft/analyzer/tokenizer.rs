@@ -1,4 +1,5 @@
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
+use crate::idx::ft::offsets::Offset;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 
 pub(super) struct Tokens {
@@ -35,18 +36,19 @@ impl Tokens {
 			match fr {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(Token::String(s)),
+					Term::NewTerm(s) => tks.push(tk.new_token(s)),
 				},
 				FilterResult::Terms(ts) => {
-					let mut tk = Some(tk);
+					let mut already_pushed = false;
 					for t in ts {
 						match t {
 							Term::Unchanged => {
-								if let Some(tk) = tk.take() {
-									tks.push(tk)
+								if !already_pushed {
+									tks.push(tk.clone());
+									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(Token::String(s)),
+							Term::NewTerm(s) => tks.push(tk.new_token(s)),
 						}
 					}
 				}
@@ -67,21 +69,37 @@ impl Tokens {
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
 	Ref(usize, usize),
-	String(String),
+	String(usize, usize, String),
+}
+
+impl From<&Token> for Offset {
+	fn from(t: &Token) -> Self {
+		match t {
+			Token::Ref(s, e) => Offset::new(*s as u32, *e as u32),
+			Token::String(s, e, _) => Offset::new(*s as u32, *e as u32),
+		}
+	}
 }
 
 impl Token {
+	fn new_token(&self, t: String) -> Self {
+		match self {
+			Token::Ref(s, e) => Token::String(*s, *e, t),
+			Token::String(s, e, _) => Token::String(*s, *e, t),
+		}
+	}
+
 	fn is_empty(&self) -> bool {
 		match self {
 			Token::Ref(start, end) => start == end,
-			Token::String(s) => s.is_empty(),
+			Token::String(_, _, s) => s.is_empty(),
 		}
 	}
 
 	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &str {
 		match self {
-			Token::Ref(s, e) => &i[*s..*e],
-			Token::String(s) => s,
+			Token::Ref(s, e) => &i[(*s as usize)..(*e as usize)],
+			Token::String(_, _, s) => s,
 		}
 	}
 }

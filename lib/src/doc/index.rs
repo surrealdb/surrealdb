@@ -50,7 +50,7 @@ impl<'a> Document<'a> {
 				let mut run = txn.lock().await;
 
 				// Store all the variable and parameters required by the index operation
-				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
+				let ic = IndexOperation::new(opt, ix, o, n, rid);
 
 				// Index operation dispatching
 				match &ix.index {
@@ -61,12 +61,7 @@ impl<'a> Document<'a> {
 						sc,
 						hl,
 						order,
-					} => match sc {
-						Scoring::Bm {
-							..
-						} => ic.index_best_matching_search(&mut run, az, *order, *hl).await?,
-						Scoring::Vs => ic.index_vector_search(az, *hl).await?,
-					},
+					} => ic.index_full_text(&mut run, az, *order, sc, *hl).await?,
 				};
 			}
 		}
@@ -182,27 +177,22 @@ impl<'a> IndexOperation<'a> {
 		})
 	}
 
-	async fn index_best_matching_search(
+	async fn index_full_text(
 		&self,
 		run: &mut kvs::Transaction,
 		az: &Ident,
 		order: u32,
-		_hl: bool,
+		scoring: &Scoring,
+		hl: bool,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, order).await?;
+		let mut ft = FtIndex::new(run, az, ikb, order, &scoring, hl).await?;
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
 			ft.index_document(run, self.rid, n).await
 		} else {
 			ft.remove_document(run, self.rid).await
 		}
-	}
-
-	async fn index_vector_search(&mut self, _az: &Ident, _hl: bool) -> Result<(), Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "VectorSearch indexing",
-		})
 	}
 }

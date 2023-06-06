@@ -230,7 +230,7 @@ impl MatchesThingIterator {
 		txn: &Transaction,
 		ix: &DefineIndexStatement,
 		az: &Ident,
-		_hl: bool,
+		hl: bool,
 		sc: &Scoring,
 		order: u32,
 		v: &Value,
@@ -243,7 +243,7 @@ impl MatchesThingIterator {
 		{
 			let query_string = v.clone().convert_to_string()?;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-			let fti = FtIndex::new(&mut run, az, ikb, order).await?;
+			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
 			let hits = fti.search(&mut run, query_string).await?;
 			Ok(Self {
 				hits,

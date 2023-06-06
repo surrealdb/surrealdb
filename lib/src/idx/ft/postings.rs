@@ -18,7 +18,7 @@ impl Postings {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: u32,
+		order: u32,
 	) -> Result<Self, Error> {
 		let keys = PostingsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -27,7 +27,7 @@ impl Postings {
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
 			btree::State::try_from_val(val)?
 		} else {
-			btree::State::new(default_btree_order)
+			btree::State::new(order)
 		};
 		Ok(Self {
 			state_key,

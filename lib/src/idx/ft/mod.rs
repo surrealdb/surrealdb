@@ -11,12 +11,14 @@ use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::docids::DocIds;
 use crate::idx::ft::doclength::DocLengths;
-use crate::idx::ft::postings::Postings;
+use crate::idx::ft::offsets::Offsets;
+use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::scorer::{BM25Scorer, Score};
 use crate::idx::ft::termdocs::TermDocs;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Array, Object, Thing, Value};
 use roaring::treemap::IntoIter;
@@ -29,8 +31,9 @@ pub(crate) struct FtIndex {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
-	bm25: Bm25Params,
-	btree_default_order: u32,
+	bm25: Option<Bm25Params>,
+	order: u32,
+	highlighting: bool,
 }
 
 #[derive(Clone)]
@@ -79,7 +82,9 @@ impl FtIndex {
 		tx: &mut Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
-		btree_default_order: u32,
+		order: u32,
+		scoring: &Scoring,
+		hl: bool,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -87,22 +92,34 @@ impl FtIndex {
 		} else {
 			State::default()
 		};
+		let mut bm25 = None;
+		if let Scoring::Bm {
+			k1,
+			b,
+		} = scoring
+		{
+			bm25 = Some(Bm25Params {
+				k1: *k1,
+				b: *b,
+			});
+		}
 		Ok(Self {
 			state,
 			state_key,
 			index_key_base,
-			bm25: Bm25Params::default(),
-			btree_default_order,
+			bm25,
+			order,
+			highlighting: hl,
 			analyzer: az.into(),
 		})
 	}
 
 	async fn doc_ids(&self, tx: &mut Transaction) -> Result<DocIds, Error> {
-		DocIds::new(tx, self.index_key_base.clone(), self.btree_default_order).await
+		DocIds::new(tx, self.index_key_base.clone(), self.order).await
 	}
 
 	async fn terms(&self, tx: &mut Transaction) -> Result<Terms, Error> {
-		Terms::new(tx, self.index_key_base.clone(), self.btree_default_order).await
+		Terms::new(tx, self.index_key_base.clone(), self.order).await
 	}
 
 	fn term_docs(&self) -> TermDocs {
@@ -110,11 +127,15 @@ impl FtIndex {
 	}
 
 	async fn doc_lengths(&self, tx: &mut Transaction) -> Result<DocLengths, Error> {
-		DocLengths::new(tx, self.index_key_base.clone(), self.btree_default_order).await
+		DocLengths::new(tx, self.index_key_base.clone(), self.order).await
 	}
 
 	async fn postings(&self, tx: &mut Transaction) -> Result<Postings, Error> {
-		Postings::new(tx, self.index_key_base.clone(), self.btree_default_order).await
+		Postings::new(tx, self.index_key_base.clone(), self.order).await
+	}
+
+	fn offsets(&self) -> Offsets {
+		Offsets::new(self.index_key_base.clone())
 	}
 
 	pub(crate) async fn remove_document(
@@ -169,10 +190,23 @@ impl FtIndex {
 		let resolved = d.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 
-		// Extract the doc_lengths, terms en frequencies
+		// Extract the doc_lengths, terms en frequencies (and offset)
 		let mut t = self.terms(tx).await?;
-		let (doc_length, terms_and_frequencies) =
-			self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
+		let (doc_length, terms_and_frequencies) = if self.highlighting {
+			//TODO let offsets = self.offsets();
+			let (dl, tos) = self
+				.analyzer
+				.extract_terms_with_frequencies_with_offsets(&mut t, tx, field_content)
+				.await?;
+			let mut tfs = Vec::with_capacity(tos.len());
+			for (tid, o) in tos {
+				tfs.push((tid, o.len() as TermFrequency));
+				//TODO offsets.set_offsets(tx, doc_id, tid, 0);
+			}
+			(dl, tfs)
+		} else {
+			self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?
+		};
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
@@ -262,21 +296,18 @@ impl FtIndex {
 			if !hits.is_empty() {
 				let postings = self.postings(tx).await?;
 				let doc_lengths = self.doc_lengths(tx).await?;
-				// TODO: Scoring should be optional
-				let scorer = BM25Scorer::new(
-					doc_lengths,
-					self.state.total_docs_lengths,
-					self.state.doc_count,
-					self.bm25.clone(),
-				);
+
+				let mut scorer = None;
+				if let Some(bm25) = &self.bm25 {
+					scorer = Some(BM25Scorer::new(
+						doc_lengths,
+						self.state.total_docs_lengths,
+						self.state.doc_count,
+						bm25.clone(),
+					));
+				}
 				let doc_ids = self.doc_ids(tx).await?;
-				return Ok(Some(HitsIterator::new(
-					doc_ids,
-					postings,
-					hits,
-					terms_docs,
-					Some(scorer),
-				)));
+				return Ok(Some(HitsIterator::new(doc_ids, postings, hits, terms_docs, scorer)));
 			}
 		}
 		Ok(None)
@@ -377,6 +408,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator, Score};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
+	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
 	use crate::sql::{Array, Thing};
 	use std::collections::HashMap;
@@ -415,10 +447,16 @@ mod tests {
 		{
 			// Add one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut fti =
-				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+			let mut fti = FtIndex::new(
+				&mut tx,
+				az.clone(),
+				IndexKeyBase::default(),
+				default_btree_order,
+				&Scoring::default(),
+				false,
+			)
+			.await
+			.unwrap();
 			fti.index_document(&mut tx, &doc1, &Array::from(vec!["hello the world"]))
 				.await
 				.unwrap();
@@ -428,10 +466,16 @@ mod tests {
 		{
 			// Add two documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut fti =
-				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+			let mut fti = FtIndex::new(
+				&mut tx,
+				az.clone(),
+				IndexKeyBase::default(),
+				default_btree_order,
+				&Scoring::default(),
+				false,
+			)
+			.await
+			.unwrap();
 			fti.index_document(&mut tx, &doc2, &Array::from(vec!["a yellow hello"])).await.unwrap();
 			fti.index_document(&mut tx, &doc3, &Array::from(vec!["foo bar"])).await.unwrap();
 			tx.commit().await.unwrap();
@@ -439,10 +483,16 @@ mod tests {
 
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let fti =
-				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+			let fti = FtIndex::new(
+				&mut tx,
+				az.clone(),
+				IndexKeyBase::default(),
+				default_btree_order,
+				&Scoring::default(),
+				false,
+			)
+			.await
+			.unwrap();
 
 			// Check the statistics
 			let statistics = fti.statistics(&mut tx).await.unwrap();
@@ -474,10 +524,16 @@ mod tests {
 		{
 			// Reindex one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut fti =
-				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+			let mut fti = FtIndex::new(
+				&mut tx,
+				az.clone(),
+				IndexKeyBase::default(),
+				default_btree_order,
+				&Scoring::default(),
+				false,
+			)
+			.await
+			.unwrap();
 			fti.index_document(&mut tx, &doc3, &Array::from(vec!["nobar foo"])).await.unwrap();
 			tx.commit().await.unwrap();
 
@@ -498,10 +554,16 @@ mod tests {
 		{
 			// Remove documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut fti =
-				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+			let mut fti = FtIndex::new(
+				&mut tx,
+				az.clone(),
+				IndexKeyBase::default(),
+				default_btree_order,
+				&Scoring::default(),
+				false,
+			)
+			.await
+			.unwrap();
 			fti.remove_document(&mut tx, &doc1).await.unwrap();
 			fti.remove_document(&mut tx, &doc2).await.unwrap();
 			fti.remove_document(&mut tx, &doc3).await.unwrap();
@@ -534,10 +596,16 @@ mod tests {
 			let default_btree_order = 5;
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let mut fti =
-					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-						.await
-						.unwrap();
+				let mut fti = FtIndex::new(
+					&mut tx,
+					az.clone(),
+					IndexKeyBase::default(),
+					default_btree_order,
+					&Scoring::default(),
+					false,
+				)
+				.await
+				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc1,
@@ -571,10 +639,16 @@ mod tests {
 
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let fti =
-					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
-						.await
-						.unwrap();
+				let fti = FtIndex::new(
+					&mut tx,
+					az.clone(),
+					IndexKeyBase::default(),
+					default_btree_order,
+					&Scoring::default(),
+					false,
+				)
+				.await
+				.unwrap();
 
 				let statistics = fti.statistics(&mut tx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);
