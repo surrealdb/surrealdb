@@ -5,7 +5,7 @@ pub mod console {
 	// Specify the imports
 	use crate::fnc::script::LOG;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::prelude::Rest;
 	/// Log the input values as INFO
 	pub fn log(args: Rest<Value>) {
 		info!(

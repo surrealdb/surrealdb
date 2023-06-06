@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
-use surrealdb::dbs::{Response, Session};
+use surrealdb::dbs::Session;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
