@@ -114,6 +114,7 @@ impl Filter {
 	#[inline]
 	fn ngram(c: &str, min: u16, max: u16) -> FilterResult {
 		let min = min as usize;
+		let c: Vec<char> = c.chars().collect();
 		let l = c.len();
 		if l < min {
 			return FilterResult::Ignore;
@@ -132,7 +133,7 @@ impl Filter {
 				if c.eq(n) {
 					ng.push(Term::Unchanged);
 				} else {
-					ng.push(Term::NewTerm(n.to_string()));
+					ng.push(Term::NewTerm(n.into_iter().collect()));
 				}
 			}
 		}
@@ -142,6 +143,7 @@ impl Filter {
 	#[inline]
 	fn edgengram(c: &str, min: u16, max: u16) -> FilterResult {
 		let min = min as usize;
+		let c: Vec<char> = c.chars().collect();
 		let l = c.len();
 		if l < min {
 			return FilterResult::Ignore;
@@ -157,7 +159,7 @@ impl Filter {
 			if c.eq(n) {
 				ng.push(Term::Unchanged);
 			} else {
-				ng.push(Term::NewTerm(n.to_string()));
+				ng.push(Term::NewTerm(n.into_iter().collect()));
 			}
 		}
 		FilterResult::Terms(ng)
@@ -715,8 +717,8 @@ mod tests {
 	fn test_ngram() {
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
-			"Alea Jacta Est",
-			&vec!["al", "ale", "le", "lea", "ja", "jac", "ac", "act", "ct", "cta", "es", "est"],
+			"Ālea iacta est",
+			&vec!["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
 		);
 	}
 
@@ -724,8 +726,8 @@ mod tests {
 	fn test_edgengram() {
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
-			"Alea Jacta Est",
-			&vec!["al", "ale", "ja", "jac", "es", "est"],
+			"Ālea iacta est",
+			&vec!["āl", "āle", "ia", "iac", "es", "est"],
 		);
 	}
 }

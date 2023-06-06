@@ -7,13 +7,11 @@ pub mod uuid {
 
 	use crate::sql::uuid;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Uuid {
-		#[quickjs(hide)]
 		pub(crate) value: Option<uuid::Uuid>,
 	}
 

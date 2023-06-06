@@ -979,9 +979,9 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 8);
 	//
-	for _ in 0..6 {
+	for i in 0..6 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		assert!(tmp.is_ok(), "{}", i);
 	}
 
 	let tmp = res.remove(0).result?;

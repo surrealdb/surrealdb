@@ -7,13 +7,11 @@ pub mod record {
 
 	use crate::sql::thing;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Record {
-		#[quickjs(hide)]
 		pub(crate) value: thing::Thing,
 	}
 
