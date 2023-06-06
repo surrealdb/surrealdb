@@ -14,6 +14,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
@@ -95,7 +96,10 @@ impl Fields {
 					expr,
 					alias,
 				} => {
-					let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+					let idiom = alias
+						.as_ref()
+						.map(Cow::Borrowed)
+						.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
 					match expr {
 						// This expression is a grouped aggregate function
 						Value::Function(f) if group && f.is_aggregate() => {

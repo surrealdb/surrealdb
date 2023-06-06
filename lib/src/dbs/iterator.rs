@@ -14,6 +14,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
@@ -225,7 +226,10 @@ impl Iterator {
 							alias,
 						} = field
 						{
-							let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+							let idiom = alias
+								.as_ref()
+								.map(Cow::Borrowed)
+								.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
 							match expr {
 								Value::Function(f) if f.is_aggregate() => {
 									let x =
