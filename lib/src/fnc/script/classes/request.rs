@@ -1,4 +1,7 @@
+use js::{class::RefsMarker, Class, Persistent};
 use reqwest::Method;
+
+use crate::fnc::script::classes::headers::headers::Headers;
 
 #[js::bind(object, public)]
 #[quickjs(bare)]
@@ -8,8 +11,9 @@ use reqwest::Method;
 pub mod request {
 
 	use super::super::blob::blob::Blob;
+	use super::RequestInit;
 	use crate::sql::value::Value;
-	use js::function::Rest;
+	use js::function::{Opt, Rest};
 	// TODO: change implementation based on features.
 	use reqwest::Url;
 
@@ -18,6 +22,7 @@ pub mod request {
 	#[allow(dead_code)]
 	pub struct Request {
 		pub(crate) url: Url,
+		pub(crate) init: RequestInit,
 	}
 
 	impl Request {
@@ -29,10 +34,10 @@ pub mod request {
 		pub fn new<'js>(
 			ctx: js::Ctx<'js>,
 			input: js::Value<'js>,
-			init: Option<js::Object<'js>>,
+			init: Opt<RequestInit>,
 			args: Rest<()>,
 		) -> js::Result<Self> {
-			let url = if let Some(url) = input.as_string() {
+			if let Some(url) = input.as_string() {
 				// url string
 				let url_str = url.to_string()?;
 				let url = Url::parse(&url_str).map_err(|e| {
@@ -42,7 +47,7 @@ pub mod request {
 						.map(|x| x.throw())
 						.unwrap_or(js::Error::Exception)
 				})?;
-				if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(false)
+				if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true)
 				{
 					// url cannot contain non empty username and passwords
 					// TODO: make type error.
@@ -51,27 +56,22 @@ pub mod request {
 						.map(|x| x.throw())
 						.unwrap_or(js::Error::Exception));
 				}
-				url
+				Ok(Self {
+					url,
+					init: init.into_inner().unwrap_or_default(),
+				})
 			} else if let Some(request) =
 				input.as_object().and_then(|obj| js::Class::<Self>::try_ref(ctx, obj).ok())
 			{
 				// existing request object, just return it
-				return Ok(request.clone());
+				Ok(request.clone())
 			} else {
-				return Err(js::Exception::from_message(
+				Err(js::Exception::from_message(
 					ctx,
 					"request `init` paramater must either be a request object or a string",
 				)?
-				.throw());
-			};
-			Ok(Self {
-				url,
-				credentials: None,
-				headers: None,
-				method: "GET".to_string(),
-				mode: None,
-				referrer: None,
-			})
+				.throw())
+			}
 		}
 
 		// ------------------------------
@@ -117,6 +117,7 @@ pub mod request {
 	}
 }
 
+#[derive(Clone)]
 pub enum RequestDestination {
 	Empty,
 	Audio,
@@ -140,6 +141,7 @@ pub enum RequestDestination {
 	Xslt,
 }
 
+#[derive(Clone)]
 pub enum RequestMode {
 	Navigate,
 	SameOrigin,
@@ -147,12 +149,14 @@ pub enum RequestMode {
 	Cors,
 }
 
+#[derive(Clone)]
 pub enum RequestCredentials {
 	Omit,
 	SameOrigin,
 	Include,
 }
 
+#[derive(Clone)]
 pub enum RequestCache {
 	Default,
 	NoStore,
@@ -162,16 +166,19 @@ pub enum RequestCache {
 	OnlyIfCached,
 }
 
+#[derive(Clone)]
 pub enum RequestRedirect {
 	Follow,
 	Error,
 	Manual,
 }
 
+#[derive(Clone)]
 pub enum RequestDuplex {
 	Half,
 }
 
+#[derive(Clone)]
 pub enum ReferrerPolicy {
 	Empty,
 	NoReferrer,
@@ -184,20 +191,27 @@ pub enum ReferrerPolicy {
 	UnsafeUrl,
 }
 
+#[derive(Clone)]
 pub struct RequestInit {
-	method: Method,
-	headers: (),
-	body: (),
-	referrer: String,
-	refferer_policy: ReferrerPolicy,
-	request_mode: RequestMode,
-	request_credentails: RequestCredentials,
-	request_cache: RequestCache,
-	request_redirect: RequestRedirect,
-	integrity: String,
-	keep_alive: bool,
+	pub method: Method,
+	pub headers: js::Persistent<Class<'static, Headers>>,
+	pub body: (),
+	pub referrer: String,
+	pub refferer_policy: ReferrerPolicy,
+	pub request_mode: RequestMode,
+	pub request_credentails: RequestCredentials,
+	pub request_cache: RequestCache,
+	pub request_redirect: RequestRedirect,
+	pub integrity: String,
+	pub keep_alive: bool,
 	signal: (),
-	duplex: RequestDuplex,
+	pub duplex: RequestDuplex,
+}
+
+impl<'js> js::class::HasRefs for RequestInit {
+	fn mark_refs(&self, marker: &RefsMarker) {
+		self.headers.mark_refs(marker);
+	}
 }
 
 fn ascii_equal_ignore_case(a: &[u8], b: &[u8]) -> bool {
@@ -207,11 +221,17 @@ fn ascii_equal_ignore_case(a: &[u8], b: &[u8]) -> bool {
 	a.into_iter().zip(b).all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
+impl Default for RequestInit {
+	fn default() -> Self {
+		todo!()
+	}
+}
+
 impl<'js> js::FromJs<'js> for RequestInit {
 	fn from_js(ctx: js::Ctx<'js>, value: js::Value<'js>) -> js::Result<Self> {
 		let object = js::Object::from_js(ctx, value)?;
 
-		let referrer = object.get::<Option<String>>("referrer").unwrap_or_else(String::new);
+		let referrer = object.get::<_, Option<String>>("referrer")?.unwrap_or_default();
 		let method = object
 			.get::<_, Option<String>>("method")?
 			.map(|m| -> js::Result<Method> {
@@ -247,6 +267,31 @@ impl<'js> js::FromJs<'js> for RequestInit {
 			.transpose()?
 			.unwrap_or(Method::GET);
 
-		todo!()
+		let headers = if let Some(hdrs) = object.get::<_, Option<js::Object>>("headers")? {
+			if let Ok(cls) = js::Class::<Headers>::from_object(hdrs.clone()) {
+				cls
+			} else {
+				Class::instance(ctx, Headers::new_inner(ctx, hdrs.into_value())?)?
+			}
+		} else {
+			Class::instance(ctx, Headers::new_empty())?
+		};
+		let headers = Persistent::save(ctx, headers);
+
+		Ok(Self {
+			method,
+			headers,
+			body: (),
+			referrer,
+			refferer_policy: ReferrerPolicy::Empty,
+			request_mode: RequestMode::Cors,
+			request_credentails: RequestCredentials::Include,
+			request_cache: RequestCache::Default,
+			request_redirect: RequestRedirect::Follow,
+			integrity: String::new(),
+			keep_alive: false,
+			signal: (),
+			duplex: RequestDuplex::Half,
+		})
 	}
 }

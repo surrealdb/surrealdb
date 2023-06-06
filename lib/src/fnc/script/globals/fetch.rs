@@ -1,8 +1,8 @@
 use crate::fnc::script::classes::request::request::Request;
-use crate::sql::value::Value;
+use crate::fnc::script::classes::request::RequestInit;
+use js::function::Opt;
 use js::prelude::Rest;
 use js::Result;
-use reqwest::Method;
 
 #[js::bind(object, public)]
 #[quickjs(rename = "fetch")]
@@ -10,9 +10,9 @@ use reqwest::Method;
 pub async fn fetch<'js>(
 	ctx: js::Ctx<'js>,
 	input: js::Value<'js>,
-	init: Option<js::Object<'js>>,
+	init: Opt<RequestInit>,
 	args: Rest<()>,
-) -> Result<Value> {
+) -> Result<String> {
 	fetch_impl(ctx, input, init, args).await
 }
 
@@ -20,9 +20,9 @@ pub async fn fetch<'js>(
 async fn fetch_impl<'js>(
 	ctx: js::Ctx<'js>,
 	_input: js::Value<'js>,
-	_init: Option<js::Object<'js>>,
+	_init: Opt<RequestInit>,
 	_args: Rest<()>,
-) -> Result<Value> {
+) -> Result<String> {
 	Err(js::Exception::from_message(
 		ctx,
 		"`fetch` is only available when surrealdb is built with the `http` feature enabled",
@@ -33,20 +33,24 @@ async fn fetch_impl<'js>(
 #[cfg(feature = "http")]
 async fn fetch_impl<'js>(
 	ctx: js::Ctx<'js>,
-	input_: js::Value<'js>,
-	init: Option<js::Object<'js>>,
+	input: js::Value<'js>,
+	init: Opt<RequestInit>,
 	args: Rest<()>,
-) -> Result<Value> {
-	let js_req = Request::new(ctx, input_, init, args)?;
+) -> Result<String> {
+	let js_req = Request::new(ctx, input, init, args)?;
 
 	let client = reqwest::Client::new();
 
-	let method = Method::from_bytes(js_req.method.as_bytes())
-		.expect("request implementation should prefent invalid method");
+	let req = reqwest::Request::new(js_req.init.method, js_req.url);
 
-	let req = reqwest::Request::new(method, js_req.url);
+	// Can't be from a different runtime, so should be fine.
+	let headers = js_req.init.headers.restore(ctx).unwrap();
 
-	let response = reqwest::RequestBuilder::from_parts(client, req).send().await;
+	let response = reqwest::RequestBuilder::from_parts(client, req)
+		.headers(headers.as_class_def().inner.borrow().clone())
+		.send()
+		.await
+		.map_err(|e| throw!(ctx, e))?;
 
-	todo!();
+	response.text().await.map_err(|e| throw!(ctx, e))
 }

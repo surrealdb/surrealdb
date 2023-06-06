@@ -69,7 +69,7 @@ pub mod headers {
 
 			for (k, v) in lock.iter() {
 				let k = k.as_str();
-				if Some(k) == res.last().map(|x| x.0).as_deref() {
+				if Some(k) == res.last().map(|x| x.0.as_str()) {
 					let ent = res.last_mut().unwrap();
 					ent.1.push_str(", ");
 					// Header value came from a string, so it should also be able to be cast back
@@ -93,7 +93,8 @@ pub mod headers {
 			// Process and check the header name is valid
 			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
 			// Convert the header values to strings
-			let all = self.inner.borrow().get_all(&key);
+			let lock = self.inner.borrow();
+			let all = lock.get_all(&key);
 
 			// Header value came from a string, so it should also be able to be cast back
 			// to a string
@@ -104,9 +105,11 @@ pub mod headers {
 			return Ok(Some(all));
 		}
 
+		// Returns all values for the `Set-Cookie` header.
 		#[quickjs(rename = "getSetCookie")]
 		pub fn get_set_cookie(&self, key: String) -> Vec<String> {
-			let key = HeaderKey::from_str("set-cookie");
+			// This should always be a correct cookie;
+			let key = HeaderName::from_str("set-cookie").unwrap();
 			self.inner
 				.borrow()
 				.get_all(key)
@@ -154,7 +157,7 @@ pub mod headers {
 			let mut pref = None;
 			for (k, v) in lock.iter() {
 				if Some(k) == pref {
-					let ent = res.last().unwrap();
+					let ent = res.last_mut().unwrap();
 					ent.push_str(", ");
 					ent.push_str(v.to_str().unwrap())
 				} else {
@@ -169,17 +172,20 @@ pub mod headers {
 }
 use std::cell::RefCell;
 
-use headers::Headers as HeadersImpl;
+use headers::Headers as HeadersClass;
 use js::{prelude::Coerced, Ctx};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-impl HeadersImpl {
-	pub fn new_inner<'js>(ctx: Ctx<'js>, val: js::Value<'js>) -> js::Result<Self> {
-		static INVALID_ERROR: &str = "Headers constructor: init was not either sequence<sequence<ByteString>> or record<ByteString, ByteString>";
-
-		let res = Self {
+impl HeadersClass {
+	pub fn new_empty() -> Self {
+		Self {
 			inner: RefCell::new(HeaderMap::new()),
-		};
+		}
+	}
+
+	pub fn new_inner<'js>(ctx: Ctx<'js>, val: js::Value<'js>) -> js::Result<Self> {
+		static INVALID_ERROR: &str = "Headers constructor: init was neither sequence<sequence<ByteString>> or record<ByteString, ByteString>";
+		let res = Self::new_empty();
 
 		// TODO Set and Map,
 		if let Some(array) = val.as_array() {
@@ -248,7 +254,7 @@ impl HeadersImpl {
 			Err(e) => {
 				return Err(js::Exception::from_message(
 					ctx,
-					&format!("invalid header name {key}"),
+					&format!("invalid header name {key}: {e}"),
 				)?
 				.throw())
 			}
@@ -258,7 +264,7 @@ impl HeadersImpl {
 			Err(e) => {
 				return Err(js::Exception::from_message(
 					ctx,
-					&format!("invalid header value {val}"),
+					&format!("invalid header value {val}: {e}"),
 				)?
 				.throw())
 			}

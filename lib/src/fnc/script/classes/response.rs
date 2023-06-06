@@ -12,8 +12,7 @@ pub mod response {
 	#[derive(Clone)]
 	#[quickjs(cloneable)]
 	#[allow(dead_code)]
-	pub struct Response {
-	}
+	pub struct Response {}
 
 	impl Response {
 		// ------------------------------
@@ -22,8 +21,7 @@ pub mod response {
 
 		#[quickjs(constructor)]
 		pub fn new(args: Rest<Value>) -> Self {
-			Self {
-			}
+			Self {}
 		}
 
 		// ------------------------------
@@ -81,10 +79,4 @@ pub mod response {
 			Err(throw!(ctx, "Not yet implemented"))
 		}
 	}
-}
-
-use response::Response as ResponseClass;
-
-impl ResponseClass{
-	fn from_response(reqwest: Response)
 }
