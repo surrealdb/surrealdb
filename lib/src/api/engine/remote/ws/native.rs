@@ -292,7 +292,7 @@ pub(crate) fn router(
 										if let Some(response) = option {
 											trace!(target: LOG, "{response:?}");
 											if let Some(Ok(id)) =
-												response.id.map(Value::convert_to_i64)
+												response.id.map(Value::coerce_to_i64)
 											{
 												if let Some((method, sender)) = routes.remove(&id) {
 													let _res = sender

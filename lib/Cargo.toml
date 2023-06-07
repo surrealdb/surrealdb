@@ -22,8 +22,9 @@ protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
 kv-indxdb = ["dep:indxdb"]
+kv-speedb = ["dep:speedb", "tokio/time"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time"]
-kv-tikv = ["dep:tikv"]
+kv-tikv = ["dep:tikv", "dep:tikv-client-proto"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -74,7 +75,7 @@ fuzzy-matcher = "0.3.7"
 geo = { version = "0.25.0", features = ["use-serde"] }
 indexmap = { version = "1.9.3", features = ["serde"] }
 indxdb = { version = "0.3.0", optional = true }
-js = { version = "0.1.7", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties"], optional = true }
+js = { version = "0.2.1" , package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties"], optional = true }
 lexicmp = "0.1.0"
 log = "0.4.17"
 md-5 = "0.10.5"
@@ -90,7 +91,7 @@ regex = "1.8.2"
 reqwest = { version = "0.11.18", default-features = false, features = ["json", "stream"], optional = true }
 roaring = { version = "0.10.1", features = ["serde"] }
 rocksdb = { version = "0.21.0", optional = true }
-rust_decimal = { version = "1.29.1", features = [ "maths" ] }
+rust_decimal = { git = "https://github.com/paupino/rust-decimal", rev = "714db9c4ccc83b742cb7613d12825dd82e845e8e", features = [ "maths" ] }
 rustls = { version = "0.20.8", optional = true }
 snap = "1.1.0"
 scrypt = "0.11.0"
@@ -99,9 +100,11 @@ serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
 sha-1 = "0.10.1"
 sha2 = "0.10.6"
+speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.40"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
+tikv-client-proto = { version = "0.1.0", optional = true }
 tokio-util = { version = "0.7.8", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"

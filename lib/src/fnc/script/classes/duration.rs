@@ -7,13 +7,11 @@ pub mod duration {
 
 	use crate::sql::duration;
 	use crate::sql::value::Value;
-	use js::Rest;
+	use js::function::Rest;
 
 	#[derive(Clone)]
-	#[quickjs(class)]
 	#[quickjs(cloneable)]
 	pub struct Duration {
-		#[quickjs(hide)]
 		pub(crate) value: Option<duration::Duration>,
 	}
 

@@ -808,7 +808,7 @@ mod tests {
 
 	#[test]
 	fn function() {
-		let function = Box::new(Function::Cast(Default::default(), Default::default()));
+		let function = Box::new(Function::Normal(Default::default(), Default::default()));
 		let value = to_value(&function).unwrap();
 		let expected = Value::Function(function);
 		assert_eq!(value, expected);

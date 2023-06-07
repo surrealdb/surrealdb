@@ -195,6 +195,41 @@ pub struct File;
 #[derive(Debug)]
 pub struct RocksDb;
 
+/// SpeeDB database
+///
+/// # Examples
+///
+/// Instantiating a SpeeDB-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SpeeDb;
+///
+/// let db = Surreal::new::<SpeeDb>("temp.db").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a SpeeDB-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SpeeDb;
+///
+/// let db = Surreal::new::<SpeeDb>(("temp.db", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-speedb")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-speedb")))]
+#[derive(Debug)]
+pub struct SpeeDb;
+
 /// IndxDB database
 ///
 /// # Examples

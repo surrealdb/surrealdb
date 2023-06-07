@@ -196,7 +196,7 @@ impl Number {
 		match self {
 			Number::Int(_) => true,
 			Number::Float(v) => v.fract() == 0.0,
-			Number::Decimal(v) => v.scale() == 0,
+			Number::Decimal(v) => v.is_integer(),
 		}
 	}
 

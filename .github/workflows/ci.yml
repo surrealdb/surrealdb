@@ -2,11 +2,8 @@ name: Continuous integration
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+  merge_group:
 
 defaults:
   run:
@@ -16,7 +13,7 @@ jobs:
 
   format:
     name: Check format
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -32,7 +29,7 @@ jobs:
 
   check:
     name: Check workspace
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -51,7 +48,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -67,7 +64,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -88,7 +85,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -107,7 +104,7 @@ jobs:
 
   ws-engine:
     name: WebSocket engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -129,7 +126,7 @@ jobs:
 
   http-engine:
     name: HTTP engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -151,7 +148,7 @@ jobs:
 
   mem-engine:
     name: Memory engine
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -165,7 +162,7 @@ jobs:
 
   file-engine:
     name: File engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
@@ -177,9 +174,37 @@ jobs:
       - name: Run cargo test
         run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
 
+  rocksdb-engine:
+    name: RocksDB engine
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::rocksdb
+
+  speedb-engine:
+    name: SpeeDB engine
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
+
   any-engine:
     name: Any engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain

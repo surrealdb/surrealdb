@@ -1,4 +1,4 @@
-#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb"))]
+#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-speedb", feature = "kv-fdb"))]
 pub(crate) mod transaction {
 	use crate::dbs::{Response, Session};
 	use crate::kvs::ds::Inner;
@@ -79,6 +79,10 @@ pub(crate) mod transaction {
 				#[cfg(feature = "kv-rocksdb")]
 				Inner::RocksDB(ds) => Datastore {
 					inner: Inner::RocksDB(ds.clone()),
+				},
+				#[cfg(feature = "kv-speedb")]
+				Inner::SpeeDB(ds) => Datastore {
+					inner: Inner::SpeeDB(ds.clone()),
 				},
 				#[cfg(feature = "kv-tikv")]
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),

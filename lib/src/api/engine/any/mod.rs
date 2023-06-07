@@ -95,6 +95,7 @@ use crate::api::opt::Endpoint;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
@@ -172,6 +173,7 @@ where
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
@@ -181,6 +183,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	)))
@@ -201,6 +204,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	),
@@ -213,6 +217,7 @@ where
 			feature = "kv-mem",
 			feature = "kv-tikv",
 			feature = "kv-rocksdb",
+			feature = "kv-speedb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
 		),

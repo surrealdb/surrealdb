@@ -1,10 +1,10 @@
-#![cfg(feature = "kv-rocksdb")]
+#![cfg(feature = "kv-speedb")]
 
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use futures::lock::Mutex;
-use rocksdb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
+use speedb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub struct Transaction {
 	// Is the transaction read+write?
 	rw: bool,
 	// The distributed datastore transaction
-	tx: Arc<Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>>,
+	tx: Arc<Mutex<Option<speedb::Transaction<'static, OptimisticTransactionDB>>>>,
 	// The read options containing the Snapshot
 	ro: ReadOptions,
 	// the above, supposedly 'static, transaction actually points here, so keep the memory alive
@@ -50,8 +50,8 @@ impl Datastore {
 		// datastore is dropped prematurely.
 		let tx = unsafe {
 			std::mem::transmute::<
-				rocksdb::Transaction<'_, OptimisticTransactionDB>,
-				rocksdb::Transaction<'static, OptimisticTransactionDB>,
+				speedb::Transaction<'_, OptimisticTransactionDB>,
+				speedb::Transaction<'static, OptimisticTransactionDB>,
 			>(tx)
 		};
 		let mut ro = ReadOptions::default();
@@ -314,7 +314,7 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::tests::tx_isolation::transaction::verify_transaction_isolation;
+	use crate::kvs::tests::transaction::verify_transaction_isolation;
 	use temp_dir::TempDir;
 
 	// https://github.com/surrealdb/surrealdb/issues/76
@@ -324,7 +324,7 @@ mod tests {
 		transaction.put("uh", "oh").await.unwrap();
 
 		async fn get_transaction() -> crate::kvs::Transaction {
-			let datastore = crate::kvs::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
+			let datastore = crate::kvs::Datastore::new("speedb:/tmp/spee.db").await.unwrap();
 			datastore.transaction(true, false).await.unwrap()
 		}
 	}

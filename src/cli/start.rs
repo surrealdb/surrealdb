@@ -7,7 +7,7 @@ use crate::dbs;
 use crate::env;
 use crate::err::Error;
 use crate::iam;
-use crate::net;
+use crate::net::{self, client_ip::ClientIp};
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
@@ -31,6 +31,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
 	#[arg(default_value = "127.0.0.1/32")]
 	allowed_networks: Vec<IpNet>,
+	#[arg(help = "The method of detecting the client's IP address")]
+	#[arg(env = "SURREAL_CLIENT_IP", long)]
+	#[arg(default_value = "socket", value_enum)]
+	client_ip: ClientIp,
 	#[arg(help = "The hostname or ip address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
@@ -88,6 +92,7 @@ pub async fn init(
 		path,
 		username: user,
 		password: pass,
+		client_ip,
 		listen_addresses,
 		web,
 		strict,
@@ -108,6 +113,7 @@ pub async fn init(
 	let _ = config::CF.set(Config {
 		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
+		client_ip,
 		path,
 		user,
 		pass,

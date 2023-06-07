@@ -14,13 +14,43 @@ const DOUBLE_ESC: &str = r#"\""#;
 const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
+/// Quotes a string with single or double quotes:
+/// - cat -> 'cat'
+/// - cat's -> "cat's"
+/// - cat's "toy" -> "cat's \"toy\""
+///
+/// Escapes / as //
 #[inline]
-pub fn escape_str(s: &str) -> Cow<'_, str> {
-	if s.contains(SINGLE) {
-		escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
-	} else {
-		Cow::Owned(format!("{SINGLE}{s}{SINGLE}"))
+pub fn quote_str(s: &str) -> String {
+	// Rough approximation of capacity, which may be exceeded
+	// if things must be escaped.
+	let mut ret = String::with_capacity(2 + s.len());
+
+	fn escape_into(into: &mut String, s: &str, escape_double: bool) {
+		// Based on internals of str::replace
+		let mut last_end = 0;
+		for (start, part) in s.match_indices(|c| c == '\\' || (c == DOUBLE && escape_double)) {
+			into.push_str(&s[last_end..start]);
+			into.push_str(if part == "\\" {
+				"\\\\"
+			} else {
+				DOUBLE_ESC
+			});
+			last_end = start + part.len();
+		}
+		into.push_str(&s[last_end..s.len()]);
 	}
+
+	let quote = if s.contains(SINGLE) {
+		DOUBLE
+	} else {
+		SINGLE
+	};
+
+	ret.push(quote);
+	escape_into(&mut ret, s, quote == DOUBLE);
+	ret.push(quote);
+	ret
 }
 
 #[inline]

@@ -109,6 +109,22 @@ impl Connection for Any {
 					.into());
 				}
 
+				"speedb" => {
+					#[cfg(feature = "kv-speedb")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
+					}
+
+					#[cfg(not(feature = "kv-speedb"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
 				"tikv" => {
 					#[cfg(feature = "kv-tikv")]
 					{

@@ -112,7 +112,7 @@ mod cli_integration {
 
 		let _server = run(&start_args);
 
-		std::thread::sleep(std::time::Duration::from_millis(10));
+		std::thread::sleep(std::time::Duration::from_millis(500));
 
 		assert!(run(&format!("isready --conn http://{addr}")).output().is_ok());
 
@@ -280,7 +280,7 @@ mod cli_integration {
 
 		let server = run(&start_args);
 
-		std::thread::sleep(std::time::Duration::from_millis(50));
+		std::thread::sleep(std::time::Duration::from_millis(750));
 
 		let output = server.kill().output().unwrap_err();
 		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
