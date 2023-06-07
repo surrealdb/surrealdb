@@ -1708,11 +1708,11 @@ impl Value {
 
 	/// Checks whether this value is a static value
 	pub(crate) fn is_static(&self) -> bool {
-		// TODO: are `Bytes` static?
 		match self {
 			Value::None => true,
 			Value::Null => true,
 			Value::Bool(_) => true,
+			Value::Bytes(_) => true,
 			Value::Uuid(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
