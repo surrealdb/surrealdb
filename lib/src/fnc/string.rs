@@ -39,7 +39,10 @@ pub fn join(args: Vec<Value>) -> Result<Value, Error> {
 	let strings = args.collect::<Vec<_>>();
 	limit(
 		"string::join",
-		strings.len().saturating_mul(chr.len() + strings.iter().map(String::len).sum::<usize>()),
+		strings
+			.len()
+			.saturating_mul(chr.len())
+			.saturating_add(strings.iter().map(String::len).sum::<usize>()),
 	)?;
 
 	// FIXME: Use intersperse to avoid intermediate allocation once stable
