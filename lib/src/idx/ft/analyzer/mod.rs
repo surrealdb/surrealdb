@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
-use crate::idx::ft::offsets::Offset;
+use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
@@ -62,20 +62,21 @@ impl Analyzer {
 	/// It will create new term ids for non already existing terms.
 	pub(super) async fn extract_terms_with_frequencies(
 		&self,
-		t: &mut Terms,
+		terms: &mut Terms,
 		tx: &mut Transaction,
 		field_content: &Array,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
-		let mut doc_length = 0;
+		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
-		let inputs = self.collect_inputs(field_content)?;
+		let inputs = self.analyse_content(field_content)?;
 		// We then collect every unique terms and count the frequency
-		let mut terms = HashMap::new();
-		for tokens in &inputs {
-			for token in tokens.list() {
-				doc_length += 1;
-				match terms.entry(tokens.get_token_string(&token)) {
+		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
+		for tks in &inputs {
+			for tk in tks.list() {
+				dl += 1;
+				let s = tks.get_token_string(tk);
+				match tf.entry(s) {
 					Entry::Vacant(e) => {
 						e.insert(1);
 					}
@@ -85,57 +86,61 @@ impl Analyzer {
 				}
 			}
 		}
-		// Now we can extract the term ids
-		let mut res = Vec::with_capacity(terms.len());
-		for (term, freq) in terms {
-			res.push((t.resolve_term_id(tx, term).await?, freq));
+		// Now we can resolve the term ids
+		let mut tfid = Vec::with_capacity(tf.len());
+		for (t, f) in tf {
+			tfid.push((terms.resolve_term_id(tx, t).await?, f));
 		}
-		Ok((doc_length, res))
+		Ok((dl, tfid))
 	}
 
 	/// This method is used for indexing.
 	/// It will create new term ids for non already existing terms.
 	pub(super) async fn extract_terms_with_frequencies_with_offsets(
 		&self,
-		t: &mut Terms,
+		terms: &mut Terms,
 		tx: &mut Transaction,
 		field_content: &Array,
-	) -> Result<(DocLength, Vec<(TermId, Vec<Offset>)>), Error> {
-		let mut doc_length = 0;
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
+		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
-		let inputs = self.collect_inputs(field_content)?;
-		// We then collect every unique terms and count the frequency
-		let mut terms = HashMap::new();
-		for tokens in &inputs {
-			for token in tokens.list() {
-				doc_length += 1;
-				match terms.entry(tokens.get_token_string(&token)) {
+		let inputs = self.analyse_content(field_content)?;
+		// We then collect every unique terms and count the frequency and extract the offsets
+		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
+		for (i, tks) in inputs.iter().enumerate() {
+			for tk in tks.list() {
+				dl += 1;
+				let s = tks.get_token_string(tk);
+				let o = tk.new_offset(i as u32);
+				match tfos.entry(s) {
 					Entry::Vacant(e) => {
-						e.insert(vec![token.into()]);
+						e.insert(vec![o]);
 					}
-					Entry::Occupied(mut e) => {
-						e.get_mut().push(token.into());
-					}
+					Entry::Occupied(mut e) => e.get_mut().push(o),
 				}
 			}
 		}
-		// Now we can extract the term ids
-		let mut res = Vec::with_capacity(terms.len());
-		for (term, offsets) in terms {
-			res.push((t.resolve_term_id(tx, term).await?, offsets));
+
+		// Now we can resolve the term ids
+		let mut tfid = Vec::with_capacity(tfos.len());
+		let mut osid = Vec::with_capacity(tfos.len());
+		for (t, o) in tfos {
+			let id = terms.resolve_term_id(tx, t).await?;
+			tfid.push((id, o.len() as TermFrequency));
+			osid.push((id, OffsetRecords(o)));
 		}
-		Ok((doc_length, res))
+		Ok((dl, tfid, osid))
 	}
 
-	fn collect_inputs(&self, field_content: &Array) -> Result<Vec<Tokens>, Error> {
-		let mut inputs = Vec::with_capacity(field_content.0.len());
+	fn analyse_content(&self, field_content: &Array) -> Result<Vec<Tokens>, Error> {
+		let mut res = Vec::with_capacity(field_content.0.len());
 		for v in &field_content.0 {
 			let input = v.to_owned().convert_to_string()?;
 			let tks = self.analyse(input);
-			inputs.push(tks);
+			res.push(tks);
 		}
-		Ok(inputs)
+		Ok(res)
 	}
 
 	fn analyse(&self, input: String) -> Tokens {

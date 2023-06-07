@@ -1,5 +1,5 @@
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
-use crate::idx::ft::offsets::Offset;
+use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 
 pub(super) struct Tokens {
@@ -68,17 +68,8 @@ impl Tokens {
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
-	Ref(usize, usize),
-	String(usize, usize, String),
-}
-
-impl From<&Token> for Offset {
-	fn from(t: &Token) -> Self {
-		match t {
-			Token::Ref(s, e) => Offset::new(*s as u32, *e as u32),
-			Token::String(s, e, _) => Offset::new(*s as u32, *e as u32),
-		}
-	}
+	Ref(Position, Position),
+	String(Position, Position, String),
 }
 
 impl Token {
@@ -86,6 +77,13 @@ impl Token {
 		match self {
 			Token::Ref(s, e) => Token::String(*s, *e, t),
 			Token::String(s, e, _) => Token::String(*s, *e, t),
+		}
+	}
+
+	pub(super) fn new_offset(&self, i: u32) -> Offset {
+		match self {
+			Token::Ref(s, e) => Offset::new(i, *s, *e),
+			Token::String(s, e, _) => Offset::new(i, *s, *e),
 		}
 	}
 
@@ -146,10 +144,10 @@ impl Tokenizer {
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
 				if !is_valid {
-					last_pos += c.len_utf8();
+					last_pos += c.len_utf8() as Position;
 				}
 			}
-			current_pos += c.len_utf8();
+			current_pos += c.len_utf8() as Position;
 		}
 		if current_pos != last_pos {
 			t.push(Token::Ref(last_pos, current_pos));

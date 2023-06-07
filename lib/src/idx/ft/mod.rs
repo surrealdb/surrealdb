@@ -6,13 +6,14 @@ mod postings;
 mod scorer;
 mod termdocs;
 pub(crate) mod terms;
+mod vlq;
 
 use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::docids::DocIds;
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::offsets::Offsets;
-use crate::idx::ft::postings::{Postings, TermFrequency};
+use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::{BM25Scorer, Score};
 use crate::idx::ft::termdocs::TermDocs;
 use crate::idx::ft::terms::{TermId, Terms};
@@ -162,12 +163,20 @@ impl FtIndex {
 				let mut p = self.postings(tx).await?;
 				let mut t = self.terms(tx).await?;
 				let td = self.term_docs();
-				for term_id in term_list {
+				for term_id in &term_list {
 					p.remove_posting(tx, term_id, doc_id).await?;
 					// if the term is not present in any document in the index, we can remove it
 					let doc_count = td.remove_doc(tx, term_id, doc_id).await?;
 					if doc_count == 0 {
 						t.remove_term_id(tx, term_id).await?;
+					}
+				}
+				// Remove the offsets if any
+				if self.highlighting {
+					let o = self.offsets();
+					for term_id in term_list {
+						// TODO?: Removal can be done with a prefix on doc_id
+						o.remove_offsets(tx, doc_id, term_id).await?;
 					}
 				}
 				t.finish(tx).await?;
@@ -192,20 +201,16 @@ impl FtIndex {
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
 		let mut t = self.terms(tx).await?;
-		let (doc_length, terms_and_frequencies) = if self.highlighting {
-			//TODO let offsets = self.offsets();
-			let (dl, tos) = self
+		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
+			let (dl, tf, ofs) = self
 				.analyzer
 				.extract_terms_with_frequencies_with_offsets(&mut t, tx, field_content)
 				.await?;
-			let mut tfs = Vec::with_capacity(tos.len());
-			for (tid, o) in tos {
-				tfs.push((tid, o.len() as TermFrequency));
-				//TODO offsets.set_offsets(tx, doc_id, tid, 0);
-			}
-			(dl, tfs)
+			(dl, tf, Some(ofs))
 		} else {
-			self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?
+			let (dl, tf) =
+				self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
+			(dl, tf, None)
 		};
 
 		// Set the doc length
@@ -239,13 +244,31 @@ impl FtIndex {
 		}
 
 		// Remove any remaining postings
-		if let Some(old_term_ids) = old_term_ids {
+		if let Some(old_term_ids) = &old_term_ids {
 			for old_term_id in old_term_ids {
 				p.remove_posting(tx, old_term_id, doc_id).await?;
 				let doc_count = term_docs.remove_doc(tx, old_term_id, doc_id).await?;
 				// if the term does not have anymore postings, we can remove the term
 				if doc_count == 0 {
 					t.remove_term_id(tx, old_term_id).await?;
+				}
+			}
+		}
+
+		if self.highlighting {
+			let o = self.offsets();
+			// Set the offset if any
+			if let Some(ofs) = offsets {
+				if !ofs.is_empty() {
+					for (tid, or) in ofs {
+						o.set_offsets(tx, doc_id, tid, or).await?;
+					}
+				}
+			}
+			// In case of an update, w remove the offset for the terms that does not exist anymore
+			if let Some(old_term_ids) = old_term_ids {
+				for old_term_id in old_term_ids {
+					o.remove_offsets(tx, doc_id, old_term_id).await?;
 				}
 			}
 		}
@@ -578,8 +601,7 @@ mod tests {
 		}
 	}
 
-	#[test(tokio::test)]
-	async fn test_ft_index_bm_25() {
+	async fn test_ft_index_bm_25(hl: bool) {
 		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
 		// the inner structures (BTrees) are built with the same terms and frequencies,
 		// but the insertion order is different, ending up in different BTree structures.
@@ -602,7 +624,7 @@ mod tests {
 					IndexKeyBase::default(),
 					default_btree_order,
 					&Scoring::default(),
-					false,
+					hl,
 				)
 				.await
 				.unwrap();
@@ -645,7 +667,7 @@ mod tests {
 					IndexKeyBase::default(),
 					default_btree_order,
 					&Scoring::default(),
-					false,
+					hl,
 				)
 				.await
 				.unwrap();
@@ -699,5 +721,15 @@ mod tests {
 				assert!(i.is_none());
 			}
 		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_ft_index_bm_25_without_highlighting() {
+		test_ft_index_bm_25(false).await;
+	}
+
+	#[test(tokio::test)]
+	async fn test_ft_index_bm_25_with_highlighting() {
+		test_ft_index_bm_25(true).await;
 	}
 }
