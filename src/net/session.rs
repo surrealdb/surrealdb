@@ -2,9 +2,9 @@ use crate::err::Error;
 use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
 use crate::iam::TOKEN;
+use crate::net::client_ip;
 use std::sync::Arc;
 use surrealdb::dbs::{Auth, Session};
-use crate::net::client_ip;
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
