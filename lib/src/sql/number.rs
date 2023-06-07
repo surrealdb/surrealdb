@@ -408,7 +408,36 @@ impl Eq for Number {}
 
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+		match (self, other) {
+			(Number::Int(v), Number::Int(w)) => v.cmp(w),
+			(Number::Float(v), Number::Float(w)) => v.total_cmp(w),
+			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
+			// ------------------------------
+			(Number::Int(v), Number::Float(w)) => (*v as f64).total_cmp(w),
+			(Number::Float(v), Number::Int(w)) => v.total_cmp(&(*w as f64)),
+			// ------------------------------
+			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).cmp(w),
+			(Number::Decimal(v), Number::Int(w)) => v.cmp(&BigDecimal::from(*w)),
+			// ------------------------------
+			(Number::Float(v), Number::Decimal(w)) => {
+				if v.is_finite() {
+					BigDecimal::from_f64(*v).unwrap_or_default().cmp(w)
+				} else if v.is_sign_negative() {
+					Ordering::Less
+				} else {
+					Ordering::Greater
+				}
+			}
+			(Number::Decimal(v), Number::Float(w)) => {
+				if w.is_finite() {
+					v.cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
+				} else if w.is_sign_negative() {
+					Ordering::Greater
+				} else {
+					Ordering::Less
+				}
+			}
+		}
 	}
 }
 
@@ -428,7 +457,7 @@ impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.eq(w),
-			(Number::Float(v), Number::Float(w)) => v.eq(w),
+			(Number::Float(v), Number::Float(w)) => v.to_bits().eq(&w.to_bits()),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => (*v as f64).eq(w),
@@ -438,10 +467,10 @@ impl PartialEq for Number {
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&BigDecimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
+				v.is_finite() && BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
+				w.is_finite() && v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
 			}
 		}
 	}
@@ -449,24 +478,7 @@ impl PartialEq for Number {
 
 impl PartialOrd for Number {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.partial_cmp(w),
-			(Number::Float(v), Number::Float(w)) => v.partial_cmp(w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.partial_cmp(w),
-			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => (*v as f64).partial_cmp(w),
-			(Number::Float(v), Number::Int(w)) => v.partial_cmp(&(*w as f64)),
-			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).partial_cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&BigDecimal::from(*w)),
-			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => {
-				BigDecimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
-			}
-			(Number::Decimal(v), Number::Float(w)) => {
-				v.partial_cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
-			}
-		}
+		Some(self.cmp(other))
 	}
 }
 
