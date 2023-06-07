@@ -2889,8 +2889,8 @@ mod tests {
 		assert_eq!(String::from("0"), Value::from(0).as_string());
 		assert_eq!(String::from("1"), Value::from(1).as_string());
 		assert_eq!(String::from("-1"), Value::from(-1).as_string());
-		assert_eq!(String::from("1.1"), Value::from(1.1).as_string());
-		assert_eq!(String::from("-1.1"), Value::from(-1.1).as_string());
+		assert_eq!(String::from("1.1f"), Value::from(1.1).as_string());
+		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_string());
 		assert_eq!(String::from("3"), Value::from("3").as_string());
 		assert_eq!(String::from("true"), Value::from("true").as_string());
 		assert_eq!(String::from("false"), Value::from("false").as_string());

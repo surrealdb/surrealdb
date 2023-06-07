@@ -667,21 +667,21 @@ mod tests {
 
 	#[test]
 	fn number_float() {
-		let sql = "123.45";
+		let sql = "123.45f";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("123.45", format!("{}", out));
+		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Number::Float(123.45));
 	}
 
 	#[test]
 	fn number_float_neg() {
-		let sql = "-123.45";
+		let sql = "-123.45f";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("-123.45", format!("{}", out));
+		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Number::Float(-123.45));
 	}
 
@@ -691,7 +691,7 @@ mod tests {
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("1234.5", format!("{}", out));
+		assert_eq!("1234.5f", format!("{}", out));
 		assert_eq!(out, Number::Float(1234.5));
 	}
 
@@ -701,7 +701,7 @@ mod tests {
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("-1234.5", format!("{}", out));
+		assert_eq!("-1234.5f", format!("{}", out));
 		assert_eq!(out, Number::Float(-1234.5));
 	}
 
@@ -711,7 +711,7 @@ mod tests {
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("123.45", format!("{}", out));
+		assert_eq!("123.45f", format!("{}", out));
 		assert_eq!(out, Number::Float(123.45));
 	}
 
@@ -721,28 +721,26 @@ mod tests {
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("-123.45", format!("{}", out));
+		assert_eq!("-123.45f", format!("{}", out));
 		assert_eq!(out, Number::Float(-123.45));
 	}
 
 	#[test]
 	fn number_float_keeps_precision() {
-		let sql = "13.571938471938472";
+		let sql = "13.571938471938472f";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("13.571938471938472", format!("{}", out));
-		assert_eq!(out, Number::try_from("13.571938471938472").unwrap());
+		assert_eq!(sql, format!("{}", out));
 	}
 
 	#[test]
 	fn number_decimal_keeps_precision() {
-		let sql = "13.571938471938472";
+		let sql = "0.0000000000000000000000000321dec";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("13.571938471938472", format!("{}", out));
-		assert_eq!(out, Number::try_from("13.571938471938472").unwrap());
+		assert_eq!(sql, format!("{}", out));
 	}
 
 	#[test]

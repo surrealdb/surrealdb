@@ -72,7 +72,7 @@ mod tests {
 		let res = scoring(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("BM25(1,0.6,100)", format!("{}", out))
+		assert_eq!("BM25(1f,0.6f,100)", format!("{}", out))
 	}
 
 	#[test]

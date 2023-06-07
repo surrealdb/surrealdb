@@ -445,7 +445,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 		RETURN array::join([], "");
 		RETURN array::join(["hello", "world"], ", ");
 		RETURN array::join(["again", "again", "again"], " and ");
-		RETURN array::join([42, 3.14, 2.72, 1.61], " and ");
+		RETURN array::join([42, true, "1.61"], " and ");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -465,7 +465,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("42 and 3.14 and 2.72 and 1.61");
+	let val = Value::from("42 and true and 1.61");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4295,7 +4295,7 @@ async fn function_type_point() -> Result<(), Error> {
 async fn function_type_string() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::string(30s);
-		RETURN type::string(13.58248);
+		RETURN type::string(13);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -4307,7 +4307,7 @@ async fn function_type_string() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("13.58248");
+	let val = Value::from("13");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

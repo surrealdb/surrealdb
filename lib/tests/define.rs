@@ -988,7 +988,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS' },
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2f,0.75f,100) HIGHLIGHTS' },
 		}",
 	);
 	assert_eq!(tmp, val);
