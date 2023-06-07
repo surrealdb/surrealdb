@@ -4,7 +4,9 @@ use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::character::complete::i64;
+use nom::combinator::{map, opt};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
 use rust_decimal::prelude::*;
@@ -159,8 +161,8 @@ impl Display for Number {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
-			Number::Float(v) => Display::fmt(v, f),
-			Number::Decimal(v) => Display::fmt(v, f),
+			Number::Float(v) => write!(f, "{v}f"),
+			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
 	}
 }
@@ -607,25 +609,34 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((int, decimal))(i)
+	let (i, v) = recognize_float(i)?;
+	let (i, suffix) = suffix(i)?;
+	let (i, _) = ending(i)?;
+	let number = match suffix {
+		Suffix::None => Number::try_from(v).map_err(|_| Failure(Parser(i)))?,
+		Suffix::Float => Number::from(f64::from_str(v).map_err(|_| Failure(Parser(i)))?),
+		Suffix::Decimal => Number::from(Decimal::from_str(v).map_err(|_| Failure(Parser(i)))?),
+	};
+	Ok((i, number))
+}
+
+#[derive(Debug)]
+enum Suffix {
+	None,
+	Float,
+	Decimal,
+}
+
+fn suffix(i: &str) -> IResult<&str, Suffix> {
+	let (i, opt_suffix) =
+		opt(alt((map(tag("f"), |_| Suffix::Float), map(tag("dec"), |_| Suffix::Decimal))))(i)?;
+	Ok((i, opt_suffix.unwrap_or(Suffix::None)))
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
 	let (i, v) = i64(i)?;
 	let (i, _) = ending(i)?;
 	Ok((i, v))
-}
-
-fn int(i: &str) -> IResult<&str, Number> {
-	let (i, v) = i64(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Number::from(v)))
-}
-
-fn decimal(i: &str) -> IResult<&str, Number> {
-	let (i, v) = recognize_float(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Number::try_from(v).map_err(|_| Failure(Parser(i)))?))
 }
 
 #[cfg(test)]
