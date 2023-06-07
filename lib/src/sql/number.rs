@@ -408,34 +408,46 @@ impl Eq for Number {}
 
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
+		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
+			if a == 0.0 && b == 0.0 {
+				// -0.0 = 0.0
+				Ordering::Equal
+			} else {
+				// Handles NaN's
+				a.total_cmp(&b)
+			}
+		}
+
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.cmp(w),
-			(Number::Float(v), Number::Float(w)) => v.total_cmp(w),
+			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => (*v as f64).total_cmp(w),
-			(Number::Float(v), Number::Int(w)) => v.total_cmp(&(*w as f64)),
+			(Number::Int(v), Number::Float(w)) => total_cmp_f64(*v as f64, *w),
+			(Number::Float(v), Number::Int(w)) => total_cmp_f64(*v, *w as f64),
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).cmp(w),
 			(Number::Decimal(v), Number::Int(w)) => v.cmp(&BigDecimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				if v.is_finite() {
-					BigDecimal::from_f64(*v).unwrap_or_default().cmp(w)
-				} else if v.is_sign_negative() {
-					Ordering::Less
-				} else {
-					Ordering::Greater
-				}
+				BigDecimal::from_f64(*v).map(|v| v.cmp(w)).unwrap_or_else(|| {
+					// v wasn't finite
+					if v.is_sign_negative() {
+						Ordering::Less
+					} else {
+						Ordering::Greater
+					}
+				})
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				if w.is_finite() {
-					v.cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
-				} else if w.is_sign_negative() {
-					Ordering::Greater
-				} else {
-					Ordering::Less
-				}
+				BigDecimal::from_f64(*w).map(|w| v.cmp(&w)).unwrap_or_else(|| {
+					// w wasn't finite
+					if w.is_sign_negative() {
+						Ordering::Greater
+					} else {
+						Ordering::Less
+					}
+				})
 			}
 		}
 	}
@@ -455,22 +467,26 @@ impl hash::Hash for Number {
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
+		fn total_eq_f64(a: f64, b: f64) -> bool {
+			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0)
+		}
+
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.eq(w),
-			(Number::Float(v), Number::Float(w)) => v.to_bits().eq(&w.to_bits()),
+			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => (*v as f64).eq(w),
-			(Number::Float(v), Number::Int(w)) => v.eq(&(*w as f64)),
+			(Number::Int(v), Number::Float(w)) => total_eq_f64(*v as f64, *w),
+			(Number::Float(v), Number::Int(w)) => total_eq_f64(*v, *w as f64),
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).eq(w),
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&BigDecimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				v.is_finite() && BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
+				BigDecimal::from_f64(*v).map(|d| d.eq(w)).unwrap_or(false)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				w.is_finite() && v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
+				BigDecimal::from_f64(*w).map(|d| v.eq(&d)).unwrap_or(false)
 			}
 		}
 	}
@@ -825,5 +841,66 @@ mod tests {
 			res,
 			Number::try_from("184.19751388608358465578173996877942643463869043732548087725588482334195240945031617770904299536").unwrap()
 		);
+	}
+
+	#[test]
+	fn ord() {
+		fn assert_cmp(a: &Number, b: &Number, ord: Ordering) {
+			assert_eq!(a.cmp(b), ord, "{a} {ord:?} {b}");
+			assert_eq!(a == b, ord.is_eq(), "{a} {ord:?} {b}");
+		}
+
+		let nz = -0.0f64;
+		let z = 0.0f64;
+		assert_ne!(nz.to_bits(), z.to_bits());
+		let nzp = permutations(nz);
+		let zp = permutations(z);
+		for nzp in nzp.iter() {
+			for zp in zp.iter() {
+				assert_cmp(nzp, zp, Ordering::Equal);
+			}
+		}
+
+		let negative_nan = f64::from_bits(18444492273895866368);
+
+		let ordering = &[
+			negative_nan,
+			f64::NEG_INFINITY,
+			-10.0,
+			-1.0,
+			-f64::MIN_POSITIVE,
+			0.0,
+			f64::MIN_POSITIVE,
+			1.0,
+			10.0,
+			f64::INFINITY,
+			f64::NAN,
+		];
+
+		fn permutations(n: f64) -> Vec<Number> {
+			let mut ret = Vec::new();
+			ret.push(Number::Float(n));
+			if n.is_finite() {
+				ret.push(Number::Decimal(n.try_into().unwrap()));
+				if n == 0.0 || n.abs() > f64::EPSILON {
+					ret.push(Number::Int(n as i64));
+				}
+			}
+			ret
+		}
+
+		for (ai, a) in ordering.iter().enumerate() {
+			let ap = permutations(*a);
+			for (bi, b) in ordering.iter().enumerate() {
+				let bp = permutations(*b);
+				let correct = ai.cmp(&bi);
+
+				for a in &ap {
+					for b in &bp {
+						assert_cmp(a, b, correct);
+					}
+				}
+			}
+		}
 	}
 }
