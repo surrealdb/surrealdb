@@ -47,13 +47,13 @@
           flake = self;
         };
 
-        mkRustToolchain = target:
+        mkRustToolchain = {target, extraComponents ? []}:
           with fenix.packages.${system};
-          combine [
+          combine ([
             stable.rustc
             stable.cargo
             targets.${target}.stable.rust-std
-          ];
+          ] ++ extraComponents);
 
         buildPlatform = pkgs.stdenv.buildPlatform.config;
 
@@ -87,7 +87,7 @@
               import ./pkg/nix/spec/${target}.nix { inherit pkgs target util; };
           in import ./pkg/nix/drv/binary.nix {
             inherit pkgs util spec crane;
-            rustToolchain = mkRustToolchain target;
+            rustToolchain = mkRustToolchain { inherit target; };
           }) util.platforms);
 
         devShells = {
@@ -108,7 +108,8 @@
             spec = (import ./pkg/nix/spec/${target}.nix) {
               inherit pkgs target util;
             };
-            rustToolchain = mkRustToolchain target;
+            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src rust-analyzer targets.${target}.stable.rustfmt ];
+            rustToolchain = mkRustToolchain { inherit target extraComponents; };
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {
             hardeningDisable = [ "fortify" ];
