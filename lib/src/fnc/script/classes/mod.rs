@@ -1,4 +1,4 @@
-use js::{Class, Ctx, Result};
+use js::{Ctx, Result};
 
 pub mod blob;
 pub mod duration;
@@ -8,13 +8,14 @@ pub mod request;
 pub mod response;
 pub mod uuid;
 
-pub fn register(ctx: Ctx<'_>) -> Result<()> {
-	Class::<blob::blob::Blob>::register(ctx)?;
-	Class::<duration::duration::Duration>::register(ctx)?;
-	Class::<headers::headers::Headers>::register(ctx)?;
-	Class::<record::record::Record>::register(ctx)?;
-	Class::<request::request::Request>::register(ctx)?;
-	Class::<response::response::Response>::register(ctx)?;
-	Class::<uuid::uuid::Uuid>::register(ctx)?;
+pub fn init(ctx: Ctx<'_>) -> Result<()> {
+	let globals = ctx.globals();
+	globals.init_def::<blob::Blob>()?;
+	globals.init_def::<duration::Duration>()?;
+	globals.init_def::<headers::Headers>()?;
+	globals.init_def::<record::Record>()?;
+	globals.init_def::<request::Request>()?;
+	globals.init_def::<response::Response>()?;
+	globals.init_def::<uuid::Uuid>()?;
 	Ok(())
 }
