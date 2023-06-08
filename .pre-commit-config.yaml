@@ -16,6 +16,3 @@ repos:
       args: ["--", "-W", "warnings"]
       types: [rust]
       pass_filenames: false
-
-
- 
