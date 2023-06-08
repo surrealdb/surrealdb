@@ -55,7 +55,8 @@ pub mod headers {
 		// Deletes a header from the header set
 		pub fn delete(&self, ctx: js::Ctx<'_>, key: String, args: Rest<Value>) -> js::Result<()> {
 			// Process and check the header name is valid
-			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
+			let key = HeaderName::from_str(&key)
+				.map_err(|e| js::Exception::throw_type(ctx, &format!("{e}")))?;
 			// Remove the header entry from the map
 			self.inner.borrow_mut().remove(&key);
 			// Everything ok
@@ -91,7 +92,8 @@ pub mod headers {
 			args: Rest<Value>,
 		) -> js::Result<Option<String>> {
 			// Process and check the header name is valid
-			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
+			let key = HeaderName::from_str(&key)
+				.map_err(|e| js::Exception::throw_type(ctx, &format!("{e}")))?;
 			// Convert the header values to strings
 			let lock = self.inner.borrow();
 			let all = lock.get_all(&key);
@@ -102,7 +104,7 @@ pub mod headers {
 			if all.is_empty() {
 				return Ok(None);
 			}
-			return Ok(Some(all));
+			Ok(Some(all))
 		}
 
 		// Returns all values for the `Set-Cookie` header.
@@ -121,7 +123,8 @@ pub mod headers {
 		// Checks to see if the header set contains a header
 		pub fn has(&self, ctx: js::Ctx<'_>, key: String, args: Rest<Value>) -> js::Result<bool> {
 			// Process and check the header name is valid
-			let key = HeaderName::from_str(&key).map_err(|e| throw!(ctx, e))?;
+			let key = HeaderName::from_str(&key)
+				.map_err(|e| js::Exception::throw_type(ctx, &format!("{e}")))?;
 			// Check if the header entry exists
 			Ok(self.inner.borrow().contains_key(&key))
 		}
@@ -177,10 +180,14 @@ use js::{prelude::Coerced, Ctx};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 impl HeadersClass {
-	pub fn new_empty() -> Self {
+	pub fn from_map(map: HeaderMap) -> Self {
 		Self {
-			inner: RefCell::new(HeaderMap::new()),
+			inner: RefCell::new(map),
 		}
+	}
+
+	pub fn new_empty() -> Self {
+		Self::from_map(HeaderMap::new())
 	}
 
 	pub fn new_inner<'js>(ctx: Ctx<'js>, val: js::Value<'js>) -> js::Result<Self> {
@@ -195,7 +202,7 @@ impl HeadersClass {
 					Ok(x) => x,
 					Err(e) => {
 						if e.is_from_js() {
-							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+							return Err(js::Exception::throw_type(ctx, INVALID_ERROR));
 						}
 						return Err(e);
 					}
@@ -204,7 +211,7 @@ impl HeadersClass {
 					Ok(x) => x,
 					Err(e) => {
 						if e.is_from_js() {
-							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+							return Err(js::Exception::throw_type(ctx, INVALID_ERROR));
 						}
 						return Err(e);
 					}
@@ -213,7 +220,7 @@ impl HeadersClass {
 					Ok(x) => x,
 					Err(e) => {
 						if e.is_from_js() {
-							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+							return Err(js::Exception::throw_type(ctx, INVALID_ERROR));
 						}
 						return Err(e);
 					}
@@ -227,7 +234,7 @@ impl HeadersClass {
 					Ok(x) => x,
 					Err(e) => {
 						if e.is_from_js() {
-							return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+							return Err(js::Exception::throw_type(ctx, INVALID_ERROR));
 						}
 						return Err(e);
 					}
@@ -235,7 +242,7 @@ impl HeadersClass {
 				res.append_inner(ctx, &key, &value.0)?;
 			}
 		} else {
-			return Err(js::Exception::from_message(ctx, INVALID_ERROR)?.throw());
+			return Err(js::Exception::throw_type(ctx, INVALID_ERROR));
 		}
 
 		Ok(res)
@@ -252,21 +259,19 @@ impl HeadersClass {
 		let key = match HeaderName::from_bytes(key.as_bytes()) {
 			Ok(x) => x,
 			Err(e) => {
-				return Err(js::Exception::from_message(
+				return Err(js::Exception::throw_type(
 					ctx,
-					&format!("invalid header name {key}: {e}"),
-				)?
-				.throw())
+					&format!("invalid header name `{key}`: {e}"),
+				))
 			}
 		};
 		let val = match HeaderValue::from_bytes(val.as_bytes()) {
 			Ok(x) => x,
 			Err(e) => {
-				return Err(js::Exception::from_message(
+				return Err(js::Exception::throw_type(
 					ctx,
-					&format!("invalid header value {val}: {e}"),
-				)?
-				.throw())
+					&format!("invalid header value `{val}`: {e}"),
+				))
 			}
 		};
 

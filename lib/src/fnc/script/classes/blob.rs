@@ -11,7 +11,8 @@ pub mod blob {
 	#[derive(Clone)]
 	#[quickjs(cloneable)]
 	pub struct Blob {
-		pub(crate) mime: String,
+		pub(crate) mime: Option<String>,
+		// TODO: make bytes?
 		pub(crate) data: Vec<u8>,
 	}
 
@@ -22,10 +23,7 @@ pub mod blob {
 
 		#[quickjs(constructor)]
 		pub fn new(args: Rest<Value>) -> Self {
-			Self {
-				data: vec![],
-				mime: String::new(),
-			}
+			todo!()
 		}
 
 		// ------------------------------
@@ -38,8 +36,8 @@ pub mod blob {
 		}
 
 		#[quickjs(get)]
-		pub fn r#type(&self) -> &str {
-			&self.mime
+		pub fn r#type(&self) -> Option<&str> {
+			self.mime.as_deref()
 		}
 
 		// ------------------------------

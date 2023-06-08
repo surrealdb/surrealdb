@@ -22,6 +22,7 @@ pub mod request {
 	#[allow(dead_code)]
 	pub struct Request {
 		pub(crate) url: Url,
+		#[quickjs(has_refs)]
 		pub(crate) init: RequestInit,
 	}
 
@@ -41,20 +42,12 @@ pub mod request {
 				// url string
 				let url_str = url.to_string()?;
 				let url = Url::parse(&url_str).map_err(|e| {
-					// TODO: make type error.
-					js::Exception::from_message(ctx, &format!("failed to parse url: {e}"))
-						.ok()
-						.map(|x| x.throw())
-						.unwrap_or(js::Error::Exception)
+					js::Exception::throw_type(ctx, &format!("failed to parse url: {e}"))
 				})?;
 				if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true)
 				{
 					// url cannot contain non empty username and passwords
-					// TODO: make type error.
-					return Err(js::Exception::from_message(ctx, "Url contained credentials.")
-						.ok()
-						.map(|x| x.throw())
-						.unwrap_or(js::Error::Exception));
+					return Err(js::Exception::throw_type(ctx, "Url contained credentials."));
 				}
 				Ok(Self {
 					url,
@@ -66,11 +59,10 @@ pub mod request {
 				// existing request object, just return it
 				Ok(request.clone())
 			} else {
-				Err(js::Exception::from_message(
+				Err(js::Exception::throw_type(
 					ctx,
 					"request `init` paramater must either be a request object or a string",
-				)?
-				.throw())
+				))
 			}
 		}
 
@@ -117,6 +109,7 @@ pub mod request {
 	}
 }
 
+/*
 #[derive(Clone)]
 pub enum RequestDestination {
 	Empty,
@@ -140,6 +133,7 @@ pub enum RequestDestination {
 	Worker,
 	Xslt,
 }
+*/
 
 #[derive(Clone)]
 pub enum RequestMode {
@@ -208,7 +202,7 @@ pub struct RequestInit {
 	pub duplex: RequestDuplex,
 }
 
-impl<'js> js::class::HasRefs for RequestInit {
+impl js::class::HasRefs for RequestInit {
 	fn mark_refs(&self, marker: &RefsMarker) {
 		self.headers.mark_refs(marker);
 	}
@@ -218,7 +212,7 @@ fn ascii_equal_ignore_case(a: &[u8], b: &[u8]) -> bool {
 	if a.len() != b.len() {
 		return false;
 	}
-	a.into_iter().zip(b).all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+	a.iter().zip(b).all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
 impl Default for RequestInit {
@@ -234,18 +228,17 @@ impl<'js> js::FromJs<'js> for RequestInit {
 		let referrer = object.get::<_, Option<String>>("referrer")?.unwrap_or_default();
 		let method = object
 			.get::<_, Option<String>>("method")?
-			.map(|m| -> js::Result<Method> {
+			.map(|mut m| -> js::Result<Method> {
 				if ascii_equal_ignore_case(m.as_bytes(), b"CONNECT")
 					|| ascii_equal_ignore_case(m.as_bytes(), b"TRACE")
 					|| ascii_equal_ignore_case(m.as_bytes(), b"TRACK")
 				{
 					//methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
 
-					return Err(js::Exception::from_message(
+					return Err(js::Exception::throw_type(
 						ctx,
 						&format!("method {m} is forbidden"),
-					)?
-					.throw());
+					));
 				}
 
 				if ascii_equal_ignore_case(m.as_bytes(), b"DELETE")
@@ -256,12 +249,12 @@ impl<'js> js::FromJs<'js> for RequestInit {
 					|| ascii_equal_ignore_case(m.as_bytes(), b"PUT")
 				{
 					// these methods must be normalized to uppercase.
-					m.to_ascii_uppercase();
+					m.make_ascii_uppercase();
 				}
 
 				match Method::from_bytes(m.as_bytes()) {
 					Ok(x) => Ok(x),
-					Err(e) => Err(js::Exception::from_message(ctx, "invalid method: {e}")?.throw()),
+					Err(e) => Err(js::Exception::throw_type(ctx, &format!("invalid method: {e}"))),
 				}
 			})
 			.transpose()?

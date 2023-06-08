@@ -719,6 +719,7 @@ dependencies = [
  "clang-sys",
  "lazy_static",
  "lazycell",
+ "log",
  "peeking_take_while",
  "prettyplease 0.2.6",
  "proc-macro2",
@@ -727,6 +728,7 @@ dependencies = [
  "rustc-hash",
  "shlex 1.1.0",
  "syn 2.0.18",
+ "which",
 ]
 
 [[package]]
@@ -914,7 +916,6 @@ dependencies = [
  "android-tzdata",
  "iana-time-zone",
  "js-sys",
- "num-integer",
  "num-traits",
  "serde",
  "time 0.1.45",
@@ -3738,9 +3739,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cdb753a1a1fe3cdb2b58bbbf3e037e86875260dca323ca03a273ead03a2f11e"
+checksum = "5722f928636e5d44c29365e21031c5e61b18a788be4799bf93f41a63dbfbaed0"
 dependencies = [
  "rquickjs-core",
  "rquickjs-macro",
@@ -3748,9 +3749,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "604c3fa56fa95f1fedc5e4ce2f1e8754eac3944a7d741a407e1e27f0cb5bd727"
+checksum = "480578def7e6493065de77418f68c56fbdf5872b6868f99880f4df0eeffebba0"
 dependencies = [
  "async-lock",
  "relative-path",
@@ -3759,9 +3760,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-macro"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f1fc43fa9c9afc738b8cabf53772b897f1a371ab7dbe896d2f71095780cfc0"
+checksum = "3c8ca1c0df9b424488e24a502d8f5d37177270164d5b00e773fc195dab081527"
 dependencies = [
  "darling",
  "fnv",
@@ -3777,11 +3778,11 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-sys"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cebb235d91be0b8c58bd07bb0dfc6864d47b29c7a8bc68910bae7c9a9d3ce28b"
+checksum = "bc9ca806b783e669a6dc80aca38dff2c5aa8a94406baad83795ab71beed990d1"
 dependencies = [
- "bindgen 0.60.1",
+ "bindgen 0.65.1",
  "cc",
 ]
 

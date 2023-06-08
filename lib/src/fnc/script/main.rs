@@ -13,6 +13,7 @@ use js::prelude::Promise;
 use js::prelude::Rest;
 use js::prelude::This;
 use js::CatchResultExt;
+use js::Class;
 use js::Function;
 use js::Module;
 
@@ -49,8 +50,9 @@ pub async fn run(
 
 	// Attempt to execute the script
 	async_with!(ctx => |ctx|{
-
 		let res = async move {
+			// register all classes to the runtime.
+			classes::register(ctx)?;
 			// Get the context global object
 			let global = ctx.globals();
 			// Register the surrealdb module as a global object
