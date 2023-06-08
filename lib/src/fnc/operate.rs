@@ -160,11 +160,11 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 pub(crate) async fn matches(
 	txn: &Transaction,
 	exe: Option<&QueryExecutor>,
-	rid: Option<&Thing>,
+	thg: Option<&Thing>,
 	e: &Expression,
 ) -> Result<Value, Error> {
 	if let Some(exe) = exe {
-		exe.matches(txn, rid, e).await
+		exe.matches(txn, thg, e).await
 	} else {
 		Ok(Value::Bool(false))
 	}

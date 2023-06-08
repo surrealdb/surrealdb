@@ -50,7 +50,7 @@ impl LiveStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Process the live query table
-		match self.what.compute(ctx, opt, txn, None, doc, None).await? {
+		match self.what.compute(ctx, opt, txn, None, None, doc).await? {
 			Value::Table(tb) => {
 				// Insert the live query
 				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);

@@ -2488,9 +2488,9 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		exe: Option<&'async_recursion QueryExecutor>,
 		thg: Option<&'async_recursion Thing>,
 		doc: Option<&'async_recursion Value>,
-		exe: Option<&'async_recursion QueryExecutor>,
 	) -> Result<Value, Error> {
 		match self {
 			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
@@ -2503,9 +2503,9 @@ impl Value {
 			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Subquery(v) => v.compute(ctx, opt, txn, thg, doc, exe).await,
-			Value::Expression(v) => v.compute(ctx, opt, txn, thg, doc, exe).await,
+			Value::Function(v) => v.compute(ctx, opt, txn, exe, thg, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, txn, exe, thg, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, exe, thg, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

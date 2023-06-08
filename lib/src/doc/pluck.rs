@@ -4,11 +4,13 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
 use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Thing;
 
 impl<'a> Document<'a> {
 	pub async fn pluck(
@@ -16,6 +18,8 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		exe: Option<&QueryExecutor>,
+		thg: Option<&Thing>,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -27,32 +31,36 @@ impl<'a> Document<'a> {
 				Output::Null => Ok(Value::Null),
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 				Output::After => {
-					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
+					self.current.compute(ctx, opt, txn, None, thg, Some(&self.current)).await
 				}
 				Output::Before => {
-					self.initial.compute(ctx, opt, txn, None, Some(&self.initial), None).await
+					self.initial.compute(ctx, opt, txn, None, thg, Some(&self.initial)).await
 				}
-				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
+				Output::Fields(v) => {
+					v.compute(ctx, None, opt, txn, thg, Some(&self.current), false).await
+				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
 					0 => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
-					_ => s.expr.compute(ctx, opt, txn, Some(&self.current), false).await,
+					_ => s.expr.compute(ctx, None, opt, txn, thg, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
-					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
+					s.expr
+						.compute(ctx, exe, opt, txn, thg, Some(&self.current), s.group.is_some())
+						.await
 				}
 				Statement::Create(_) => {
-					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
+					self.current.compute(ctx, opt, txn, exe, thg, Some(&self.current)).await
 				}
 				Statement::Update(_) => {
-					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
+					self.current.compute(ctx, opt, txn, exe, thg, Some(&self.current)).await
 				}
 				Statement::Relate(_) => {
-					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
+					self.current.compute(ctx, opt, txn, exe, thg, Some(&self.current)).await
 				}
 				Statement::Insert(_) => {
-					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
+					self.current.compute(ctx, opt, txn, exe, thg, Some(&self.current)).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -79,7 +87,7 @@ impl<'a> Document<'a> {
 								ctx.add_value("value", &val);
 								// Process the PERMISSION clause
 								if !e
-									.compute(&ctx, opt, txn, None, Some(&self.current), None)
+									.compute(&ctx, opt, txn, None, None, Some(&self.current))
 									.await?
 									.is_truthy()
 								{

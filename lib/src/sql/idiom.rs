@@ -138,11 +138,11 @@ impl Idiom {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Value(v)) => {
-				v.compute(ctx, opt, txn, None, doc, None)
+				v.compute(ctx, opt, txn, None, None, doc)
 					.await?
 					.get(ctx, opt, txn, doc, self.as_ref().next())
 					.await?
-					.compute(ctx, opt, txn, None, doc, None)
+					.compute(ctx, opt, txn, None, None, doc)
 					.await
 			}
 			// Otherwise use the current document
@@ -151,7 +151,7 @@ impl Idiom {
 				Some(v) => {
 					v.get(ctx, opt, txn, doc, self)
 						.await?
-						.compute(ctx, opt, txn, None, doc, None)
+						.compute(ctx, opt, txn, None, None, doc)
 						.await
 				}
 				// There isn't any document

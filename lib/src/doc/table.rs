@@ -92,7 +92,7 @@ impl<'a> Document<'a> {
 						// There is a WHERE clause specified
 						Some(cond) => {
 							match cond
-								.compute(ctx, opt, txn, None, Some(&self.current), None)
+								.compute(ctx, opt, txn, None, None, Some(&self.current))
 								.await?
 							{
 								v if v.is_truthy() => {
@@ -185,7 +185,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, None, doc, None).await? {
+							match cond.compute(ctx, opt, txn, None, None, doc).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -198,7 +198,9 @@ impl<'a> Document<'a> {
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(Data::ReplaceExpression(
-												tb.expr.compute(ctx, opt, txn, doc, false).await?,
+												tb.expr
+													.compute(ctx, None, opt, txn, None, doc, false)
+													.await?,
 											)),
 											..UpdateStatement::default()
 										}),
@@ -230,7 +232,9 @@ impl<'a> Document<'a> {
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
 									data: Some(Data::ReplaceExpression(
-										tb.expr.compute(ctx, opt, txn, doc, false).await?,
+										tb.expr
+											.compute(ctx, None, opt, txn, None, doc, false)
+											.await?,
 									)),
 									..UpdateStatement::default()
 								}),
@@ -269,29 +273,29 @@ impl<'a> Document<'a> {
 				match v {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
+							let val = f.compute(ctx, opt, txn, None, None, doc).await?;
 							self.chg(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.chg(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.min(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.max(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.mean(&mut ops, &act, v.to_idiom(), val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, None, doc, None).await?;
+						let val = v.compute(ctx, opt, txn, None, None, doc).await?;
 						self.set(&mut ops, v.to_idiom(), val);
 					}
 				}
@@ -301,29 +305,29 @@ impl<'a> Document<'a> {
 				match v {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
+							let val = f.compute(ctx, opt, txn, None, None, doc).await?;
 							self.chg(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.chg(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.min(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.max(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, doc, None).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
 							self.mean(&mut ops, &act, i.to_owned(), val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, None, doc, None).await?;
+						let val = v.compute(ctx, opt, txn, None, None, doc).await?;
 						self.set(&mut ops, i.to_owned(), val);
 					}
 				}

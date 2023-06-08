@@ -61,7 +61,7 @@ impl UpdateStatement {
 		let opt = &opt.futures(false);
 		// Loop over the update targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, None, doc, None).await?;
+			let v = w.compute(ctx, opt, txn, None, None, doc).await?;
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),

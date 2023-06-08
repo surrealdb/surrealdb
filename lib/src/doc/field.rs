@@ -59,7 +59,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the VALUE clause
-					val = expr.compute(&ctx, opt, txn, None, Some(&self.current), None).await?;
+					val = expr.compute(&ctx, opt, txn, None, None, Some(&self.current)).await?;
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
@@ -88,7 +88,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("before", &old);
 					// Process the ASSERT clause
 					if !expr
-						.compute(&ctx, opt, txn, None, Some(&self.current), None)
+						.compute(&ctx, opt, txn, None, None, Some(&self.current))
 						.await?
 						.is_truthy()
 					{
@@ -123,7 +123,7 @@ impl<'a> Document<'a> {
 							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
 							if !e
-								.compute(&ctx, opt, txn, None, Some(&self.current), None)
+								.compute(&ctx, opt, txn, None, None, Some(&self.current))
 								.await?
 								.is_truthy()
 							{

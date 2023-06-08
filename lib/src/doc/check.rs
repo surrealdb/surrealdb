@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
 			if !cond
-				.compute(ctx, opt, txn, self.id.as_ref(), Some(&self.current), exe)
+				.compute(ctx, opt, txn, exe, self.id.as_ref(), Some(&self.current))
 				.await?
 				.is_truthy()
 			{

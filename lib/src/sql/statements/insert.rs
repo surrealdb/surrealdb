@@ -81,7 +81,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(ctx, opt, txn, None, doc, None).await?;
+				let v = v.compute(ctx, opt, txn, None, None, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {

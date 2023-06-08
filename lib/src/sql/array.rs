@@ -121,7 +121,7 @@ impl Array {
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt, txn, None, doc, None).await {
+			match v.compute(ctx, opt, txn, None, None, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};

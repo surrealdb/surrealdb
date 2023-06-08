@@ -68,11 +68,11 @@ impl Expression {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		exe: Option<&QueryExecutor>,
 		thg: Option<&Thing>,
 		doc: Option<&Value>,
-		exe: Option<&QueryExecutor>,
 	) -> Result<Value, Error> {
-		let l = self.l.compute(ctx, opt, txn, thg, doc, exe).await?;
+		let l = self.l.compute(ctx, opt, txn, exe, thg, doc).await?;
 		match self.o {
 			Operator::Or => {
 				if let true = l.is_truthy() {
@@ -96,7 +96,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = self.r.compute(ctx, opt, txn, thg, doc, exe).await?;
+		let r = self.r.compute(ctx, opt, txn, exe, thg, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),

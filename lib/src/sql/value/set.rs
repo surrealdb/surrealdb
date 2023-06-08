@@ -77,7 +77,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, None, None, Some(v)).await?.is_truthy() {
 								v.set(ctx, opt, txn, path, val.clone()).await?;
 							}
 						}

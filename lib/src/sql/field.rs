@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::ending::field as ending;
@@ -10,6 +11,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
+use crate::sql::Thing;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
@@ -74,8 +76,10 @@ impl Fields {
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
+		exe: Option<&QueryExecutor>,
 		opt: &Options,
 		txn: &Transaction,
+		thg: Option<&Thing>,
 		doc: Option<&Value>,
 		group: bool,
 	) -> Result<Value, Error> {
@@ -85,7 +89,7 @@ impl Fields {
 		let doc = doc.unwrap_or(&Value::None);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.compute(ctx, opt, txn, None, Some(doc), None).await?,
+			true => doc.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {
@@ -96,9 +100,9 @@ impl Fields {
 					Value::Function(f) if group && f.is_aggregate() => {
 						let x = match f.args().len() {
 							// If no function arguments, then compute the result
-							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
+							0 => f.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 							// If arguments, then pass the first value through
-							_ => f.args()[0].compute(ctx, opt, txn, None, Some(doc), None).await?,
+							_ => f.args()[0].compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 						};
 						// Check if this is a single VALUE field expression
 						match self.single().is_some() {
@@ -121,7 +125,7 @@ impl Fields {
 							let x = x
 								.get(ctx, opt, txn, Some(doc), v)
 								.await?
-								.compute(ctx, opt, txn, None, Some(doc), None)
+								.compute(ctx, opt, txn, exe, None, Some(doc))
 								.await?
 								.flatten();
 							// Add the result to the temporary store
@@ -139,7 +143,7 @@ impl Fields {
 					}
 					// This expression is a normal field expression
 					_ => {
-						let x = v.compute(ctx, opt, txn, None, Some(doc), None).await?;
+						let x = v.compute(ctx, opt, txn, exe, None, Some(doc)).await?;
 						// Check if this is a single VALUE field expression
 						match self.single().is_some() {
 							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
@@ -152,9 +156,9 @@ impl Fields {
 					Value::Function(f) if group && f.is_aggregate() => {
 						let x = match f.args().len() {
 							// If no function arguments, then compute the result
-							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
+							0 => f.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 							// If arguments, then pass the first value through
-							_ => f.args()[0].compute(ctx, opt, txn, None, Some(doc), None).await?,
+							_ => f.args()[0].compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 						};
 						// Check if this is a single VALUE field expression
 						match self.single().is_some() {
@@ -177,7 +181,7 @@ impl Fields {
 							let x = x
 								.get(ctx, opt, txn, Some(doc), v)
 								.await?
-								.compute(ctx, opt, txn, None, Some(doc), None)
+								.compute(ctx, opt, txn, exe, None, Some(doc))
 								.await?
 								.flatten();
 							// Add the result to the temporary store
@@ -199,7 +203,7 @@ impl Fields {
 					}
 					// This expression is a normal field expression
 					_ => {
-						let x = v.compute(ctx, opt, txn, None, Some(doc), None).await?;
+						let x = v.compute(ctx, opt, txn, exe, thg, Some(doc)).await?;
 						// Check if this is a single VALUE field expression
 						match self.single().is_some() {
 							false => out.set(ctx, opt, txn, i, x).await?,

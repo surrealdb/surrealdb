@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub(crate) struct QueryExecutor {
+pub struct QueryExecutor {
 	inner: Arc<Inner>,
 }
 
@@ -61,7 +61,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,
-		rid: Option<&Thing>,
+		thg: Option<&Thing>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		// If we find the expression in `pre_match`,
@@ -74,9 +74,9 @@ impl QueryExecutor {
 		}
 
 		// Otherwise, we look for the first possible index options, and evaluate the expression
-		if let Some(rid) = rid {
+		if let Some(thg) = thg {
 			// Does the record id match this executor's table?
-			if rid.tb.eq(&self.inner.table) {
+			if thg.tb.eq(&self.inner.table) {
 				if let Some(ios) = self.inner.index_map.get(exp) {
 					for io in ios {
 						if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
@@ -84,7 +84,7 @@ impl QueryExecutor {
 							// TODO The query string could be extracted when IndexOptions are created
 							let query_string = io.v.clone().convert_to_string()?;
 							return Ok(Value::Bool(
-								fti.match_id_value(&mut run, rid, &query_string).await?,
+								fti.match_id_value(&mut run, thg, &query_string).await?,
 							));
 						}
 					}
@@ -96,5 +96,17 @@ impl QueryExecutor {
 		Err(Error::NoIndexFoundForMatch {
 			value: exp.to_string(),
 		})
+	}
+
+	pub(crate) async fn highlight(
+		&self,
+		_txn: &Transaction,
+		thg: Option<&Thing>,
+		prefix: Value,
+		suffix: Value,
+		field: Value,
+	) -> Result<Value, Error> {
+		println!("{:?} {} {} {}", thg, prefix, suffix, field);
+		todo!()
 	}
 }

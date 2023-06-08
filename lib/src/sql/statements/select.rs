@@ -94,7 +94,7 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, thg, doc, exe).await?;
+			let v = w.compute(ctx, opt, txn, exe, thg, doc).await?;
 			match v {
 				Value::Table(v) => {
 					i.ingest(planner.get_iterable(opt, txn, v).await?);

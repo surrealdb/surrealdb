@@ -38,13 +38,13 @@ impl IfelseStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(ctx, opt, txn, None, doc, None).await?;
+			let v = cond.compute(ctx, opt, txn, None, None, doc).await?;
 			if v.is_truthy() {
-				return then.compute(ctx, opt, txn, None, doc, None).await;
+				return then.compute(ctx, opt, txn, None, None, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(ctx, opt, txn, None, doc, None).await,
+			Some(ref v) => v.compute(ctx, opt, txn, None, None, doc).await,
 			None => Ok(Value::None),
 		}
 	}

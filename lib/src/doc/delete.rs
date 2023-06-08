@@ -31,6 +31,6 @@ impl<'a> Document<'a> {
 		// Run event queries
 		self.event(ctx, opt, txn, stm).await?;
 		// Yield document
-		self.pluck(ctx, opt, txn, stm).await
+		self.pluck(ctx, opt, txn, None, None, stm).await
 	}
 }

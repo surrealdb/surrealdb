@@ -23,6 +23,6 @@ impl<'a> Document<'a> {
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
 		// Yield document
-		self.pluck(ctx, opt, txn, stm).await
+		self.pluck(ctx, opt, txn, exe, self.id.as_ref(), stm).await
 	}
 }

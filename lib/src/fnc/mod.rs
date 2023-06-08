@@ -1,6 +1,9 @@
 use crate::ctx::Context;
+use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use crate::sql::Thing;
 
 pub mod args;
 pub mod array;
@@ -19,6 +22,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod script;
+pub mod search;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -27,15 +31,23 @@ pub mod r#type;
 pub mod util;
 
 /// Attempts to run any function
-pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	exe: Option<&QueryExecutor>,
+	thg: Option<&Thing>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	if name.eq("sleep")
 		|| name.starts_with("http")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("search::")
 	{
-		asynchronous(ctx, name, args).await
+		asynchronous(ctx, txn, exe, thg, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -263,7 +275,14 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 }
 
 /// Attempts to run any asynchronous function.
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn asynchronous(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	exe: Option<&QueryExecutor>,
+	thg: Option<&Thing>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_arch = "wasm32"))]
@@ -298,6 +317,8 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+		//
+		"search::highlight" => search::highlight((ctx, txn, exe, thg)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)

@@ -56,14 +56,14 @@ impl Param {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.compute(ctx, opt, txn, None, doc, None).await,
+				Some(v) => v.compute(ctx, opt, txn, None, None, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(ctx, opt, txn, None, doc, None).await,
+				Some(v) => v.compute(ctx, opt, txn, None, None, doc).await,
 				// The param has not been set locally
 				None => {
 					// Clone transaction

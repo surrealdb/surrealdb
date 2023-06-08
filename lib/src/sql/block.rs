@@ -104,7 +104,7 @@ impl Block {
 					return v.compute(&ctx, opt, txn, doc).await;
 				}
 				Entry::Value(v) => {
-					return v.compute(&ctx, opt, txn, None, doc, None).await;
+					return v.compute(&ctx, opt, txn, None, None, doc).await;
 				}
 			}
 		}

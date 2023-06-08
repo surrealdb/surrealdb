@@ -32,10 +32,10 @@ impl<'a> Document<'a> {
 				// Send a DELETE notification to the WebSocket
 			} else if self.is_new() {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &stm).await?;
+				let _ = self.pluck(ctx, opt, txn, None, None, &stm).await?;
 			} else {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &stm).await?;
+				let _ = self.pluck(ctx, opt, txn, None, None, &stm).await?;
 			};
 		}
 		// Carry on

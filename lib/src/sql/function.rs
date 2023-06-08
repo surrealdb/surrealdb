@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::val_char;
 use crate::sql::common::{closeparentheses, commas, openparentheses};
@@ -11,6 +12,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{value, Value};
+use crate::sql::Thing;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use nom::branch::alt;
@@ -137,6 +139,8 @@ impl Function {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		exe: Option<&'async_recursion QueryExecutor>,
+		thg: Option<&'async_recursion Thing>,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		// Prevent long function chains
@@ -147,10 +151,10 @@ impl Function {
 		match self {
 			Self::Normal(s, x) => {
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
-					.await?;
+				let a =
+					try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, thg, doc))).await?;
 				// Run the normal function
-				fnc::run(ctx, s, a).await
+				fnc::run(ctx, txn, exe, thg, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Get the function definition
@@ -173,7 +177,7 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, None, doc)))
 					.await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
@@ -190,7 +194,7 @@ impl Function {
 				{
 					// Compute the function arguments
 					let a =
-						try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
+						try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, None, doc)))
 							.await?;
 					// Run the script function
 					fnc::script::run(ctx, opt, txn, doc, s, a).await
@@ -266,6 +270,7 @@ pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 		preceded(tag("meta::"), function_meta),
 		preceded(tag("parse::"), function_parse),
 		preceded(tag("rand::"), function_rand),
+		preceded(tag("search::"), function_search),
 		preceded(tag("session::"), function_session),
 		preceded(tag("string::"), function_string),
 		preceded(tag("time::"), function_time),
@@ -462,6 +467,10 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("uuid::v7"),
 		tag("uuid"),
 	))(i)
+}
+
+fn function_search(i: &str) -> IResult<&str, &str> {
+	alt((tag("highlight"),))(i)
 }
 
 fn function_session(i: &str) -> IResult<&str, &str> {

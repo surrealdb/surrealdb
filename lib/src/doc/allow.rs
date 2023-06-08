@@ -39,7 +39,7 @@ impl<'a> Document<'a> {
 						let opt = &opt.perms(false);
 						// Process the PERMISSION clause
 						if !e
-							.compute(ctx, opt, txn, None, Some(&self.current), None)
+							.compute(ctx, opt, txn, None, None, Some(&self.current))
 							.await?
 							.is_truthy()
 						{

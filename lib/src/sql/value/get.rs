@@ -95,7 +95,7 @@ impl Value {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in v.iter() {
-							if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, None, None, Some(v)).await?.is_truthy() {
 								a.push(v.get(ctx, opt, txn, doc, path).await?)
 							}
 						}

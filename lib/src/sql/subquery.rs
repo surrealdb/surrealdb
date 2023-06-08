@@ -67,15 +67,15 @@ impl Subquery {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		exe: Option<&QueryExecutor>,
 		thg: Option<&Thing>,
 		doc: Option<&Value>,
-		exe: Option<&QueryExecutor>,
 	) -> Result<Value, Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(2)?;
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(ctx, opt, txn, thg, doc, exe).await,
+			Self::Value(ref v) => v.compute(ctx, opt, txn, exe, thg, doc).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {

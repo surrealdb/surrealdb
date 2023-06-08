@@ -239,12 +239,15 @@ impl Iterator {
 										.all()
 										.get(ctx, opt, txn, None, v.to_idiom().as_ref())
 										.await?;
-									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
+									let x = f
+										.aggregate(x)
+										.compute(ctx, opt, txn, None, None, None)
+										.await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, None, Some(&x), None).await?;
+									let x = v.compute(ctx, opt, txn, None, None, Some(&x)).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 							}
@@ -254,7 +257,10 @@ impl Iterator {
 							match v {
 								Value::Function(f) if f.is_aggregate() => {
 									let x = vals.all().get(ctx, opt, txn, None, i).await?;
-									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
+									let x = f
+										.aggregate(x)
+										.compute(ctx, opt, txn, None, None, None)
+										.await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
 								_ => {
