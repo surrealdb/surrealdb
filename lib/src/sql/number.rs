@@ -161,7 +161,15 @@ impl Display for Number {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
-			Number::Float(v) => write!(f, "{v}f"),
+			Number::Float(v) => {
+				if v.is_finite() {
+					// Add suffix to distinguish between int and float
+					write!(f, "{v}f")
+				} else {
+					// Don't add suffix for NaN, inf, -inf
+					Display::fmt(v, f)
+				}
+			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
 	}
