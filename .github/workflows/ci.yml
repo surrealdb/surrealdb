@@ -13,7 +13,7 @@ jobs:
 
   format:
     name: Check format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -29,7 +29,7 @@ jobs:
 
   check:
     name: Check workspace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -48,7 +48,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -64,7 +64,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -85,7 +85,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -104,7 +104,7 @@ jobs:
 
   ws-engine:
     name: WebSocket engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -126,7 +126,7 @@ jobs:
 
   http-engine:
     name: HTTP engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -148,7 +148,7 @@ jobs:
 
   mem-engine:
     name: Memory engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -162,7 +162,7 @@ jobs:
 
   file-engine:
     name: File engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -176,7 +176,7 @@ jobs:
 
   rocksdb-engine:
     name: RocksDB engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -190,7 +190,7 @@ jobs:
 
   speedb-engine:
     name: SpeeDB engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -204,7 +204,7 @@ jobs:
 
   any-engine:
     name: Any engine
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
