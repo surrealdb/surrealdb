@@ -11,6 +11,7 @@ use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::value::Value;
+use crate::sql::Uuid;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -19,7 +20,6 @@ use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct LiveStatement {
@@ -56,7 +56,7 @@ impl LiveStatement {
 				// Clone the current statement
 				let mut stm = self.clone();
 				// Store the current Node ID
-				stm.node = *opt.id;
+				stm.node = Uuid((*opt.id).clone());
 				// Insert the node live query
 				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;
@@ -71,7 +71,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.into())
+		Ok(Value::Uuid(self.id.clone()))
 	}
 }
 

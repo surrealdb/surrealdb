@@ -1,12 +1,12 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
-use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::LOG;
+use crate::dbs::{Auth, QueryType};
 use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::sql::paths::DB;
@@ -93,6 +93,7 @@ impl<'a> Executor<'a> {
 		Response {
 			time: v.time,
 			result: Err(Error::QueryCancelled),
+			query_type: QueryType::Other,
 		}
 	}
 
@@ -104,6 +105,7 @@ impl<'a> Executor<'a> {
 					Ok(_) => Err(Error::QueryNotExecuted),
 					Err(e) => Err(e),
 				},
+				query_type: QueryType::Other,
 			},
 			_ => v,
 		}
@@ -165,7 +167,7 @@ impl<'a> Executor<'a> {
 			// Check if this is a RETURN statement
 			let clr = matches!(stm, Statement::Output(_));
 			// Process a single statement
-			let res = match stm {
+			let res = match stm.clone() {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
@@ -355,6 +357,11 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
+				query_type: match stm {
+					Statement::Live(_) => QueryType::Live,
+					Statement::Kill(_) => QueryType::Kill,
+					_ => QueryType::Other,
+				},
 			};
 			// Output the response
 			if self.txn.is_some() {
