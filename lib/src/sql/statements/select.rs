@@ -242,7 +242,7 @@ mod tests {
 
 	#[test]
 	fn select_statement_table_thing() {
-		let sql = "SELECT *, ((1 + 3) / 4), 1.3999 AS tester FROM test, test:thingy";
+		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
