@@ -21,6 +21,8 @@ impl IntoEndpoint<FDb> for &str {
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
+			username: String::new(),
+			password: String::new(),
 		})
 	}
 }
@@ -29,7 +31,7 @@ impl IntoEndpoint<FDb> for &Path {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let path = self.display();
+		let path = self.display().to_string();
 		IntoEndpoint::<FDb>::into_endpoint(path.as_str())
 	}
 }
@@ -42,7 +44,7 @@ where
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (path, _) = self;
-		let mut endpoint = IntoEndpoint::<FDb>::into_endpoint(path.as_ref());
+		let mut endpoint = IntoEndpoint::<FDb>::into_endpoint(path.as_ref())?;
 		endpoint.strict = true;
 		Ok(endpoint)
 	}
@@ -56,7 +58,7 @@ where
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (path, root) = self;
-		let mut endpoint = path.as_ref().into_endpoint()?;
+		let mut endpoint = IntoEndpoint::<FDb>::into_endpoint(path.as_ref())?;
 		endpoint.auth = Level::Kv;
 		endpoint.username = root.username.to_owned();
 		endpoint.password = root.password.to_owned();
@@ -72,7 +74,7 @@ where
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (path, _, root) = self;
-		let mut endpoint = (path, root).into_endpoint()?;
+		let mut endpoint = IntoEndpoint::<FDb>::into_endpoint((path, root))?;
 		endpoint.strict = true;
 		Ok(endpoint)
 	}
