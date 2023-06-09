@@ -31,8 +31,7 @@ impl<'js> FromJs<'js> for Value {
 				}
 				Err(e) => Err(e),
 			},
-			val if val.is_int() => Ok(val.as_int().unwrap().into()),
-			val if val.is_float() => Ok(val.as_float().unwrap().into()),
+			val if val.is_number() => Ok(val.as_number().unwrap().into()),
 			val if val.is_array() => {
 				let v = val.as_array().unwrap();
 				let mut x = Array::with_capacity(v.len());
