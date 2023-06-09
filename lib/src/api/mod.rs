@@ -128,7 +128,6 @@ where
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) enum ExtraFeatures {
-	Auth,
 	Backup,
 }
 

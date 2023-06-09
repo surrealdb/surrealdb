@@ -1,8 +1,10 @@
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
 use fst::Error as FstError;
+use jsonwebtoken::errors::Error as JWTError;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::string::FromUtf8Error;
@@ -74,6 +76,10 @@ pub enum Error {
 	/// There was an error with the SQL query
 	#[error("The SQL query was not parsed fully")]
 	QueryRemaining,
+
+	/// There was an error with authentication
+	#[error("There was a problem with authentication")]
+	InvalidAuth,
 
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
@@ -456,6 +462,18 @@ pub enum Error {
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
+	}
+}
+
+impl From<Base64Error> for Error {
+	fn from(_: Base64Error) -> Error {
+		Error::InvalidAuth
+	}
+}
+
+impl From<JWTError> for Error {
+	fn from(_: JWTError) -> Error {
+		Error::InvalidAuth
 	}
 }
 
