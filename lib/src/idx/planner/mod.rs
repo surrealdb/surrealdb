@@ -13,6 +13,7 @@ use std::collections::HashMap;
 pub(crate) struct QueryPlanner<'a> {
 	opt: &'a Options,
 	cond: &'a Option<Cond>,
+	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
 }
 

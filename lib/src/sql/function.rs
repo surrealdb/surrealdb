@@ -193,9 +193,8 @@ impl Function {
 				#[cfg(feature = "scripting")]
 				{
 					// Compute the function arguments
-					let a =
-						try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, None, doc)))
-							.await?;
+					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, thg, doc)))
+						.await?;
 					// Run the script function
 					fnc::script::run(ctx, opt, txn, doc, s, a).await
 				}

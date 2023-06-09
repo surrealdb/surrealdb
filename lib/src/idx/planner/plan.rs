@@ -1,8 +1,9 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::{FtIndex, HitsIterator};
+use crate::idx::ft::terms::TermId;
+use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
 use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::tree::{IndexMap, Node};
+use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::Key;
@@ -79,7 +80,7 @@ pub(super) struct IndexOption {
 }
 
 impl IndexOption {
-	fn new(ix: DefineIndexStatement, op: Operator, v: Value, ep: Expression) -> Self {
+	pub(super) fn new(ix: DefineIndexStatement, op: Operator, v: Value, ep: Expression) -> Self {
 		Self {
 			ix,
 			op,
@@ -96,28 +97,6 @@ impl IndexOption {
 		i: IndexMap,
 	) -> Result<QueryExecutor, Error> {
 		QueryExecutor::new(opt, txn, t, i, Some(self.ep.clone())).await
-	}
-
-	pub(super) fn found(
-		ix: &DefineIndexStatement,
-		op: &Operator,
-		v: &Node,
-		ep: &Expression,
-	) -> Option<Self> {
-		if let Some(v) = v.is_scalar() {
-			if match ix.index {
-				Index::Idx => Operator::Equal.eq(op),
-				Index::Uniq => Operator::Equal.eq(op),
-				Index::Search {
-					..
-				} => {
-					matches!(op, Operator::Matches(_))
-				}
-			} {
-				return Some(IndexOption::new(ix.clone(), op.to_owned(), v.clone(), ep.clone()));
-			}
-		}
-		None
 	}
 
 	async fn new_iterator(
@@ -144,8 +123,8 @@ impl IndexOption {
 				sc,
 				order,
 			} => match self.op {
-				Operator::Matches(_) => Ok(Box::new(
-					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, &self.v)
+				Operator::Matches(mr) => Ok(Box::new(
+					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, mr, &self.v)
 						.await?,
 				)),
 				_ => Err(Error::BypassQueryPlanner),
@@ -221,6 +200,7 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
+	_terms: Option<(MatchRef, Vec<TermId>)>,
 	hits: Option<HitsIterator>,
 }
 
@@ -233,6 +213,7 @@ impl MatchesThingIterator {
 		hl: bool,
 		sc: &Scoring,
 		order: u32,
+		mr: Option<MatchRef>,
 		v: &Value,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
@@ -244,9 +225,10 @@ impl MatchesThingIterator {
 			let query_string = v.clone().convert_to_string()?;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
 			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
-			let hits = fti.search(&mut run, query_string).await?;
+			let (terms, hits) = fti.search(&mut run, query_string).await?;
 			Ok(Self {
 				hits,
+				_terms: mr.map(|mr| (mr, terms)),
 			})
 		} else {
 			Err(Error::FeatureNotYetImplemented {

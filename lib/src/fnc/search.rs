@@ -11,11 +11,11 @@ pub async fn highlight(
 		Option<&'_ QueryExecutor>,
 		Option<&'_ Thing>,
 	),
-	(prefix, suffix, field): (Value, Value, Value),
+	(prefix, suffix, match_ref): (Value, Value, Value),
 ) -> Result<Value, Error> {
 	if let Some(exe) = exe {
-		exe.highlight(txn, thg, prefix, suffix, field).await
+		exe.highlight(txn, thg, prefix, suffix, match_ref.clone(), match_ref).await
 	} else {
-		Ok(field)
+		Ok(match_ref)
 	}
 }

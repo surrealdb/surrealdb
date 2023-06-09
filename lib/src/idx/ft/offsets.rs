@@ -30,7 +30,7 @@ impl Offsets {
 		Ok(())
 	}
 
-	pub(super) async fn _get_offsets(
+	pub(super) async fn get_offsets(
 		&self,
 		tx: &mut Transaction,
 		doc_id: DocId,

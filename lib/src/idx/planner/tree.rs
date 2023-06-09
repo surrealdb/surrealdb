@@ -1,6 +1,8 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::ft::MatchRef;
 use crate::idx::planner::plan::IndexOption;
+use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
@@ -8,9 +10,13 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub(super) struct Tree {}
+#[derive(Default)]
+pub(super) struct IndexMap {
+	pub(super) index: HashMap<Expression, HashSet<IndexOption>>,
+	pub(super) terms: HashMap<MatchRef, (String, String)>,
+}
 
-pub(super) type IndexMap = HashMap<Expression, HashSet<IndexOption>>;
+pub(super) struct Tree {}
 
 impl Tree {
 	pub(super) async fn build<'a>(
@@ -91,17 +97,10 @@ impl<'a> TreeBuilder<'a> {
 		let right = self.eval_value(&e.r).await?;
 		let mut index_option = None;
 		if let Some(ix) = left.is_indexed_field() {
-			if let Some(io) = IndexOption::found(ix, &e.o, &right, e) {
-				index_option = Some(io.clone());
-				self.add_index(e, io);
-			}
-		}
-		if let Some(ix) = right.is_indexed_field() {
-			if let Some(io) = IndexOption::found(ix, &e.o, &left, e) {
-				index_option = Some(io.clone());
-				self.add_index(e, io);
-			}
-		}
+			index_option = self.lookup_index_option(ix, &e.o, &right, e);
+		} else if let Some(ix) = right.is_indexed_field() {
+			index_option = self.lookup_index_option(ix, &e.o, &left, e);
+		};
 		Ok(Node::Expression {
 			index_option,
 			left: Box::new(left),
@@ -110,8 +109,41 @@ impl<'a> TreeBuilder<'a> {
 		})
 	}
 
+	fn lookup_index_option(
+		&mut self,
+		ix: &DefineIndexStatement,
+		op: &Operator,
+		v: &Node,
+		ep: &Expression,
+	) -> Option<IndexOption> {
+		if let Some(v) = v.is_scalar() {
+			if match &ix.index {
+				Index::Idx => Operator::Equal.eq(op),
+				Index::Uniq => Operator::Equal.eq(op),
+				Index::Search {
+					az,
+					..
+				} => {
+					if let Operator::Matches(mr) = op {
+						if let Some(mr) = mr {
+							self.index_map.terms.insert(*mr, (az.0.to_owned(), v.to_raw_string()));
+						}
+						true
+					} else {
+						false
+					}
+				}
+			} {
+				let io = IndexOption::new(ix.clone(), op.to_owned(), v.clone(), ep.clone());
+				self.add_index(ep, io.clone());
+				return Some(io);
+			}
+		}
+		None
+	}
+
 	fn add_index(&mut self, e: &Expression, io: IndexOption) {
-		match self.index_map.entry(e.clone()) {
+		match self.index_map.index.entry(e.clone()) {
 			Entry::Occupied(mut e) => {
 				e.get_mut().insert(io);
 			}

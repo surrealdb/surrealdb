@@ -27,6 +27,8 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::ops::BitAnd;
 
+pub(crate) type MatchRef = u8;
+
 pub(crate) struct FtIndex {
 	analyzer: Analyzer,
 	state_key: Key,
@@ -291,29 +293,40 @@ impl FtIndex {
 		Ok(())
 	}
 
+	pub(super) async fn extract_terms(
+		&self,
+		tx: &mut Transaction,
+		query_string: String,
+	) -> Result<Vec<TermId>, Error> {
+		let t = self.terms(tx).await?;
+		let (terms, _) = self.analyzer.extract_terms(&t, tx, query_string).await?;
+		Ok(terms)
+	}
+
 	pub(super) async fn search(
 		&self,
 		tx: &mut Transaction,
 		query_string: String,
-	) -> Result<Option<HitsIterator>, Error> {
+	) -> Result<(Vec<TermId>, Option<HitsIterator>), Error> {
 		let t = self.terms(tx).await?;
 		let td = self.term_docs();
-		let terms = self.analyzer.extract_terms(&t, tx, query_string).await?;
+		let (terms, missing) = self.analyzer.extract_terms(&t, tx, query_string).await?;
+		if missing {
+			// If any term does not exists, as we are doing an AND query,
+			// we can return an empty results set
+			return Ok((terms, None));
+		}
 		let mut hits: Option<RoaringTreemap> = None;
 		let mut terms_docs = Vec::with_capacity(terms.len());
-		for term_id in terms {
-			if let Some(term_id) = term_id {
-				if let Some(term_docs) = td.get_docs(tx, term_id).await? {
-					if let Some(h) = hits {
-						hits = Some(h.bitand(&term_docs));
-					} else {
-						hits = Some(term_docs.clone());
-					}
-					terms_docs.push((term_id, term_docs));
-					continue;
+		for term_id in &terms {
+			if let Some(term_docs) = td.get_docs(tx, *term_id).await? {
+				if let Some(h) = hits {
+					hits = Some(h.bitand(&term_docs));
+				} else {
+					hits = Some(term_docs.clone());
 				}
+				terms_docs.push((*term_id, term_docs));
 			}
-			return Ok(None);
 		}
 		if let Some(hits) = hits {
 			if !hits.is_empty() {
@@ -330,19 +343,22 @@ impl FtIndex {
 					));
 				}
 				let doc_ids = self.doc_ids(tx).await?;
-				return Ok(Some(HitsIterator::new(doc_ids, postings, hits, terms_docs, scorer)));
+				return Ok((
+					terms,
+					Some(HitsIterator::new(doc_ids, postings, hits, terms_docs, scorer)),
+				));
 			}
 		}
-		Ok(None)
+		Ok((terms, None))
 	}
 
 	pub(super) async fn match_id_value(
 		&self,
 		tx: &mut Transaction,
-		rid: &Thing,
+		thg: &Thing,
 		term: &str,
 	) -> Result<bool, Error> {
-		let doc_key: Key = rid.into();
+		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let terms = self.terms(tx).await?;
@@ -356,6 +372,27 @@ impl FtIndex {
 			}
 		}
 		Ok(false)
+	}
+
+	pub(super) async fn highlight(
+		&self,
+		tx: &mut Transaction,
+		thg: &Thing,
+		terms: &Vec<TermId>,
+		_prefix: Value,
+		_suffix: Value,
+		value: Value,
+	) -> Result<Value, Error> {
+		let doc_key: Key = thg.into();
+		let doc_ids = self.doc_ids(tx).await?;
+		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
+			let o = self.offsets();
+			for term_id in terms {
+				let _r = o.get_offsets(tx, doc_id, *term_id).await?;
+				todo!()
+			}
+		}
+		Ok(value)
 	}
 
 	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -525,22 +562,22 @@ mod tests {
 			assert_eq!(statistics.doc_lengths.keys_count, 3);
 
 			// Search & score
-			let i = fti.search(&mut tx, "hello".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "hello".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-			let i = fti.search(&mut tx, "world".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "world".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc1, Some(0.4859746))]).await;
 
-			let i = fti.search(&mut tx, "yellow".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "yellow".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc2, Some(0.4859746))]).await;
 
-			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
-			let i = fti.search(&mut tx, "bar".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "bar".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
-			let i = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
 			assert!(i.is_none());
 		}
 
@@ -562,15 +599,15 @@ mod tests {
 
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
 			// We can't anymore find 'bar'
-			let i = fti.search(&mut tx, "bar".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "bar".to_string()).await.unwrap();
 			assert!(i.is_none());
 
 			// We can now find 'nobar'
-			let i = fti.search(&mut tx, "nobar".to_string()).await.unwrap();
+			let (_, i) = fti.search(&mut tx, "nobar".to_string()).await.unwrap();
 			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 		}
 
@@ -678,7 +715,7 @@ mod tests {
 				assert_eq!(statistics.doc_ids.keys_count, 4);
 				assert_eq!(statistics.doc_lengths.keys_count, 4);
 
-				let i = fti.search(&mut tx, "the".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "the".to_string()).await.unwrap();
 				check_hits(
 					i,
 					&mut tx,
@@ -691,7 +728,7 @@ mod tests {
 				)
 				.await;
 
-				let i = fti.search(&mut tx, "dog".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "dog".to_string()).await.unwrap();
 				check_hits(
 					i,
 					&mut tx,
@@ -699,25 +736,25 @@ mod tests {
 				)
 				.await;
 
-				let i = fti.search(&mut tx, "fox".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "fox".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let i = fti.search(&mut tx, "over".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "over".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let i = fti.search(&mut tx, "lazy".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "lazy".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let i = fti.search(&mut tx, "jumped".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "jumped".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let i = fti.search(&mut tx, "nothing".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "nothing".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc3, Some(0.87105393))]).await;
 
-				let i = fti.search(&mut tx, "animals".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "animals".to_string()).await.unwrap();
 				check_hits(i, &mut tx, vec![(&doc4, Some(0.92279965))]).await;
 
-				let i = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
+				let (_, i) = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
 				assert!(i.is_none());
 			}
 		}

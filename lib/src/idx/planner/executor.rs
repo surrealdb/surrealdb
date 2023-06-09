@@ -1,6 +1,7 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::terms::TermId;
+use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::sql::index::Index;
@@ -18,6 +19,7 @@ struct Inner {
 	index_map: IndexMap,
 	pre_match: Option<Expression>,
 	ft_map: HashMap<String, FtIndex>,
+	terms: HashMap<MatchRef, (String, Vec<TermId>)>,
 }
 
 impl QueryExecutor {
@@ -30,7 +32,7 @@ impl QueryExecutor {
 	) -> Result<Self, Error> {
 		let mut run = txn.lock().await;
 		let mut ft_map = HashMap::new();
-		for ios in index_map.values() {
+		for ios in index_map.index.values() {
 			for io in ios {
 				if let Index::Search {
 					az,
@@ -48,12 +50,20 @@ impl QueryExecutor {
 				}
 			}
 		}
+		let mut terms = HashMap::with_capacity(index_map.terms.len());
+		for (mr, (ix, qs)) in &index_map.terms {
+			if let Some(ft) = ft_map.get(ix) {
+				let term_ids = ft.extract_terms(&mut run, qs.clone()).await?;
+				terms.insert(*mr, (ix.to_owned(), term_ids));
+			}
+		}
 		Ok(Self {
 			inner: Arc::new(Inner {
 				table: table.0.clone(),
 				index_map,
 				pre_match,
 				ft_map,
+				terms,
 			}),
 		})
 	}
@@ -77,7 +87,7 @@ impl QueryExecutor {
 		if let Some(thg) = thg {
 			// Does the record id match this executor's table?
 			if thg.tb.eq(&self.inner.table) {
-				if let Some(ios) = self.inner.index_map.get(exp) {
+				if let Some(ios) = self.inner.index_map.index.get(exp) {
 					for io in ios {
 						if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
 							let mut run = txn.lock().await;
@@ -100,13 +110,24 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		_txn: &Transaction,
+		txn: &Transaction,
 		thg: Option<&Thing>,
 		prefix: Value,
 		suffix: Value,
-		field: Value,
+		match_ref: Value,
+		doc: Value,
 	) -> Result<Value, Error> {
-		println!("{:?} {} {} {}", thg, prefix, suffix, field);
-		todo!()
+		let mut tx = txn.lock().await;
+		if let Some(thg) = thg {
+			if let Value::Number(n) = match_ref {
+				let m = n.as_int() as u8;
+				if let Some((ix, terms)) = self.inner.terms.get(&m) {
+					if let Some(ft) = self.inner.ft_map.get(ix) {
+						return ft.highlight(&mut tx, thg, terms, prefix, suffix, doc).await;
+					}
+				}
+			}
+		}
+		Ok(doc)
 	}
 }

@@ -1,3 +1,4 @@
+use crate::idx::ft::MatchRef;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -34,11 +35,11 @@ pub enum Operator {
 	AllEqual, // *=
 	AnyEqual, // ?=
 	//
-	Like,                // ~
-	NotLike,             // !~
-	AllLike,             // *~
-	AnyLike,             // ?~
-	Matches(Option<u8>), // @{ref}@
+	Like,                      // ~
+	NotLike,                   // !~
+	AllLike,                   // *~
+	AnyLike,                   // ?~
+	Matches(Option<MatchRef>), // @{ref}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=

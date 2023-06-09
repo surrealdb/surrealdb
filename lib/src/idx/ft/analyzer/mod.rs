@@ -41,7 +41,7 @@ impl Analyzer {
 		t: &Terms,
 		tx: &mut Transaction,
 		query_string: String,
-	) -> Result<Vec<Option<TermId>>, Error> {
+	) -> Result<(Vec<TermId>, bool), Error> {
 		let tokens = self.analyse(query_string);
 		// We first collect every unique terms
 		// as it can contains duplicates
@@ -49,13 +49,17 @@ impl Analyzer {
 		for token in tokens.list() {
 			terms.insert(token);
 		}
+		let mut missing = false;
 		// Now we can extract the term ids
 		let mut res = Vec::with_capacity(terms.len());
 		for term in terms {
-			let term_id = t.get_term_id(tx, tokens.get_token_string(term)).await?;
-			res.push(term_id);
+			if let Some(term_id) = t.get_term_id(tx, tokens.get_token_string(term)).await? {
+				res.push(term_id);
+			} else {
+				missing = false;
+			}
 		}
-		Ok(res)
+		Ok((res, missing))
 	}
 
 	/// This method is used for indexing.
