@@ -172,7 +172,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-mem --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
 
   file-engine:
     name: File engine
@@ -186,7 +188,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
 
   rocksdb-engine:
     name: RocksDB engine
@@ -200,7 +204,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::rocksdb
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::rocksdb
 
   speedb-engine:
     name: SpeeDB engine
@@ -214,7 +220,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
 
   any-engine:
     name: Any engine
