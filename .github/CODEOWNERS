@@ -25,5 +25,8 @@
 /src/cli/ @rushmorem @finnbear
 /tests/cli.rs @finnbear
 
+# Code and tests for opentelemetry
+/src/o11y @sgirones
+
 # Tests related to the key-value store
 /lib/src/kvs/tests/ @tobiemh @phughk
