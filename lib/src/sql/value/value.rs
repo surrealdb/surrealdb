@@ -2225,6 +2225,7 @@ impl Value {
 			Value::None => true,
 			Value::Null => true,
 			Value::Bool(_) => true,
+			Value::Bytes(_) => true,
 			Value::Uuid(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,

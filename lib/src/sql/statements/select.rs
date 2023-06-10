@@ -50,8 +50,10 @@ impl SelectStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
 			Field::All => false,
-			Field::Alone(v) => v.writeable(),
-			Field::Alias(v, _) => v.writeable(),
+			Field::Single {
+				expr,
+				..
+			} => expr.writeable(),
 		}) {
 			return true;
 		}
