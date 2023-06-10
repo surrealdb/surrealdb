@@ -115,7 +115,7 @@
             hardeningDisable = [ "fortify" ];
 
             depsBuildBuild = buildSpec.depsBuildBuild or [ ]
-              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack ]);
+              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack pre-commit]);
 
             inherit (util) SURREAL_BUILD_METADATA;
           })) util.platforms);
