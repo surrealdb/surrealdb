@@ -72,7 +72,13 @@ mod tikv {
 	use serial_test::serial;
 
 	async fn new_ds() -> Datastore {
-		Datastore::new("tikv:127.0.0.1:2379").await.unwrap()
+		let ds = Datastore::new("tikv:127.0.0.1:2379").await.unwrap();
+		// Clear any previous test entries
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		assert!(tx.delp(vec![], u32::MAX).await.is_ok());
+		tx.commit().await.unwrap();
+		// Return the datastore
+		ds
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -93,8 +99,13 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds() -> Datastore {
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new("/etc/foundationdb/fdb.cluster").await.unwrap()
+		let ds = Datastore::new("/etc/foundationdb/fdb.cluster").await.unwrap();
+		// Clear any previous test entries
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		assert!(tx.delp(vec![], u32::MAX).await.is_ok());
+		tx.commit().await.unwrap();
+		// Return the datastore
+		ds
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {

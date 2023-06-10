@@ -154,8 +154,15 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.tx.insert(key.into(), val.into()).await?;
+		// Get the key
+		let key = key.into();
+		// Get the val
+		let val = val.into();
+		// Set the key if empty
+		match self.tx.key_exists(key.clone()).await? {
+			false => self.tx.put(key, val).await?,
+			_ => return Err(Error::TxKeyAlreadyExists),
+		};
 		// Return result
 		Ok(())
 	}
