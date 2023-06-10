@@ -83,6 +83,20 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --no-deps -- -W warnings
 
+  cli:
+    name: Test command line
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked --no-default-features --features storage-mem --workspace --test cli
+
   test:
     name: Test workspace
     runs-on: ubuntu-20.04
@@ -100,7 +114,7 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --include-ignored
+        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
 
   ws-engine:
     name: WebSocket engine
