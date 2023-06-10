@@ -94,6 +94,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
       - name: Run cargo test
         run: cargo test --locked --no-default-features --features storage-mem --workspace --test cli
 
