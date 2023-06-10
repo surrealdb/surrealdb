@@ -70,7 +70,9 @@ impl Transaction {
 		// Mark this transaction as done
 		self.ok = true;
 		// Cancel this transaction
-		self.tx.rollback().await?;
+		if self.rw {
+			self.tx.rollback().await?;
+		}
 		// Continue
 		Ok(())
 	}
