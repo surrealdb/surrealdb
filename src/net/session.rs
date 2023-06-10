@@ -3,7 +3,6 @@ use crate::err::Error;
 use crate::iam::verify::basic;
 use crate::iam::BASIC;
 use crate::net::client_ip;
-use std::net::SocketAddr;
 use surrealdb::dbs::Session;
 use surrealdb::iam::verify::token;
 use surrealdb::iam::TOKEN;

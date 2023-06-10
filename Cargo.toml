@@ -73,6 +73,7 @@ nix = "0.26.2"
 rcgen = "0.10.0"
 tonic = "0.8.3"
 opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"] }
+serial_test = "2.0.0"
 tokio-stream = { version = "0.1", features = ["net"] }
 temp-env = "0.3.4"
 
