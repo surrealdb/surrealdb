@@ -23,7 +23,7 @@ async fn multiwriter_same_key() {
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(false, false).await.unwrap();
 	let val = tx.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "other text");
+	assert_eq!(val, b"other text");
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(true, false).await.unwrap();
@@ -32,7 +32,7 @@ async fn multiwriter_same_key() {
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(false, false).await.unwrap();
 	let val = tx.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "original text");
+	assert_eq!(val, b"original text");
 	tx.cancel().await.unwrap();
 }
 
@@ -61,12 +61,12 @@ async fn multiwriter_different_keys() {
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(false, false).await.unwrap();
 	let val = tx.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "some text");
+	assert_eq!(val, b"some text");
 	let val = tx.get("test1").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "other text 1");
+	assert_eq!(val, b"other text 1");
 	let val = tx.get("test2").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "other text 2");
+	assert_eq!(val, b"other text 2");
 	let val = tx.get("test3").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "other text 3");
+	assert_eq!(val, b"other text 3");
 	tx.cancel().await.unwrap();
 }

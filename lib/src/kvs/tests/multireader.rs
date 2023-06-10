@@ -10,15 +10,15 @@ async fn multireader() {
 	// Create a readonly transaction
 	let mut tx1 = ds.transaction(false, false).await.unwrap();
 	let val = tx1.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "some text");
+	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let mut tx2 = ds.transaction(false, false).await.unwrap();
 	let val = tx2.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "some text");
+	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let mut tx3 = ds.transaction(false, false).await.unwrap();
 	let val = tx3.get("test").await.unwrap().unwrap();
-	assert_eq!(std::str::from_utf8(&val).unwrap(), "some text");
+	assert_eq!(val, b"some text");
 	// Cancel both readonly transactions
 	tx1.cancel().await.unwrap();
 	tx2.cancel().await.unwrap();
