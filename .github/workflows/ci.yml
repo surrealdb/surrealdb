@@ -224,6 +224,34 @@ jobs:
           cargo test --locked --package surrealdb --no-default-features --features kv-speedb --lib kvs
           cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
 
+  tikv-engine:
+     name: TiKV engine
+     runs-on: ubuntu-20.04
+     steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Install TiKV
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          ~/.tiup/bin/tiup install tikv pd
+          ~/.tiup/bin/tiup -v
+
+      - name: Run cargo test
+        run: |
+          (&>/dev/null ~/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &)
+          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --test api api_integration::tikv
+
   any-engine:
     name: Any engine
     runs-on: ubuntu-20.04
