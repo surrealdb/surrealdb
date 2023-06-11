@@ -154,7 +154,7 @@ impl Function {
 				let a =
 					try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, exe, thg, doc))).await?;
 				// Run the normal function
-				fnc::run(ctx, txn, exe, thg, s, a).await
+				fnc::run(ctx, txn, exe, thg, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Get the function definition

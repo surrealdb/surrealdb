@@ -36,6 +36,7 @@ pub async fn run(
 	txn: &Transaction,
 	exe: Option<&QueryExecutor>,
 	thg: Option<&Thing>,
+	doc: Option<&Value>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -47,7 +48,7 @@ pub async fn run(
 		|| name.starts_with("crypto::scrypt")
 		|| name.starts_with("search::")
 	{
-		asynchronous(ctx, txn, exe, thg, name, args).await
+		asynchronous(ctx, txn, exe, thg, doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -280,6 +281,7 @@ pub async fn asynchronous(
 	txn: &Transaction,
 	exe: Option<&QueryExecutor>,
 	thg: Option<&Thing>,
+	doc: Option<&Value>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -318,7 +320,7 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::highlight" => search::highlight((ctx, txn, exe, thg)).await,
+		"search::highlight" => search::highlight((ctx, txn, exe, thg, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)

@@ -2,11 +2,12 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
+use crate::idx::planner::plan::IndexOption;
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Table, Thing, Value};
-use std::collections::HashMap;
+use crate::sql::{Expression, Idiom, Table, Thing, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -16,10 +17,16 @@ pub struct QueryExecutor {
 
 struct Inner {
 	table: String,
-	index_map: IndexMap,
+	index: HashMap<Expression, HashSet<IndexOption>>,
 	pre_match: Option<Expression>,
 	ft_map: HashMap<String, FtIndex>,
-	terms: HashMap<MatchRef, (String, Vec<TermId>)>,
+	terms: HashMap<MatchRef, IndexFieldTerms>,
+}
+
+struct IndexFieldTerms {
+	ix: String,
+	id: Idiom,
+	t: Vec<TermId>,
 }
 
 impl QueryExecutor {
@@ -51,16 +58,23 @@ impl QueryExecutor {
 			}
 		}
 		let mut terms = HashMap::with_capacity(index_map.terms.len());
-		for (mr, (ix, qs)) in &index_map.terms {
-			if let Some(ft) = ft_map.get(ix) {
-				let term_ids = ft.extract_terms(&mut run, qs.clone()).await?;
-				terms.insert(*mr, (ix.to_owned(), term_ids));
+		for (mr, ifv) in index_map.terms {
+			if let Some(ft) = ft_map.get(&ifv.ix) {
+				let term_ids = ft.extract_terms(&mut run, ifv.val.clone()).await?;
+				terms.insert(
+					mr,
+					IndexFieldTerms {
+						ix: ifv.ix,
+						id: ifv.id,
+						t: term_ids,
+					},
+				);
 			}
 		}
 		Ok(Self {
 			inner: Arc::new(Inner {
 				table: table.0.clone(),
-				index_map,
+				index: index_map.index,
 				pre_match,
 				ft_map,
 				terms,
@@ -87,7 +101,7 @@ impl QueryExecutor {
 		if let Some(thg) = thg {
 			// Does the record id match this executor's table?
 			if thg.tb.eq(&self.inner.table) {
-				if let Some(ios) = self.inner.index_map.index.get(exp) {
+				if let Some(ios) = self.inner.index.get(exp) {
 					for io in ios {
 						if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
 							let mut run = txn.lock().await;
@@ -115,19 +129,21 @@ impl QueryExecutor {
 		prefix: Value,
 		suffix: Value,
 		match_ref: Value,
-		doc: Value,
+		doc: &Value,
 	) -> Result<Value, Error> {
 		let mut tx = txn.lock().await;
 		if let Some(thg) = thg {
 			if let Value::Number(n) = match_ref {
 				let m = n.as_int() as u8;
-				if let Some((ix, terms)) = self.inner.terms.get(&m) {
-					if let Some(ft) = self.inner.ft_map.get(ix) {
-						return ft.highlight(&mut tx, thg, terms, prefix, suffix, doc).await;
+				if let Some(ift) = self.inner.terms.get(&m) {
+					if let Some(ft) = self.inner.ft_map.get(&ift.ix) {
+						// TODO remove!
+						assert_eq!(ift.id.len(), 1);
+						return ft.highlight(&mut tx, thg, &ift.t, prefix, suffix, doc).await;
 					}
 				}
 			}
 		}
-		Ok(doc)
+		Ok(Value::None)
 	}
 }

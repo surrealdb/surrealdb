@@ -381,7 +381,7 @@ impl FtIndex {
 		terms: &Vec<TermId>,
 		_prefix: Value,
 		_suffix: Value,
-		value: Value,
+		_doc: &Value,
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
@@ -392,7 +392,7 @@ impl FtIndex {
 				todo!()
 			}
 		}
-		Ok(value)
+		Ok(Value::None)
 	}
 
 	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {

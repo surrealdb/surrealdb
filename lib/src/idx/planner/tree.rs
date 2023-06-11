@@ -13,7 +13,13 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(super) struct IndexMap {
 	pub(super) index: HashMap<Expression, HashSet<IndexOption>>,
-	pub(super) terms: HashMap<MatchRef, (String, String)>,
+	pub(super) terms: HashMap<MatchRef, IndexFieldValue>,
+}
+
+pub(super) struct IndexFieldValue {
+	pub(super) ix: String,
+	pub(super) id: Idiom,
+	pub(super) val: String,
 }
 
 pub(super) struct Tree {}
@@ -86,7 +92,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
 		Ok(if let Some(ix) = self.find_index(i).await? {
-			Node::IndexedField(ix)
+			Node::IndexedField(i.to_owned(), ix)
 		} else {
 			Node::NonIndexedField
 		})
@@ -96,10 +102,10 @@ impl<'a> TreeBuilder<'a> {
 		let left = self.eval_value(&e.l).await?;
 		let right = self.eval_value(&e.r).await?;
 		let mut index_option = None;
-		if let Some(ix) = left.is_indexed_field() {
-			index_option = self.lookup_index_option(ix, &e.o, &right, e);
-		} else if let Some(ix) = right.is_indexed_field() {
-			index_option = self.lookup_index_option(ix, &e.o, &left, e);
+		if let Some((id, ix)) = left.is_indexed_field() {
+			index_option = self.lookup_index_option(ix, &e.o, id, &right, e);
+		} else if let Some((id, ix)) = right.is_indexed_field() {
+			index_option = self.lookup_index_option(ix, &e.o, id, &left, e);
 		};
 		Ok(Node::Expression {
 			index_option,
@@ -113,6 +119,7 @@ impl<'a> TreeBuilder<'a> {
 		&mut self,
 		ix: &DefineIndexStatement,
 		op: &Operator,
+		id: &Idiom,
 		v: &Node,
 		ep: &Expression,
 	) -> Option<IndexOption> {
@@ -121,12 +128,18 @@ impl<'a> TreeBuilder<'a> {
 				Index::Idx => Operator::Equal.eq(op),
 				Index::Uniq => Operator::Equal.eq(op),
 				Index::Search {
-					az,
 					..
 				} => {
 					if let Operator::Matches(mr) = op {
 						if let Some(mr) = mr {
-							self.index_map.terms.insert(*mr, (az.0.to_owned(), v.to_raw_string()));
+							self.index_map.terms.insert(
+								*mr,
+								IndexFieldValue {
+									ix: ix.name.0.to_owned(),
+									id: id.to_owned(),
+									val: v.to_raw_string(),
+								},
+							);
 						}
 						true
 					} else {
@@ -169,7 +182,7 @@ pub(super) enum Node {
 		right: Box<Node>,
 		operator: Operator,
 	},
-	IndexedField(DefineIndexStatement),
+	IndexedField(Idiom, DefineIndexStatement),
 	NonIndexedField,
 	Scalar(Value),
 	Unsupported,
@@ -184,9 +197,9 @@ impl Node {
 		}
 	}
 
-	pub(super) fn is_indexed_field(&self) -> Option<&DefineIndexStatement> {
-		if let Node::IndexedField(ix) = self {
-			Some(ix)
+	pub(super) fn is_indexed_field(&self) -> Option<(&Idiom, &DefineIndexStatement)> {
+		if let Node::IndexedField(id, ix) = self {
+			Some((id, ix))
 		} else {
 			None
 		}
