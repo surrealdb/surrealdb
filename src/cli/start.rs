@@ -4,6 +4,7 @@ use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
+use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::iam;
@@ -39,6 +40,8 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[command(flatten)]
+	dbs: StartCommandDbsOptions,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
 	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
 	#[arg(value_parser = super::validator::key_valid)]
@@ -94,6 +97,7 @@ pub async fn init(
 		password: pass,
 		client_ip,
 		listen_addresses,
+		dbs,
 		web,
 		strict,
 		log: CustomEnvFilter(log),
@@ -125,7 +129,7 @@ pub async fn init(
 	// Initiate master auth
 	iam::init().await?;
 	// Start the kvs server
-	dbs::init().await?;
+	dbs::init(dbs).await?;
 	// Start the web server
 	net::init().await?;
 	// All ok
