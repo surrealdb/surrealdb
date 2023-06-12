@@ -393,7 +393,7 @@ impl Rpc {
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
 		let opts = CF.get().unwrap();
-		surrealdb::iam::signin::signin(kvs, &None, opts.strict, &mut self.session, vars)
+		surrealdb::iam::signin::signin(kvs, opts.strict, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)

@@ -25,7 +25,7 @@ mod api_integration {
 
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
-	const ROOT_PASS: &str = "surrealdb";
+	const ROOT_PASS: &str = "root";
 
 	#[derive(Debug, Serialize)]
 	struct Record<'a> {

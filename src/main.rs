@@ -21,7 +21,6 @@ mod cnf;
 mod dbs;
 mod env;
 mod err;
-mod iam;
 mod net;
 mod o11y;
 mod rpc;

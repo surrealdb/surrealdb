@@ -2,8 +2,8 @@ mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
 	use rand::{thread_rng, Rng};
-	use std::error::Error;
 	use serial_test::serial;
+	use std::error::Error;
 	use std::fs;
 	use std::path::Path;
 	use std::process::{Command, Stdio};
@@ -104,7 +104,7 @@ mod cli_integration {
 			extra_args.push_str(" --no-auth");
 		}
 
-		let start_args = format!("start --bind {addr} memory --no-banner --log info {extra_args}");
+		let start_args = format!("start --bind {addr} memory --no-banner --log info --user root --pass root {extra_args}");
 
 		println!("starting server with args: {start_args}");
 
@@ -300,10 +300,9 @@ mod cli_integration {
 
 	#[tokio::test]
 	#[serial]
-	#[ignore = "only runs in CI"]
 	async fn with_kv_auth() {
 		let (addr, _server) = start_server(true, false, true).await.unwrap();
-		let creds = format!("--user root --pass surrealdb");
+		let creds = format!("--user root --pass root");
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
 		// Can query /sql over HTTP

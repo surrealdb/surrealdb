@@ -9,8 +9,10 @@ pub struct Config {
 	pub strict: bool,
 	pub bind: SocketAddr,
 	pub path: String,
-	pub no_auth: bool,
 	pub client_ip: ClientIp,
+	pub no_auth: bool,
+	pub user: Option<String>,
+	pub pass: Option<String>,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
 }

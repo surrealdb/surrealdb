@@ -4,7 +4,6 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
 use crate::kvs::Datastore;
-use crate::opt::auth::Root;
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::{Duration, Utc};
@@ -15,7 +14,6 @@ use super::verify::verify_creds;
 
 pub async fn signin(
 	kvs: &Datastore,
-	configured_root: &Option<Root<'_>>,
 	strict: bool,
 	session: &mut Session,
 	vars: Object,
@@ -89,14 +87,7 @@ pub async fn signin(
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 
-					// If there's a configured root (local engines), attempt to signin to it
-					// Otherwise, do a signin using a KV user
-					if configured_root.is_some() {
-						super::signin::su(configured_root, session, user, pass)?;
-						Ok(None)
-					} else {
-						super::signin::kv(kvs, session, user, pass).await
-					}
+					super::signin::kv(kvs, session, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -304,22 +295,4 @@ pub async fn kv(
 		}
 		Err(e) => Err(e),
 	}
-}
-
-// Use for local engines authentication
-pub fn su(
-	configured_root: &Option<Root<'_>>,
-	session: &mut Session,
-	user: String,
-	pass: String,
-) -> Result<(), Error> {
-	// Attempt to verify the root user
-	if let Some(root) = configured_root {
-		if user == root.username && pass == root.password {
-			session.au = Arc::new(Auth::Kv);
-			return Ok(());
-		}
-	}
-	// The specified user login does not exist
-	Err(Error::InvalidAuth)
 }

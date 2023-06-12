@@ -87,6 +87,13 @@ pub(crate) fn router(
 ) {
 	spawn_local(async move {
 		let url = address.endpoint;
+		let configured_root = match address.auth {
+			Level::Kv => Some(Root {
+				username: &address.username,
+				password: &address.password,
+			}),
+			_ => None,
+		};
 
 		let path = match url.scheme() {
 			"mem" => "memory",
@@ -95,6 +102,14 @@ pub(crate) fn router(
 
 		let kvs = match Datastore::new(path).await {
 			Ok(kvs) => {
+				// If a root user is specified, setup the initial datastore credentials
+				if configured_root.is_some() {
+					if let Err(error) = kvs.setup_initial_creds(configured_root.unwrap()).await {
+						let _ = conn_tx.into_send_async(Err(error.into())).await;
+						return;
+					}
+				}
+
 				let _ = conn_tx.into_send_async(Ok(())).await;
 				kvs
 			}
@@ -106,13 +121,7 @@ pub(crate) fn router(
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
-		let configured_root = match address.auth {
-			Level::Kv => Some(Root {
-				username: &address.username,
-				password: &address.password,
-			}),
-			_ => None,
-		};
+
 		let mut session = if configured_root.is_some() {
 			// If a root user is specified, lock down the database
 			Session::default()

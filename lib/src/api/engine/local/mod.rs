@@ -46,7 +46,6 @@ use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use crate::opt::auth::Root;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Query;
@@ -338,9 +337,6 @@ pub struct TiKv;
 pub struct FDb;
 
 /// An embedded database
-///
-/// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe
-/// on `Db`
 #[derive(Debug, Clone)]
 pub struct Db {
 	pub(crate) method: crate::api::conn::Method,
@@ -403,7 +399,6 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Datastore,
-	configured_root: &Option<Root<'_>>,
 	strict: bool,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
@@ -440,9 +435,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response =
-				crate::iam::signin::signin(kvs, configured_root, strict, session, credentials)
-					.await?;
+			let response = crate::iam::signin::signin(kvs, strict, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Authenticate => {

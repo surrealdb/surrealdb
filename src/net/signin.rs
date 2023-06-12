@@ -63,7 +63,7 @@ async fn handler(
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signin::signin(kvs, &None, opts.strict, &mut session, vars)
+			match surrealdb::iam::signin::signin(kvs, opts.strict, &mut session, vars)
 				.await
 				.map_err(Error::from)
 			{

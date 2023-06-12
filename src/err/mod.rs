@@ -73,6 +73,9 @@ impl From<Utf8Error> for Error {
 
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
+		if matches!(error, surrealdb::error::Db::InvalidAuth) {
+			return Error::InvalidAuth;
+		}
 		Error::Db(error.into())
 	}
 }

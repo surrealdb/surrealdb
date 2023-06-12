@@ -72,7 +72,7 @@ async fn signin_ns() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	db.signin(Namespace {
@@ -91,7 +91,7 @@ async fn signin_db() {
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON DATABASE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON DATABASE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	db.signin(Database {
@@ -151,7 +151,7 @@ async fn authenticate() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	let token = db

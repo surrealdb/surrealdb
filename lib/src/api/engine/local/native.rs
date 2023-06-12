@@ -89,6 +89,13 @@ pub(crate) fn router(
 ) {
 	tokio::spawn(async move {
 		let url = address.endpoint;
+		let configured_root = match address.auth {
+			Level::Kv => Some(Root {
+				username: &address.username,
+				password: &address.password,
+			}),
+			_ => None,
+		};
 
 		let kvs = {
 			let path = match url.scheme() {
@@ -106,6 +113,14 @@ pub(crate) fn router(
 
 			match Datastore::new(&path).await {
 				Ok(kvs) => {
+					// If a root user is specified, setup the initial datastore credentials
+					if configured_root.is_some() {
+						if let Err(error) = kvs.setup_initial_creds(configured_root.unwrap()).await
+						{
+							let _ = conn_tx.into_send_async(Err(error.into())).await;
+							return;
+						}
+					}
 					let _ = conn_tx.into_send_async(Ok(())).await;
 					kvs
 				}
@@ -118,13 +133,7 @@ pub(crate) fn router(
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
-		let configured_root = match address.auth {
-			Level::Kv => Some(Root {
-				username: &address.username,
-				password: &address.password,
-			}),
-			_ => None,
-		};
+
 		let mut session = if configured_root.is_some() {
 			// If a root user is specified, lock down the database
 			Session::default()
@@ -134,15 +143,7 @@ pub(crate) fn router(
 		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(
-				route.request,
-				&kvs,
-				&configured_root,
-				address.strict,
-				&mut session,
-				&mut vars,
-			)
-			.await
+			match super::router(route.request, &kvs, address.strict, &mut session, &mut vars).await
 			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;

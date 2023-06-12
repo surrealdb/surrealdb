@@ -497,3 +497,77 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>
 		response_type: PhantomData,
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::sql::{test::Parse, value::Value};
+
+	#[tokio::test]
+	async fn local_engine_without_auth() {
+		// Instantiate an in-memory instance without root credentials
+		let db = connect("memory").await.unwrap();
+		db.use_ns("N").use_db("D").await.unwrap();
+		// The client has access to everything
+		assert!(
+			db.query("INFO FOR KV").await.unwrap().check().is_ok(),
+			"client should have access to KV"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
+			"client should have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
+			"client should have access to DB"
+		);
+
+		// There are no users in the datastore
+		let mut res = db.query("INFO FOR KV").await.unwrap();
+		let users: Value = res.take("users").unwrap();
+
+		assert_eq!(users, Value::parse("[{}]"), "there should be no users in the system");
+	}
+
+	#[tokio::test]
+	async fn local_engine_with_auth() {
+		// Instantiate an in-memory instance with root credentials
+		let creds = Root {
+			username: "root",
+			password: "root",
+		};
+		let db = connect(("memory", creds)).await.unwrap();
+		db.use_ns("N").use_db("D").await.unwrap();
+
+		// The client needs to sign in before it can access anything
+		assert!(
+			db.query("INFO FOR KV").await.unwrap().check().is_err(),
+			"client should not have access to KV"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_err(),
+			"client should not have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_err(),
+			"client should not have access to DB"
+		);
+
+		// It can sign in
+		assert!(db.signin(creds).await.is_ok(), "client should not be able to sign in");
+
+		// After the sign in, the client has access to everything
+		assert!(
+			db.query("INFO FOR KV").await.unwrap().check().is_ok(),
+			"client should have access to KV"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
+			"client should have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
+			"client should have access to DB"
+		);
+	}
+}

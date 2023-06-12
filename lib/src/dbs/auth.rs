@@ -1,10 +1,6 @@
 use std::fmt;
 
-use once_cell::sync::OnceCell;
-
 use crate::err::Error;
-
-pub static AUTH_ENABLED: OnceCell<bool> = OnceCell::new();
 
 /// The authentication level for a datastore execution context.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
@@ -70,11 +66,6 @@ pub enum Auth {
 }
 
 impl Auth {
-	// Is authentication enabled?
-	pub fn is_enabled() -> bool {
-		// If AUTH_ENABLED is not set, then authentication is enabled by default
-		*AUTH_ENABLED.get().unwrap_or(&true)
-	}
 	/// Checks whether the current authentication has root level permissions
 	pub fn is_kv(&self) -> bool {
 		self.check(Level::Kv)
@@ -117,11 +108,6 @@ impl Auth {
 	}
 	/// Checks whether the current authentication matches the required level
 	pub(crate) fn check(&self, level: Level) -> bool {
-		// If authentication is disabled, return always true
-		if !Self::is_enabled() {
-			return true;
-		}
-
 		match self {
 			Auth::No => matches!(level, Level::No),
 			Auth::Sc(_, _, _) => matches!(level, Level::No | Level::Sc),

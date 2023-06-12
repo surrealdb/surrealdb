@@ -8,6 +8,7 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::kvs::LOG;
+use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -23,6 +24,7 @@ use tracing::instrument;
 pub struct Datastore {
 	pub(super) inner: Inner,
 	query_timeout: Option<Duration>,
+	auth_enabled: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -207,6 +209,7 @@ impl Datastore {
 		inner.map(|inner| Self {
 			inner,
 			query_timeout: None,
+			auth_enabled: false,
 		})
 	}
 
@@ -214,6 +217,44 @@ impl Datastore {
 	pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
 		self
+	}
+
+	/// Set global auth config
+	pub fn auth(mut self, auth: bool) -> Self {
+		self.auth_enabled = auth;
+		self
+	}
+
+	pub fn is_auth_enabled(&self) -> bool {
+		self.auth_enabled
+	}
+
+	// Setup the initial credentials
+	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+		let mut txn = self.transaction(false, false).await?;
+
+		match txn.all_kv_users().await {
+			Ok(val) if val.is_empty() => {
+				warn!(
+					target: LOG,
+					"No root users found, create the initial user '{}'.", creds.username
+				);
+
+				let sql = format!(
+					"DEFINE USER {user} ON KV PASSWORD '{pass}'",
+					user = creds.username,
+					pass = creds.password
+				);
+				let sess = Session::for_kv();
+				self.execute(&sql, &sess, None, false).await?;
+				Ok(())
+			}
+			Ok(_) => {
+				warn!(target: LOG, "Root users found, don't create the initial user.");
+				Ok(())
+			}
+			Err(e) => Err(e.into()),
+		}
 	}
 
 	/// Create a new transaction on this datastore
@@ -366,6 +407,7 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
