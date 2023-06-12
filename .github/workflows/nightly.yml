@@ -29,7 +29,7 @@ jobs:
 
       - name: Run cargo test
         run: |
-          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace memory &)
+          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
 
   lint:

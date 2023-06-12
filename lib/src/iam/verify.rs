@@ -384,6 +384,8 @@ async fn verify_ns_creds(
 
 	let user_res = match tx.get_ns_user(ns, user).await {
 		Ok(u) => Ok(u),
+		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
+		// If the USER resource is not found in the namespace, try to find the LOGIN resource
 		Err(error::Db::UserNsNotFound {
 			ns: _,
 			value: _,
@@ -415,6 +417,8 @@ async fn verify_db_creds(
 
 	let user_res = match tx.get_db_user(ns, db, user).await {
 		Ok(u) => Ok(u),
+		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
+		// If the USER resource is not found in the database, try to find the LOGIN resource
 		Err(error::Db::UserDbNotFound {
 			ns: _,
 			db: _,

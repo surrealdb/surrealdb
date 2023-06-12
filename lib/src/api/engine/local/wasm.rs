@@ -111,7 +111,7 @@ pub(crate) fn router(
 				}
 
 				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs
+				kvs.auth(true)
 			}
 			Err(error) => {
 				let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -122,11 +122,12 @@ pub(crate) fn router(
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
 
-		let mut session = if configured_root.is_some() {
-			// If a root user is specified, lock down the database
+		let mut session = if kvs.is_auth_enabled() {
+			// If auth is enabled, lock down the database
 			Session::default()
 		} else {
-			// If no root user is specified, the database should be open
+			// If auth is disabled, the database should be open
+			warn!("Authentication is disabled");
 			Session::for_kv()
 		};
 

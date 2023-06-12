@@ -407,7 +407,6 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
-
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
