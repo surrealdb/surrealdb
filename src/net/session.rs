@@ -1,10 +1,12 @@
+use crate::dbs::DB;
 use crate::err::Error;
-use crate::iam::verify::{basic, token};
+use crate::iam::verify::basic;
 use crate::iam::BASIC;
-use crate::iam::TOKEN;
 use crate::net::client_ip;
 use std::sync::Arc;
 use surrealdb::dbs::{Auth, Session};
+use surrealdb::iam::verify::token;
+use surrealdb::iam::TOKEN;
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
@@ -34,22 +36,20 @@ async fn process(
 	ns: Option<String>,
 	db: Option<String>,
 ) -> Result<Session, warp::Rejection> {
-	// TODO(sgirones): ns and db allow the invalid value Some("").
-	// Once we introduce namespaces/databases/scope as resources, we can properly parse the values and reject them if necessary.
-	// For now, reject the request if the value is Some("").
-	if ns == Some(String::new()) || db == Some(String::new()) {
-		Err(Error::InvalidAuth)?
-	}
-
+	let kvs = DB.get().unwrap();
 	// Create session
 	#[rustfmt::skip]
 	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
 	// Parse the authentication header
 	match au {
 		// Basic authentication data was supplied
-		Some(auth) if auth.starts_with(BASIC) => basic(&mut session, auth).await,
+		Some(auth) if auth.starts_with(BASIC) => {
+			basic(&mut session, auth).await.map_err(Error::from)
+		}
 		// Token authentication data was supplied
-		Some(auth) if auth.starts_with(TOKEN) => token(&mut session, auth).await,
+		Some(auth) if auth.starts_with(TOKEN) => {
+			token(kvs, &mut session, auth).await.map_err(Error::from)
+		}
 		// Wrong authentication data was supplied
 		Some(_) => Err(Error::InvalidAuth),
 		// No authentication data was supplied

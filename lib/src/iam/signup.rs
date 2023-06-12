@@ -1,17 +1,21 @@
-use crate::cli::CF;
 use crate::cnf::SERVER_NAME;
-use crate::dbs::DB;
+use crate::dbs::Auth;
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
+use crate::kvs::Datastore;
+use crate::sql::Object;
+use crate::sql::Value;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
-use surrealdb::dbs::Auth;
-use surrealdb::dbs::Session;
-use surrealdb::sql::Object;
-use surrealdb::sql::Value;
 
-pub async fn signup(session: &mut Session, vars: Object) -> Result<Option<String>, Error> {
+pub async fn signup(
+	kvs: &Datastore,
+	strict: bool,
+	session: &mut Session,
+	vars: Object,
+) -> Result<Option<String>, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -24,23 +28,21 @@ pub async fn signup(session: &mut Session, vars: Object) -> Result<Option<String
 			let db = db.to_raw_string();
 			let sc = sc.to_raw_string();
 			// Attempt to signin to specified scope
-			super::signup::sc(session, ns, db, sc, vars).await
+			super::signup::sc(kvs, strict, session, ns, db, sc, vars).await
 		}
 		_ => Err(Error::InvalidAuth),
 	}
 }
 
 pub async fn sc(
+	kvs: &Datastore,
+	strict: bool,
 	session: &mut Session,
 	ns: String,
 	db: String,
 	sc: String,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
-	// Get local copy of options
-	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied Scope login exists
@@ -54,7 +56,7 @@ pub async fn sc(
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars, opt.strict).await {
+					match kvs.compute(val, &sess, vars, strict).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned

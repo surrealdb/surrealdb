@@ -146,11 +146,6 @@ pub enum Error {
 	/// it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]
 	BackupsNotSupported,
-
-	/// The protocol or storage engine being used does not support authentication on the
-	/// architecture it's running on
-	#[error("The protocol or storage engine does not support authentication on this architecture")]
-	AuthNotSupported,
 }
 
 #[cfg(feature = "protocol-http")]

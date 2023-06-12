@@ -9,10 +9,9 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::connect;
-use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::{self, Statement, Value};
-use surrealdb::{Error as SurrealError, Response};
+use surrealdb::Response;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -52,9 +51,6 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
 
-	// Connect to the database engine
-	let client = connect(endpoint).await?;
-
 	// Keep track of current namespace/database.
 	let (mut ns, mut db) = if let Some(DatabaseSelectionOptionalArguments {
 		namespace,
@@ -66,22 +62,26 @@ pub async fn init(
 		(None, None)
 	};
 
-	// Sign in to the server if the specified database engine supports it
-	if let Some(username) = username {
+	let client = if username.is_none() {
+		connect(endpoint.to_owned()).await?
+	} else {
 		let root = Root {
-			username: &username,
-			password: &password.expect("empty password not allowed"),
+			username: &username.unwrap(),
+			password: &password.expect("Password is required when username is provided"),
 		};
-		if let Err(error) = client.signin(root).await {
-			match error {
-				// Authentication not supported by this engine, we can safely continue
-				SurrealError::Api(ApiError::AuthNotSupported) => {}
-				error => {
-					return Err(error.into());
-				}
-			}
-		}
-	}
+
+		// Connect to the database engine with authentication
+		//
+		// NOTE: Why do we need to do this? This code is used to connect to local and remote engines.
+		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
+		// * For remote engines, it's not really necessary, because auth is already configured by the server.
+		// It was decided to do it this way to keep the same code in both scenarios.
+		let client = connect((endpoint, root)).await?;
+
+		// Sign in to the server
+		client.signin(root).await?;
+		client
+	};
 
 	// Create a new terminal REPL
 	let mut rl = Editor::new().unwrap();

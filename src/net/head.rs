@@ -1,6 +1,6 @@
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
-use crate::cnf::SERVER_NAME;
+use surrealdb::cnf::SERVER_NAME;
 
 const ID: &str = "ID";
 const NS: &str = "NS";

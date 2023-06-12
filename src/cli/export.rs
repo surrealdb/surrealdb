@@ -5,9 +5,7 @@ use crate::cli::LOG;
 use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::connect;
-use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
-use surrealdb::Error as SurrealError;
 
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
@@ -43,26 +41,26 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 
-	// Connect to the database engine
-	let client = connect(endpoint).await?;
-
-	// Sign in to the server if the specified database engine supports it
-	if let Some(username) = username {
+	let client = if username.is_none() {
+		connect(endpoint.to_owned()).await?
+	} else {
 		let root = Root {
-			username: &username,
-			password: &password.expect("empty password not allowed"),
+			username: &username.unwrap(),
+			password: &password.expect("Password is required when username is provided"),
 		};
 
-		if let Err(error) = client.signin(root).await {
-			match error {
-				// Authentication not supported by this engine, we can safely continue
-				SurrealError::Api(ApiError::AuthNotSupported) => {}
-				error => {
-					return Err(error.into());
-				}
-			}
-		}
-	}
+		// Connect to the database engine with authentication
+		//
+		// NOTE: Why do we need to do this? This code is used to connect to local and remote engines.
+		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
+		// * For remote engines, it's not really necessary, because auth is already configured by the server.
+		// It was decided to do it this way to keep the same code in both scenarios.
+		let client = connect((endpoint, root)).await?;
+
+		// Sign in to the server
+		client.signin(root).await?;
+		client
+	};
 
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;

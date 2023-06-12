@@ -366,10 +366,6 @@ where
 
 	/// Signs up a user to a specific authentication scope
 	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
-	///
 	/// # Examples
 	///
 	/// ```no_run
@@ -429,10 +425,6 @@ where
 	}
 
 	/// Signs this connection in to a specific authentication scope
-	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
 	///
 	/// # Examples
 	///
@@ -553,10 +545,6 @@ where
 
 	/// Invalidates the authentication for the current connection
 	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
-	///
 	/// # Examples
 	///
 	/// ```no_run
@@ -574,10 +562,6 @@ where
 	}
 
 	/// Authenticates the current connection with a JWT token
-	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
 	///
 	/// # Examples
 	///
