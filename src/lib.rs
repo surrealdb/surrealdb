@@ -1,5 +1,4 @@
 use proc_macro::TokenStream;
-use quote::format_ident;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
@@ -9,15 +8,6 @@ pub fn store(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	// Fetch the struct name
 	let name = &input.ident;
-	// Fetch the macro options
-	let conf = input.attrs.iter().find(|a| a.path.is_ident("format")).map(|a| a.tokens.to_string());
-	// Fetch the output format
-	let func = match conf {
-		Some(v) if v.as_str() == "(NamedCompact)" => format_ident!("to_vec_named_compact"),
-		Some(v) if v.as_str() == "(Compact)" => format_ident!("to_vec_compact"),
-		Some(v) if v.as_str() == "(Named)" => format_ident!("to_vec_named"),
-		_ => format_ident!("to_vec"),
-	};
 	//
 	let output = quote! {
 
@@ -33,26 +23,40 @@ pub fn store(input: TokenStream) -> TokenStream {
 			}
 		}
 
-		impl From<&Vec<u8>> for #name {
-			fn from(v: &Vec<u8>) -> Self {
-				bung::from_slice::<Self>(v).unwrap()
-			}
-		}
-
 		impl From<#name> for Vec<u8> {
 			fn from(v: #name) -> Vec<u8> {
 				Self::from(&v)
 			}
 		}
 
+		impl From<&Vec<u8>> for #name {
+			fn from(v: &Vec<u8>) -> Self {
+				use bincode::Options;
+				bincode::options()
+					.with_no_limit()
+					.with_little_endian()
+					.with_varint_encoding()
+					.reject_trailing_bytes()
+					.deserialize::<Self>(v)
+					.unwrap()
+			}
+		}
+
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
-				bung::#func(v).unwrap_or_default()
+				use bincode::Options;
+				bincode::options()
+					.with_no_limit()
+					.with_little_endian()
+					.with_varint_encoding()
+					.reject_trailing_bytes()
+					.serialize(v)
+					.unwrap_or_default()
 			}
 		}
 
 	};
-
+	//
 	output.into()
 }
 
