@@ -60,7 +60,7 @@ pub mod ft; // Stores a DEFINE TABLE AS config definition
 pub mod graph; // Stores a graph edge pointer
 pub mod index; // Stores an index entry
 pub mod ix; // Stores a DEFINE INDEX config definition
-pub mod ku;
+pub mod ku; // Stores a DEFINE USER ON KV config definition
 pub mod kv; // Stores the key prefix for all keys
 pub mod lq; // Stores a LIVE SELECT query definition on the database
 pub mod lv; // Stores a LIVE SELECT query definition on the table
@@ -75,7 +75,7 @@ pub mod scope; // Stores the key prefix for all keys under a scope
 pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores a DEFINE USER ON KV config definition
+pub mod thing;
 
 const CHAR_PATH: u8 = 0xb1; // ±
 const CHAR_INDEX: u8 = 0xa4; // ¤
