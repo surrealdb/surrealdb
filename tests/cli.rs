@@ -3,6 +3,7 @@ mod cli_integration {
 
 	use rand::{thread_rng, Rng};
 	use std::error::Error;
+	use serial_test::serial;
 	use std::fs;
 	use std::path::Path;
 	use std::process::{Command, Stdio};
@@ -131,27 +132,31 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[serial]
 	fn version() {
 		assert!(run("version").output().is_ok());
 	}
 
 	#[test]
+	#[serial]
 	fn help() {
 		assert!(run("help").output().is_ok());
 	}
 
 	#[test]
+	#[serial]
 	fn nonexistent_subcommand() {
 		assert!(run("nonexistent").output().is_err());
 	}
 
 	#[test]
+	#[serial]
 	fn nonexistent_option() {
 		assert!(run("version --turbo").output().is_err());
 	}
 
 	#[tokio::test]
-	#[ignore = "only runs in CI"]
+	#[serial]
 	async fn all_commands() {
 		let (addr, _server) = start_server(false, false, true).await.unwrap();
 
@@ -282,7 +287,7 @@ mod cli_integration {
 	}
 
 	#[tokio::test]
-	#[ignore = "only runs in CI"]
+	#[serial]
 	async fn start_tls() {
 		let (_, server) = start_server(false, true, false).await.unwrap();
 
@@ -294,6 +299,7 @@ mod cli_integration {
 	}
 
 	#[tokio::test]
+	#[serial]
 	#[ignore = "only runs in CI"]
 	async fn with_kv_auth() {
 		let (addr, _server) = start_server(true, false, true).await.unwrap();
@@ -343,7 +349,7 @@ mod cli_integration {
 	}
 
 	#[tokio::test]
-	#[ignore = "only runs in CI"]
+	#[serial]
 	async fn with_anon_auth() {
 		let (addr, _server) = start_server(true, false, true).await.unwrap();
 		let creds = ""; // Anonymous user

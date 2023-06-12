@@ -25,6 +25,7 @@ use crate::sql::id::Id;
 use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
+use crate::sql::number::decimal_is_integer;
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
@@ -38,9 +39,6 @@ use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
-use bigdecimal::BigDecimal;
-use bigdecimal::FromPrimitive;
-use bigdecimal::ToPrimitive;
 use chrono::{DateTime, Utc};
 use derive::Store;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -53,6 +51,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
+use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use std::cmp::Ordering;
@@ -403,8 +402,8 @@ impl From<f64> for Value {
 	}
 }
 
-impl From<BigDecimal> for Value {
-	fn from(v: BigDecimal) -> Self {
+impl From<Decimal> for Value {
+	fn from(v: Decimal) -> Self {
 		Value::Number(Number::from(v))
 	}
 }
@@ -654,12 +653,12 @@ impl TryFrom<Value> for f64 {
 	}
 }
 
-impl TryFrom<Value> for BigDecimal {
+impl TryFrom<Value> for Decimal {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
 		}
 	}
 }
@@ -1175,9 +1174,9 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if v.is_integer() => match v.to_i64() {
+			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
 				// The Decimal can be represented as an i64
-				Some(v) => Ok(v),
+				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
 				_ => Err(Error::CoerceTo {
 					from: self,
@@ -1200,9 +1199,9 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as u64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if v.is_integer() => match v.to_u64() {
+			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
 				// The Decimal can be represented as an u64
-				Some(v) => Ok(v),
+				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
 				_ => Err(Error::CoerceTo {
 					from: self,
@@ -1225,11 +1224,11 @@ impl Value {
 			// Attempt to convert an int number
 			Value::Number(Number::Int(v)) => Ok(v as f64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) => match v.to_f64() {
+			Value::Number(Number::Decimal(v)) => match v.try_into() {
 				// The Decimal can be represented as a f64
-				Some(v) => Ok(v),
+				Ok(v) => Ok(v),
 				// Ths Decimal loses precision
-				None => Err(Error::CoerceTo {
+				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "f64".into(),
 				}),
@@ -1263,7 +1262,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if v.is_integer() => match v.to_i64() {
+			Value::Number(Number::Decimal(ref v)) if decimal_is_integer(v) => match v.to_i64() {
 				// The Decimal can be represented as an Int
 				Some(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
@@ -1311,7 +1310,7 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
-			Value::Number(Number::Int(ref v)) => match BigDecimal::from_i64(*v) {
+			Value::Number(Number::Int(v)) => match Decimal::from_i64(v) {
 				// The Int can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
 				// Ths Int does not convert to a Decimal
@@ -1321,7 +1320,7 @@ impl Value {
 				}),
 			},
 			// Attempt to convert an float number
-			Value::Number(Number::Float(ref v)) => match BigDecimal::from_f64(*v) {
+			Value::Number(Number::Float(v)) => match Decimal::from_f64(v) {
 				// The Float can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
 				// Ths Float does not convert to a Decimal
@@ -1724,9 +1723,9 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if v.is_integer() => match v.to_i64() {
+			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
 				// The Decimal can be represented as an Int
-				Some(v) => Ok(Number::Int(v)),
+				Ok(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
 				_ => Err(Error::ConvertTo {
 					from: self,
@@ -1759,11 +1758,11 @@ impl Value {
 			// Attempt to convert an int number
 			Value::Number(Number::Int(v)) => Ok(Number::Float(v as f64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) => match v.to_f64() {
+			Value::Number(Number::Decimal(v)) => match v.try_into() {
 				// The Decimal can be represented as a Float
-				Some(v) => Ok(Number::Float(v)),
-				// Ths BigDecimal loses precision
-				None => Err(Error::ConvertTo {
+				Ok(v) => Ok(Number::Float(v)),
+				// The Decimal loses precision
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "float".into(),
 				}),
@@ -1792,30 +1791,30 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
-			Value::Number(Number::Int(ref v)) => match BigDecimal::from_i64(*v) {
+			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
 				// The Int can be represented as a Decimal
-				Some(v) => Ok(Number::Decimal(v)),
+				Ok(v) => Ok(Number::Decimal(v)),
 				// Ths Int does not convert to a Decimal
-				None => Err(Error::ConvertTo {
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
 				}),
 			},
 			// Attempt to convert an float number
-			Value::Number(Number::Float(ref v)) => match BigDecimal::from_f64(*v) {
+			Value::Number(Number::Float(ref v)) => match Decimal::try_from(*v) {
 				// The Float can be represented as a Decimal
-				Some(v) => Ok(Number::Decimal(v)),
+				Ok(v) => Ok(Number::Decimal(v)),
 				// Ths Float does not convert to a Decimal
-				None => Err(Error::ConvertTo {
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
 				}),
 			},
 			// Attempt to convert a string value
-			Value::Strand(ref v) => match BigDecimal::from_str(v) {
-				// The string can be represented as a Float
+			Value::Strand(ref v) => match Decimal::from_str(v) {
+				// The string can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths string is not a float
+				// Ths string is not a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -2226,6 +2225,7 @@ impl Value {
 			Value::None => true,
 			Value::Null => true,
 			Value::Bool(_) => true,
+			Value::Bytes(_) => true,
 			Value::Uuid(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
@@ -2523,6 +2523,15 @@ impl TryAdd for Value {
 				(Number::Int(v), Number::Int(w)) if v.checked_add(w).is_none() => {
 					Err(Error::TryAdd(v.to_string(), w.to_string()))
 				}
+				(Number::Decimal(v), Number::Decimal(w)) if v.checked_add(w).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), w) if v.checked_add(w.to_decimal()).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_add(w).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
 				(v, w) => Ok(Value::Number(v + w)),
 			},
 			(Value::Strand(v), Value::Strand(w)) => Ok(Value::Strand(v + w)),
@@ -2547,6 +2556,15 @@ impl TrySub for Value {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => match (v, w) {
 				(Number::Int(v), Number::Int(w)) if v.checked_sub(w).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), Number::Decimal(w)) if v.checked_sub(w).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), w) if v.checked_sub(w.to_decimal()).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_sub(w).is_none() => {
 					Err(Error::TrySub(v.to_string(), w.to_string()))
 				}
 				(v, w) => Ok(Value::Number(v - w)),
@@ -2575,6 +2593,15 @@ impl TryMul for Value {
 				(Number::Int(v), Number::Int(w)) if v.checked_mul(w).is_none() => {
 					Err(Error::TryMul(v.to_string(), w.to_string()))
 				}
+				(Number::Decimal(v), Number::Decimal(w)) if v.checked_mul(w).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), w) if v.checked_mul(w.to_decimal()).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_mul(w).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
 				(v, w) => Ok(Value::Number(v * w)),
 			},
 			(v, w) => Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
@@ -2595,6 +2622,10 @@ impl TryDiv for Value {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => match (v, w) {
 				(_, w) if w == Number::Int(0) => Ok(Value::None),
+				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
+					// Divided a large number by a small number, got an overflowing number
+					Err(Error::TryDiv(v.to_string(), w.to_string()))
+				}
 				(v, w) => Ok(Value::Number(v / w)),
 			},
 			(v, w) => Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
@@ -2617,6 +2648,9 @@ impl TryPow for Value {
 				(Number::Int(v), Number::Int(w))
 					if w.try_into().ok().and_then(|w| v.checked_pow(w)).is_none() =>
 				{
+					Err(Error::TryPow(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), Number::Int(w)) if v.checked_powi(w).is_none() => {
 					Err(Error::TryPow(v.to_string(), w.to_string()))
 				}
 				(v, w) => Ok(Value::Number(v.pow(w))),
@@ -2857,8 +2891,8 @@ mod tests {
 		assert_eq!(String::from("0"), Value::from(0).as_string());
 		assert_eq!(String::from("1"), Value::from(1).as_string());
 		assert_eq!(String::from("-1"), Value::from(-1).as_string());
-		assert_eq!(String::from("1.1"), Value::from(1.1).as_string());
-		assert_eq!(String::from("-1.1"), Value::from(-1.1).as_string());
+		assert_eq!(String::from("1.1f"), Value::from(1.1).as_string());
+		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_string());
 		assert_eq!(String::from("3"), Value::from("3").as_string());
 		assert_eq!(String::from("true"), Value::from("true").as_string());
 		assert_eq!(String::from("false"), Value::from("false").as_string());
@@ -2870,7 +2904,7 @@ mod tests {
 		assert_eq!(64, std::mem::size_of::<Value>());
 		assert_eq!(104, std::mem::size_of::<Error>());
 		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::number::Number>());
+		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
