@@ -1914,6 +1914,7 @@ impl Transaction {
 }
 
 #[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests {
 	use crate::{
 		kvs::Datastore,
