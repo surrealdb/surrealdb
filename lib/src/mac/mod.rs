@@ -23,20 +23,32 @@ macro_rules! get_cfg {
 
 #[cfg(feature = "scripting")]
 macro_rules! throw {
-	($e:ident) => {
+	($ctx:expr,$e:ident) => {
+		js::Exception::from_message($ctx, &$e.to_string())
+			.map(js::Exception::throw)
+			.unwrap_or(js::Error::Exception)
+		/*
+		 * TODO: add line and file back in later
 		js::Error::Exception {
 			line: line!() as i32,
 			message: $e.to_string(),
 			file: file!().to_owned(),
 			stack: "".to_owned(),
 		}
+		*/
 	};
-	($str:expr) => {
+	($ctx:expr,$str:expr) => {
+		js::Exception::from_message($ctx, &$str)
+			.map(js::Exception::throw)
+			.unwrap_or(js::Error::Exception)
+		/*
+		 * TODO: add line and file back in later
 		js::Error::Exception {
 			line: line!() as i32,
 			message: $str.to_owned(),
 			file: file!().to_owned(),
 			stack: "".to_owned(),
 		}
+		*/
 	};
 }

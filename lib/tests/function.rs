@@ -3,7 +3,7 @@ use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Number, Value};
 
 // --------------------------------------------------
 // array
@@ -28,10 +28,13 @@ async fn function_array_add() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2]");
@@ -65,10 +68,13 @@ async fn function_array_all() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::Bool(false);
@@ -94,10 +100,13 @@ async fn function_array_any() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::Bool(true);
@@ -123,10 +132,13 @@ async fn function_array_append() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,[2,3]]");
@@ -152,10 +164,13 @@ async fn function_array_combine() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[ [1,2], [1,3], [2,2], [2,3] ]");
@@ -181,10 +196,13 @@ async fn function_array_complement() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2]");
@@ -210,10 +228,13 @@ async fn function_array_concat() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,3,4,5,6]");
@@ -239,10 +260,13 @@ async fn function_array_difference() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,5,6]");
 	assert_eq!(tmp, val);
@@ -267,10 +291,13 @@ async fn function_array_distinct() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4]");
@@ -297,10 +324,13 @@ async fn function_array_flatten() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4]");
@@ -330,10 +360,13 @@ async fn function_array_group() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,5,6]");
@@ -391,10 +424,13 @@ async fn function_array_intersect() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[3,4]");
@@ -409,7 +445,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 		RETURN array::join([], "");
 		RETURN array::join(["hello", "world"], ", ");
 		RETURN array::join(["again", "again", "again"], " and ");
-		RETURN array::join([42, 3.14, 2.72, 1.61], " and ");
+		RETURN array::join([42, true, "1.61"], " and ");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -429,7 +465,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("42 and 3.14 and 2.72 and 1.61");
+	let val = Value::from("42 and true and 1.61");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -452,10 +488,13 @@ async fn function_array_len() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(6);
@@ -481,10 +520,13 @@ async fn function_array_max() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'text'");
@@ -510,10 +552,13 @@ async fn function_array_min() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("1");
@@ -539,10 +584,13 @@ async fn function_array_pop() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(4);
@@ -568,10 +616,13 @@ async fn function_array_prepend() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[[2,3],1,2]");
@@ -597,10 +648,13 @@ async fn function_array_push() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,[2,3]]");
@@ -658,10 +712,13 @@ async fn function_array_reverse() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[4,3,3,'text',2,1]");
@@ -691,10 +748,13 @@ async fn function_array_slice() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,'text',3,3,4]");
@@ -740,10 +800,13 @@ async fn function_array_sort() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,4,'text']");
@@ -785,10 +848,13 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,4,'text']");
@@ -814,10 +880,13 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("['text',4,4,3,2,1]");
@@ -843,10 +912,13 @@ async fn function_array_union() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but found 3",
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,6,3,4,5]");
@@ -865,7 +937,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 		RETURN bytes::len(<bytes>"");
 		RETURN bytes::len(true);
 		RETURN bytes::len(<bytes>"π");
-		RETURN bytes::len("ππ");
+		RETURN bytes::len(<bytes>"ππ");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -877,10 +949,13 @@ async fn function_bytes_len() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but failed to convert true into a bytes"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but found true"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("2");
@@ -1458,8 +1533,8 @@ async fn function_encoding_base64_decode() -> Result<(), Error> {
 #[tokio::test]
 async fn function_encoding_base64_encode() -> Result<(), Error> {
 	let sql = r#"
-		RETURN encoding::base64::encode("");
-		RETURN encoding::base64::encode("hello");
+		RETURN encoding::base64::encode(<bytes>"");
+		RETURN encoding::base64::encode(<bytes>"hello");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -1968,10 +2043,13 @@ async fn function_math_bottom() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0."
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0."
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1]");
@@ -2019,10 +2097,13 @@ async fn function_math_fixed() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(101);
@@ -2479,10 +2560,13 @@ async fn function_math_top() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function math::top(). The second argument must be an integer greater than 0."
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function math::top(). The second argument must be an integer greater than 0."
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[3]");
@@ -4069,11 +4153,13 @@ async fn function_type_decimal() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("13.1043784018");
+	let val = Value::Number(Number::Decimal("13.1043784018".parse().unwrap()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("13.5719384719384719385639856394139476937756394756");
+	let val = Value::Number(Number::Decimal(
+		"13.571938471938471938563985639413947693775639".parse().unwrap(),
+	));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4209,7 +4295,7 @@ async fn function_type_point() -> Result<(), Error> {
 async fn function_type_string() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::string(30s);
-		RETURN type::string(13.58248);
+		RETURN type::string(13);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -4221,7 +4307,7 @@ async fn function_type_string() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("13.58248");
+	let val = Value::from("13");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

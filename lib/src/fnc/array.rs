@@ -262,7 +262,7 @@ mod tests {
 		test(
 			vec![Value::from(3.14), Value::from(2.72), Value::from(1.61)].into(),
 			" is not ",
-			"3.14 is not 2.72 is not 1.61",
+			"3.14f is not 2.72f is not 1.61f",
 		);
 	}
 }

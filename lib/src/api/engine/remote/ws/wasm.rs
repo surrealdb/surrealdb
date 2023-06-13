@@ -12,7 +12,6 @@ use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
@@ -83,12 +82,9 @@ impl Connection for Client {
 				return Err(error);
 			}
 
-			let mut features = HashSet::new();
-			features.insert(ExtraFeatures::Auth);
-
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {
-					features,
+					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -265,7 +261,7 @@ pub(crate) fn router(
 							Ok(option) => {
 								if let Some(response) = option {
 									trace!(target: LOG, "{response:?}");
-									if let Some(Ok(id)) = response.id.map(Value::convert_to_i64) {
+									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
 										if let Some((method, sender)) = routes.remove(&id) {
 											let _ = sender
 												.into_send_async(DbResponse::from((

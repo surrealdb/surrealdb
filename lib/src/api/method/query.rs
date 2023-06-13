@@ -486,7 +486,7 @@ mod tests {
 			Err(Error::BackupsNotSupported.into()),
 			Ok(vec![6.into()]),
 			Ok(vec![7.into()]),
-			Err(Error::AuthNotSupported.into()),
+			Err(Error::DuplicateRequestId(0).into()),
 		];
 		let response = Response(to_map(response));
 		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err() else {
@@ -507,14 +507,14 @@ mod tests {
 			Err(Error::BackupsNotSupported.into()),
 			Ok(vec![6.into()]),
 			Ok(vec![7.into()]),
-			Err(Error::AuthNotSupported.into()),
+			Err(Error::DuplicateRequestId(0).into()),
 		];
 		let mut response = Response(to_map(response));
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let crate::Error::Api(Error::AuthNotSupported) = errors.get(&10).unwrap() else {
-            panic!("index `10` is not `AuthNotSupported`");
+		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
+            panic!("index `10` is not `DuplicateRequestId`");
         };
 		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
             panic!("index `7` is not `BackupsNotSupported`");

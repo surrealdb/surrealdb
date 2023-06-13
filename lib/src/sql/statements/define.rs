@@ -1427,7 +1427,7 @@ mod tests {
 				},
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75,1000) HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2f,0.75f,1000) HIGHLIGHTS");
 	}
 
 	#[test]
