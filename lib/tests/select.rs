@@ -109,7 +109,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn t() -> Result<(), Error> {
+async fn select_where_field_is_bool() -> Result<(), Error> {
 	let sql = "
 		CREATE test:1 SET active = false;
 		CREATE test:2 SET active = false;
