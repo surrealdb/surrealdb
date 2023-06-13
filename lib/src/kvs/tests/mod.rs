@@ -38,7 +38,8 @@ mod rocksdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
@@ -61,7 +62,8 @@ mod speedb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -88,7 +90,8 @@ mod tikv {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -115,5 +118,6 @@ mod fdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_allow.rs");
 }
