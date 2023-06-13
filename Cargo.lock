@@ -707,6 +707,7 @@ dependencies = [
  "clang-sys",
  "lazy_static",
  "lazycell",
+ "log",
  "peeking_take_while",
  "prettyplease 0.2.6",
  "proc-macro2",
@@ -715,6 +716,7 @@ dependencies = [
  "rustc-hash",
  "shlex 1.1.0",
  "syn 2.0.18",
+ "which",
 ]
 
 [[package]]
@@ -1654,9 +1656,9 @@ dependencies = [
 
 [[package]]
 name = "foundationdb"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69adb701525370e5f8958454b46e8459b276d81ce6391edbf84eae32eeddff75"
+checksum = "8696fd1be198f101eb58aeecf0f504fc02b28c7afcc008b4e4a998a91b305108"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -1666,35 +1668,40 @@ dependencies = [
  "futures 0.3.28",
  "memchr",
  "rand 0.8.5",
+ "serde",
+ "serde_bytes",
+ "serde_json",
  "static_assertions",
 ]
 
 [[package]]
 name = "foundationdb-gen"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134e1c986a2bb78904f426d4924a55e8c14162ba764e229501eb6f95c8c37489"
+checksum = "62239700f01b041b6372aaeb847c52f960e1a69fd2b1025dc995ea3dd90e3308"
 dependencies = [
  "xml-rs",
 ]
 
 [[package]]
 name = "foundationdb-macros"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2163c7326208be8edc605e10303ec6ae45cf106c12540754a9970bcce0f80cae"
+checksum = "83c8d52fe8b46ab822b4decdcc0d6d85aeedfc98f0d52ba2bd4aec4a97807516"
 dependencies = [
+ "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.18",
+ "try_map",
 ]
 
 [[package]]
 name = "foundationdb-sys"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eb26eee771096794dbee1a2a9defa455443a2c150a810386331aa0d6603d356"
+checksum = "98e49545f5393d276b7b888c77e3f9519fd33727435f8244344be72c3284256f"
 dependencies = [
- "bindgen 0.60.1",
+ "bindgen 0.65.1",
 ]
 
 [[package]]
@@ -4204,6 +4211,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "416bda436f9aab92e02c8e10d49a15ddd339cea90b6e340fe51ed97abb548294"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_cbor"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5227,6 +5243,12 @@ name = "try-lock"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
+
+[[package]]
+name = "try_map"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb1626d07cb5c1bb2cf17d94c0be4852e8a7c02b041acec9a8c5bdda99f9d580"
 
 [[package]]
 name = "tungstenite"

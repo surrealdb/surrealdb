@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
-use crate::sql::Datetime;
 use crate::sql::Version;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
@@ -31,7 +30,20 @@ impl ser::Serializer for Serializer {
 	where
 		T: ?Sized + Serialize,
 	{
-		Ok(Some(Version(Datetime(value.serialize(ser::datetime::Serializer.wrap())?))))
+		value.serialize(self.wrap())
+	}
+
+	#[inline]
+	fn serialize_newtype_struct<T>(
+		self,
+		name: &'static str,
+		value: &T,
+	) -> Result<Self::Ok, Self::Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		debug_assert_eq!(name, "Version");
+		Ok(Some(Version(value.serialize(ser::datetime::Serializer.wrap())?)))
 	}
 }
 
