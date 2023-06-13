@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::fnc;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::val_char;
 use crate::sql::common::{closeparentheses, commas, openparentheses};
@@ -11,7 +10,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{value, Value};
-use crate::sql::Thing;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use nom::branch::alt;
@@ -144,7 +142,7 @@ impl Function {
 				// Compute the function arguments
 				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 				// Run the normal function
-				fnc::run(ctx, txn, exe, thg, doc, s, a).await
+				fnc::run(ctx, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Clone transaction

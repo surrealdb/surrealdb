@@ -1,23 +1,16 @@
 use crate::ctx::Context;
-use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::{Thing, Value};
+use crate::sql::Value;
 
 pub async fn highlight(
-	(_ctx, txn, exe, thg, doc): (
-		&Context<'_>,
-		Option<&'_ Transaction>,
-		Option<&'_ QueryExecutor>,
-		Option<&'_ Thing>,
-		Option<&'_ Value>,
-	),
+	ctx: &Context<'_>,
 	(prefix, suffix, match_ref): (Value, Value, Value),
 ) -> Result<Value, Error> {
-	if let Some(txn) = txn {
-		if let Some(doc) = doc {
-			if let Some(exe) = exe {
-				return exe.highlight(txn, thg, prefix, suffix, match_ref.clone(), doc).await;
+	if let Some(doc) = ctx.doc() {
+		if let Some(thg) = ctx.thing() {
+			if let Some(exe) = ctx.query_executor() {
+				let txn = ctx.clone_transaction()?;
+				return exe.highlight(&txn, thg, prefix, suffix, match_ref.clone(), doc).await;
 			}
 		}
 	}

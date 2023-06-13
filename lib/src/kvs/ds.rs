@@ -414,7 +414,7 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = Context::default();
 		// Add the transaction
-		ctx.add_transaction(txn.clone());
+		ctx.add_transaction(Some(&txn));
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);

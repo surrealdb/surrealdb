@@ -217,7 +217,7 @@ impl Iterable {
 					let mut rid_ctx = Context::new(&iter_ctx);
 					rid_ctx.add_thing(&rid);
 					// Process the record
-					ite.process(ctx, opt, stm, val).await;
+					ite.process(&rid_ctx, opt, stm, val).await;
 				}
 				continue;
 			}

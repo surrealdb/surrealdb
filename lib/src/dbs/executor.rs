@@ -243,7 +243,10 @@ impl<'a> Executor<'a> {
 							// Check if the variable is a protected variable
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
-								false => stm.compute(&ctx, &opt).await,
+								false => {
+									ctx.add_transaction(self.txn.as_ref());
+									stm.compute(&ctx, &opt).await
+								}
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
 									// Move the parameter name, as we no longer need it
@@ -301,6 +304,7 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
+										ctx.add_transaction(self.txn.as_ref());
 										// Process the statement
 										let res = stm.compute(&ctx, &opt).await;
 										// Catch statement timeout
@@ -310,7 +314,10 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => stm.compute(&ctx, &opt).await,
+									None => {
+										ctx.add_transaction(self.txn.as_ref());
+										stm.compute(&ctx, &opt).await
+									}
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
