@@ -12,7 +12,7 @@ storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-speedb = ["surrealdb/kv-speedb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb-6_3"]
+storage-fdb = ["surrealdb/kv-fdb-7_1"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 
