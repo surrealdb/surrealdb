@@ -132,14 +132,7 @@ pub(crate) fn router(
 		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(
-				route.request,
-				&kvs,
-				address.strict,
-				&mut session,
-				&mut vars,
-			)
-			.await
+			match super::router(route.request, &kvs, address.strict, &mut session, &mut vars).await
 			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;
