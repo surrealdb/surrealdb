@@ -107,7 +107,11 @@ impl Fields {
 								// If no function arguments, then compute the result
 								0 => f.compute(ctx, opt, txn, Some(doc)).await?,
 								// If arguments, then pass the first value through
-								_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
+								_ => {
+									f.args()[0]
+										.compute(ctx, opt, txn, None, Some(doc), None)
+										.await?
+								}
 							};
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
@@ -130,7 +134,7 @@ impl Fields {
 								let x = x
 									.get(ctx, opt, txn, Some(doc), v)
 									.await?
-									.compute(ctx, opt, txn, Some(doc))
+									.compute(ctx, opt, txn, None, Some(doc), None)
 									.await?
 									.flatten();
 								// Add the result to the temporary store
@@ -156,7 +160,7 @@ impl Fields {
 						}
 						// This expression is a normal field expression
 						_ => {
-							let x = expr.compute(ctx, opt, txn, Some(doc)).await?;
+							let x = expr.compute(ctx, opt, txn, None, Some(doc), None).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => out.set(ctx, opt, txn, idiom.as_ref(), x).await?,

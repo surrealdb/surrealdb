@@ -296,7 +296,7 @@ impl<'a> Document<'a> {
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(ctx, opt, txn, doc).await?;
+						let val = expr.compute(ctx, opt, txn, None, doc, None).await?;
 						self.set(&mut ops, idiom, val);
 					}
 				}
