@@ -21,6 +21,7 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::{QueryType, Response, Session};
+use surrealdb::opt::auth::Root;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
@@ -434,7 +435,9 @@ impl Rpc {
 
 	#[instrument(skip_all, name = "rpc signup", fields(websocket=self.uuid.to_string()))]
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signup::signup(&mut self.session, vars)
+		let kvs = DB.get().unwrap();
+		let opts = CF.get().unwrap();
+		surrealdb::iam::signup::signup(kvs, opts.strict, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -442,20 +445,27 @@ impl Rpc {
 
 	#[instrument(skip_all, name = "rpc signin", fields(websocket=self.uuid.to_string()))]
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signin::signin(&mut self.session, vars)
+		let kvs = DB.get().unwrap();
+		let opts = CF.get().unwrap();
+		let root = opts.pass.as_ref().map(|pass| Root {
+			username: &opts.user,
+			password: pass,
+		});
+		surrealdb::iam::signin::signin(kvs, &root, opts.strict, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
 	}
 	#[instrument(skip_all, name = "rpc invalidate", fields(websocket=self.uuid.to_string()))]
 	async fn invalidate(&mut self) -> Result<Value, Error> {
-		crate::iam::clear::clear(&mut self.session).await?;
+		surrealdb::iam::clear::clear(&mut self.session)?;
 		Ok(Value::None)
 	}
 
 	#[instrument(skip_all, name = "rpc auth", fields(websocket=self.uuid.to_string()))]
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
-		crate::iam::verify::token(&mut self.session, token.0).await?;
+		let kvs = DB.get().unwrap();
+		surrealdb::iam::verify::token(kvs, &mut self.session, token.0).await?;
 		Ok(Value::None)
 	}
 

@@ -1,7 +1,7 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
 use crate::sql::strand::Strand;
 use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
@@ -89,7 +89,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
+		Display::fmt(&quote_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
 	}
 }
 

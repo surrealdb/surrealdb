@@ -311,7 +311,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			},
 			{
 				group: 2,
-				one: 7.6,
+				one: 7.6000000000000005,
 				two: 12.7,
 			}
 		]",
@@ -328,7 +328,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			},
 			{
 				group: 2,
-				one: 7.6,
+				one: 7.6000000000000005,
 				two: 12.7,
 			}
 		]",
@@ -451,7 +451,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 			{
 				group: 2,
 				one: 9,
-				two: 14,
+				two: 13,
 			}
 		]",
 	);

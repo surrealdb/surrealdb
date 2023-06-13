@@ -3,8 +3,6 @@ use crate::api::conn::Param;
 use crate::api::conn::Router;
 use crate::api::opt::auth::Jwt;
 use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -28,9 +26,6 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.router?;
-			if !router.features.contains(&ExtraFeatures::Auth) {
-				return Err(Error::AuthNotSupported.into());
-			}
 			let mut conn = Client::new(Method::Authenticate);
 			conn.execute_unit(router, Param::new(vec![self.token.into()])).await
 		})

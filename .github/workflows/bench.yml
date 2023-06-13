@@ -1,6 +1,8 @@
 name: Benchmark
 
-on: [pull_request]
+on:
+  push:
+  pull_request:
 
 defaults:
   run:
@@ -9,7 +11,7 @@ defaults:
 jobs:
   bench:
     name: Bench library
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable

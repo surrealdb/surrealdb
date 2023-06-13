@@ -17,6 +17,7 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -27,6 +28,7 @@ pub struct Datastore {
 	pub(super) inner: Inner,
 	pub(super) send: Sender<Notification>,
 	pub(super) recv: Receiver<Notification>,
+	query_timeout: Option<Duration>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -35,6 +37,8 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
+	#[cfg(feature = "kv-speedb")]
+	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -51,8 +55,10 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
+			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
@@ -102,24 +108,12 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		// Create a live query notification channel
-		let (send, recv) = channel::bounded(100);
-		// Initiate the desired datastore
-		match path {
+		let inner = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::Mem(super::mem::Datastore::new().await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::mem::Datastore::new().await.map(Inner::Mem)
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -131,16 +125,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -152,19 +137,24 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate an SpeeDB database
+			s if s.starts_with("speedb:") => {
+				#[cfg(feature = "kv-speedb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("speedb://");
+					let s = s.trim_start_matches("speedb:");
+					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+				#[cfg(not(feature = "kv-speedb"))]
+				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -173,16 +163,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::IndxDB(super::indxdb::Datastore::new(s).await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::indxdb::Datastore::new(s).await.map(Inner::IndxDB)
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -194,16 +175,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::TiKV(super::tikv::Datastore::new(s).await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::tikv::Datastore::new(s).await.map(Inner::TiKV)
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -215,16 +187,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
-						inner: Inner::FDB(super::fdb::Datastore::new(s).await?),
-						send,
-						recv,
-					};
-					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
-					Ok(ds)
+					super::fdb::Datastore::new(s).await.map(Inner::FDB)
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -234,7 +197,27 @@ impl Datastore {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		}
+		};
+		// Create a live query notification channel
+		let (send, recv) = channel::bounded(100);
+		// Initiate the desired datastore
+		let ds = inner.map(|inner| Self {
+			id: Arc::new(Uuid::new_v4()),
+			inner,
+			send,
+			recv,
+			query_timeout: None,
+		})?;
+		info!(target: LOG, "Started kvs store at {}", path);
+		ds.register_membership().await?;
+		trace!(target: LOG, "Registered membership for {}", ds.id);
+		Ok(ds)
+	}
+
+	/// Set global query timeout
+	pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
+		self.query_timeout = duration;
+		self
 	}
 
 	// Adds entries to the KV store indicating membership information
@@ -281,6 +264,11 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
+			}
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SpeeDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
@@ -337,7 +325,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -389,7 +381,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -442,7 +438,11 @@ impl Datastore {
 		//
 		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables

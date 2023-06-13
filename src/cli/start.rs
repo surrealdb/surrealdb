@@ -4,10 +4,11 @@ use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
+use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::iam;
-use crate::net;
+use crate::net::{self, client_ip::ClientIp};
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
@@ -31,10 +32,16 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
 	#[arg(default_value = "127.0.0.1/32")]
 	allowed_networks: Vec<IpNet>,
+	#[arg(help = "The method of detecting the client's IP address")]
+	#[arg(env = "SURREAL_CLIENT_IP", long)]
+	#[arg(default_value = "socket", value_enum)]
+	client_ip: ClientIp,
 	#[arg(help = "The hostname or ip address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[command(flatten)]
+	dbs: StartCommandDbsOptions,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
 	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
 	#[arg(value_parser = super::validator::key_valid)]
@@ -88,7 +95,9 @@ pub async fn init(
 		path,
 		username: user,
 		password: pass,
+		client_ip,
 		listen_addresses,
+		dbs,
 		web,
 		strict,
 		log: CustomEnvFilter(log),
@@ -108,6 +117,7 @@ pub async fn init(
 	let _ = config::CF.set(Config {
 		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
+		client_ip,
 		path,
 		user,
 		pass,
@@ -119,7 +129,7 @@ pub async fn init(
 	// Initiate master auth
 	iam::init().await?;
 	// Start the kvs server
-	dbs::init().await?;
+	dbs::init(dbs).await?;
 	// Start the web server
 	net::init().await?;
 	// All ok

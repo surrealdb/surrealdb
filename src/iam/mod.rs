@@ -1,18 +1,10 @@
-pub mod base;
-pub mod clear;
-pub mod parse;
-pub mod signin;
-pub mod signup;
-pub mod token;
 pub mod verify;
 
 use crate::cli::CF;
 use crate::err::Error;
+use surrealdb::iam::LOG;
 
 pub const BASIC: &str = "Basic ";
-pub const TOKEN: &str = "Bearer ";
-
-const LOG: &str = "surrealdb::iam";
 
 pub async fn init() -> Result<(), Error> {
 	// Get local copy of options

@@ -1,10 +1,13 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::TiKv;
 use crate::api::err::Error;
+use crate::api::opt::auth::Root;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
 use crate::api::Result;
+use crate::dbs::Level;
+use std::fmt::Display;
 use std::net::SocketAddr;
 use url::Url;
 
@@ -18,6 +21,9 @@ impl IntoEndpoint<TiKv> for &str {
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
+			auth: Level::No,
+			username: String::new(),
+			password: String::new(),
 		})
 	}
 }
@@ -32,6 +38,9 @@ impl IntoEndpoint<TiKv> for SocketAddr {
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
+			auth: Level::No,
+			username: String::new(),
+			password: String::new(),
 		})
 	}
 }
@@ -46,19 +55,53 @@ impl IntoEndpoint<TiKv> for String {
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
+			auth: Level::No,
+			username: String::new(),
+			password: String::new(),
 		})
 	}
 }
 
 impl<T> IntoEndpoint<TiKv> for (T, Strict)
 where
-	T: IntoEndpoint<TiKv>,
+	T: IntoEndpoint<TiKv> + Display,
 {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let mut address = self.0.into_endpoint()?;
-		address.strict = true;
-		Ok(address)
+		let (address, _) = self;
+		let mut endpoint = address.into_endpoint()?;
+		endpoint.strict = true;
+		Ok(endpoint)
+	}
+}
+
+impl<T> IntoEndpoint<TiKv> for (T, Root<'_>)
+where
+	T: IntoEndpoint<TiKv> + Display,
+{
+	type Client = Db;
+
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, root) = self;
+		let mut endpoint = address.into_endpoint()?;
+		endpoint.auth = Level::Kv;
+		endpoint.username = root.username.to_owned();
+		endpoint.password = root.password.to_owned();
+		Ok(endpoint)
+	}
+}
+
+impl<T> IntoEndpoint<TiKv> for (T, Strict, Root<'_>)
+where
+	T: IntoEndpoint<TiKv> + Display,
+{
+	type Client = Db;
+
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, _, root) = self;
+		let mut endpoint = (address, root).into_endpoint()?;
+		endpoint.strict = true;
+		Ok(endpoint)
 	}
 }

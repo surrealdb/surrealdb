@@ -366,10 +366,6 @@ where
 
 	/// Signs up a user to a specific authentication scope
 	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
-	///
 	/// # Examples
 	///
 	/// ```no_run
@@ -429,10 +425,6 @@ where
 	}
 
 	/// Signs this connection in to a specific authentication scope
-	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
 	///
 	/// # Examples
 	///
@@ -553,10 +545,6 @@ where
 
 	/// Invalidates the authentication for the current connection
 	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
-	///
 	/// # Examples
 	///
 	/// ```no_run
@@ -574,10 +562,6 @@ where
 	}
 
 	/// Authenticates the current connection with a JWT token
-	///
-	/// # Support
-	///
-	/// Currently only supported by the WS and HTTP protocols.
 	///
 	/// # Examples
 	///
@@ -656,9 +640,6 @@ where
 	/// let people: Vec<Person> = db.select("person").await?;
 	///
 	/// // Select a specific record from a table
-	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
-	///
-	/// // You can skip an unnecessary option if you know the record already exists
 	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	/// #
 	/// # Ok(())

@@ -1,16 +1,17 @@
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
+use serde::Serialize;
+use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::connect;
-use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::{self, Statement, Value};
-use surrealdb::{Error as SurrealError, Response};
+use surrealdb::Response;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -19,10 +20,13 @@ pub struct SqlCommandArguments {
 	#[command(flatten)]
 	auth: AuthArguments,
 	#[command(flatten)]
-	sel: DatabaseSelectionArguments,
+	sel: Option<DatabaseSelectionOptionalArguments>,
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
 	pretty: bool,
+	/// Whether to emit results in JSON
+	#[arg(long)]
+	json: bool,
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
@@ -37,11 +41,9 @@ pub async fn init(
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
-		sel: DatabaseSelectionArguments {
-			namespace,
-			database,
-		},
+		sel,
 		pretty,
+		json,
 		multi,
 		..
 	}: SqlCommandArguments,
@@ -49,22 +51,14 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
 
-	// Connect to the database engine
-	let client = connect(endpoint).await?;
-	// Sign in to the server if the specified database engine supports it
 	let root = Root {
 		username: &username,
 		password: &password,
 	};
-	if let Err(error) = client.signin(root).await {
-		match error {
-			// Authentication not supported by this engine, we can safely continue
-			SurrealError::Api(ApiError::AuthNotSupported) => {}
-			error => {
-				return Err(error.into());
-			}
-		}
-	}
+	// Connect to the database engine
+	let client = connect((endpoint, root)).await?;
+	// Sign in to the server
+	client.signin(root).await?;
 	// Create a new terminal REPL
 	let mut rl = Editor::new().unwrap();
 	// Set custom input validation
@@ -74,8 +68,15 @@ pub async fn init(
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
 	// Keep track of current namespace/database.
-	let mut ns = Some(namespace);
-	let mut db = Some(database);
+	let (mut ns, mut db) = if let Some(DatabaseSelectionOptionalArguments {
+		namespace,
+		database,
+	}) = sel
+	{
+		(namespace, database)
+	} else {
+		(None, None)
+	};
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
@@ -149,7 +150,7 @@ pub async fn init(
 				}
 				let res = client.query(query).await;
 				// Get the request response
-				match process(pretty, res) {
+				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
 					}
@@ -169,7 +170,7 @@ pub async fn init(
 	Ok(())
 }
 
-fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
+fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
@@ -187,12 +188,24 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 	} else {
 		response.take(0)?
 	};
-	// Check if we should prettify
-	Ok(match pretty {
-		// Don't prettify the response
-		false => value.to_string(),
-		// Yes prettify the response
-		true => format!("{value:#}"),
+	// Check if we should emit JSON and/or prettify
+	Ok(match (json, pretty) {
+		// Don't prettify the SurrealQL response
+		(false, false) => value.to_string(),
+		// Yes prettify the SurrealQL response
+		(false, true) => format!("{value:#}"),
+		// Don't pretty print the JSON response
+		(true, false) => serde_json::to_string(&value.into_json()).unwrap(),
+		// Yes prettify the JSON response
+		(true, true) => {
+			let mut buf = Vec::new();
+			let mut serializer = serde_json::Serializer::with_formatter(
+				&mut buf,
+				PrettyFormatter::with_indent(b"\t"),
+			);
+			value.into_json().serialize(&mut serializer).unwrap();
+			String::from_utf8(buf).unwrap()
+		}
 	})
 }
 
