@@ -30,6 +30,19 @@ impl ser::Serializer for Serializer {
 	where
 		T: ?Sized + Serialize,
 	{
+		value.serialize(self.wrap())
+	}
+
+	#[inline]
+	fn serialize_newtype_struct<T>(
+		self,
+		name: &'static str,
+		value: &T,
+	) -> Result<Self::Ok, Self::Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		debug_assert_eq!(name, "Version");
 		Ok(Some(Version(value.serialize(ser::datetime::Serializer.wrap())?)))
 	}
 }
