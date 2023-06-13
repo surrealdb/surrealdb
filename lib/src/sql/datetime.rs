@@ -87,10 +87,6 @@ impl Datetime {
 	pub fn to_raw(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
-
-	pub(crate) fn from_timestamp(secs: i64, nanos: u32) -> Option<Self> {
-		Utc.timestamp_opt(secs, nanos).single().map(Self)
-	}
 }
 
 impl Display for Datetime {
@@ -285,8 +281,6 @@ pub mod ts_binary {
 		ser::{self, SerializeTuple},
 	};
 
-	use crate::sql::Datetime;
-
 	/// Serialize a UTC datetime into an integer number of nanoseconds since the epoch
 	pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -306,6 +300,8 @@ pub mod ts_binary {
 		d.deserialize_tuple(2, TimestampVisitor)
 	}
 
+	struct TimestampVisitor;
+
 	impl<'de> de::Visitor<'de> for TimestampVisitor {
 		type Value = DateTime<Utc>;
 
@@ -317,9 +313,11 @@ pub mod ts_binary {
 		where
 			A: SeqAccess<'de>,
 		{
-			let secs = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"));
-			let nanos = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"));
-			Datetime::from_timestamp(secs, nanos)
+			let secs = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			let nanos =
+				seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			Utc.timestamp_opt(secs, nanos)
+				.single()
 				.ok_or_else(|| de::Error::custom("invalid timestamp"))
 		}
 	}

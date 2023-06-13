@@ -1,8 +1,9 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
-use crate::sql::Datetime;
 use chrono::offset::Utc;
 use chrono::DateTime;
+use chrono::TimeZone;
+use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::Serialize;
@@ -14,7 +15,7 @@ impl ser::Serializer for Serializer {
 	type Error = Error;
 
 	type SerializeSeq = Impossible<DateTime<Utc>, Error>;
-	type SerializeTuple = Impossible<DateTime<Utc>, Error>;
+	type SerializeTuple = SerializeDateTime;
 	type SerializeTupleStruct = Impossible<DateTime<Utc>, Error>;
 	type SerializeTupleVariant = Impossible<DateTime<Utc>, Error>;
 	type SerializeMap = Impossible<DateTime<Utc>, Error>;
@@ -23,22 +24,45 @@ impl ser::Serializer for Serializer {
 
 	const EXPECTED: &'static str = "a struct `DateTime<Utc>`";
 
-	fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
-		Datetime::from_nanos(value)
-			.map(|d| d.0)
-			.ok_or_else(|| Error::custom("invalid datetime nanos"))
+	#[inline]
+	fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+		debug_assert_eq!(len, 2);
+		Ok(SerializeDateTime::default())
+	}
+}
+
+#[derive(Default)]
+pub(super) struct SerializeDateTime {
+	secs: Option<i64>,
+	nanos: Option<u32>,
+}
+
+impl serde::ser::SerializeTuple for SerializeDateTime {
+	type Ok = DateTime<Utc>;
+	type Error = Error;
+
+	fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+	where
+		T: Serialize + ?Sized,
+	{
+		if self.secs.is_none() {
+			self.secs = Some(value.serialize(ser::primitive::i64::Serializer.wrap())?);
+		} else if self.nanos.is_none() {
+			self.nanos = Some(value.serialize(ser::primitive::u32::Serializer.wrap())?);
+		} else {
+			return Err(Error::custom(format!("unexpected `Datetime` 3rd field`")));
+		}
+		Ok(())
 	}
 
-	#[inline]
-	fn serialize_newtype_struct<T>(
-		self,
-		_name: &'static str,
-		value: &T,
-	) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		value.serialize(self.wrap())
+	fn end(self) -> Result<Self::Ok, Self::Error> {
+		match (self.secs, self.nanos) {
+			(Some(secs), Some(nanos)) => Utc
+				.timestamp_opt(secs, nanos)
+				.single()
+				.ok_or_else(|| Error::custom("invalid `Datetime`")),
+			_ => Err(Error::custom("`Datetime` missing required value(s)")),
+		}
 	}
 }
 
