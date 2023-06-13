@@ -137,10 +137,15 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
@@ -159,10 +164,15 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -294,8 +304,13 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any
