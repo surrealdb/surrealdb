@@ -116,12 +116,13 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 		CREATE test:3 SET active = true;
 		SELECT * FROM test WHERE active = false;
 		SELECT * FROM test WHERE active != true;
+		SELECT * FROM test WHERE active = true;
 	";
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -181,6 +182,17 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 			{
 				id: test:2,
 				active: false
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: test:3,
+				active: true
 			}
 		]",
 	);
