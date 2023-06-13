@@ -106,7 +106,6 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
-#[format(Named)]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to
@@ -2942,13 +2941,13 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(5, Value::None.to_vec().len());
-		assert_eq!(5, Value::Null.to_vec().len());
-		assert_eq!(7, Value::Bool(true).to_vec().len());
-		assert_eq!(7, Value::Bool(false).to_vec().len());
-		assert_eq!(13, Value::from("test").to_vec().len());
-		assert_eq!(29, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(45, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		assert_eq!(1, Value::None.to_vec().len());
+		assert_eq!(1, Value::Null.to_vec().len());
+		assert_eq!(2, Value::Bool(true).to_vec().len());
+		assert_eq!(2, Value::Bool(false).to_vec().len());
+		assert_eq!(6, Value::from("test").to_vec().len());
+		assert_eq!(15, Value::parse("{ hello: 'world' }").to_vec().len());
+		assert_eq!(22, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
 	}
 
 	#[test]

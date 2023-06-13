@@ -56,7 +56,7 @@ pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
 {
-	match bung::to_vec(val) {
+	match surrealdb::sql::serde::serialize(val) {
 		Ok(v) => Output::Full(v),
 		Err(_) => Output::Fail,
 	}
@@ -96,7 +96,7 @@ impl warp::Reply for Output {
 			}
 			Output::Full(v) => {
 				let mut res = warp::reply::Response::new(v.into());
-				let con = HeaderValue::from_static("application/bung");
+				let con = HeaderValue::from_static("application/surrealdb");
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}

@@ -23,6 +23,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::IntoEndpoint;
+use crate::sql::serde::deserialize;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -104,7 +105,7 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/bung"));
+	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
 	headers
 }
 
@@ -166,7 +167,7 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let response: AuthResponse =
-		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+		deserialize(&bytes).map_err(|error| Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,
 		})?;
@@ -177,7 +178,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	info!(target: LOG, "{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
-	let responses = bung::from_slice::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
+	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
 		Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,

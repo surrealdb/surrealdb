@@ -15,6 +15,7 @@ use crate::api::opt::Endpoint;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
+use crate::sql::serde::deserialize;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -369,7 +370,7 @@ impl Response {
 				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => bung::from_slice(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(&binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
 					binary,
 					error,

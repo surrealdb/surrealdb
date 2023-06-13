@@ -55,7 +55,7 @@ impl<T: Serialize> Response<T> {
 				let _ = chn.send(res).await;
 			}
 			Output::Full => {
-				let res = bung::to_vec(&self).unwrap();
+				let res = surrealdb::sql::serde::serialize(&self).unwrap();
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}

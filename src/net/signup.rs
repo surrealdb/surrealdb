@@ -69,16 +69,16 @@ async fn handler(
 			{
 				// Authentication was successful
 				Ok(v) => match output.as_deref() {
+					// Return nothing
+					None => Ok(output::none()),
+					// Text serialization
+					Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
 					// Simple serialization
 					Some("application/json") => Ok(output::json(&Success::new(v))),
 					Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
 					Some("application/pack") => Ok(output::pack(&Success::new(v))),
 					// Internal serialization
-					Some("application/bung") => Ok(output::full(&Success::new(v))),
-					// Text serialization
-					Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
-					// Return nothing
-					None => Ok(output::none()),
+					Some("application/surrealdb") => Ok(output::full(&Success::new(v))),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},

@@ -45,7 +45,7 @@ async fn handler(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// Return nothing
 					"application/octet-stream" => Ok(output::none()),
 					// An incorrect content-type was requested
