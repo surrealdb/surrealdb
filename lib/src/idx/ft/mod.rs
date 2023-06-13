@@ -637,11 +637,13 @@ mod tests {
 			tx.commit().await.unwrap();
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let i = fti.search(&mut tx, "hello".to_string()).await.unwrap();
-			assert!(i.is_none());
+			let (v, h) = fti.search(&mut tx, "hello".to_string()).await.unwrap();
+			assert!(v.is_empty());
+			assert!(h.is_none());
 
-			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
-			assert!(i.is_none());
+			let (v, h) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			assert!(v.is_empty());
+			assert!(h.is_none());
 		}
 	}
 
