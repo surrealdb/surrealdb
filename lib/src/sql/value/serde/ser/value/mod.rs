@@ -10,7 +10,6 @@ use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
 use crate::sql::Block;
 use crate::sql::Bytes;
-use crate::sql::Datetime;
 use crate::sql::Duration;
 use crate::sql::Future;
 use crate::sql::Ident;
@@ -227,7 +226,7 @@ impl ser::Serializer for Serializer {
 				Ok(Value::Uuid(Uuid(value.serialize(ser::uuid::Serializer.wrap())?)))
 			}
 			sql::datetime::TOKEN => {
-				Ok(Value::Datetime(Datetime(value.serialize(ser::datetime::Serializer.wrap())?)))
+				Ok(Value::Datetime(value.serialize(ser::datetime::Serializer.wrap())?))
 			}
 			_ => value.serialize(self.wrap()),
 		}
