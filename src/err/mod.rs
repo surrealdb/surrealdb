@@ -1,5 +1,4 @@
 use base64::DecodeError as Base64Error;
-use jsonwebtoken::errors::Error as JWTError;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use serde_cbor::error::Error as CborError;
@@ -68,12 +67,6 @@ impl From<Base64Error> for Error {
 
 impl From<Utf8Error> for Error {
 	fn from(_: Utf8Error) -> Error {
-		Error::InvalidAuth
-	}
-}
-
-impl From<JWTError> for Error {
-	fn from(_: JWTError) -> Error {
 		Error::InvalidAuth
 	}
 }

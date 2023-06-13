@@ -2,6 +2,7 @@ mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
 	use rand::{thread_rng, Rng};
+	use serial_test::serial;
 	use std::fs;
 	use std::path::Path;
 	use std::process::{Command, Stdio};
@@ -76,27 +77,31 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[serial]
 	fn version() {
 		assert!(run("version").output().is_ok());
 	}
 
 	#[test]
+	#[serial]
 	fn help() {
 		assert!(run("help").output().is_ok());
 	}
 
 	#[test]
+	#[serial]
 	fn nonexistent_subcommand() {
 		assert!(run("nonexistent").output().is_err());
 	}
 
 	#[test]
+	#[serial]
 	fn nonexistent_option() {
 		assert!(run("version --turbo").output().is_err());
 	}
 
 	#[test]
-	#[ignore = "only runs in CI"]
+	#[serial]
 	fn start() {
 		let mut rng = thread_rng();
 
@@ -255,7 +260,7 @@ mod cli_integration {
 	}
 
 	#[test]
-	#[ignore = "only runs in CI"]
+	#[serial]
 	fn start_tls() {
 		let mut rng = thread_rng();
 

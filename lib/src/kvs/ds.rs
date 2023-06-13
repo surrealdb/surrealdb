@@ -15,12 +15,14 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::instrument;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
+	query_timeout: Option<Duration>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -100,14 +102,12 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		match path {
+		let inner = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
-					let v = super::mem::Datastore::new().await.map(|v| Datastore {
-						inner: Inner::Mem(v),
-					});
+					let v = super::mem::Datastore::new().await.map(Inner::Mem);
 					info!(target: LOG, "Started kvs store in {}", path);
 					v
 				}
@@ -121,9 +121,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::RocksDB(v),
-					});
+					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
@@ -137,9 +135,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::RocksDB(v),
-					});
+					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
@@ -153,9 +149,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("speedb://");
 					let s = s.trim_start_matches("speedb:");
-					let v = super::speedb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::SpeeDB(v),
-					});
+					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
@@ -169,9 +163,7 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-					let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::IndxDB(v),
-					});
+					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
@@ -185,9 +177,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::TiKV(v),
-					});
+					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
@@ -201,9 +191,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::FDB(v),
-					});
+					let v = super::fdb::Datastore::new(s).await.map(Inner::FDB);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
@@ -215,7 +203,17 @@ impl Datastore {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		}
+		};
+		inner.map(|inner| Self {
+			inner,
+			query_timeout: None,
+		})
+	}
+
+	/// Set global query timeout
+	pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
+		self.query_timeout = duration;
+		self
 	}
 
 	/// Create a new transaction on this datastore
@@ -305,7 +303,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -355,7 +357,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -406,7 +412,11 @@ impl Datastore {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables

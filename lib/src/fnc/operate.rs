@@ -342,6 +342,6 @@ mod tests {
 		let res = div(one, two);
 		assert!(res.is_ok());
 		let out = res.unwrap();
-		assert_eq!("1.25", format!("{}", out));
+		assert_eq!("1.25f", format!("{}", out));
 	}
 }

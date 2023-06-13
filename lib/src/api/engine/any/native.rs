@@ -135,7 +135,6 @@ impl Connection for Any {
 				"http" | "https" => {
 					#[cfg(feature = "protocol-http")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						features.insert(ExtraFeatures::Backup);
 						let headers = http::default_headers();
 						#[allow(unused_mut)]
@@ -168,7 +167,6 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						let url = address.endpoint.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						let maybe_connector = address.tls_config.map(Connector::from);
