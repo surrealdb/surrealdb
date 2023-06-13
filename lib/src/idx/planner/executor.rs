@@ -133,13 +133,17 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		let mut tx = txn.lock().await;
 		if let Some(thg) = thg {
+			// We have to make the connection between the match ref from the highlight function...
 			if let Value::Number(n) = match_ref {
 				let m = n.as_int() as u8;
+				// ... and from the match operator (@{matchref}@)
 				if let Some(ift) = self.inner.terms.get(&m) {
+					// Check we have an index?
 					if let Some(ft) = self.inner.ft_map.get(&ift.ix) {
-						// TODO remove!
-						assert_eq!(ift.id.len(), 1);
-						return ft.highlight(&mut tx, thg, &ift.t, prefix, suffix, doc).await;
+						// All good, we can do the highlight
+						return ft
+							.highlight(&mut tx, thg, &ift.t, prefix, suffix, &ift.id, doc)
+							.await;
 					}
 				}
 			}

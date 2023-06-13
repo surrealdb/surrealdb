@@ -1,6 +1,7 @@
 pub(crate) mod analyzer;
 pub(crate) mod docids;
 mod doclength;
+mod highlighter;
 mod offsets;
 mod postings;
 mod scorer;
@@ -12,6 +13,7 @@ use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::docids::DocIds;
 use crate::idx::ft::doclength::DocLengths;
+use crate::idx::ft::highlighter::Highlighter;
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::{BM25Scorer, Score};
@@ -21,7 +23,7 @@ use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{Array, Object, Thing, Value};
+use crate::sql::{Array, Idiom, Object, Thing, Value};
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -379,18 +381,23 @@ impl FtIndex {
 		tx: &mut Transaction,
 		thg: &Thing,
 		terms: &Vec<TermId>,
-		_prefix: Value,
-		_suffix: Value,
-		_doc: &Value,
+		prefix: Value,
+		suffix: Value,
+		idiom: &Idiom,
+		doc: &Value,
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let o = self.offsets();
+			let mut hl = Highlighter::new(prefix, suffix, idiom, doc);
 			for term_id in terms {
-				let _r = o.get_offsets(tx, doc_id, *term_id).await?;
-				todo!()
+				let o = o.get_offsets(tx, doc_id, *term_id).await?;
+				if let Some(o) = o {
+					hl.highlight(o.0);
+				}
 			}
+			return Ok(hl.try_into()?);
 		}
 		Ok(Value::None)
 	}

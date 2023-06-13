@@ -58,13 +58,13 @@ impl Offsets {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offset {
-	index: u32,
-	start: Position,
-	end: Position,
+	pub(super) index: u32,
+	pub(super) start: Position,
+	pub(super) end: Position,
 }
 
 impl Offset {
-	pub(super) fn new(index: u32, start: u32, end: u32) -> Self {
+	pub(super) fn new(index: u32, start: Position, end: Position) -> Self {
 		Self {
 			index,
 			start,
