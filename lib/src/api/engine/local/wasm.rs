@@ -111,7 +111,7 @@ pub(crate) fn router(
 				}
 
 				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs.auth(true)
+				kvs.auth(configured_root.is_some())
 			}
 			Err(error) => {
 				let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -135,7 +135,6 @@ pub(crate) fn router(
 			match super::router(
 				route.request,
 				&kvs,
-				&configured_root,
 				address.strict,
 				&mut session,
 				&mut vars,
