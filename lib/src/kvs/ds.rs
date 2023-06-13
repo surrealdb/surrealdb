@@ -15,12 +15,14 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::instrument;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
+	query_timeout: Option<Duration>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -29,6 +31,8 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
+	#[cfg(feature = "kv-speedb")]
+	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -45,8 +49,10 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
+			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
@@ -96,18 +102,15 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		match path {
+		let inner = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
-					let v = super::mem::Datastore::new().await.map(|v| Datastore {
-						inner: Inner::Mem(v),
-					});
+					let v = super::mem::Datastore::new().await.map(Inner::Mem);
 					info!(target: LOG, "Started kvs store in {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-mem"))]
 				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -118,13 +121,10 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::RocksDB(v),
-					});
+					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -135,15 +135,26 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::RocksDB(v),
-					});
+					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate an SpeeDB database
+			s if s.starts_with("speedb:") => {
+				#[cfg(feature = "kv-speedb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("speedb://");
+					let s = s.trim_start_matches("speedb:");
+					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+				#[cfg(not(feature = "kv-speedb"))]
+				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -152,13 +163,10 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-					let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::IndxDB(v),
-					});
+					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-indxdb"))]
 				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -169,13 +177,10 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::TiKV(v),
-					});
+					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-tikv"))]
 				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -186,13 +191,10 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
-						inner: Inner::FDB(v),
-					});
+					let v = super::fdb::Datastore::new(s).await.map(Inner::FDB);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-fdb"))]
 				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -201,7 +203,17 @@ impl Datastore {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		}
+		};
+		inner.map(|inner| Self {
+			inner,
+			query_timeout: None,
+		})
+	}
+
+	/// Set global query timeout
+	pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
+		self.query_timeout = duration;
+		self
 	}
 
 	/// Create a new transaction on this datastore
@@ -230,6 +242,11 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
+			}
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SpeeDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
@@ -286,7 +303,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -336,7 +357,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
@@ -387,7 +412,11 @@ impl Datastore {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a default context
-		let ctx = Context::default();
+		let mut ctx = Context::default();
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables

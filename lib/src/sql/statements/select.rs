@@ -46,11 +46,14 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
 			Field::All => false,
-			Field::Alone(v) => v.writeable(),
-			Field::Alias(v, _) => v.writeable(),
+			Field::Single {
+				expr,
+				..
+			} => expr.writeable(),
 		}) {
 			return true;
 		}
@@ -59,7 +62,7 @@ impl SelectStatement {
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match self.what.len() {
 			1 if self.what[0].is_object() => true,
@@ -67,7 +70,7 @@ impl SelectStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -241,7 +244,7 @@ mod tests {
 
 	#[test]
 	fn select_statement_table_thing() {
-		let sql = "SELECT *, ((1 + 3) / 4), 1.3999 AS tester FROM test, test:thingy";
+		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;

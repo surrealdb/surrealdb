@@ -9,20 +9,29 @@ impl Value {
 			// Get the current path part
 			match self {
 				// Current path part is an object
-				Value::Object(v) => {
-					if let Part::Field(f) = p {
-						match path.len() {
-							1 => {
-								v.remove(f as &str);
-							}
-							_ => {
-								if let Some(v) = v.get_mut(f as &str) {
-									v.cut(path.next())
-								}
+				Value::Object(v) => match p {
+					Part::Field(f) => match path.len() {
+						1 => {
+							v.remove(f.as_str());
+						}
+						_ => {
+							if let Some(v) = v.get_mut(f.as_str()) {
+								v.cut(path.next())
 							}
 						}
-					}
-				}
+					},
+					Part::Index(i) => match path.len() {
+						1 => {
+							v.remove(&i.to_string());
+						}
+						_ => {
+							if let Some(v) = v.get_mut(&i.to_string()) {
+								v.cut(path.next())
+							}
+						}
+					},
+					_ => {}
+				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => match path.len() {

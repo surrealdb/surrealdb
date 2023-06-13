@@ -4,9 +4,11 @@ use crate::sql::value::Value;
 
 pub mod args;
 pub mod array;
+pub mod bytes;
 pub mod count;
 pub mod crypto;
 pub mod duration;
+pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod is;
@@ -92,6 +94,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
 		//
+		"bytes::len" => bytes::len,
+		//
 		"count" => count::count,
 		//
 		"crypto::md5" => crypto::md5,
@@ -116,6 +120,9 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		"encoding::base64::decode" => encoding::base64::decode,
+		"encoding::base64::encode" => encoding::base64::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -218,6 +225,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
+		"time::ceil" => time::ceil,
 		"time::day" => time::day,
 		"time::floor" => time::floor,
 		"time::format" => time::format,

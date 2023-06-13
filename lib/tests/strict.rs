@@ -232,7 +232,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ns: { test: 'DEFINE NAMESPACE test' },
+			namespaces: { test: 'DEFINE NAMESPACE test' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -240,9 +240,9 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			db: { test: 'DEFINE DATABASE test' },
-			nl: {},
-			nt: {},
+			databases: { test: 'DEFINE DATABASE test' },
+			logins: {},
+			tokens: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -250,12 +250,13 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -263,10 +264,10 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: { extra: 'DEFINE FIELD extra ON test VALUE true' },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { extra: 'DEFINE FIELD extra ON test VALUE true' },
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);

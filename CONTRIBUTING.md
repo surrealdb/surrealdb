@@ -1,6 +1,6 @@
-<h1><img height="25" src="/img/contributing.svg">&nbsp;&nbsp;Contributing</h1>
+<h1><img height="25" src="./img/contributing.svg">&nbsp;&nbsp;Contributing</h1>
 
-We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; for you to contribute to SurrealDB and help make it better! We want contributing to SurrealDB to be fun, enjoyable, and educational for anyone and everyone. All contributions are welcome, including features, bugfixes, and documentation changes, as well as updates and tweaks, blog posts, workshops, and everything else.
+We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to contribute to SurrealDB and help make it better! We want contributing to SurrealDB to be fun, enjoyable, and educational for anyone and everyone. All contributions are welcome, including features, bugfixes, and documentation changes, as well as updates and tweaks, blog posts, workshops, and everything else.
 
 ## How to start
 
@@ -91,7 +91,7 @@ Please avoid introducing new dependencies to SurrealDB without consulting the te
 
 ## Introducing new features
 
-We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
+We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
 
 This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs).
 
@@ -117,45 +117,51 @@ Where `TYPE` can be one of the following:
 For the initial start, fork the project and use git clone command to download the repository to your computer. A standard procedure for working on an issue would be to:
 
 1. Clone the `surrealdb` repository and download to your computer.
-```bash
-git clone https://github.com/surrealdb/surrealdb
-```
+    ```bash
+    git clone https://github.com/surrealdb/surrealdb
+    ```
 
-1. Pull all changes from the upstream `main` branch, before creating a new branch - to ensure that your `main` branch is up-to-date with the latest changes:
-```bash
-git pull
-```
+    (Optional): Install [pre-commit](https://pre-commit.com/#install) to run the checks before each commit and run:
 
-2. Create new branch from `main` like: `bugfix-548-ensure-queries-execute-sequentially`:
-```bash
-git checkout -b "[the name of your branch]"
-```
+    ```bash
+    pre-commit install
+    ```
 
-3. Make changes to the code, and ensure all code changes are formatted correctly:
-```bash
-cargo fmt
-```
+2. Pull all changes from the upstream `main` branch, before creating a new branch - to ensure that your `main` branch is up-to-date with the latest changes:
+    ```bash
+    git pull
+    ```
 
-4. Commit your changes when finished:
-```bash
-git add -A
-git commit -m "[your commit message]"
-```
+3. Create new branch from `main` like: `bugfix-548-ensure-queries-execute-sequentially`:
+    ```bash
+    git checkout -b "[the name of your branch]"
+    ```
 
-5. Push changes to GitHub:
-```bash
-git push origin "[the name of your branch]"
-```
+4. Make changes to the code, and ensure all code changes are formatted correctly:
+    ```bash
+    cargo fmt
+    ```
 
-6. Submit your changes for review, by going to your repository on GitHub and clicking the `Compare & pull request` button.
+5. Commit your changes when finished:
+    ```bash
+    git add -A
+    git commit -m "[your commit message]"
+    ```
 
-7. Ensure that you have entered a commit message which details about the changes, and what the pull request is for.
+6. Push changes to GitHub:
+    ```bash
+    git push origin "[the name of your branch]"
+    ```
 
-8. Now submit the pull request by clicking the `Create pull request` button.
+7. Submit your changes for review, by going to your repository on GitHub and clicking the `Compare & pull request` button.
 
-9. Wait for code review and approval.
+8. Ensure that you have entered a commit message which details about the changes, and what the pull request is for.
 
-10. After approval, merge your pull request.
+9. Now submit the pull request by clicking the `Create pull request` button.
+
+10. Wait for code review and approval.
+
+11. After approval, merge your pull request.
 
 ## Other Ways to Help
 

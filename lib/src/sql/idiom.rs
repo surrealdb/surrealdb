@@ -123,6 +123,11 @@ impl Idiom {
 }
 
 impl Idiom {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		self.0.iter().any(|v| v.writeable())
+	}
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

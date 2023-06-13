@@ -184,7 +184,7 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail
-		let mut res = run_queries(&cast_chain(35)).await?;
+		let mut res = run_queries(&cast_chain(125)).await?;
 		//
 		assert_eq!(res.len(), 1);
 		//
@@ -212,6 +212,13 @@ fn with_enough_stack(
 	#[allow(unused_mut)]
 	let mut builder = Builder::new();
 
+	// Roughly how much stack is allocated for surreal server workers in release mode
+	#[cfg(not(debug_assertions))]
+	{
+		builder = builder.stack_size(8_000_000);
+	}
+
+	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
 		builder = builder.stack_size(16_000_000);

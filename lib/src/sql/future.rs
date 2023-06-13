@@ -4,10 +4,10 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::block::{block, Block};
 use crate::sql::comment::mightbespace;
+use crate::sql::common::{closechevron, openchevron};
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
-use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -24,6 +24,7 @@ impl From<Value> for Future {
 }
 
 impl Future {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -48,9 +49,9 @@ impl fmt::Display for Future {
 }
 
 pub fn future(i: &str) -> IResult<&str, Future> {
-	let (i, _) = char('<')(i)?;
+	let (i, _) = openchevron(i)?;
 	let (i, _) = tag("future")(i)?;
-	let (i, _) = char('>')(i)?;
+	let (i, _) = closechevron(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = block(i)?;
 	Ok((i, Future(v)))
@@ -64,11 +65,11 @@ mod tests {
 
 	#[test]
 	fn future_expression() {
-		let sql = "<future> { 1.2345 + 5.4321 }";
+		let sql = "<future> { 5 + 10 }";
 		let res = future(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
-		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("1.2345 + 5.4321")))));
+		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
+		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));
 	}
 }

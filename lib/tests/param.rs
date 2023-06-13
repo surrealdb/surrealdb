@@ -25,12 +25,13 @@ async fn define_global_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: { test: 'DEFINE PARAM $test VALUE 12345' },
-			sc: {},
-			tb: {},
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: { test: 'DEFINE PARAM $test VALUE 12345' },
+			scopes: {},
+			tables: {},
 		}",
 	);
 	assert_eq!(tmp, val);

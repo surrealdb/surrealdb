@@ -1,32 +1,28 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
-use bigdecimal::BigDecimal;
+use rust_decimal::Decimal;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
-use std::fmt::Display;
 
 pub(super) struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = BigDecimal;
+	type Ok = Decimal;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<BigDecimal, Error>;
-	type SerializeTuple = Impossible<BigDecimal, Error>;
-	type SerializeTupleStruct = Impossible<BigDecimal, Error>;
-	type SerializeTupleVariant = Impossible<BigDecimal, Error>;
-	type SerializeMap = Impossible<BigDecimal, Error>;
-	type SerializeStruct = Impossible<BigDecimal, Error>;
-	type SerializeStructVariant = Impossible<BigDecimal, Error>;
+	type SerializeSeq = Impossible<Decimal, Error>;
+	type SerializeTuple = Impossible<Decimal, Error>;
+	type SerializeTupleStruct = Impossible<Decimal, Error>;
+	type SerializeTupleVariant = Impossible<Decimal, Error>;
+	type SerializeMap = Impossible<Decimal, Error>;
+	type SerializeStruct = Impossible<Decimal, Error>;
+	type SerializeStructVariant = Impossible<Decimal, Error>;
 
-	const EXPECTED: &'static str = "a struct `BigDecimal`";
+	const EXPECTED: &'static str = "a struct `Decimal`";
 
 	#[inline]
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: Display,
-	{
-		value.to_string().parse::<BigDecimal>().map_err(Error::custom)
+	fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
+		value.parse::<Decimal>().map_err(Error::custom)
 	}
 }
 
@@ -38,8 +34,8 @@ mod tests {
 
 	#[test]
 	fn from_i32() {
-		let decimal = BigDecimal::from(25);
-		let serialized = decimal.serialize(Serializer.wrap()).unwrap();
+		let decimal = Decimal::from(25);
+		let serialized = Serialize::serialize(&decimal, Serializer.wrap()).unwrap();
 		assert_eq!(decimal, serialized);
 	}
 }

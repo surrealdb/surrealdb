@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Function;
-use crate::sql::Kind;
 use crate::sql::Script;
 use crate::sql::Value;
 use ser::Serializer as _;
@@ -33,7 +32,6 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeTupleVariant, Self::Error> {
 		let inner = match variant {
-			"Cast" => Inner::Cast(None, None),
 			"Normal" => Inner::Normal(None, None),
 			"Custom" => Inner::Custom(None, None),
 			"Script" => Inner::Script(None, None),
@@ -54,7 +52,6 @@ pub(super) struct SerializeFunction {
 }
 
 enum Inner {
-	Cast(Option<Kind>, Option<Value>),
 	Normal(Option<String>, Option<Vec<Value>>),
 	Custom(Option<String>, Option<Vec<Value>>),
 	Script(Option<Script>, Option<Vec<Value>>),
@@ -75,12 +72,6 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 			(0, Inner::Script(ref mut var, _)) => {
 				*var = Some(Script(value.serialize(ser::string::Serializer.wrap())?));
 			}
-			(0, Inner::Cast(ref mut var, _)) => {
-				*var = Some(value.serialize(ser::kind::Serializer.wrap())?);
-			}
-			(1, Inner::Cast(_, ref mut var)) => {
-				*var = Some(value.serialize(ser::value::Serializer.wrap())?);
-			}
 			(
 				1,
 				Inner::Normal(_, ref mut var)
@@ -91,7 +82,6 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 			}
 			(index, inner) => {
 				let variant = match inner {
-					Inner::Cast(..) => "Cast",
 					Inner::Normal(..) => "Normal",
 					Inner::Custom(..) => "Custom",
 					Inner::Script(..) => "Script",
@@ -107,7 +97,6 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 
 	fn end(self) -> Result<Self::Ok, Self::Error> {
 		match self.inner {
-			Inner::Cast(Some(one), Some(two)) => Ok(Function::Cast(one, two)),
 			Inner::Normal(Some(one), Some(two)) => Ok(Function::Normal(one, two)),
 			Inner::Custom(Some(one), Some(two)) => Ok(Function::Custom(one, two)),
 			Inner::Script(Some(one), Some(two)) => Ok(Function::Script(one, two)),
@@ -120,13 +109,6 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 mod tests {
 	use super::*;
 	use serde::Serialize;
-
-	#[test]
-	fn cast() {
-		let function = Function::Cast(Default::default(), Default::default());
-		let serialized = function.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(function, serialized);
-	}
 
 	#[test]
 	fn normal() {

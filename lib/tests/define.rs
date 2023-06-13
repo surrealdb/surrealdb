@@ -22,7 +22,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ns: { test: 'DEFINE NAMESPACE test' },
+			namespaces: { test: 'DEFINE NAMESPACE test' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -47,9 +47,9 @@ async fn define_statement_database() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			db: { test: 'DEFINE DATABASE test' },
-			nl: {},
-			nt: {},
+			databases: { test: 'DEFINE DATABASE test' },
+			logins: {},
+			tokens: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -76,14 +76,15 @@ async fn define_statement_function() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
-			pa: {},
-			sc: {},
-			pa: {},
-			sc: {},
-			tb: {},
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
+			params: {},
+			scopes: {},
+			params: {},
+			scopes: {},
+			tables: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -108,12 +109,13 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -138,12 +140,13 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test SCHEMALESS' },
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -172,12 +175,13 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -202,12 +206,13 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -244,10 +249,10 @@ async fn define_statement_event() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
-			fd: {},
-			ft: {},
-			ix: {},
+			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
+			fields: {},
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -301,10 +306,10 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"{
-			ev: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
-			fd: {},
-			ft: {},
-			ix: {},
+			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
+			fields: {},
+			tables: {},
+			indexes: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -358,10 +363,10 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
-			fd: {},
-			ft: {},
-			ix: {},
+			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
+			fields: {},
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -407,10 +412,10 @@ async fn define_statement_field() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user' },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { test: 'DEFINE FIELD test ON user' },
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -439,10 +444,10 @@ async fn define_statement_field_type() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user TYPE string' },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { test: 'DEFINE FIELD test ON user TYPE string' },
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -471,10 +476,10 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"{
-			ev: {},
-			fd: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
+			tables: {},
+			indexes: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -503,10 +508,10 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -535,10 +540,10 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"{
-			ev: {},
-			fd: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
-			ft: {},
-			ix: {},
+			events: {},
+			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
+			tables: {},
+			indexes: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -577,10 +582,10 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: { test: 'DEFINE INDEX test ON user FIELDS age' },
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -619,10 +624,10 @@ async fn define_statement_index_single() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: { test: 'DEFINE INDEX test ON user FIELDS email' },
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -663,10 +668,10 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -715,10 +720,10 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -773,10 +778,10 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -839,14 +844,10 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..3 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
@@ -863,10 +864,10 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: {},
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -890,17 +891,10 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..4 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
@@ -917,13 +911,86 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: {},
-			ix: {},
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_analyzer() -> Result<(), Error> {
+	let sql = "
+		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
+		INFO FOR DB;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {
+				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
+				english: 'DEFINE ANALYZER english TOKENIZERS SPACE,CASE FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+			},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {}
+		}",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_search_index() -> Result<(), Error> {
+	let sql = r#"
+		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
+		CREATE blog:3 SET title = 'This blog is going to be deleted';
+		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS;
+		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
+		DELETE blog:3;
+		INFO FOR TABLE blog;
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..6 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2f,0.75f,100) HIGHLIGHTS' },
+		}",
+	);
+	assert_eq!(tmp, val);
 	Ok(())
 }

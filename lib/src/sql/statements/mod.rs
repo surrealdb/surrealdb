@@ -37,6 +37,7 @@ pub use self::set::SetStatement;
 pub use self::update::UpdateStatement;
 pub use self::yuse::UseStatement;
 
+pub use self::define::DefineAnalyzerStatement;
 pub use self::define::DefineDatabaseStatement;
 pub use self::define::DefineEventStatement;
 pub use self::define::DefineFieldStatement;

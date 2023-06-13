@@ -2,11 +2,14 @@ use crate::ctx::Context;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
 use crate::sql::Value;
-use js::{Async, Result};
+use js::prelude::Async;
+use js::Result;
 
 mod array;
+mod bytes;
 mod crypto;
 mod duration;
+mod encoding;
 mod geo;
 mod http;
 mod is;
@@ -25,9 +28,11 @@ impl_module_def!(
 	Package,
 	"", // root path
 	"array" => (array::Package),
+	"bytes" => (bytes::Package),
 	"count" => run,
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
+	"encoding" => (encoding::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"is" => (is::Package),
@@ -44,30 +49,28 @@ impl_module_def!(
 	"type" => (r#type::Package)
 );
 
-fn run(name: &str, args: Vec<Value>) -> Result<Value> {
+fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	// Create a default context
 	let ctx = Context::background();
 	// Process the called function
 	let res = fnc::synchronous(&ctx, name, args);
 	// Convert any response error
-	res.map_err(|err| js::Error::Exception {
-		message: err.to_string(),
-		file: String::from(""),
-		line: -1,
-		stack: String::from(""),
+	res.map_err(|err| {
+		js::Exception::from_message(js_ctx, &err.to_string())
+			.map(js::Exception::throw)
+			.unwrap_or(js::Error::Exception)
 	})
 }
 
-async fn fut(name: &str, args: Vec<Value>) -> Result<Value> {
+async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	// Create a default context
 	let ctx = Context::background();
 	// Process the called function
 	let res = fnc::asynchronous(&ctx, name, args).await;
 	// Convert any response error
-	res.map_err(|err| js::Error::Exception {
-		message: err.to_string(),
-		file: String::from(""),
-		line: -1,
-		stack: String::from(""),
+	res.map_err(|err| {
+		js::Exception::from_message(js_ctx, &err.to_string())
+			.map(js::Exception::throw)
+			.unwrap_or(js::Error::Exception)
 	})
 }

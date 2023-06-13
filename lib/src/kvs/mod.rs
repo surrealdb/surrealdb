@@ -5,6 +5,7 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+mod speedb;
 mod tikv;
 mod tx;
 

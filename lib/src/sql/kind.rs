@@ -1,6 +1,6 @@
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
 use crate::sql::common::verbar;
+use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::table::{table, Table};
@@ -46,6 +46,13 @@ impl Default for Kind {
 impl Kind {
 	fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
+	}
+}
+
+impl From<&Kind> for Box<Kind> {
+	#[inline]
+	fn from(v: &Kind) -> Self {
+		Box::new(v.clone())
 	}
 }
 
@@ -136,9 +143,9 @@ fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, v) = opt(alt((
 		|i| {
 			let (i, _) = mightbespace(i)?;
-			let (i, _) = char('(')(i)?;
+			let (i, _) = openparentheses(i)?;
 			let (i, v) = separated_list1(commas, table)(i)?;
-			let (i, _) = char(')')(i)?;
+			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {
