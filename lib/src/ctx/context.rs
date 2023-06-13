@@ -112,8 +112,10 @@ impl<'a> Context<'a> {
 		self.add_deadline(Instant::now() + timeout)
 	}
 
-	pub fn add_transaction(&mut self, transaction: Transaction) {
-		self.transaction = Some(transaction);
+	pub fn add_transaction(&mut self, txn: Option<&Transaction>) {
+		if let Some(txn) = txn {
+			self.transaction = Some(txn.clone());
+		}
 	}
 
 	pub fn add_thing(&mut self, thing: &'a Thing) {
