@@ -76,7 +76,11 @@ impl AllAndStrategy {
 			b: PlanBuilder::default(),
 		};
 		match s.eval_node(node) {
-			Ok(_) => Ok(Some(s.b.build()?)),
+			Ok(_) => match s.b.build() {
+				Ok(p) => Ok(Some(p)),
+				Err(Error::BypassQueryPlanner) => Ok(None),
+				Err(e) => Err(e),
+			},
 			Err(Error::BypassQueryPlanner) => Ok(None),
 			Err(e) => Err(e),
 		}

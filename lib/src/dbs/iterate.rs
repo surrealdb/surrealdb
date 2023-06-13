@@ -150,7 +150,7 @@ impl Iterable {
 		QueryPlanner::add_query_executor(pla, &v.tb, &mut child_ctx);
 
 		// Process the document record
-		ite.process(ctx, opt, stm, val).await;
+		ite.process(&child_ctx, opt, stm, val).await;
 		Ok(())
 	}
 
