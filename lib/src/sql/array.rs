@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebracket, commas, openbracket};
@@ -112,16 +111,10 @@ impl Array {
 
 impl Array {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt, txn, None, None, doc).await {
+			match v.compute(ctx, opt).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};

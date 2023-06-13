@@ -4,9 +4,7 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -24,7 +22,6 @@ use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
-use crate::sql::Thing;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -75,15 +72,7 @@ impl SelectStatement {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		thg: Option<&Thing>,
-		doc: Option<&Value>,
-		exe: Option<&QueryExecutor>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -96,10 +85,10 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, exe, thg, doc).await?;
+			let v = w.compute(ctx, opt).await?;
 			match v {
-				Value::Table(v) => {
-					i.ingest(planner.get_iterable(opt, txn, v).await?);
+				Value::Table(t) => {
+					i.ingest(planner.get_iterable(ctx, opt, t).await?);
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
@@ -130,7 +119,7 @@ impl SelectStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm, Some(&planner)).await
+		i.output(ctx, opt, &stm, Some(&planner)).await
 	}
 }
 

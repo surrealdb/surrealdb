@@ -413,6 +413,8 @@ impl Datastore {
 		let mut opt = Options::default();
 		// Create a default context
 		let mut ctx = Context::default();
+		// Add the transaction
+		ctx.add_transaction(txn.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
@@ -429,7 +431,7 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None, None, None).await?;
+		let res = val.compute(&ctx, &opt).await?;
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,

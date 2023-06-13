@@ -1,8 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::ending::field as ending;
@@ -11,7 +9,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
-use crate::sql::Thing;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
@@ -77,20 +74,18 @@ impl Fields {
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
-		exe: Option<&QueryExecutor>,
 		opt: &Options,
-		txn: &Transaction,
-		thg: Option<&Thing>,
-		doc: Option<&Value>,
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);
 		//
-		let doc = doc.unwrap_or(&Value::None);
+		let doc = ctx.doc().unwrap_or(&Value::None);
+		let mut ctx = Context::new(ctx);
+		ctx.add_doc(doc);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
+			true => doc.compute(&ctx, opt).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {
@@ -109,15 +104,13 @@ impl Fields {
 						Value::Function(f) if group && f.is_aggregate() => {
 							let x = match f.args().len() {
 								// If no function arguments, then compute the result
-								0 => f.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
+								0 => f.compute(&ctx, opt).await?,
 								// If arguments, then pass the first value through
-								_ => {
-									f.args()[0].compute(ctx, opt, txn, exe, thg, Some(doc)).await?
-								}
+								_ => f.args()[0].compute(&ctx, opt).await?,
 							};
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
-								false => out.set(ctx, opt, txn, idiom.as_ref(), x).await?,
+								false => out.set(&ctx, opt, idiom.as_ref(), x).await?,
 								true => out = x,
 							}
 						}
@@ -133,12 +126,8 @@ impl Fields {
 									None => doc,
 								};
 								// Continue fetching the next idiom part
-								let x = x
-									.get(ctx, opt, txn, Some(doc), v)
-									.await?
-									.compute(ctx, opt, txn, exe, None, Some(doc))
-									.await?
-									.flatten();
+								let x =
+									x.get(&ctx, opt, v).await?.compute(&ctx, opt).await?.flatten();
 								// Add the result to the temporary store
 								res.push((v, x));
 							}
@@ -148,24 +137,23 @@ impl Fields {
 									// This is an alias expression part
 									Some(a) => {
 										if let Some(i) = alias {
-											out.set(ctx, opt, txn, i, x.clone()).await?;
+											out.set(&ctx, opt, i, x.clone()).await?;
 										}
-										out.set(ctx, opt, txn, a, x).await?;
+										out.set(&ctx, opt, a, x).await?;
 									}
 									// This is the end of the expression
 									None => {
-										out.set(ctx, opt, txn, alias.as_ref().unwrap_or(v), x)
-											.await?
+										out.set(&ctx, opt, alias.as_ref().unwrap_or(v), x).await?
 									}
 								}
 							}
 						}
 						// This expression is a normal field expression
 						_ => {
-							let x = expr.compute(ctx, opt, txn, exe, thg, Some(doc)).await?;
+							let x = expr.compute(&ctx, opt).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
-								false => out.set(ctx, opt, txn, idiom.as_ref(), x).await?,
+								false => out.set(&ctx, opt, idiom.as_ref(), x).await?,
 								true => out = x,
 							}
 						}
