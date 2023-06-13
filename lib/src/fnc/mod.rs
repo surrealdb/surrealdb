@@ -48,7 +48,7 @@ pub async fn run(
 		|| name.starts_with("crypto::scrypt")
 		|| name.starts_with("search::")
 	{
-		asynchronous(ctx, txn, exe, thg, doc, name, args).await
+		asynchronous(ctx, Some(txn), exe, thg, doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -278,7 +278,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
 	ctx: &Context<'_>,
-	txn: &Transaction,
+	txn: Option<&Transaction>,
 	exe: Option<&QueryExecutor>,
 	thg: Option<&Thing>,
 	doc: Option<&Value>,

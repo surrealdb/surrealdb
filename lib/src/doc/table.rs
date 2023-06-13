@@ -300,7 +300,7 @@ impl<'a> Document<'a> {
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(ctx, opt, txn, None, doc, None).await?;
+						let val = expr.compute(ctx, opt, txn, None, None, doc).await?;
 						self.set(&mut ops, idiom, val);
 					}
 				}

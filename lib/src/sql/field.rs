@@ -109,12 +109,10 @@ impl Fields {
 						Value::Function(f) if group && f.is_aggregate() => {
 							let x = match f.args().len() {
 								// If no function arguments, then compute the result
-								0 => f.compute(ctx, opt, txn, Some(doc)).await?,
+								0 => f.compute(ctx, opt, txn, exe, thg, Some(doc)).await?,
 								// If arguments, then pass the first value through
 								_ => {
-									f.args()[0]
-										.compute(ctx, opt, txn, None, Some(doc), None)
-										.await?
+									f.args()[0].compute(ctx, opt, txn, exe, thg, Some(doc)).await?
 								}
 							};
 							// Check if this is a single VALUE field expression

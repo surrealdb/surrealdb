@@ -257,7 +257,7 @@ impl Iterator {
 									let x = if let Some(alias) = alias {
 										alias.compute(ctx, opt, txn, Some(&x)).await?
 									} else {
-										expr.compute(ctx, opt, txn, None, Some(&x), None).await?
+										expr.compute(ctx, opt, txn, None, None, Some(&x)).await?
 									};
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
