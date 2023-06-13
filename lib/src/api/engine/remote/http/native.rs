@@ -68,7 +68,6 @@ impl Connection for Client {
 			router(base_url, client, route_rx);
 
 			let mut features = HashSet::new();
-			features.insert(ExtraFeatures::Auth);
 			features.insert(ExtraFeatures::Backup);
 
 			Ok(Surreal {

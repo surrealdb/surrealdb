@@ -564,12 +564,12 @@ mod tests {
 
 	#[test]
 	fn function_single_not() {
-		let sql = "not(1.2345)";
+		let sql = "not(10)";
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("not(1.2345)", format!("{}", out));
-		assert_eq!(out, Function::Normal("not".to_owned(), vec![1.2345.into()]));
+		assert_eq!("not(10)", format!("{}", out));
+		assert_eq!(out, Function::Normal("not".to_owned(), vec![10.into()]));
 	}
 
 	#[test]

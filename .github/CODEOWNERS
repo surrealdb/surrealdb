@@ -1,0 +1,32 @@
+# Default owners for the repository
+* @tobiemh
+
+# Configuration for GitHub
+/.github/ @tobiemh
+
+# Code for fuzzing configuration
+/lib/fuzz/ @finnbear
+
+# Code and tests for the Rust API
+/lib/CARGO.md @rushmorem
+/lib/README.md @rushmorem
+/lib/examples/ @rushmorem
+/lib/src/api/ @rushmorem
+/lib/src/tests/api/ @rushmorem
+/lib/src/tests/api.rs @rushmorem
+
+# Code and tests for indexing
+/lib/src/idx/ @emmanuel-keller
+
+# Code and tests for scripting
+/lib/src/fnc/script/ @DelSkayn
+
+# Code and tests for the command-line
+/src/cli/ @rushmorem @finnbear
+/tests/cli.rs @finnbear
+
+# Code and tests for opentelemetry
+/src/o11y/ @sgirones
+
+# Tests related to the key-value store
+/lib/src/kvs/tests/ @tobiemh @phughk

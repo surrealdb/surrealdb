@@ -268,67 +268,40 @@ impl<'a> Document<'a> {
 		};
 		//
 		for field in exp.other() {
-			// Process it if it is a normal field
-			if let Field::Alone(v) = field {
-				match v {
+			// Process the field
+			if let Field::Single {
+				expr,
+				alias,
+			} = field
+			{
+				let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
 							let val = f.compute(ctx, opt, txn, None, None, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::sum" => {
 							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::min" => {
 							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.min(&mut ops, &act, v.to_idiom(), val);
+							self.min(&mut ops, &act, idiom, val);
 						}
 						"math::max" => {
 							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.max(&mut ops, &act, v.to_idiom(), val);
+							self.max(&mut ops, &act, idiom, val);
 						}
 						"math::mean" => {
 							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.mean(&mut ops, &act, v.to_idiom(), val);
+							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, None, None, doc).await?;
-						self.set(&mut ops, v.to_idiom(), val);
-					}
-				}
-			}
-			// Process it if it is a aliased field
-			if let Field::Alias(v, i) = field {
-				match v {
-					Value::Function(f) if f.is_rolling() => match f.name() {
-						"count" => {
-							let val = f.compute(ctx, opt, txn, None, None, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.min(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.max(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, None, None, doc).await?;
-							self.mean(&mut ops, &act, i.to_owned(), val);
-						}
-						_ => unreachable!(),
-					},
-					_ => {
-						let val = v.compute(ctx, opt, txn, None, None, doc).await?;
-						self.set(&mut ops, i.to_owned(), val);
+						let val = expr.compute(ctx, opt, txn, None, doc, None).await?;
+						self.set(&mut ops, idiom, val);
 					}
 				}
 			}

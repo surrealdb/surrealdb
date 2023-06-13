@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+	path::{Path, PathBuf},
+	str::FromStr,
+	time::Duration,
+};
 
 pub(crate) mod parser;
 
@@ -62,4 +66,8 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 		32 => Ok(v.to_string()),
 		_ => Err(String::from("Ensure your database encryption key is 16, 24, or 32 bytes long")),
 	}
+}
+
+pub(crate) fn duration(v: &str) -> Result<Duration, String> {
+	surrealdb::sql::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
 }

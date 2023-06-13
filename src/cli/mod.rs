@@ -6,14 +6,15 @@ mod import;
 mod isready;
 mod sql;
 mod start;
+mod upgrade;
 pub(crate) mod validator;
 mod version;
 
-pub use config::CF;
-
+use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
+pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
@@ -57,6 +58,8 @@ enum Commands {
 	Export(ExportCommandArguments),
 	#[command(about = "Output the command-line tool version information")]
 	Version,
+	#[command(about = "Upgrade to the latest stable version")]
+	Upgrade(UpgradeCommandArguments),
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
 	#[command(
@@ -74,6 +77,7 @@ pub async fn init() -> ExitCode {
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version => version::init(),
+		Commands::Upgrade(args) => upgrade::init(args).await,
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 	};

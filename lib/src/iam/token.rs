@@ -1,8 +1,8 @@
+use crate::sql::Object;
+use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use surrealdb::sql::Object;
-use surrealdb::sql::Value;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 

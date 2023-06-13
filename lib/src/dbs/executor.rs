@@ -316,6 +316,11 @@ impl<'a> Executor<'a> {
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
+								// Catch global timeout
+								let res = match ctx.is_timedout() {
+									true => Err(Error::QueryTimedout),
+									false => res,
+								};
 								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
 									if let Err(e) = self.commit(loc).await {
