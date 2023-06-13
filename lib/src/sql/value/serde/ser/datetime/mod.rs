@@ -69,7 +69,6 @@ impl serde::ser::SerializeTuple for SerializeDateTime {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
