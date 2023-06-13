@@ -2,7 +2,8 @@ pub(crate) mod executor;
 pub(crate) mod plan;
 mod tree;
 
-use crate::dbs::{Iterable, Options, Transaction};
+use crate::ctx::Context;
+use crate::dbs::{Iterable, Options};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
@@ -18,14 +19,15 @@ pub(crate) struct QueryPlanner<'a> {
 
 impl<'a> QueryPlanner<'a> {
 	#[inline]
-	pub(crate) fn get_opt_query_executor(
+	pub(crate) fn add_query_executor(
 		pla: Option<&QueryPlanner<'_>>,
 		tb: &str,
-	) -> Option<QueryExecutor> {
+		ctx: &mut Context<'_>,
+	) {
 		if let Some(p) = pla {
-			p.get_query_executor(tb)
-		} else {
-			None
+			if let Some(exe) = p.get_query_executor(tb) {
+				ctx.add_query_executor(exe);
+			}
 		}
 	}
 
@@ -43,18 +45,19 @@ impl<'a> QueryPlanner<'a> {
 
 	pub(crate) async fn get_iterable(
 		&mut self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		t: Table,
 	) -> Result<Iterable, Error> {
-		let res = Tree::build(self.opt, txn, &t, self.cond).await?;
+		let txn = ctx.clone_transaction()?;
+		let res = Tree::build(self.opt, &txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				let e = plan.i.new_query_executor(opt, txn, &t, im).await?;
+				let e = plan.i.new_query_executor(opt, &txn, &t, im).await?;
 				self.executors.insert(t.0.clone(), e);
 				return Ok(Iterable::Index(t, plan));
 			}
-			let e = QueryExecutor::new(opt, txn, &t, im, None).await?;
+			let e = QueryExecutor::new(opt, &txn, &t, im, None).await?;
 			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))

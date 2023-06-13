@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 
@@ -10,21 +9,22 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
+		// Clone transaction
+		let txn = ctx.clone_transaction()?;
 		// Get the record id
 		let _ = self.id.as_ref().unwrap();
 		// Loop through all index statements
-		for lv in self.lv(opt, txn).await?.iter() {
+		for lv in self.lv(opt, &txn).await?.iter() {
 			// Create a new statement
 			let stm = Statement::from(lv);
 			// Check LIVE SELECT where condition
-			if self.check(ctx, opt, txn, &stm, None).await.is_err() {
+			if self.check(ctx, opt, &stm).await.is_err() {
 				continue;
 			}
 			// Check what type of data change this is
@@ -32,10 +32,10 @@ impl<'a> Document<'a> {
 				// Send a DELETE notification to the WebSocket
 			} else if self.is_new() {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &stm).await?;
+				let _ = self.pluck(ctx, opt, &stm).await?;
 			} else {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &stm).await?;
+				let _ = self.pluck(ctx, opt, &stm).await?;
 			};
 		}
 		// Carry on

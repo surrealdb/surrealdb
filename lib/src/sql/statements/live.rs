@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -32,13 +31,7 @@ pub struct LiveStatement {
 
 impl LiveStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.realtime()?;
 		// Selected DB?
@@ -46,11 +39,11 @@ impl LiveStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the live query table
-		match self.what.compute(ctx, opt, txn, None, doc, None).await? {
+		match self.what.compute(ctx, opt).await? {
 			Value::Table(tb) => {
 				// Insert the live query
 				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);

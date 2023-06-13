@@ -284,10 +284,10 @@ impl FtIndex {
 	pub(super) async fn match_id_value(
 		&self,
 		tx: &mut Transaction,
-		rid: &Thing,
+		thg: &Thing,
 		term: &str,
 	) -> Result<bool, Error> {
-		let doc_key: Key = rid.into();
+		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let terms = self.terms(tx).await?;

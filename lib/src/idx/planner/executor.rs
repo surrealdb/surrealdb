@@ -60,7 +60,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,
-		rid: Option<&Thing>,
+		thg: &Thing,
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		// If we find the expression in `pre_match`,
@@ -73,19 +73,17 @@ impl QueryExecutor {
 		}
 
 		// Otherwise, we look for the first possible index options, and evaluate the expression
-		if let Some(rid) = rid {
-			// Does the record id match this executor's table?
-			if rid.tb.eq(&self.inner.table) {
-				if let Some(ios) = self.inner.index_map.get(exp) {
-					for io in ios {
-						if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
-							let mut run = txn.lock().await;
-							// TODO The query string could be extracted when IndexOptions are created
-							let query_string = io.v.clone().convert_to_string()?;
-							return Ok(Value::Bool(
-								fti.match_id_value(&mut run, rid, &query_string).await?,
-							));
-						}
+		// Does the record id match this executor's table?
+		if thg.tb.eq(&self.inner.table) {
+			if let Some(ios) = self.inner.index_map.get(exp) {
+				for io in ios {
+					if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
+						let mut run = txn.lock().await;
+						// TODO The query string could be extracted when IndexOptions are created
+						let query_string = io.v.clone().convert_to_string()?;
+						return Ok(Value::Bool(
+							fti.match_id_value(&mut run, thg, &query_string).await?,
+						));
 					}
 				}
 			}

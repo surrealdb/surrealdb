@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -132,13 +131,7 @@ impl Function {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&'async_recursion Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
 		// Ensure futures are run
@@ -147,18 +140,17 @@ impl Function {
 		match self {
 			Self::Normal(s, x) => {
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
-					.await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 				// Run the normal function
 				fnc::run(ctx, s, a).await
 			}
 			Self::Custom(s, x) => {
+				// Clone transaction
+				let txn = ctx.clone_transaction()?;
 				// Get the function definition
 				let val = {
-					// Clone transaction
-					let run = txn.clone();
 					// Claim transaction
-					let mut run = run.lock().await;
+					let mut run = txn.lock().await;
 					// Get the function definition
 					run.get_fc(opt.ns(), opt.db(), s).await?
 				};
@@ -173,8 +165,7 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
-					.await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
@@ -182,18 +173,16 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(&kind)?);
 				}
 				// Run the custom function
-				val.block.compute(&ctx, opt, txn, doc).await
+				val.block.compute(&ctx, opt).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
 					// Compute the function arguments
-					let a =
-						try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, None, doc, None)))
-							.await?;
+					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 					// Run the script function
-					fnc::script::run(ctx, opt, txn, doc, s, a).await
+					fnc::script::run(ctx, opt, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{

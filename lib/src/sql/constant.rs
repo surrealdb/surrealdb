@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
@@ -79,13 +78,7 @@ impl Constant {
 	}
 
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
 		Ok(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),

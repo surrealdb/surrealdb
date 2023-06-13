@@ -61,6 +61,10 @@ pub enum Error {
 	#[error("Transaction is too large")]
 	TxTooLarge,
 
+	/// The context does have any transaction
+	#[error("No transaction")]
+	NoTx,
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
