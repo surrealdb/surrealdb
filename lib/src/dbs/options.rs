@@ -77,8 +77,10 @@ impl Options {
 		self.db.as_ref().unwrap()
 	}
 
-	/// Get currently selected Level
-	pub fn current_level(&self) -> Level {
+	/// Level selected by the user
+	/// 
+	/// The selected level doesn't imply the user has been authorized to access it.
+	pub fn selected_level(&self) -> Level {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(Some(_), Some(_)) => Level::Db,
 			(Some(_), None) => Level::Ns,

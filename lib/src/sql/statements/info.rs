@@ -227,7 +227,7 @@ impl InfoStatement {
 					// Get the level from the provided user statement
 					Some(val) => val.to_level(),
 					// If no level is provided, use the current selected level
-					None => opt.current_level(),
+					None => opt.selected_level(),
 				};
 
 				// Check if all the necessary options are set for the given level
