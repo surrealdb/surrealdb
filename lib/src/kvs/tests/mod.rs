@@ -1,5 +1,4 @@
 #[cfg(feature = "kv-mem")]
-#[cfg(test)]
 mod mem {
 
 	use crate::kvs::Datastore;
@@ -21,7 +20,6 @@ mod mem {
 }
 
 #[cfg(feature = "kv-rocksdb")]
-#[cfg(test)]
 mod rocksdb {
 
 	use crate::kvs::Datastore;
@@ -41,12 +39,12 @@ mod rocksdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
-#[cfg(test)]
 mod speedb {
 
 	use crate::kvs::Datastore;
@@ -66,11 +64,12 @@ mod speedb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
+	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
-#[cfg(test)]
 mod tikv {
 
 	use crate::kvs::Datastore;
@@ -94,12 +93,12 @@ mod tikv {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
-#[cfg(test)]
 mod fdb {
 
 	use crate::kvs::Datastore;
@@ -107,7 +106,7 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds() -> Datastore {
-		let ds = Datastore::new("/etc/foundationdb/fdb.cluster").await.unwrap();
+		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster").await.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		assert!(tx.delp(vec![], u32::MAX).await.is_ok());
@@ -123,6 +122,7 @@ mod fdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
-	include!("multiwriter.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_allow.rs");
 	include!("tb.rs");
 }
