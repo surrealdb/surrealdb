@@ -94,6 +94,7 @@ use crate::api::err::Error;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
