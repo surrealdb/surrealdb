@@ -1,5 +1,3 @@
-mod tb;
-
 #[cfg(feature = "kv-mem")]
 #[cfg(test)]
 mod mem {
@@ -19,6 +17,7 @@ mod mem {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
+	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -43,6 +42,7 @@ mod rocksdb {
 	include!("snapshot.rs");
 	include!("multireader.rs");
 	include!("multiwriter.rs");
+	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
@@ -95,6 +95,7 @@ mod tikv {
 	include!("snapshot.rs");
 	include!("multireader.rs");
 	include!("multiwriter.rs");
+	include!("tb.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -123,4 +124,5 @@ mod fdb {
 	include!("snapshot.rs");
 	include!("multireader.rs");
 	include!("multiwriter.rs");
+	include!("tb.rs");
 }
