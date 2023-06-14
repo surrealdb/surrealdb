@@ -91,3 +91,36 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	assert_eq!(tmp, val);
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
+	let sql = r"
+		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bar'];
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bar';
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				content: [
+					'<em>Hello</em> World!',
+					'Be Bop',
+					'Foo <em>Bar</em>'
+				]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}

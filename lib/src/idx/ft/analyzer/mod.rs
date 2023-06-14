@@ -7,7 +7,7 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::Array;
+use crate::sql::{Array, Value};
 use filter::Filter;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -73,7 +73,8 @@ impl Analyzer {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
-		let inputs = self.analyse_content(field_content)?;
+		let mut inputs = vec![];
+		self.analyse_content(field_content, &mut inputs)?;
 		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
 		for tks in &inputs {
@@ -109,7 +110,8 @@ impl Analyzer {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
-		let inputs = self.analyse_content(field_content)?;
+		let mut inputs = Vec::with_capacity(field_content.len());
+		self.analyse_content(field_content, &mut inputs)?;
 		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -137,14 +139,25 @@ impl Analyzer {
 		Ok((dl, tfid, osid))
 	}
 
-	fn analyse_content(&self, field_content: &Array) -> Result<Vec<Tokens>, Error> {
-		let mut res = Vec::with_capacity(field_content.0.len());
+	fn analyse_content(&self, field_content: &Array, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		for v in &field_content.0 {
-			let input = v.to_owned().convert_to_string()?;
-			let tks = self.analyse(input);
-			res.push(tks);
+			self.analyse_value(v, tks);
 		}
-		Ok(res)
+		Ok(())
+	}
+
+	fn analyse_value(&self, val: &Value, tks: &mut Vec<Tokens>) {
+		match val {
+			Value::Strand(s) => tks.push(self.analyse(s.0.clone())),
+			Value::Number(n) => tks.push(self.analyse(n.to_string())),
+			Value::Bool(b) => tks.push(self.analyse(b.to_string())),
+			Value::Array(a) => {
+				for v in &a.0 {
+					self.analyse_value(v, tks);
+				}
+			}
+			_ => {}
+		}
 	}
 
 	fn analyse(&self, input: String) -> Tokens {

@@ -3,7 +3,8 @@ use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::{Idiom, Value};
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 pub(super) struct Highlighter {
 	prefix: Vec<char>,
@@ -45,6 +46,20 @@ impl Highlighter {
 			}
 		}
 	}
+
+	fn extract(val: Value, vals: &mut Vec<Option<String>>) {
+		match val {
+			Value::Strand(s) => vals.push(Some(s.0)),
+			Value::Number(n) => vals.push(Some(n.to_string())),
+			Value::Bool(b) => vals.push(Some(b.to_string())),
+			Value::Array(a) => {
+				for v in a.0 {
+					Self::extract(v, vals);
+				}
+			}
+			_ => vals.push(None),
+		}
+	}
 }
 
 impl TryFrom<Highlighter> for Value {
@@ -56,32 +71,30 @@ impl TryFrom<Highlighter> for Value {
 		}
 		let mut vals = vec![];
 		for (_, f) in hl.fields {
-			let s = match f {
-				Value::Strand(s) => Some(s.0),
-				Value::Number(n) => Some(n.to_string()),
-				Value::Bool(b) => Some(b.to_string()),
-				_ => None,
-			};
-			vals.push(s);
+			Highlighter::extract(f, &mut vals);
 		}
 		let mut res = Vec::with_capacity(vals.len());
-		for (idx, m) in hl.offsets {
-			if let Some(v) = vals.get_mut(idx as usize) {
-				if let Some(v) = v {
+		let mut idx = 0;
+		for val in vals {
+			if let Some(v) = val {
+				if let Some(m) = hl.offsets.get(&idx) {
 					let mut v: Vec<char> = v.chars().collect();
 					let mut d = 0;
 					for (s, e) in m {
-						let p = (s as usize) + d;
+						let p = (*s as usize) + d;
 						v.splice(p..p, hl.prefix.clone());
 						d += hl.prefix.len();
-						let p = (e as usize) + d;
+						let p = (*e as usize) + d;
 						v.splice(p..p, hl.suffix.clone());
 						d += hl.suffix.len();
 					}
 					let s: String = v.iter().collect();
 					res.push(Value::from(s));
+				} else {
+					res.push(Value::from(v));
 				}
 			}
+			idx += 1;
 		}
 		Ok(match res.len() {
 			0 => Value::None,
