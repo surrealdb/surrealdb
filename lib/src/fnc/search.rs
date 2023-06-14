@@ -8,7 +8,7 @@ pub async fn highlight(
 ) -> Result<Value, Error> {
 	if let Some(doc) = ctx.doc() {
 		if let Some(thg) = ctx.thing() {
-			if let Some(exe) = ctx.query_executor() {
+			if let Some(exe) = ctx.get_query_executor(&thg.tb) {
 				let txn = ctx.clone_transaction()?;
 				return exe.highlight(&txn, thg, prefix, suffix, match_ref.clone(), doc).await;
 			}
