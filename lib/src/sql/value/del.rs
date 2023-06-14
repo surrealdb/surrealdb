@@ -105,7 +105,7 @@ impl Value {
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
 								let mut child_ctx = Context::new(ctx);
-								child_ctx.add_doc(v);
+								child_ctx.add_cursor_doc(v);
 								if w.compute(&child_ctx, opt).await?.is_truthy() {
 									m.insert(i);
 								};
@@ -117,7 +117,7 @@ impl Value {
 							let path = path.next();
 							for v in v.iter_mut() {
 								let mut child_ctx = Context::new(ctx);
-								child_ctx.add_doc(v);
+								child_ctx.add_cursor_doc(v);
 								if w.compute(&child_ctx, opt).await?.is_truthy() {
 									v.del(ctx, opt, path).await?;
 								}

@@ -58,7 +58,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("value", &val);
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					// Process the VALUE clause
 					val = expr.compute(&ctx, opt).await?;
 				}
@@ -87,7 +87,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("value", &val);
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					// Process the ASSERT clause
 					if !expr.compute(&ctx, opt).await?.is_truthy() {
 						return Err(Error::FieldValue {
@@ -119,7 +119,7 @@ impl<'a> Document<'a> {
 							ctx.add_value("value", &val);
 							ctx.add_value("after", &val);
 							ctx.add_value("before", &old);
-							ctx.add_doc(&self.current);
+							ctx.add_cursor_doc(&self.current);
 							// Process the PERMISSION clause
 							if !e.compute(&ctx, opt).await?.is_truthy() {
 								val = old

@@ -35,12 +35,12 @@ pub struct Context<'a> {
 	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 	// An optional transaction
 	transaction: Option<Transaction>,
+	// An optional query executor
+	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
 	// An optional record id
 	thing: Option<&'a Thing>,
-	// An optional query executor
-	query_executor: Option<QueryExecutor>,
-	// An option document
-	doc: Option<&'a Value>,
+	// An optional cursor document
+	cursor_doc: Option<&'a Value>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -57,6 +57,7 @@ impl<'a> Debug for Context<'a> {
 			.field("cancelled", &self.cancelled)
 			.field("values", &self.values)
 			.field("thing", &self.thing)
+			.field("doc", &self.cursor_doc)
 			.finish()
 	}
 }
@@ -70,9 +71,9 @@ impl<'a> Context<'a> {
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			transaction: None,
+			query_executors: None,
 			thing: None,
-			query_executor: None,
-			doc: None,
+			cursor_doc: None,
 		}
 	}
 
@@ -84,9 +85,9 @@ impl<'a> Context<'a> {
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			transaction: parent.transaction.clone(),
+			query_executors: parent.query_executors.clone(),
 			thing: parent.thing,
-			query_executor: parent.query_executor.clone(),
-			doc: parent.doc,
+			cursor_doc: parent.cursor_doc,
 		}
 	}
 
@@ -122,12 +123,17 @@ impl<'a> Context<'a> {
 		self.thing = Some(thing);
 	}
 
-	pub fn add_doc(&mut self, doc: &'a Value) {
-		self.doc = Some(doc);
+	/// Add a cursor document to this context.
+	/// Usage: A new child context is created by an iterator for each document.
+	/// The iterator sets the value of the current document (known as cursor document).
+	/// The cursor document is copied do the child contexts.
+	pub(crate) fn add_cursor_doc(&mut self, doc: &'a Value) {
+		self.cursor_doc = Some(doc);
 	}
 
-	pub(crate) fn add_query_executor(&mut self, exe: QueryExecutor) {
-		self.query_executor = Some(exe);
+	/// Set the query executors
+	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
+		self.query_executors = Some(Arc::new(executors));
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -158,11 +164,15 @@ impl<'a> Context<'a> {
 	}
 
 	pub fn doc(&self) -> Option<&Value> {
-		self.doc
+		self.cursor_doc
 	}
 
-	pub(crate) fn query_executor(&self) -> Option<&QueryExecutor> {
-		self.query_executor.as_ref()
+	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
+		if let Some(qe) = &self.query_executors {
+			qe.get(tb)
+		} else {
+			None
+		}
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

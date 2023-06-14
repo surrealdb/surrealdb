@@ -93,7 +93,7 @@ impl Value {
 						let mut a = Vec::new();
 						for v in v.iter() {
 							let mut child_ctx = Context::new(ctx);
-							child_ctx.add_doc(v);
+							child_ctx.add_cursor_doc(v);
 							if w.compute(&child_ctx, opt).await?.is_truthy() {
 								a.push(v.get(&child_ctx, opt, path).await?)
 							}
@@ -323,7 +323,7 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		ctx.add_doc(&doc);
+		ctx.add_cursor_doc(&doc);
 		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(
 			res,

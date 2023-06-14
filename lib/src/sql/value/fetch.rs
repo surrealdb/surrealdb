@@ -63,7 +63,7 @@ impl Value {
 						let path = path.next();
 						for v in v.iter_mut() {
 							let mut child_ctx = Context::new(ctx);
-							child_ctx.add_doc(v);
+							child_ctx.add_cursor_doc(v);
 							if w.compute(&child_ctx, opt).await?.is_truthy() {
 								v.fetch(ctx, opt, path).await?;
 							}

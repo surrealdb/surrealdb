@@ -82,7 +82,7 @@ impl<'a> Document<'a> {
 			return Ok(None);
 		}
 		let mut ctx = Context::new(ctx);
-		ctx.add_doc(value);
+		ctx.add_cursor_doc(value);
 		let mut o = Array::with_capacity(ix.cols.len());
 		for i in ix.cols.iter() {
 			let v = i.compute(&ctx, opt).await?;

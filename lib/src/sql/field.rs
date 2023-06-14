@@ -82,7 +82,7 @@ impl Fields {
 		//
 		let doc = ctx.doc().unwrap_or(&Value::None);
 		let mut ctx = Context::new(ctx);
-		ctx.add_doc(doc);
+		ctx.add_cursor_doc(doc);
 		// Process the desired output
 		let mut out = match self.is_all() {
 			true => doc.compute(&ctx, opt).await?,

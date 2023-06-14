@@ -24,32 +24,32 @@ impl<'a> Document<'a> {
 			match v {
 				Data::PatchExpression(data) => {
 					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_doc(&self.current);
+					current_ctx.add_cursor_doc(&self.current);
 					let data = data.compute(&current_ctx, opt).await?;
 					self.current.to_mut().patch(data)?
 				}
 				Data::MergeExpression(data) => {
 					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_doc(&self.current);
+					current_ctx.add_cursor_doc(&self.current);
 					let data = data.compute(&current_ctx, opt).await?;
 					self.current.to_mut().merge(data)?
 				}
 				Data::ReplaceExpression(data) => {
 					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_doc(&self.current);
+					current_ctx.add_cursor_doc(&self.current);
 					let data = data.compute(&current_ctx, opt).await?;
 					self.current.to_mut().replace(data)?
 				}
 				Data::ContentExpression(data) => {
 					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_doc(&self.current);
+					current_ctx.add_cursor_doc(&self.current);
 					let data = data.compute(&current_ctx, opt).await?;
 					self.current.to_mut().replace(data)?
 				}
 				Data::SetExpression(x) => {
 					for x in x.iter() {
 						let mut current_ctx = Context::new(ctx);
-						current_ctx.add_doc(&self.current);
+						current_ctx.add_cursor_doc(&self.current);
 						let v = x.2.compute(&current_ctx, opt).await?;
 						match x.1 {
 							Operator::Equal => match v {
@@ -84,7 +84,7 @@ impl<'a> Document<'a> {
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
 						let mut current_ctx = Context::new(&ctx);
-						current_ctx.add_doc(&self.current);
+						current_ctx.add_cursor_doc(&self.current);
 						let v = x.2.compute(&current_ctx, opt).await?;
 						match x.1 {
 							Operator::Equal => match v {
