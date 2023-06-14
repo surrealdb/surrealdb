@@ -18,29 +18,12 @@ pub(crate) struct QueryPlanner<'a> {
 }
 
 impl<'a> QueryPlanner<'a> {
-	#[inline]
-	pub(crate) fn add_query_executor(
-		pla: Option<&QueryPlanner<'_>>,
-		tb: &str,
-		ctx: &mut Context<'_>,
-	) {
-		if let Some(p) = pla {
-			if let Some(exe) = p.get_query_executor(tb) {
-				ctx.add_query_executor(exe);
-			}
-		}
-	}
-
 	pub(crate) fn new(opt: &'a Options, cond: &'a Option<Cond>) -> Self {
 		Self {
 			opt,
 			cond,
 			executors: HashMap::default(),
 		}
-	}
-
-	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<QueryExecutor> {
-		self.executors.get(tb).cloned()
 	}
 
 	pub(crate) async fn get_iterable(
@@ -61,6 +44,14 @@ impl<'a> QueryPlanner<'a> {
 			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))
+	}
+
+	pub(crate) fn finish(self) -> Option<HashMap<String, QueryExecutor>> {
+		if self.executors.is_empty() {
+			None
+		} else {
+			Some(self.executors)
+		}
 	}
 }
 

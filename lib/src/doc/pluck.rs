@@ -26,17 +26,17 @@ impl<'a> Document<'a> {
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 				Output::After => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					self.current.compute(&ctx, opt).await
 				}
 				Output::Before => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.initial);
+					ctx.add_cursor_doc(&self.initial);
 					self.initial.compute(&ctx, opt).await
 				}
 				Output::Fields(v) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					v.compute(&ctx, opt, false).await
 				}
 			},
@@ -45,33 +45,33 @@ impl<'a> Document<'a> {
 					0 => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 					_ => {
 						let mut ctx = Context::new(ctx);
-						ctx.add_doc(&self.current);
+						ctx.add_cursor_doc(&self.current);
 						s.expr.compute(&ctx, opt, false).await
 					}
 				},
 				Statement::Select(s) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					s.expr.compute(&ctx, opt, s.group.is_some()).await
 				}
 				Statement::Create(_) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					self.current.compute(&ctx, opt).await
 				}
 				Statement::Update(_) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					self.current.compute(&ctx, opt).await
 				}
 				Statement::Relate(_) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					self.current.compute(&ctx, opt).await
 				}
 				Statement::Insert(_) => {
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					self.current.compute(&ctx, opt).await
 				}
 				_ => Err(Error::Ignore),
@@ -99,7 +99,7 @@ impl<'a> Document<'a> {
 								// Configure the context
 								let mut ctx = Context::new(ctx);
 								ctx.add_value("value", &val);
-								ctx.add_doc(&self.current);
+								ctx.add_cursor_doc(&self.current);
 								// Process the PERMISSION clause
 								if !e.compute(&ctx, opt).await?.is_truthy() {
 									out.del(&ctx, opt, k).await?

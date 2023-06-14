@@ -109,7 +109,7 @@ impl DeleteStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, &stm, None).await
+		i.output(ctx, opt, &stm).await
 	}
 }
 

@@ -158,7 +158,7 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 
 pub(crate) async fn matches(ctx: &Context<'_>, e: &Expression) -> Result<Value, Error> {
 	if let Some(thg) = ctx.thing() {
-		if let Some(exe) = ctx.query_executor() {
+		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
 			// Clone transaction
 			let txn = ctx.clone_transaction()?;
 			// Check the matches

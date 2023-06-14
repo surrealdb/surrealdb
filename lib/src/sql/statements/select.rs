@@ -81,6 +81,7 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
@@ -118,8 +119,16 @@ impl SelectStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
-		// Output the results
-		i.output(ctx, opt, &stm, Some(&planner)).await
+		// Add query executors if any
+		if let Some(ex) = planner.finish() {
+			let mut ctx = Context::new(ctx);
+			ctx.set_query_executors(ex);
+			// Output the results
+			i.output(&ctx, opt, &stm).await
+		} else {
+			// Output the results
+			i.output(ctx, opt, &stm).await
+		}
 	}
 }
 

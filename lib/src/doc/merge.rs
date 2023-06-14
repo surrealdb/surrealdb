@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 		// This is an INSERT statement
 		if let Workable::Insert(v) = &self.extras {
 			let mut ctx = Context::new(ctx);
-			ctx.add_doc(&self.current);
+			ctx.add_cursor_doc(&self.current);
 			let v = v.compute(&ctx, opt).await?;
 			self.current.to_mut().merge(v)?;
 		}

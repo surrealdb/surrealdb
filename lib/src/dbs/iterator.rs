@@ -6,7 +6,6 @@ use crate::dbs::LOG;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::plan::Plan;
-use crate::idx::planner::QueryPlanner;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -77,7 +76,6 @@ impl Iterator {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
@@ -85,13 +83,13 @@ impl Iterator {
 		let mut run = Context::new(ctx);
 		self.run = run.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(&ctx, opt, stm).await?;
+		self.setup_limit(ctx, opt, stm).await?;
 		// Process the query START clause
-		self.setup_start(&ctx, opt, stm).await?;
+		self.setup_start(ctx, opt, stm).await?;
 		// Process any EXPLAIN clause
-		let explanation = self.output_explain(&ctx, opt, stm)?;
+		let explanation = self.output_explain(ctx, opt, stm)?;
 		// Process prepared values
-		self.iterate(&ctx, opt, stm, pla).await?;
+		self.iterate(ctx, opt, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
@@ -244,7 +242,7 @@ impl Iterator {
 								_ => {
 									let x = vals.first();
 									let mut child_ctx = Context::new(ctx);
-									child_ctx.add_doc(&x);
+									child_ctx.add_cursor_doc(&x);
 									let x = if let Some(alias) = alias {
 										alias.compute(&child_ctx, opt).await?
 									} else {
@@ -409,13 +407,12 @@ impl Iterator {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&'async_recursion QueryPlanner<'_>>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, stm, pla, self).await?;
+			v.iterate(ctx, opt, stm, self).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -428,7 +425,6 @@ impl Iterator {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&'async_recursion QueryPlanner<'_>>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
@@ -438,7 +434,7 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, stm, pla, self).await?;
+					v.iterate(ctx, opt, stm, self).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -470,7 +466,7 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok((k, v)) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, stm, pla, chn.clone(), k, v))
+						e.spawn(Document::compute(ctx, opt, stm, chn.clone(), k, v))
 							// Ensure we detach the spawned task
 							.detach();
 					}

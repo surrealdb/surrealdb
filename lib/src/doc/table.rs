@@ -66,7 +66,7 @@ impl<'a> Document<'a> {
 				// There is a GROUP BY clause specified
 				Some(group) => {
 					let mut initial_ctx = Context::new(ctx);
-					initial_ctx.add_doc(&self.initial);
+					initial_ctx.add_cursor_doc(&self.initial);
 					// Set the previous record id
 					let old = Thing {
 						tb: ft.name.to_raw(),
@@ -77,7 +77,7 @@ impl<'a> Document<'a> {
 							.into(),
 					};
 					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_doc(&self.current);
+					current_ctx.add_cursor_doc(&self.current);
 					// Set the current record id
 					let rid = Thing {
 						tb: ft.name.to_raw(),
@@ -172,7 +172,7 @@ impl<'a> Document<'a> {
 					};
 					// Use the current record data
 					let mut ctx = Context::new(ctx);
-					ctx.add_doc(&self.current);
+					ctx.add_cursor_doc(&self.current);
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
@@ -250,8 +250,8 @@ impl<'a> Document<'a> {
 		// Create a new context with the initial or the current doc
 		let mut ctx = Context::new(ctx);
 		match act {
-			Action::Delete => ctx.add_doc(self.initial.as_ref()),
-			Action::Update => ctx.add_doc(self.current.as_ref()),
+			Action::Delete => ctx.add_cursor_doc(self.initial.as_ref()),
+			Action::Update => ctx.add_cursor_doc(self.current.as_ref()),
 			_ => unreachable!(),
 		};
 		//

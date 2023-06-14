@@ -5,7 +5,6 @@ use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use channel::Sender;
@@ -16,16 +15,13 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
 		val: Operable,
 	) -> Result<(), Error> {
 		let mut ctx = Context::new(ctx);
-		// Retrieve the QueryExecutor
 		if let Some(t) = &thg {
 			ctx.add_thing(t);
-			QueryPlanner::add_query_executor(pla, &t.tb, &mut ctx);
 		}
 		// Setup a new workable
 		let ins = match val {

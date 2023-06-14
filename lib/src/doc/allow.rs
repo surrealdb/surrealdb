@@ -38,7 +38,7 @@ impl<'a> Document<'a> {
 						// Disable permissions
 						let opt = &opt.perms(false);
 						let mut ctx = Context::new(ctx);
-						ctx.add_doc(&self.current);
+						ctx.add_cursor_doc(&self.current);
 						// Process the PERMISSION clause
 						if !e.compute(&ctx, opt).await?.is_truthy() {
 							return Err(Error::Ignore);

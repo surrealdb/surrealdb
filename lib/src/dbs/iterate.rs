@@ -6,7 +6,6 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::err::Error;
 use crate::idx::planner::plan::Plan;
-use crate::idx::planner::QueryPlanner;
 use crate::key::graph;
 use crate::key::thing;
 use crate::sql::dir::Dir;
@@ -21,24 +20,23 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
 				Iterable::Value(v) => Self::iterate_value(ctx, opt, stm, v, ite).await,
-				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, stm, pla, v, ite).await?,
+				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, stm, v, ite).await?,
 				Iterable::Mergeable(v, o) => {
-					Self::iterate_mergeable(ctx, opt, stm, pla, v, o, ite).await?;
+					Self::iterate_mergeable(ctx, opt, stm, v, o, ite).await?;
 				}
 				Iterable::Relatable(f, v, w) => {
-					Self::iterate_relatable(ctx, opt, stm, pla, f, v, w, ite).await?
+					Self::iterate_relatable(ctx, opt, stm, f, v, w, ite).await?
 				}
-				Iterable::Table(v) => Self::iterate_table(ctx, opt, stm, pla, v, ite).await?,
-				Iterable::Range(v) => Self::iterate_range(ctx, opt, stm, pla, v, ite).await?,
-				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, stm, pla, e, ite).await?,
+				Iterable::Table(v) => Self::iterate_table(ctx, opt, stm, v, ite).await?,
+				Iterable::Range(v) => Self::iterate_range(ctx, opt, stm, v, ite).await?,
+				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, stm, e, ite).await?,
 				Iterable::Index(t, p) => {
-					Self::iterate_index(ctx, opt, stm, pla, t, p, ite).await?;
+					Self::iterate_index(ctx, opt, stm, t, p, ite).await?;
 				}
 			}
 		}
@@ -62,7 +60,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		v: Thing,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -81,7 +78,6 @@ impl Iterable {
 		// Get the optional query executor
 		let mut child_ctx = Context::new(ctx);
 		child_ctx.add_thing(&v);
-		QueryPlanner::add_query_executor(pla, &v.tb, &mut child_ctx);
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
 		Ok(())
@@ -91,7 +87,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		v: Thing,
 		o: Value,
 		ite: &mut Iterator,
@@ -110,10 +105,9 @@ impl Iterable {
 		};
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
-		// Get the optional query executor
+		// Create a new context to process the operable
 		let mut child_ctx = Context::new(ctx);
 		child_ctx.add_thing(&v);
-		QueryPlanner::add_query_executor(pla, &v.tb, &mut child_ctx);
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
 		Ok(())
@@ -123,7 +117,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
@@ -146,9 +139,6 @@ impl Iterable {
 		// Create the child context
 		let mut child_ctx = Context::new(ctx);
 		child_ctx.add_thing(&v);
-		// Get the optional query executor
-		QueryPlanner::add_query_executor(pla, &v.tb, &mut child_ctx);
-
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
 		Ok(())
@@ -158,7 +148,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		v: Table,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -166,9 +155,6 @@ impl Iterable {
 		let txn = ctx.clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
-		let mut iter_ctx = Context::new(ctx);
-		// Get the optional query executor
-		QueryPlanner::add_query_executor(pla, &v.0, &mut iter_ctx);
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns(), opt.db(), &v);
 		let end = thing::suffix(opt.ns(), opt.db(), &v);
@@ -214,10 +200,10 @@ impl Iterable {
 					let rid = Thing::from((key.tb, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
-					let mut rid_ctx = Context::new(&iter_ctx);
-					rid_ctx.add_thing(&rid);
+					let mut child_ctx = Context::new(&ctx);
+					child_ctx.add_thing(&rid);
 					// Process the record
-					ite.process(&rid_ctx, opt, stm, val).await;
+					ite.process(&child_ctx, opt, stm, val).await;
 				}
 				continue;
 			}
@@ -230,7 +216,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		v: Range,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -262,9 +247,6 @@ impl Iterable {
 		};
 		// Prepare the next holder key
 		let mut nxt: Option<Vec<u8>> = None;
-		// Get the optional query executor
-		let mut ctx = Context::new(ctx);
-		QueryPlanner::add_query_executor(pla, &v.tb, &mut ctx);
 		// Loop until no more keys
 		loop {
 			// Check if the context is finished
@@ -303,7 +285,7 @@ impl Iterable {
 					let key: crate::key::thing::Thing = (&k).into();
 					let val: crate::sql::value::Value = (&v).into();
 					let rid = Thing::from((key.tb, key.id));
-					let mut ctx = Context::new(&ctx);
+					let mut ctx = Context::new(ctx);
 					ctx.add_thing(&rid);
 					// Create a new operable value
 					let val = Operable::Value(val);
@@ -321,7 +303,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		e: Edges,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -448,8 +429,6 @@ impl Iterable {
 							Some(v) => Value::from(v),
 							None => Value::None,
 						});
-						// Get the optional query executor
-						QueryPlanner::add_query_executor(pla, gra.ft, &mut ctx);
 						// Process the record
 						ite.process(&ctx, opt, stm, val).await;
 					}
@@ -465,7 +444,6 @@ impl Iterable {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pla: Option<&QueryPlanner<'_>>,
 		table: Table,
 		plan: Plan,
 		ite: &mut Iterator,
@@ -473,8 +451,6 @@ impl Iterable {
 		let txn = ctx.clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		let mut ctx = Context::new(ctx);
-		QueryPlanner::add_query_executor(pla, &table.0, &mut ctx);
 		let mut iterator = plan.new_iterator(opt, &txn).await?;
 		let mut things = iterator.next_batch(&txn, 1000).await?;
 		while !things.is_empty() {

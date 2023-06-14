@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			let mut ctx = Context::new(ctx);
-			ctx.add_doc(&self.current);
+			ctx.add_cursor_doc(&self.current);
 			// Check if the expression is truthy
 			if !cond.compute(&ctx, opt).await?.is_truthy() {
 				// Ignore this document
