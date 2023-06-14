@@ -58,7 +58,7 @@ impl fmt::Display for Datastore {
 			#[cfg(feature = "kv-speedb")]
 			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indxdb"),
+			Inner::IndxDB(_) => write!(f, "indexdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
