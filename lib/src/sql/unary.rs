@@ -74,4 +74,14 @@ mod tests {
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Unary(Operator::Neg, Value::Strand("a".into()).to_idiom().into()));
 	}
+
+	#[test]
+	fn not_var() {
+		let sql = "NOT a";
+		let res = unary(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+		assert_eq!(out, Unary(Operator::Not, Value::Strand("a".into()).to_idiom().into()));
+	}
 }

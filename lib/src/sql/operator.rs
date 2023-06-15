@@ -150,7 +150,22 @@ pub fn assigner(i: &str) -> IResult<&str, Operator> {
 }
 
 pub fn unary(i: &str) -> IResult<&str, Operator> {
-	alt((map(tag("-"), |_| Operator::Neg), map(alt((tag("!"), tag("NOT"))), |_| Operator::Not)))(i)
+	alt((unary_symbols, unary_phrases))(i)
+}
+
+pub fn unary_symbols(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = mightbespace(i)?;
+	let (i, v) =
+		alt((alt((map(tag("-"), |_| Operator::Neg), map(tag("!"), |_| Operator::Not))),))(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, v))
+}
+
+pub fn unary_phrases(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = alt((map(tag_no_case("NOT"), |_| Operator::Or),))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	Ok((i, v))
 }
 
 pub fn binary(i: &str) -> IResult<&str, Operator> {
