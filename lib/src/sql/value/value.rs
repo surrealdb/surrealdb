@@ -2694,7 +2694,7 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(unary, Value::from), map(expression, Value::from), single))(i)
+	alt((map(expression, Value::from), single, map(unary, Value::from)))(i)
 }
 
 /// Parse any `Value` excluding expressions
