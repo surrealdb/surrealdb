@@ -2694,10 +2694,10 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(expression, Value::from), single, map(unary, Value::from)))(i)
+	alt((map(expression, Value::from), single))(i)
 }
 
-/// Parse any `Value` excluding expressions
+/// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
@@ -2718,8 +2718,11 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
+			map(unary, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
+		)),
+		alt((
 			map(block, Value::from),
 			map(param, Value::from),
 			map(regex, Value::from),

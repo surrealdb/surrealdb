@@ -218,4 +218,13 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("(3 * 3 * 3) = (3 * 3 * 3)", format!("{}", out));
 	}
+
+	#[test]
+	fn expression_with_unary() {
+		let sql = "-(5) + 5";
+		let res = expression(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("sql", format!("{}", out));
+	}
 }
