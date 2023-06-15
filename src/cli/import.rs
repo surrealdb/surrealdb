@@ -39,11 +39,9 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 
-	let client = if username.is_none() {
-		connect(endpoint.to_owned()).await?
-	} else {
+	let client = if let Some(username) = username {
 		let root = Root {
-			username: &username.unwrap(),
+			username: &username,
 			password: &password.expect("Password is required when username is provided"),
 		};
 
@@ -58,6 +56,8 @@ pub async fn init(
 		// Sign in to the server
 		client.signin(root).await?;
 		client
+	} else {
+		connect(endpoint).await?
 	};
 
 	// Use the specified namespace / database
