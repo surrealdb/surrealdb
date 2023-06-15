@@ -225,6 +225,6 @@ mod tests {
 		let res = expression(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("sql", format!("{}", out));
+		assert_eq!(sql, format!("{}", out));
 	}
 }
