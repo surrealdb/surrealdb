@@ -68,10 +68,10 @@ mod tests {
 	#[test]
 	fn neg_var() {
 		let sql = "-a";
-		let res = cast(sql);
+		let res = unary(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
-		assert_eq!(out, Unary(Operator::Neg, Value::Idiom("a".into())));
+		assert_eq!(out, Unary(Operator::Neg, Value::Strand("a".into()).to_idiom().into()));
 	}
 }

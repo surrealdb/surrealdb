@@ -305,7 +305,7 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeTupleStruct, Error> {
 		match name {
-			sql::cast::TOKEN => Ok(SerializeTupleStruct::Unary(Default::default())),
+			sql::cast::TOKEN => Ok(SerializeTupleStruct::Cast(Default::default())),
 			sql::unary::TOKEN => Ok(SerializeTupleStruct::Unary(Default::default())),
 			_ => Ok(SerializeTupleStruct::Array(Default::default())),
 		}

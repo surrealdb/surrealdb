@@ -72,8 +72,8 @@ mod tests {
 	use serde::Serialize;
 
 	#[test]
-	fn foo_equals_bar() {
-		let expression = Unary(Operator::Not, Value::True);
+	fn not_true() {
+		let expression = Unary(Operator::Not, Value::Bool(true));
 		let serialized = expression.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(expression, serialized);
 	}
