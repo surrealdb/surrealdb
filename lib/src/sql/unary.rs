@@ -94,7 +94,10 @@ mod tests {
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(
 			out,
-			Unary(Operator::Not, Unary(Operator::Not, Value::Strand("a".into()).to_idiom().into()))
+			Unary(
+				Operator::Not,
+				Unary(Operator::Not, Value::Strand("a".into()).to_idiom().into()).into()
+			)
 		);
 	}
 }
