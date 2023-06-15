@@ -11,8 +11,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
+/// Binary operators.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Operator {
+	//
+	Neg, // -
+	Not, // !
 	//
 	Or,  // ||
 	And, // &&
@@ -70,14 +74,14 @@ impl Operator {
 	#[inline]
 	pub fn precedence(&self) -> u8 {
 		match self {
-			Operator::Or => 1,
-			Operator::And => 2,
-			Operator::Tco => 3,
-			Operator::Nco => 4,
-			Operator::Sub => 6,
-			Operator::Add => 7,
-			Operator::Mul => 8,
-			Operator::Div => 9,
+			Self::Or => 1,
+			Self::And => 2,
+			Self::Tco => 3,
+			Self::Nco => 4,
+			Self::Sub => 6,
+			Self::Add => 7,
+			Self::Mul => 8,
+			Self::Div => 9,
 			_ => 5,
 		}
 	}
@@ -86,6 +90,8 @@ impl Operator {
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			Self::Neg => f.write_str("-"),
+			Self::Not => f.write_str("!"),
 			Self::Or => f.write_str("OR"),
 			Self::And => f.write_str("AND"),
 			Self::Tco => f.write_str("?:"),
@@ -143,11 +149,15 @@ pub fn assigner(i: &str) -> IResult<&str, Operator> {
 	))(i)
 }
 
-pub fn operator(i: &str) -> IResult<&str, Operator> {
-	alt((symbols, phrases))(i)
+pub fn unary(i: &str) -> IResult<&str, Operator> {
+	alt((map(tag("-"), |_| Operator::Neg), map(alt((tag("!"), tag("NOT"))), |_| Operator::Not)))(i)
 }
 
-pub fn symbols(i: &str) -> IResult<&str, Operator> {
+pub fn binary(i: &str) -> IResult<&str, Operator> {
+	alt((binary_symbols, binary_phrases))(i)
+}
+
+pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		alt((
@@ -203,7 +213,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 	Ok((i, v))
 }
 
-pub fn phrases(i: &str) -> IResult<&str, Operator> {
+pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
 		alt((

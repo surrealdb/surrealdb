@@ -37,6 +37,8 @@ use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
+use crate::sql::unary::unary;
+use crate::sql::unary::Unary;
 use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
@@ -59,6 +61,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
+use std::ops::Neg;
 use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
@@ -149,6 +152,7 @@ pub enum Value {
 	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
+	Unary(Box<Unary>),
 	Expression(Box<Expression>),
 	// Add new variants here
 }
@@ -303,6 +307,12 @@ impl From<Function> for Value {
 impl From<Subquery> for Value {
 	fn from(v: Subquery) -> Self {
 		Value::Subquery(Box::new(v))
+	}
+}
+
+impl From<Unary> for Value {
+	fn from(v: Unary) -> Self {
+		Value::Unary(Box::new(v))
 	}
 }
 
@@ -2448,6 +2458,7 @@ impl fmt::Display for Value {
 			Value::Datetime(v) => write!(f, "{v}"),
 			Value::Duration(v) => write!(f, "{v}"),
 			Value::Edges(v) => write!(f, "{v}"),
+			Value::Unary(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
@@ -2505,6 +2516,7 @@ impl Value {
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Unary(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
@@ -2665,9 +2677,24 @@ impl TryPow for Value {
 
 // ------------------------------
 
-/// Parse any `Value` including binary expressions
+pub(crate) trait TryNeg<Rhs = Self> {
+	type Output;
+	fn try_neg(self) -> Result<Self::Output, Error>;
+}
+
+impl TryNeg for Value {
+	type Output = Self;
+	fn try_neg(self) -> Result<Self, Error> {
+		match self {
+			Self::Number(n) if !matches!(n, Number::Int(i64::MIN)) => Ok(Self::Number(n.neg())),
+			v => Err(Error::TryNeg(v.to_string())),
+		}
+	}
+}
+
+/// Parse any `Value` including unary and binary expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(expression, Value::from), single))(i)
+	alt((map(unary, Value::from), map(expression, Value::from), single))(i)
 }
 
 /// Parse any `Value` excluding binary expressions

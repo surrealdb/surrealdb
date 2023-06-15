@@ -20,12 +20,14 @@ use crate::sql::Table;
 use crate::sql::Uuid;
 use map::SerializeValueMap;
 use rust_decimal::Decimal;
+use ser::cast::SerializeCast;
 use ser::edges::SerializeEdges;
 use ser::expression::SerializeExpression;
 use ser::function::SerializeFunction;
 use ser::model::SerializeModel;
 use ser::range::SerializeRange;
 use ser::thing::SerializeThing;
+use ser::unary::SerializeUnary;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Serialize;
@@ -60,7 +62,7 @@ impl ser::Serializer for Serializer {
 
 	type SerializeSeq = SerializeArray;
 	type SerializeTuple = SerializeArray;
-	type SerializeTupleStruct = SerializeArray;
+	type SerializeTupleStruct = SerializeTupleStruct;
 	type SerializeTupleVariant = SerializeTupleVariant;
 	type SerializeMap = SerializeMap;
 	type SerializeStruct = SerializeStruct;
@@ -299,10 +301,14 @@ impl ser::Serializer for Serializer {
 
 	fn serialize_tuple_struct(
 		self,
-		_name: &'static str,
-		len: usize,
+		name: &'static str,
+		_len: usize,
 	) -> Result<Self::SerializeTupleStruct, Error> {
-		self.serialize_seq(Some(len))
+		match name {
+			sql::cast::TOKEN => Ok(SerializeTupleStruct::Unary(Default::default())),
+			sql::unary::TOKEN => Ok(SerializeTupleStruct::Unary(Default::default())),
+			_ => Ok(SerializeTupleStruct::Array(Default::default())),
+		}
 	}
 
 	fn serialize_tuple_variant(
@@ -368,6 +374,7 @@ impl ser::Serializer for Serializer {
 	}
 }
 
+#[derive(Default)]
 pub(super) struct SerializeArray(vec::SerializeValueVec);
 
 impl serde::ser::SerializeSeq for SerializeArray {
@@ -452,6 +459,36 @@ pub(super) enum SerializeTupleVariant {
 	},
 }
 
+pub(super) enum SerializeTupleStruct {
+	Cast(SerializeCast),
+	Unary(SerializeUnary),
+	Array(SerializeArray),
+}
+
+impl serde::ser::SerializeTupleStruct for SerializeTupleStruct {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		match self {
+			Self::Cast(cast) => cast.serialize_field(value),
+			Self::Unary(unary) => unary.serialize_field(value),
+			Self::Array(array) => array.serialize_field(value),
+		}
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		match self {
+			Self::Cast(cast) => Ok(Value::Cast(Box::new(cast.end()?))),
+			Self::Unary(unary) => Ok(Value::Unary(Box::new(unary.end()?))),
+			Self::Array(array) => Ok(serde::ser::SerializeTupleStruct::end(array)?),
+		}
+	}
+}
+
 impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 	type Ok = Value;
 	type Error = Error;
@@ -461,9 +498,9 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			SerializeTupleVariant::Model(model) => model.serialize_field(value),
-			SerializeTupleVariant::Function(function) => function.serialize_field(value),
-			SerializeTupleVariant::Unknown {
+			Self::Model(model) => model.serialize_field(value),
+			Self::Function(function) => function.serialize_field(value),
+			Self::Unknown {
 				ref mut fields,
 				..
 			} => fields.serialize_element(value),
@@ -472,11 +509,9 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			SerializeTupleVariant::Model(model) => Ok(Value::Model(model.end()?)),
-			SerializeTupleVariant::Function(function) => {
-				Ok(Value::Function(Box::new(function.end()?)))
-			}
-			SerializeTupleVariant::Unknown {
+			Self::Model(model) => Ok(Value::Model(model.end()?)),
+			Self::Function(function) => Ok(Value::Function(Box::new(function.end()?))),
+			Self::Unknown {
 				variant,
 				fields,
 			} => Ok(map! {
@@ -504,21 +539,21 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			SerializeStruct::Thing(thing) => thing.serialize_field(key, value),
-			SerializeStruct::Expression(expr) => expr.serialize_field(key, value),
-			SerializeStruct::Edges(edges) => edges.serialize_field(key, value),
-			SerializeStruct::Range(range) => range.serialize_field(key, value),
-			SerializeStruct::Unknown(map) => map.serialize_entry(key, value),
+			Self::Thing(thing) => thing.serialize_field(key, value),
+			Self::Expression(expr) => expr.serialize_field(key, value),
+			Self::Edges(edges) => edges.serialize_field(key, value),
+			Self::Range(range) => range.serialize_field(key, value),
+			Self::Unknown(map) => map.serialize_entry(key, value),
 		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			SerializeStruct::Thing(thing) => Ok(Value::Thing(thing.end()?)),
-			SerializeStruct::Expression(expr) => Ok(Value::Expression(Box::new(expr.end()?))),
-			SerializeStruct::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
-			SerializeStruct::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
-			SerializeStruct::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
+			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
+			Self::Expression(expr) => Ok(Value::Expression(Box::new(expr.end()?))),
+			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
+			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
+			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
 		}
 	}
 }

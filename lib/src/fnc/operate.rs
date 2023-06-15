@@ -2,9 +2,18 @@ use crate::err::Error;
 use crate::sql::value::TryAdd;
 use crate::sql::value::TryDiv;
 use crate::sql::value::TryMul;
+use crate::sql::value::TryNeg;
 use crate::sql::value::TryPow;
 use crate::sql::value::TrySub;
 use crate::sql::value::Value;
+
+pub fn neg(a: Value) -> Result<Value, Error> {
+	a.try_neg()
+}
+
+pub fn not(a: Value) -> Result<Value, Error> {
+	super::not::not((a,))
+}
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(match a.is_truthy() {

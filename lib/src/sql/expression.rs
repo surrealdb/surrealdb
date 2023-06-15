@@ -4,7 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::error::IResult;
-use crate::sql::operator::{operator, Operator};
+use crate::sql::operator::{binary, Operator};
 use crate::sql::value::{single, value, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -12,6 +12,7 @@ use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
+/// Binary expressions.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
 pub struct Expression {
@@ -141,7 +142,7 @@ impl fmt::Display for Expression {
 
 pub fn expression(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = single(i)?;
-	let (i, o) = operator(i)?;
+	let (i, o) = binary(i)?;
 	let (i, r) = value(i)?;
 	let v = match r {
 		Value::Expression(r) => r.augment(l, o),

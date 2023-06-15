@@ -2,39 +2,30 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
-use crate::sql::idiom::Idiom;
-use crate::sql::kind::{kind, Kind};
+use crate::sql::operator::{self, Operator};
 use crate::sql::value::{single, Value};
 use async_recursion::async_recursion;
-use nom::character::complete::char;
-use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Unary";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Cast")]
-pub struct Cast(pub Kind, pub Value);
+#[serde(rename = "$surrealdb::private::sql::Unary")]
+pub struct Unary(pub Operator, pub Value);
 
-impl PartialOrd for Cast {
+impl PartialOrd for Unary {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
 		None
 	}
 }
 
-impl Cast {
-	/// Convert cast to a field name
-	pub fn to_idiom(&self) -> Idiom {
-		self.1.to_idiom()
-	}
-}
-
-impl Cast {
+impl Unary {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
@@ -44,24 +35,29 @@ impl Cast {
 		txn: &Transaction,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
-		// Prevent long cast chains
+		// Prevent long unary chains
 		let opt = &opt.dive(1)?;
-		// Compute the value to be cast and convert it
-		self.1.compute(ctx, opt, txn, doc).await?.convert_to(&self.0)
+		// Compute the operand
+		let operand = self.1.compute(ctx, opt, txn, doc).await?;
+		match &self.0 {
+			Operator::Neg => fnc::operate::neg(operand),
+			Operator::Not => fnc::operate::not(operand),
+			op => unreachable!("{op:?} is not a unary op"),
+		}
 	}
 }
 
-impl fmt::Display for Cast {
+impl fmt::Display for Unary {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<{}> {}", self.0, self.1)
 	}
 }
 
-pub fn cast(i: &str) -> IResult<&str, Cast> {
-	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
+pub fn unary(i: &str) -> IResult<&str, Unary> {
+	let (i, op) = operator::unary(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
-	Ok((i, Cast(k, v)))
+	Ok((i, Unary(op, v)))
 }
 
 #[cfg(test)]

@@ -35,6 +35,7 @@ mod subquery;
 mod table;
 mod thing;
 mod timeout;
+mod unary;
 mod uuid;
 mod value;
 mod version;
