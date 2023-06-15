@@ -77,7 +77,7 @@ mod tests {
 
 	#[test]
 	fn not_var() {
-		let sql = "NOT a";
+		let sql = "!a";
 		let res = unary(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
