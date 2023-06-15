@@ -2692,12 +2692,12 @@ impl TryNeg for Value {
 	}
 }
 
-/// Parse any `Value` including unary and binary expressions
+/// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
 	alt((map(unary, Value::from), map(expression, Value::from), single))(i)
 }
 
-/// Parse any `Value` excluding binary expressions
+/// Parse any `Value` excluding expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
@@ -2736,6 +2736,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 pub fn select(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
+			map(unary, Value::from),
 			map(expression, Value::from),
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
