@@ -76,7 +76,7 @@ impl DefineStatement {
 			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
 			// DEFINE LOGIN has been deprecated. Use DEFINE USER instead
 			Self::Login(_) => Err(Error::Deprecated(
-				"DEFINE LOGIN has been deprecated. Use DEFINE USER instead".to_string(),
+				"DEFINE LOGIN is no longer supported. Use DEFINE USER instead".to_string(),
 			)),
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
