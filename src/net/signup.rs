@@ -16,7 +16,6 @@ const MAX: u64 = 1024; // 1 KiB
 struct Success {
 	code: u16,
 	details: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	token: Option<String>,
 }
 

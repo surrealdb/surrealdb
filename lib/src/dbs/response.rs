@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::sql::value::Value;
 use serde::ser::SerializeStruct;
+use serde::Deserialize;
 use serde::Serialize;
 use std::time::Duration;
 
@@ -36,26 +37,30 @@ impl Response {
 	}
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub(crate) enum Status {
+	Ok,
+	Err,
+}
+
 impl Serialize for Response {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
+		let mut val = serializer.serialize_struct(TOKEN, 3)?;
+		val.serialize_field("time", self.speed().as_str())?;
 		match &self.result {
 			Ok(v) => {
-				let mut val = serializer.serialize_struct(TOKEN, 3)?;
-				val.serialize_field("time", self.speed().as_str())?;
-				val.serialize_field("status", "OK")?;
+				val.serialize_field("status", &Status::Ok)?;
 				val.serialize_field("result", v)?;
-				val.end()
 			}
 			Err(e) => {
-				let mut val = serializer.serialize_struct(TOKEN, 3)?;
-				val.serialize_field("time", self.speed().as_str())?;
-				val.serialize_field("status", "ERR")?;
-				val.serialize_field("detail", e)?;
-				val.end()
+				val.serialize_field("status", &Status::Err)?;
+				val.serialize_field("result", &Value::from(e.to_string()))?;
 			}
 		}
+		val.end()
 	}
 }

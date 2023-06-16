@@ -27,6 +27,7 @@ use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
+use serde::Deserialize;
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -284,27 +285,54 @@ pub(crate) fn router(
 						Either::Response(result) => {
 							last_activity = Instant::now();
 							match result {
-								Ok(message) => match Response::try_from(message) {
+								Ok(message) => match Response::try_from(&message) {
 									Ok(option) => {
 										if let Some(response) = option {
 											trace!(target: LOG, "{response:?}");
 											if let Some(Ok(id)) =
 												response.id.map(Value::coerce_to_i64)
 											{
-												if let Some((method, sender)) = routes.remove(&id) {
+												if let Some((_method, sender)) = routes.remove(&id)
+												{
 													let _res = sender
-														.into_send_async(DbResponse::from((
-															method,
-															response.content,
-														)))
+														.into_send_async(DbResponse::from(
+															response.result,
+														))
 														.await;
 												}
 											}
 										}
 									}
-									Err(_error) => {
-										// Unfortunately, we don't know which response failed to deserialize
-										warn!(target: LOG, "Failed to deserialise message");
+									Err(error) => {
+										#[derive(Deserialize)]
+										struct Response {
+											id: Option<Value>,
+										}
+
+										// Let's try to find out the ID of the response that failed to deserialise
+										if let Message::Binary(binary) = message {
+											if let Ok(Response {
+												id,
+											}) = deserialize(&binary)
+											{
+												// Return an error if an ID was returned
+												if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+													if let Some((_method, sender)) =
+														routes.remove(&id)
+													{
+														let _res = sender
+															.into_send_async(Err(error))
+															.await;
+													}
+												}
+											} else {
+												// Unfortunately, we don't know which response failed to deserialize
+												warn!(
+													target: LOG,
+													"Failed to deserialise message; {error:?}"
+												);
+											}
+										}
 									}
 								},
 								Err(error) => {
@@ -382,15 +410,15 @@ pub(crate) fn router(
 }
 
 impl Response {
-	fn try_from(message: Message) -> Result<Option<Self>> {
+	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
 				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
-					binary,
+					binary: binary.clone(),
 					error,
 				}
 				.into()

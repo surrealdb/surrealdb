@@ -22,6 +22,7 @@ where
 		.with_no_limit()
 		.with_little_endian()
 		.with_varint_encoding()
-		.reject_trailing_bytes()
+		// Ignore extra fields so we can pull out the ID only from responses that fail to deserialise
+		.allow_trailing_bytes()
 		.deserialize(bytes)
 }
