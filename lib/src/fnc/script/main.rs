@@ -1,4 +1,6 @@
 use super::classes;
+#[cfg(feature = "http")]
+use super::fetch;
 use super::globals;
 use super::modules;
 use super::modules::loader;
@@ -59,8 +61,8 @@ pub async fn run(
 				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx, "surrealdb")?
 					.get::<_, js::Value>("default")?,
 			)?;
-			// Register the fetch function to the globals
-			global.init_def::<globals::fetch::Fetch>()?;
+			#[cfg(feature = "http")]
+			fetch::register(ctx)?;
 			// Register the console function to the globals
 			global.init_def::<globals::console::Console>()?;
 			// Register the special SurrealDB types as classes
