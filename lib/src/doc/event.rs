@@ -24,7 +24,7 @@ impl<'a> Document<'a> {
 		// Don't run permissions
 		let opt = &opt.perms(false);
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Loop through all event statements
 		for ev in self.ev(opt, &txn).await?.iter() {
 			// Get the event action

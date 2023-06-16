@@ -7,5 +7,6 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"search",
-	"highlight" => fut Async
+	"highlight" => fut Async,
+	"offsets" => fut Async
 );

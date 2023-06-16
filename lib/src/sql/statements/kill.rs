@@ -26,7 +26,7 @@ impl KillStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Create the live query key

@@ -30,7 +30,7 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Read the index

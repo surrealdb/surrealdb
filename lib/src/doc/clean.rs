@@ -13,7 +13,7 @@ impl<'a> Document<'a> {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Get the table
 		let tb = self.tb(opt, &txn).await?;
 		// This table is schemafull

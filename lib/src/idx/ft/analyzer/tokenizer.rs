@@ -245,11 +245,11 @@ impl Splitter {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::analyzer::tests::test_analyser;
+	use crate::idx::ft::analyzer::tests::test_analyzer;
 
 	#[test]
 	fn test_tokenize_blank_class() {
-		test_analyser(
+		test_analyzer(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
 			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
 			&[
@@ -261,7 +261,7 @@ mod tests {
 
 	#[test]
 	fn test_tokenize_source_code() {
-		test_analyser(
+		test_analyzer(
 			"DEFINE ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
 			r#"struct MyRectangle {
     // specified by corners

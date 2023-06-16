@@ -42,7 +42,7 @@ impl Analyzer {
 		tx: &mut Transaction,
 		query_string: String,
 	) -> Result<(Vec<TermId>, bool), Error> {
-		let tokens = self.analyse(query_string);
+		let tokens = self.analyze(query_string);
 		// We first collect every unique terms
 		// as it can contains duplicates
 		let mut terms = HashSet::new();
@@ -74,7 +74,7 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = vec![];
-		self.analyse_content(field_content, &mut inputs)?;
+		self.analyze_content(field_content, &mut inputs)?;
 		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
 		for tks in &inputs {
@@ -111,7 +111,7 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = Vec::with_capacity(field_content.len());
-		self.analyse_content(field_content, &mut inputs)?;
+		self.analyze_content(field_content, &mut inputs)?;
 		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -139,28 +139,28 @@ impl Analyzer {
 		Ok((dl, tfid, osid))
 	}
 
-	fn analyse_content(&self, field_content: &Array, tks: &mut Vec<Tokens>) -> Result<(), Error> {
+	fn analyze_content(&self, field_content: &Array, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		for v in &field_content.0 {
-			self.analyse_value(v, tks);
+			self.analyze_value(v, tks);
 		}
 		Ok(())
 	}
 
-	fn analyse_value(&self, val: &Value, tks: &mut Vec<Tokens>) {
+	fn analyze_value(&self, val: &Value, tks: &mut Vec<Tokens>) {
 		match val {
-			Value::Strand(s) => tks.push(self.analyse(s.0.clone())),
-			Value::Number(n) => tks.push(self.analyse(n.to_string())),
-			Value::Bool(b) => tks.push(self.analyse(b.to_string())),
+			Value::Strand(s) => tks.push(self.analyze(s.0.clone())),
+			Value::Number(n) => tks.push(self.analyze(n.to_string())),
+			Value::Bool(b) => tks.push(self.analyze(b.to_string())),
 			Value::Array(a) => {
 				for v in &a.0 {
-					self.analyse_value(v, tks);
+					self.analyze_value(v, tks);
 				}
 			}
 			_ => {}
 		}
 	}
 
-	fn analyse(&self, input: String) -> Tokens {
+	fn analyze(&self, input: String) -> Tokens {
 		if let Some(t) = &self.t {
 			if !input.is_empty() {
 				let t = Tokenizer::tokenize(t, input);
@@ -176,11 +176,11 @@ mod tests {
 	use super::Analyzer;
 	use crate::sql::statements::define::analyzer;
 
-	pub(super) fn test_analyser(def: &str, input: &str, expected: &[&str]) {
+	pub(super) fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
 		let (_, az) = analyzer(def).unwrap();
 		let a: Analyzer = az.into();
 
-		let tokens = a.analyse(input.to_string());
+		let tokens = a.analyze(input.to_string());
 		let mut res = vec![];
 		for t in tokens.list() {
 			res.push(tokens.get_token_string(t));

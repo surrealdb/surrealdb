@@ -33,7 +33,7 @@ impl<'a> QueryPlanner<'a> {
 		opt: &Options,
 		t: Table,
 	) -> Result<Iterable, Error> {
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		let res = Tree::build(self.opt, &txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {

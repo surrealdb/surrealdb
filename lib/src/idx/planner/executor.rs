@@ -123,7 +123,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		txn: &Transaction,
+		txn: Transaction,
 		thg: &Thing,
 		prefix: Value,
 		suffix: Value,
@@ -140,6 +140,28 @@ impl QueryExecutor {
 				if let Some(ft) = self.inner.ft_map.get(&ift.ix) {
 					// All good, we can do the highlight
 					return ft.highlight(&mut tx, thg, &ift.t, prefix, suffix, &ift.id, doc).await;
+				}
+			}
+		}
+		Ok(Value::None)
+	}
+
+	pub(crate) async fn offsets(
+		&self,
+		txn: Transaction,
+		thg: &Thing,
+		match_ref: Value,
+	) -> Result<Value, Error> {
+		let mut tx = txn.lock().await;
+		// We have to make the connection between the match ref from the highlight function...
+		if let Value::Number(n) = match_ref {
+			let m = n.as_int() as u8;
+			// ... and from the match operator (@{matchref}@)
+			if let Some(ift) = self.inner.terms.get(&m) {
+				// Check we have an index?
+				if let Some(ft) = self.inner.ft_map.get(&ift.ix) {
+					// All good, we can extract the offsets
+					return ft.extract_offsets(&mut tx, thg, &ift.t).await;
 				}
 			}
 		}

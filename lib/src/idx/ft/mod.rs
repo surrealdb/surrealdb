@@ -7,13 +7,12 @@ mod postings;
 mod scorer;
 mod termdocs;
 pub(crate) mod terms;
-mod vlq;
 
 use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::docids::DocIds;
 use crate::idx::ft::doclength::DocLengths;
-use crate::idx::ft::highlighter::Highlighter;
+use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::{BM25Scorer, Score};
@@ -398,6 +397,28 @@ impl FtIndex {
 				}
 			}
 			return Ok(hl.try_into()?);
+		}
+		Ok(Value::None)
+	}
+
+	pub(super) async fn extract_offsets(
+		&self,
+		tx: &mut Transaction,
+		thg: &Thing,
+		terms: &Vec<TermId>,
+	) -> Result<Value, Error> {
+		let doc_key: Key = thg.into();
+		let doc_ids = self.doc_ids(tx).await?;
+		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
+			let o = self.offsets();
+			let mut or = Offseter::default();
+			for term_id in terms {
+				let o = o.get_offsets(tx, doc_id, *term_id).await?;
+				if let Some(o) = o {
+					or.highlight(o.0);
+				}
+			}
+			return Ok(or.try_into()?);
 		}
 		Ok(Value::None)
 	}

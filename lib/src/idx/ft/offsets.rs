@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::ft::vlq::{delta_vlq_decode, delta_vlq_encode};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, Val};
 
@@ -26,7 +25,8 @@ impl Offsets {
 		offsets: OffsetRecords,
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bo_key(doc_id, term_id);
-		tx.set(key, offsets).await?;
+		let val: Val = offsets.try_into()?;
+		tx.set(key, val).await?;
 		Ok(())
 	}
 
@@ -76,8 +76,10 @@ impl Offset {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct OffsetRecords(pub(super) Vec<Offset>);
 
-impl From<OffsetRecords> for Val {
-	fn from(offsets: OffsetRecords) -> Self {
+impl TryFrom<OffsetRecords> for Val {
+	type Error = Error;
+
+	fn try_from(offsets: OffsetRecords) -> Result<Self, Self::Error> {
 		// We build a unique vector with every values (start and offset).
 		let mut decompressed = Vec::new();
 		// The first push the size of the index,
@@ -94,7 +96,7 @@ impl From<OffsetRecords> for Val {
 			decompressed.push(o.start);
 			decompressed.push(o.end);
 		}
-		delta_vlq_encode(decompressed)
+		Ok(bincode::serialize(&decompressed)?)
 	}
 }
 
@@ -105,7 +107,7 @@ impl TryFrom<Val> for OffsetRecords {
 		if val.is_empty() {
 			return Ok(Self(vec![]));
 		}
-		let decompressed = delta_vlq_decode(val);
+		let decompressed: Vec<u32> = bincode::deserialize(&val)?;
 		let mut iter = decompressed.iter();
 		let s = *iter.next().ok_or(Error::CorruptedIndex)?;
 		let mut indexes = Vec::with_capacity(s as usize);
@@ -147,7 +149,7 @@ mod tests {
 				end: 4,
 			},
 		]);
-		let v: Val = o.clone().into();
+		let v: Val = o.clone().try_into().unwrap();
 		let o2 = v.try_into().unwrap();
 		assert_eq!(o, o2)
 	}

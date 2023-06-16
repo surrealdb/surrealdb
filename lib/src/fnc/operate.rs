@@ -160,7 +160,7 @@ pub(crate) async fn matches(ctx: &Context<'_>, e: &Expression) -> Result<Value, 
 	if let Some(thg) = ctx.thing() {
 		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
 			// Clone transaction
-			let txn = ctx.clone_transaction()?;
+			let txn = ctx.try_clone_transaction()?;
 			// Check the matches
 			return exe.matches(&txn, thg, e).await;
 		}

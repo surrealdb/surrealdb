@@ -152,7 +152,9 @@ impl<'a> Context<'a> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
-	pub fn clone_transaction(&self) -> Result<Transaction, Error> {
+	/// Returns a transaction if any.
+	/// Otherwise it fails by returning a Error::NoTx error.
+	pub fn try_clone_transaction(&self) -> Result<Transaction, Error> {
 		match &self.transaction {
 			None => Err(Error::NoTx),
 			Some(txn) => Ok(txn.clone()),

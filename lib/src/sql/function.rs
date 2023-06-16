@@ -146,7 +146,7 @@ impl Function {
 			}
 			Self::Custom(s, x) => {
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Get the function definition
 				let val = {
 					// Claim transaction
@@ -455,7 +455,7 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 }
 
 fn function_search(i: &str) -> IResult<&str, &str> {
-	alt((tag("highlight"),))(i)
+	alt((tag("highlight"), tag("offsets")))(i)
 }
 
 fn function_session(i: &str) -> IResult<&str, &str> {
