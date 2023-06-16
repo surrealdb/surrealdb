@@ -29,10 +29,11 @@ impl ser::Serializer for Serializer {
 		self,
 		name: &'static str,
 		_variant_index: u32,
-		_variant: &'static str,
+		variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		match name {
+		debug_assert_eq!(name, crate::sql::expression::TOKEN);
+		match variant {
 			"Unary" => Ok(SerializeExpression::Unary(Default::default())),
 			"Binary" => Ok(SerializeExpression::Binary(Default::default())),
 			_ => Err(Error::custom(format!("unexpected `Expression::{name}`"))),
@@ -167,8 +168,18 @@ mod tests {
 	}
 
 	#[test]
+	fn unary() {
+		let expression = Expression::Unary {
+			o: Operator::Not,
+			v: "Bar".into(),
+		};
+		let serialized = expression.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(expression, serialized);
+	}
+
+	#[test]
 	fn foo_equals_bar() {
-		let expression = Expression {
+		let expression = Expression::Binary {
 			l: "foo".into(),
 			o: Operator::Equal,
 			r: "Bar".into(),

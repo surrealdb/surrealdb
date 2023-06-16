@@ -32,7 +32,6 @@ use serde::ser::Error as _;
 use serde::ser::Serialize;
 use serde::ser::SerializeMap as _;
 use serde::ser::SerializeSeq as _;
-use serde::ser::SerializeStructVariant as _;
 use std::fmt::Display;
 use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
@@ -527,7 +526,6 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 pub(super) enum SerializeStruct {
 	Thing(SerializeThing),
-	Expression(SerializeExpression),
 	Edges(SerializeEdges),
 	Range(SerializeRange),
 	Unknown(SerializeValueMap),
@@ -543,7 +541,6 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 	{
 		match self {
 			Self::Thing(thing) => thing.serialize_field(key, value),
-			Self::Expression(expr) => expr.serialize_field(key, value),
 			Self::Edges(edges) => edges.serialize_field(key, value),
 			Self::Range(range) => range.serialize_field(key, value),
 			Self::Unknown(map) => map.serialize_entry(key, value),
@@ -553,7 +550,6 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 	fn end(self) -> Result<Value, Error> {
 		match self {
 			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
-			Self::Expression(expr) => Ok(Value::Expression(Box::new(expr.end()?))),
 			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
 			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
 			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
@@ -882,7 +878,7 @@ mod tests {
 
 	#[test]
 	fn expression() {
-		let expression = Box::new(Expression {
+		let expression = Box::new(Expression::Binary {
 			l: "foo".into(),
 			o: Operator::Equal,
 			r: "Bar".into(),
