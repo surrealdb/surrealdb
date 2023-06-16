@@ -1,5 +1,5 @@
 use crate::sql::array::{array, Array};
-use crate::sql::expression::{expression, Expression};
+use crate::sql::expression::{binary, Expression};
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::param::{param, Param};
 use crate::sql::script::{script, Script};
@@ -48,6 +48,6 @@ impl Parse<Self> for Thing {
 
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
-		expression(val).unwrap().1
+		binary(val).unwrap().1
 	}
 }

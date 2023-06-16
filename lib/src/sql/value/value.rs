@@ -16,7 +16,7 @@ use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
@@ -37,8 +37,6 @@ use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
-use crate::sql::unary::unary;
-use crate::sql::unary::Unary;
 use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
@@ -152,7 +150,6 @@ pub enum Value {
 	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
-	Unary(Box<Unary>),
 	Expression(Box<Expression>),
 	// Add new variants here
 }
@@ -307,12 +304,6 @@ impl From<Function> for Value {
 impl From<Subquery> for Value {
 	fn from(v: Subquery) -> Self {
 		Value::Subquery(Box::new(v))
-	}
-}
-
-impl From<Unary> for Value {
-	fn from(v: Unary) -> Self {
-		Value::Unary(Box::new(v))
 	}
 }
 
@@ -2458,7 +2449,6 @@ impl fmt::Display for Value {
 			Value::Datetime(v) => write!(f, "{v}"),
 			Value::Duration(v) => write!(f, "{v}"),
 			Value::Edges(v) => write!(f, "{v}"),
-			Value::Unary(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
@@ -2489,7 +2479,7 @@ impl Value {
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
-			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
+			Value::Expression(v) => v.writeable(),
 			_ => false,
 		}
 	}
@@ -2516,7 +2506,6 @@ impl Value {
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Unary(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
@@ -2694,7 +2683,7 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(expression, Value::from), single))(i)
+	alt((map(binary, Value::from), single))(i)
 }
 
 /// Parse any `Value` excluding binary expressions
@@ -2740,7 +2729,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
 			map(unary, Value::from),
-			map(expression, Value::from),
+			map(binary, Value::from),
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::Bool(true)),

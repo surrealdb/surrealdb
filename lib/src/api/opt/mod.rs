@@ -380,7 +380,6 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Cast(cast) => json!(cast),
 		Value::Function(function) => json!(function),
 		Value::Subquery(subquery) => json!(subquery),
-		Value::Unary(unary) => json!(unary),
 		Value::Expression(expression) => json!(expression),
 	}
 }

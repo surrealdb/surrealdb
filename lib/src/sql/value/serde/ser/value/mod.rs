@@ -27,12 +27,12 @@ use ser::function::SerializeFunction;
 use ser::model::SerializeModel;
 use ser::range::SerializeRange;
 use ser::thing::SerializeThing;
-use ser::unary::SerializeUnary;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Serialize;
 use serde::ser::SerializeMap as _;
 use serde::ser::SerializeSeq as _;
+use serde::ser::SerializeStructVariant as _;
 use std::fmt::Display;
 use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
@@ -306,7 +306,6 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::SerializeTupleStruct, Error> {
 		match name {
 			sql::cast::TOKEN => Ok(SerializeTupleStruct::Cast(Default::default())),
-			sql::unary::TOKEN => Ok(SerializeTupleStruct::Unary(Default::default())),
 			_ => Ok(SerializeTupleStruct::Array(Default::default())),
 		}
 	}
@@ -353,7 +352,6 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::SerializeStruct, Error> {
 		Ok(match name {
 			sql::thing::TOKEN => SerializeStruct::Thing(Default::default()),
-			sql::expression::TOKEN => SerializeStruct::Expression(Default::default()),
 			sql::edges::TOKEN => SerializeStruct::Edges(Default::default()),
 			sql::range::TOKEN => SerializeStruct::Range(Default::default()),
 			_ => SerializeStruct::Unknown(Default::default()),
@@ -362,14 +360,22 @@ impl ser::Serializer for Serializer {
 
 	fn serialize_struct_variant(
 		self,
-		_name: &'static str,
+		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Error> {
-		Ok(SerializeStructVariant {
-			name: String::from(variant),
-			map: Object::default(),
+		Ok(if name == sql::expression::TOKEN {
+			SerializeStructVariant::Expression(match variant {
+				"Unary" => SerializeExpression::Unary(Default::default()),
+				"Binary" => SerializeExpression::Binary(Default::default()),
+				_ => return Err(Error::custom(format!("unexpected `Expression::{name}`"))),
+			})
+		} else {
+			SerializeStructVariant::Object {
+				name: String::from(variant),
+				map: Object::default(),
+			}
 		})
 	}
 }
@@ -461,7 +467,6 @@ pub(super) enum SerializeTupleVariant {
 
 pub(super) enum SerializeTupleStruct {
 	Cast(SerializeCast),
-	Unary(SerializeUnary),
 	Array(SerializeArray),
 }
 
@@ -475,7 +480,6 @@ impl serde::ser::SerializeTupleStruct for SerializeTupleStruct {
 	{
 		match self {
 			Self::Cast(cast) => cast.serialize_field(value),
-			Self::Unary(unary) => unary.serialize_field(value),
 			Self::Array(array) => array.serialize_field(value),
 		}
 	}
@@ -483,7 +487,6 @@ impl serde::ser::SerializeTupleStruct for SerializeTupleStruct {
 	fn end(self) -> Result<Value, Error> {
 		match self {
 			Self::Cast(cast) => Ok(Value::Cast(Box::new(cast.end()?))),
-			Self::Unary(unary) => Ok(Value::Unary(Box::new(unary.end()?))),
 			Self::Array(array) => Ok(serde::ser::SerializeTupleStruct::end(array)?),
 		}
 	}
@@ -558,9 +561,12 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 	}
 }
 
-pub(super) struct SerializeStructVariant {
-	name: String,
-	map: Object,
+pub(super) enum SerializeStructVariant {
+	Expression(SerializeExpression),
+	Object {
+		name: String,
+		map: Object,
+	},
 }
 
 impl serde::ser::SerializeStructVariant for SerializeStructVariant {
@@ -571,16 +577,32 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 	where
 		T: ?Sized + Serialize,
 	{
-		self.map.0.insert(String::from(key), value.serialize(Serializer.wrap())?);
-		Ok(())
+		match self {
+			Self::Expression(expression) => expression.serialize_field(key, value),
+			Self::Object {
+				map,
+				..
+			} => {
+				map.0.insert(String::from(key), value.serialize(Serializer.wrap())?);
+				Ok(())
+			}
+		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
-		let mut object = Object::default();
+		match self {
+			Self::Expression(expression) => Ok(Value::from(expression.end()?)),
+			Self::Object {
+				name,
+				map,
+			} => {
+				let mut object = Object::default();
 
-		object.insert(self.name, Value::Object(self.map));
+				object.insert(name, Value::Object(map));
 
-		Ok(Value::Object(object))
+				Ok(Value::Object(object))
+			}
+		}
 	}
 }
 

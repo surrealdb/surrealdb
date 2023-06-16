@@ -62,7 +62,6 @@ pub(crate) mod table;
 pub(crate) mod thing;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
-pub(crate) mod unary;
 pub(crate) mod uuid;
 pub(crate) mod value;
 pub(crate) mod version;
