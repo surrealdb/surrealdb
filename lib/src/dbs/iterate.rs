@@ -451,43 +451,51 @@ impl Iterable {
 		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		let mut iterator = plan.new_iterator(opt, &txn).await?;
-		let mut things = iterator.next_batch(&txn, 1000).await?;
-		while !things.is_empty() {
-			// Check if the context is finished
-			if ctx.is_done() {
-				break;
-			}
-
-			for thing in things {
-				// Check the context
+		let exe = ctx.get_query_executor(&table.0);
+		if let Some(exe) = exe {
+			let mut iterator = plan.new_iterator(opt, &txn, exe).await?;
+			let mut things = iterator.next_batch(&txn, 1000).await?;
+			while !things.is_empty() {
+				// Check if the context is finished
 				if ctx.is_done() {
 					break;
 				}
 
-				// If the record is from another table we can skip
-				if !thing.tb.eq(table.as_str()) {
-					continue;
+				for (thing, doc_id) in things {
+					// Check the context
+					if ctx.is_done() {
+						break;
+					}
+
+					// If the record is from another table we can skip
+					if !thing.tb.eq(table.as_str()) {
+						continue;
+					}
+
+					// Fetch the data from the store
+					let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+					let val = txn.lock().await.get(key.clone()).await?;
+					let rid = Thing::from((key.tb, key.id));
+					let mut ctx = Context::new(&ctx);
+					ctx.add_thing(&rid);
+					ctx.add_doc_id(doc_id);
+					// Parse the data from the store
+					let val = Operable::Value(match val {
+						Some(v) => Value::from(v),
+						None => Value::None,
+					});
+					// Process the document record
+					ite.process(&ctx, opt, stm, val).await;
 				}
 
-				// Fetch the data from the store
-				let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-				let val = txn.lock().await.get(key.clone()).await?;
-				let rid = Thing::from((key.tb, key.id));
-				let mut ctx = Context::new(&ctx);
-				ctx.add_thing(&rid);
-				// Parse the data from the store
-				let val = Operable::Value(match val {
-					Some(v) => Value::from(v),
-					None => Value::None,
-				});
-				// Process the document record
-				ite.process(&ctx, opt, stm, val).await;
+				// Collect the next batch of ids
+				things = iterator.next_batch(&txn, 1000).await?;
 			}
-
-			// Collect the next batch of ids
-			things = iterator.next_batch(&txn, 1000).await?;
+			Ok(())
+		} else {
+			Err(Error::QueryNotExecutedDetail {
+				message: "The QueryExecutor has not been found.".to_string(),
+			})
 		}
-		Ok(())
 	}
 }

@@ -156,3 +156,67 @@ async fn select_where_matches_using_index_and_arrays_and_offsets() -> Result<(),
 	assert_eq!(tmp, val);
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
+	let sql = r"
+		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';
+		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog';
+		CREATE blog:3 SET title = 'the other animals sat there watching';
+		CREATE blog:4 SET title = 'the dog sat there and did nothing';
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		SELECT id,search::score(1) AS score FROM blog WHERE title @1@ 'animals';
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..6 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:3,
+				score: 0.9227996468544006
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_without_using_index_and_score() -> Result<(), Error> {
+	let sql = r"
+		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';
+		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog';
+		CREATE blog:3 SET title = 'the other animals sat there watching';
+		CREATE blog:4 SET title = 'the dog sat there and did nothing';
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		SELECT id,search::score(1) AS score FROM blog WHERE (title @1@ 'animals' AND id>0) OR (title @1@ 'animals' AND id<99);
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..6 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:3,
+				score: 0.9227996468544006
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}

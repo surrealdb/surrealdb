@@ -4,18 +4,18 @@ mod doclength;
 mod highlighter;
 mod offsets;
 mod postings;
-mod scorer;
+pub(super) mod scorer;
 mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::ft::docids::DocIds;
+use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
-use crate::idx::ft::scorer::{BM25Scorer, Score};
+use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermDocs;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
@@ -27,6 +27,7 @@ use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::ops::BitAnd;
+use std::sync::Arc;
 
 pub(crate) type MatchRef = u8;
 
@@ -118,7 +119,7 @@ impl FtIndex {
 		})
 	}
 
-	async fn doc_ids(&self, tx: &mut Transaction) -> Result<DocIds, Error> {
+	pub(crate) async fn doc_ids(&self, tx: &mut Transaction) -> Result<DocIds, Error> {
 		DocIds::new(tx, self.index_key_base.clone(), self.order).await
 	}
 
@@ -304,53 +305,59 @@ impl FtIndex {
 		Ok(terms)
 	}
 
-	pub(super) async fn search(
+	pub(super) async fn get_terms_docs(
 		&self,
 		tx: &mut Transaction,
-		query_string: String,
-	) -> Result<(Vec<TermId>, Option<HitsIterator>), Error> {
-		let t = self.terms(tx).await?;
-		let td = self.term_docs();
-		let (terms, missing) = self.analyzer.extract_terms(&t, tx, query_string).await?;
-		if missing {
-			// If any term does not exists, as we are doing an AND query,
-			// we can return an empty results set
-			return Ok((terms, None));
-		}
-		let mut hits: Option<RoaringTreemap> = None;
+		terms: &Vec<TermId>,
+	) -> Result<Option<Vec<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
-		for term_id in &terms {
+		let td = self.term_docs();
+		for term_id in terms {
 			if let Some(term_docs) = td.get_docs(tx, *term_id).await? {
-				if let Some(h) = hits {
-					hits = Some(h.bitand(&term_docs));
-				} else {
-					hits = Some(term_docs.clone());
-				}
 				terms_docs.push((*term_id, term_docs));
+			}
+		}
+		Ok(Some(terms_docs))
+	}
+
+	pub(super) async fn new_hits_iterator(
+		&self,
+		tx: &mut Transaction,
+		terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+	) -> Result<Option<HitsIterator>, Error> {
+		let mut hits: Option<RoaringTreemap> = None;
+		for (_, term_docs) in terms_docs.iter() {
+			if let Some(h) = hits {
+				hits = Some(h.bitand(term_docs));
+			} else {
+				hits = Some(term_docs.clone());
 			}
 		}
 		if let Some(hits) = hits {
 			if !hits.is_empty() {
-				let postings = self.postings(tx).await?;
-				let doc_lengths = self.doc_lengths(tx).await?;
-
-				let mut scorer = None;
-				if let Some(bm25) = &self.bm25 {
-					scorer = Some(BM25Scorer::new(
-						doc_lengths,
-						self.state.total_docs_lengths,
-						self.state.doc_count,
-						bm25.clone(),
-					));
-				}
 				let doc_ids = self.doc_ids(tx).await?;
-				return Ok((
-					terms,
-					Some(HitsIterator::new(doc_ids, postings, hits, terms_docs, scorer)),
-				));
+				return Ok(Some(HitsIterator::new(doc_ids, hits)));
 			}
 		}
-		Ok((terms, None))
+		Ok(None)
+	}
+
+	pub(super) async fn new_scorer(
+		&self,
+		tx: &mut Transaction,
+		terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+	) -> Result<Option<BM25Scorer>, Error> {
+		if let Some(bm25) = &self.bm25 {
+			return Ok(Some(BM25Scorer::new(
+				self.postings(tx).await?,
+				terms_docs,
+				self.doc_lengths(tx).await?,
+				self.state.total_docs_lengths,
+				self.state.doc_count,
+				bm25.clone(),
+			)));
+		}
+		Ok(None)
 	}
 
 	pub(super) async fn match_id_value(
@@ -436,52 +443,25 @@ impl FtIndex {
 
 pub(crate) struct HitsIterator {
 	doc_ids: DocIds,
-	postings: Postings,
 	iter: IntoIter,
-	terms_docs: Vec<(TermId, RoaringTreemap)>,
-	scorer: Option<BM25Scorer>,
 }
 
 impl HitsIterator {
-	fn new(
-		doc_ids: DocIds,
-		postings: Postings,
-		hits: RoaringTreemap,
-		terms_docs: Vec<(TermId, RoaringTreemap)>,
-		scorer: Option<BM25Scorer>,
-	) -> Self {
+	fn new(doc_ids: DocIds, hits: RoaringTreemap) -> Self {
 		Self {
 			doc_ids,
-			postings,
 			iter: hits.into_iter(),
-			terms_docs,
-			scorer,
 		}
 	}
 
 	pub(crate) async fn next(
 		&mut self,
 		tx: &mut Transaction,
-	) -> Result<Option<(Thing, Option<Score>)>, Error> {
+	) -> Result<Option<(Thing, DocId)>, Error> {
 		loop {
 			if let Some(doc_id) = self.iter.next() {
 				if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-					let score = if let Some(scorer) = &self.scorer {
-						let mut sc = 0.0;
-						for (term_id, docs) in &self.terms_docs {
-							if docs.contains(doc_id) {
-								if let Some(term_freq) =
-									self.postings.get_term_frequency(tx, *term_id, doc_id).await?
-								{
-									sc += scorer.score(tx, doc_id, docs.len(), term_freq).await?;
-								}
-							}
-						}
-						Some(sc)
-					} else {
-						None
-					};
-					return Ok(Some((doc_key.into(), score)));
+					return Ok(Some((doc_key.into(), doc_id)));
 				}
 			} else {
 				break;
@@ -493,23 +473,27 @@ impl HitsIterator {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::{FtIndex, HitsIterator, Score};
+	use crate::idx::ft::scorer::{BM25Scorer, Score};
+	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
 	use crate::sql::{Array, Thing};
 	use std::collections::HashMap;
+	use std::sync::Arc;
 	use test_log::test;
 
 	async fn check_hits(
-		i: Option<HitsIterator>,
 		tx: &mut Transaction,
+		hits: Option<HitsIterator>,
+		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
 	) {
-		if let Some(mut i) = i {
+		if let Some(mut hits) = hits {
 			let mut map = HashMap::new();
-			while let Some((k, s)) = i.next(tx).await.unwrap() {
+			while let Some((k, d)) = hits.next(tx).await.unwrap() {
+				let s = scr.score(tx, d).await.unwrap();
 				map.insert(k, s);
 			}
 			assert_eq!(map.len(), e.len());
@@ -519,6 +503,18 @@ mod tests {
 		} else {
 			panic!("hits is none");
 		}
+	}
+
+	async fn search(
+		tx: &mut Transaction,
+		fti: &FtIndex,
+		qs: &str,
+	) -> (Option<HitsIterator>, BM25Scorer) {
+		let t = fti.extract_terms(tx, qs.to_string()).await.unwrap();
+		let td = Arc::new(fti.get_terms_docs(tx, &t).await.unwrap().unwrap());
+		let scr = fti.new_scorer(tx, td.clone()).await.unwrap().unwrap();
+		let hits = fti.new_hits_iterator(tx, td).await.unwrap();
+		(hits, scr)
 	}
 
 	#[test(tokio::test)]
@@ -590,23 +586,23 @@ mod tests {
 			assert_eq!(statistics.doc_lengths.keys_count, 3);
 
 			// Search & score
-			let (_, i) = fti.search(&mut tx, "hello".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "hello").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-			let (_, i) = fti.search(&mut tx, "world".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc1, Some(0.4859746))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "world").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
 
-			let (_, i) = fti.search(&mut tx, "yellow".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc2, Some(0.4859746))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "yellow").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
 
-			let (_, i) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "foo").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-			let (_, i) = fti.search(&mut tx, "bar".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "bar").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-			let (_, i) = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
-			assert!(i.is_none());
+			let (hits, _) = search(&mut tx, &fti, "dummy").await;
+			assert!(hits.is_none());
 		}
 
 		{
@@ -627,16 +623,16 @@ mod tests {
 
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let (_, i) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "foo").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
 			// We can't anymore find 'bar'
-			let (_, i) = fti.search(&mut tx, "bar".to_string()).await.unwrap();
-			assert!(i.is_none());
+			let (hits, _) = search(&mut tx, &fti, "bar").await;
+			assert!(hits.is_none());
 
 			// We can now find 'nobar'
-			let (_, i) = fti.search(&mut tx, "nobar".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
+			let (hits, scr) = search(&mut tx, &fti, "nobar").await;
+			check_hits(&mut tx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 		}
 
 		{
@@ -658,13 +654,11 @@ mod tests {
 			tx.commit().await.unwrap();
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let (v, h) = fti.search(&mut tx, "hello".to_string()).await.unwrap();
-			assert!(v.is_empty());
-			assert!(h.is_none());
+			let (hits, _) = search(&mut tx, &fti, "hello").await;
+			assert!(hits.is_none());
 
-			let (v, h) = fti.search(&mut tx, "foo".to_string()).await.unwrap();
-			assert!(v.is_empty());
-			assert!(h.is_none());
+			let (hits, _) = search(&mut tx, &fti, "foo").await;
+			assert!(hits.is_none());
 		}
 	}
 
@@ -745,10 +739,11 @@ mod tests {
 				assert_eq!(statistics.doc_ids.keys_count, 4);
 				assert_eq!(statistics.doc_lengths.keys_count, 4);
 
-				let (_, i) = fti.search(&mut tx, "the".to_string()).await.unwrap();
+				let (hits, scr) = search(&mut tx, &fti, "the").await;
 				check_hits(
-					i,
 					&mut tx,
+					hits,
+					scr,
 					vec![
 						(&doc1, Some(0.0)),
 						(&doc2, Some(0.0)),
@@ -758,34 +753,35 @@ mod tests {
 				)
 				.await;
 
-				let (_, i) = fti.search(&mut tx, "dog".to_string()).await.unwrap();
+				let (hits, scr) = search(&mut tx, &fti, "dog").await;
 				check_hits(
-					i,
 					&mut tx,
+					hits,
+					scr,
 					vec![(&doc1, Some(0.0)), (&doc2, Some(0.0)), (&doc3, Some(0.0))],
 				)
 				.await;
 
-				let (_, i) = fti.search(&mut tx, "fox".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "fox").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let (_, i) = fti.search(&mut tx, "over".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "over").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let (_, i) = fti.search(&mut tx, "lazy".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "lazy").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let (_, i) = fti.search(&mut tx, "jumped".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "jumped").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let (_, i) = fti.search(&mut tx, "nothing".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc3, Some(0.87105393))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "nothing").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
 
-				let (_, i) = fti.search(&mut tx, "animals".to_string()).await.unwrap();
-				check_hits(i, &mut tx, vec![(&doc4, Some(0.92279965))]).await;
+				let (hits, scr) = search(&mut tx, &fti, "animals").await;
+				check_hits(&mut tx, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
 
-				let (_, i) = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
-				assert!(i.is_none());
+				let (hits, _) = search(&mut tx, &fti, "dummy").await;
+				assert!(hits.is_none());
 			}
 		}
 	}

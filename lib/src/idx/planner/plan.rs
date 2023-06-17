@@ -1,5 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
 use crate::idx::planner::executor::QueryExecutor;
@@ -12,7 +13,9 @@ use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Ident, Object, Operator, Table, Thing, Value};
 use async_trait::async_trait;
+use roaring::RoaringTreemap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct PlanBuilder {
@@ -20,14 +23,14 @@ pub(super) struct PlanBuilder {
 }
 
 impl PlanBuilder {
-	pub(super) fn add(&mut self, i: IndexOption) {
+	pub(super) fn add_index_option(&mut self, i: IndexOption) {
 		self.indexes.push(i);
 	}
 
 	pub(super) fn build(mut self) -> Result<Plan, Error> {
 		// TODO select the best option if there are several (cost based)
 		if let Some(index) = self.indexes.pop() {
-			Ok(index.into())
+			Ok(Plan::new(index))
 		} else {
 			Err(Error::BypassQueryPlanner)
 		}
@@ -39,12 +42,19 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
+	pub(super) fn new(i: IndexOption) -> Self {
+		Self {
+			i,
+		}
+	}
+
 	pub(crate) async fn new_iterator(
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
-		self.i.new_iterator(opt, txn).await
+		self.i.new_iterator(opt, txn, exe).await
 	}
 
 	pub(crate) fn explain(&self) -> Value {
@@ -63,29 +73,28 @@ impl Plan {
 	}
 }
 
-impl From<IndexOption> for Plan {
-	fn from(i: IndexOption) -> Self {
-		Self {
-			i,
-		}
-	}
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) struct IndexOption {
 	pub(super) ix: DefineIndexStatement,
 	pub(super) v: Value,
 	pub(super) op: Operator,
 	ep: Expression,
+	mr: Option<MatchRef>,
 }
 
 impl IndexOption {
 	pub(super) fn new(ix: DefineIndexStatement, op: Operator, v: Value, ep: Expression) -> Self {
+		let mr = if let Operator::Matches(mr) = ep.o {
+			mr
+		} else {
+			None
+		};
 		Self {
 			ix,
 			op,
 			v,
 			ep,
+			mr,
 		}
 	}
 
@@ -103,6 +112,7 @@ impl IndexOption {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
 		match &self.ix.index {
 			Index::Idx => match self.op {
@@ -123,10 +133,13 @@ impl IndexOption {
 				sc,
 				order,
 			} => match self.op {
-				Operator::Matches(mr) => Ok(Box::new(
-					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, mr, &self.v)
-						.await?,
-				)),
+				Operator::Matches(_) => {
+					let td = exe.pre_match_terms_docs();
+					Ok(Box::new(
+						MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, td)
+							.await?,
+					))
+				}
 				_ => Err(Error::BypassQueryPlanner),
 			},
 		}
@@ -136,7 +149,11 @@ impl IndexOption {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub(crate) trait ThingIterator: Send {
-	async fn next_batch(&mut self, tx: &Transaction, size: u32) -> Result<Vec<Thing>, Error>;
+	async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		size: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error>;
 }
 
 struct NonUniqueEqualThingIterator {
@@ -159,7 +176,11 @@ impl NonUniqueEqualThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for NonUniqueEqualThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = self.beg.clone();
 		let max = self.end.clone();
 		let res = txn.lock().await.scan(min..max, limit).await?;
@@ -167,7 +188,7 @@ impl ThingIterator for NonUniqueEqualThingIterator {
 			self.beg = key.clone();
 			self.beg.push(0x00);
 		}
-		let res = res.iter().map(|(_, val)| val.into()).collect();
+		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
 		Ok(res)
 	}
 }
@@ -189,10 +210,14 @@ impl UniqueEqualThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for UniqueEqualThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
-				return Ok(vec![val.into()]);
+				return Ok(vec![(val.into(), NO_DOC_ID)]);
 			}
 		}
 		Ok(vec![])
@@ -200,7 +225,6 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
-	_terms: Option<(MatchRef, Vec<TermId>)>,
 	hits: Option<HitsIterator>,
 }
 
@@ -213,23 +237,26 @@ impl MatchesThingIterator {
 		hl: bool,
 		sc: &Scoring,
 		order: u32,
-		mr: Option<MatchRef>,
-		v: &Value,
+		terms_docs: Option<Arc<Vec<(TermId, RoaringTreemap)>>>,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
-		let mut run = txn.lock().await;
 		if let Scoring::Bm {
 			..
 		} = sc
 		{
-			let query_string = v.clone().convert_to_string()?;
+			let mut run = txn.lock().await;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
 			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
-			let (terms, hits) = fti.search(&mut run, query_string).await?;
-			Ok(Self {
-				hits,
-				_terms: mr.map(|mr| (mr, terms)),
-			})
+			if let Some(terms_docs) = terms_docs {
+				let hits = fti.new_hits_iterator(&mut run, terms_docs).await?;
+				Ok(Self {
+					hits,
+				})
+			} else {
+				Ok(Self {
+					hits: None,
+				})
+			}
 		} else {
 			Err(Error::FeatureNotYetImplemented {
 				feature: "Vector Search",
@@ -241,12 +268,16 @@ impl MatchesThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for MatchesThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, mut limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		mut limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let mut res = vec![];
 		if let Some(hits) = &mut self.hits {
 			let mut run = txn.lock().await;
 			while limit > 0 {
-				if let Some((hit, _)) = hits.next(&mut run).await? {
+				if let Some(hit) = hits.next(&mut run).await? {
 					res.push(hit);
 				} else {
 					break;

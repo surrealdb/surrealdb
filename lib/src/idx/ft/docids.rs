@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) type DocId = u64;
 
-pub(super) struct DocIds {
+pub(crate) const NO_DOC_ID: u64 = u64::MAX;
+
+pub(crate) struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<DocIdsKeyProvider>,
@@ -59,7 +61,7 @@ impl DocIds {
 		doc_id
 	}
 
-	pub(super) async fn get_doc_id(
+	pub(crate) async fn get_doc_id(
 		&self,
 		tx: &mut Transaction,
 		doc_key: Key,

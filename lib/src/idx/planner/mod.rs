@@ -87,7 +87,7 @@ impl AllAndStrategy {
 				operator,
 			} => {
 				if let Some(io) = index_option {
-					self.b.add(io.clone());
+					self.b.add_index_option(io.clone());
 				}
 				self.eval_expression(left, right, operator)
 			}
