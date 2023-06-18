@@ -211,6 +211,22 @@ impl<T> Abolish<T> for Vec<T> {
 
 // ------------------------------
 
+pub(crate) trait Clump<T> {
+	fn clump(self, clump_size: usize) -> T;
+}
+
+impl Clump<Array> for Array {
+	fn clump(self, clump_size: usize) -> Array {
+		self.0
+			.chunks(clump_size)
+			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.collect::<Vec<_>>()
+			.into()
+	}
+}
+
+// ------------------------------
+
 pub(crate) trait Combine<T> {
 	fn combine(self, other: T) -> T;
 }
@@ -416,5 +432,20 @@ mod tests {
 		let out = res.unwrap().1.uniq();
 		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
 		assert_eq!(out.0.len(), 4);
+	}
+
+	#[test]
+	fn array_clump() {
+		fn test(input_sql: &str, clump_size: usize, expected_result: &str) {
+			let arr_result = array(input_sql);
+			assert!(arr_result.is_ok());
+			let arr = arr_result.unwrap().1;
+			let clumped_arr = arr.clump(clump_size);
+			assert_eq!(expected_result, format!("{}", clumped_arr));
+		}
+
+		test("[0, 1, 2, 3]", 2, "[[0, 1], [2, 3]]");
+		test("[0, 1, 2, 3, 4, 5]", 3, "[[0, 1, 2], [3, 4, 5]]");
+		test("[0, 1, 2]", 2, "[[0, 1], [2]]");
 	}
 }
