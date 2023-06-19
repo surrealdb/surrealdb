@@ -145,10 +145,10 @@ impl Function {
 				fnc::run(ctx, s, a).await
 			}
 			Self::Custom(s, x) => {
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Get the function definition
 				let val = {
+					// Clone transaction
+					let txn = ctx.try_clone_transaction()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
