@@ -179,7 +179,32 @@ async fn function_array_combine() -> Result<(), Error> {
 	Ok(())
 }
 
-//TODO: Add test for array::clump (waiting on #2146)
+#[tokio::test]
+async fn function_array_clump() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::clump([0, 1, 2, 3], 2);
+		RETURN array::clump([0, 1, 2], 2);
+		RETURN array::clump([0, 1, 2], 3);
+		RETURN array::clump([0, 1, 2, 3, 4, 5], 3);
+	"#;
+	let desired_responses = [
+		"[[0, 1], [2, 3]]",
+		"[[0, 1], [2]]",
+		"[[0, 1, 2]]",
+		"[[0, 1, 2], [3, 4, 5]]",
+	];
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let res = db.execute(sql, &session, None, false).await?;
+	for (i, v) in res.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
+		if let Some(desired_response) = desired_responses.get(i) {
+			assert_eq!(v, &Value::parse(*desired_response))
+		} else {
+			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
 
 #[tokio::test]
 async fn function_array_complement() -> Result<(), Error> {
@@ -897,7 +922,34 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	Ok(())
 }
 
-//TODO: Add test for array::transpose (waiting on #2146)
+#[tokio::test]
+async fn function_array_transpose() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::transpose([[0, 1], [2, 3]]);
+		RETURN array::transpose([[0, 1, 2], [3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3], [4, 5]]);
+		RETURN array::transpose([[0, 1, 2], "oops", [null, "sorry"]]);
+	"#;
+	let desired_responses = [
+		"[[0, 2], [1, 3]]",
+		"[[0, 3], [1, 4], [2]]",
+		"[[0, 2], [1, 3], [4]]",
+		"[[0, 2, 4], [1, 3, 5]]",
+		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
+	];
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let res = db.execute(sql, &session, None, false).await?;
+	for (i, v) in res.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
+		if let Some(desired_response) = desired_responses.get(i) {
+			assert_eq!(v, &Value::parse(*desired_response));
+		} else {
+			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
 
 #[tokio::test]
 async fn function_array_union() -> Result<(), Error> {
