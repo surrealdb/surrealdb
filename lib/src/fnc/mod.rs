@@ -1,3 +1,5 @@
+
+//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
