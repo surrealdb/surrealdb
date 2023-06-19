@@ -1,3 +1,9 @@
+//! This module defines the lifecycle of everything that happens in a document.
+//! A document is a row that has the following:
+//! - `Thing`: name of the table and ID of the record
+//! - `current`: value after the transaction
+//! - `initial`: value before the transaction
+//! - `id`: traditionally an integer but can be an object or collection such as an array
 pub(crate) use self::document::*;
 
 #[cfg(not(target_arch = "wasm32"))]
