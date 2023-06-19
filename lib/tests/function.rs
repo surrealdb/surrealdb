@@ -736,6 +736,17 @@ async fn function_array_remove() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_retain() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::retain([0, 1, 2], [false, true, false]);
+		RETURN array::retain([0, 1, 2], [true]);
+		RETURN array::retain([0, 1], [1, 1]);"#,
+		&["[1]", "[0]", "[0, 1]"],
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_reverse() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::reverse([]);

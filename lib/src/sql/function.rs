@@ -301,6 +301,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("prepend"),
 			tag("push"),
 			tag("remove"),
+			tag("retain"),
 			tag("reverse"),
 			tag("slice"),
 			tag("sort::asc"),

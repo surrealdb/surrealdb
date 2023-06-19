@@ -153,6 +153,16 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn retain((mut value_array, decider_array): (Array, Array)) -> Result<Value, Error> {
+	let mut i = 0;
+	value_array.retain(|_| {
+		let out = decider_array.get(i).map_or(false, |v| v.is_truthy());
+		i += 1;
+		out
+	});
+	Ok(value_array.into())
+}
+
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
 	Ok(array.into())

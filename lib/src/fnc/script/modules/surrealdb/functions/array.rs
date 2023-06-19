@@ -30,6 +30,7 @@ impl_module_def!(
 	"push" => run,
 	"prepend" => run,
 	"remove" => run,
+	"retain" => run,
 	"reverse" => run,
 	"slice" => run,
 	"sort" => (sort::Package),

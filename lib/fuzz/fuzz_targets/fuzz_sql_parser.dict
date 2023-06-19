@@ -170,6 +170,7 @@
 "array::prepend("
 "array::push("
 "array::remove("
+"array::retain("
 "array::reverse("
 "array::slice("
 "array::sort("
