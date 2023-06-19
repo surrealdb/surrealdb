@@ -7,6 +7,7 @@ use crate::sql::array::Concat;
 use crate::sql::array::Difference;
 use crate::sql::array::Flatten;
 use crate::sql::array::Intersect;
+use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
@@ -201,6 +202,10 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 			Ok(array.into())
 		}
 	}
+}
+
+pub fn transpose((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.transpose().into())
 }
 
 pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {

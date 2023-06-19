@@ -32,5 +32,6 @@ impl_module_def!(
 	"reverse" => run,
 	"slice" => run,
 	"sort" => (sort::Package),
+	"transpose" => run,
 	"union" => run
 );

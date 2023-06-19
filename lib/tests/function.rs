@@ -897,6 +897,8 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	Ok(())
 }
 
+//TODO: Add test for array::transpose (waiting on #2146)
+
 #[tokio::test]
 async fn function_array_union() -> Result<(), Error> {
 	let sql = r#"
