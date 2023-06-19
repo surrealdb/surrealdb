@@ -6,9 +6,9 @@ mod body;
 mod classes;
 mod func;
 mod stream;
+#[cfg(feature = "http")]
 mod util;
 
-use body::{Body, BodyKind};
 use classes::{Blob, FormData, Headers, Request, Response};
 use func::Fetch;
 

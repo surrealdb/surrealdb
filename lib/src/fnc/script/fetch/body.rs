@@ -1,3 +1,7 @@
+use crate::fnc::script::fetch::{classes::BlobClass, stream::ReadableStream, RequestError};
+use bytes::{Bytes, BytesMut};
+use futures::{future, Stream, StreamExt, TryStreamExt};
+use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
 use std::{
 	cell::{Cell, RefCell},
 	pin::Pin,
@@ -5,12 +9,6 @@ use std::{
 	sync::Arc,
 	task::Poll,
 };
-
-use bytes::{Bytes, BytesMut};
-use futures::{future, Stream, StreamExt, TryStreamExt};
-use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
-
-use super::{classes::BlobClass, stream::ReadableStream, RequestError};
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
 

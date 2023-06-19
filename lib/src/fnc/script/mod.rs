@@ -6,10 +6,15 @@ pub use main::run;
 
 mod classes;
 mod error;
-#[cfg(feature = "http")]
-mod fetch;
 mod from;
 mod globals;
 mod into;
 mod main;
 mod modules;
+
+#[cfg(feature = "http")]
+mod fetch;
+#[cfg(not(feature = "http"))]
+mod fetch_stub;
+#[cfg(not(feature = "http"))]
+use self::fetch_stub as fetch;

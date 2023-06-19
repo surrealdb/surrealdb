@@ -23,12 +23,10 @@ pub enum ResponseType {
 #[allow(clippy::module_inception)]
 pub mod response {
 
-	use super::super::{
-		super::{
-			util::{self, is_redirect_status},
-			Body, BodyKind, RequestError,
-		},
-		BlobClass, HeadersClass,
+	use crate::fnc::script::fetch::{
+		body::{Body, BodyKind},
+		classes::{BlobClass, HeadersClass},
+		util, RequestError,
 	};
 
 	use super::{ResponseInit, ResponseType};
@@ -292,7 +290,7 @@ pub mod response {
 				.map_err(|e| Exception::throw_type(ctx, &format!("Invalid url: {e}")))?;
 
 			let status = status.into_inner().unwrap_or(302) as u16;
-			if !is_redirect_status(status) {
+			if !util::is_redirect_status(status) {
 				return Err(Exception::throw_range(ctx, "Status code is not a redirect status"));
 			}
 

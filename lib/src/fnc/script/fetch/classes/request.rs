@@ -5,10 +5,11 @@ use js::{
 };
 use reqwest::Method;
 
-use super::{
-	super::util::ascii_equal_ignore_case,
-	super::{Body, RequestError},
-	BlobClass, HeadersClass,
+use crate::fnc::script::fetch::{
+	body::Body,
+	classes::{BlobClass, HeadersClass},
+	util::ascii_equal_ignore_case,
+	RequestError,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
