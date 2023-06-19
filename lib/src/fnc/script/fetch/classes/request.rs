@@ -389,3 +389,8 @@ mod request {
 		}
 	}
 }
+
+#[cfg(test)]
+mod test {
+	fn method() {}
+}

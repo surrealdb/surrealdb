@@ -128,10 +128,15 @@ impl Body {
 	/// Clones the body teeing any possible underlying streems
 	pub fn clone_js(&self, ctx: Ctx<'_>) -> Self {
 		let data = match self.data.replace(BodyData::Used) {
-			BodyData::Buffer(x) => BodyData::Buffer(x),
-			BodyData::Stream(ref mut stream) => {
+			BodyData::Buffer(x) => {
+				let res = BodyData::Buffer(x.clone());
+				self.data.set(BodyData::Buffer(x));
+				res
+			}
+			BodyData::Stream(stream) => {
 				let (tee, drive) = stream.borrow_mut().tee();
 				ctx.spawn(drive);
+				self.data.set(BodyData::Stream(stream));
 				BodyData::Stream(RefCell::new(tee))
 			}
 			BodyData::Used => BodyData::Used,
