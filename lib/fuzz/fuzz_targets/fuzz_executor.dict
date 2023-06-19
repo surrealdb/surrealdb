@@ -177,6 +177,7 @@
 "array::sort::asc("
 "array::sort::desc("
 "array::transpose("
+"array::truthy_indices("
 "array::union("
 "count("
 "crypto"

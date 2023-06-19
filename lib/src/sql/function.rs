@@ -308,6 +308,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("sort::desc"),
 			tag("sort"),
 			tag("transpose"),
+			tag("truthy_indices"),
 			tag("union"),
 		)),
 	))(i)

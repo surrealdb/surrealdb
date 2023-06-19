@@ -32,6 +32,7 @@ impl_module_def!(
 	"remove" => run,
 	"retain" => run,
 	"reverse" => run,
+	"truthy_indices" => run,
 	"slice" => run,
 	"sort" => (sort::Package),
 	"transpose" => run,

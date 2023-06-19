@@ -339,7 +339,7 @@ impl Intersect<Self> for Array {
 pub(crate) trait Matches<T> {
 	/// Returns an array complimenting the origional where each value is true or false
 	/// depending on whether it is == to the compared value.
-	/// 
+	///
 	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
 	/// to count the number of times an element appears in an array but it's nice to have
 	/// this in addition.
@@ -419,6 +419,37 @@ impl Transpose<Array> for Array {
 				.push(iters.iter_mut().filter_map(|i| i.next()).collect::<Vec<_>>().into());
 		}
 		transposed_vec.into()
+	}
+}
+
+// ------------------------------
+
+// Documented with the assumption that it is just for arrays.
+pub(crate) trait TruthyIndices<T> {
+	/// Returns an array of the indicies of the values inside that are truthy.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// let arr = Array::from(vec![true, false, true, false, false, true]);
+	/// assert_eq!(arr.truthy_indices(), [0, 2, 5]);
+	/// ```
+	fn truthy_indices(self) -> T;
+}
+
+impl TruthyIndices<Array> for Array {
+	fn truthy_indices(self) -> Array {
+		self.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if v.is_truthy() {
+					Some(i.into())
+				} else {
+					None
+				}
+			})
+			.collect::<Vec<Value>>()
+			.into()
 	}
 }
 
@@ -537,6 +568,20 @@ mod tests {
 		test("[0, 1, 2, 3, 4, 5]", 3, "[[0, 1, 2], [3, 4, 5]]");
 		test("[0, 1, 2]", 2, "[[0, 1], [2]]");
 		test("[]", 2, "[]");
+	}
+
+	#[test]
+	fn array_truthy_indices() {
+		fn test(input_sql: &str, expected_result: &str) {
+			let arr_result = array(input_sql);
+			assert!(arr_result.is_ok());
+			let arr = arr_result.unwrap().1;
+			let truthy_indices = arr.truthy_indices();
+			assert_eq!(format!("{}", truthy_indices), expected_result);
+		}
+
+		test("[true, false, false, true]", "[0, 3]");
+		test("[0, 1]", "[1]");
 	}
 
 	#[test]
