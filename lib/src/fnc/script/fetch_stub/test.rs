@@ -3,20 +3,20 @@ use js::{CatchResultExt, CaughtError};
 macro_rules! create_test_context{
 	($ctx:ident => { $($t:tt)* }) => {
 
-	tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
+		tokio::runtime::Builder::new_current_thread()
+			.enable_all()
+			.build()
+			.unwrap()
+			.block_on(async {
 
-		let rt = js::AsyncRuntime::new().unwrap();
-		let ctx = js::AsyncContext::full(&rt).await.unwrap();
+				let rt = js::AsyncRuntime::new().unwrap();
+				let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
-		js::async_with!(ctx => |$ctx|{
-			super::register($ctx).unwrap();
-			$($t)*
-		}).await;
-        });
+				js::async_with!(ctx => |$ctx|{
+					super::register($ctx).unwrap();
+					$($t)*
+				}).await;
+			});
 	};
 }
 

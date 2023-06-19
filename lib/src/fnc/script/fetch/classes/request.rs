@@ -331,8 +331,8 @@ mod request {
 		#[quickjs(skip)]
 		async fn take_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<Bytes> {
 			let Some(body) = self.init.body.as_ref() else {
-                return Ok(Bytes::new())
-            };
+				return Ok(Bytes::new())
+			};
 			match body.to_buffer().await {
 				Ok(Some(x)) => Ok(x),
 				Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),

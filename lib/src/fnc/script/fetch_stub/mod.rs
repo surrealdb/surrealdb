@@ -40,15 +40,15 @@ macro_rules! impl_stub_class {
 					#[quickjs(constructor)]
 					pub fn new(ctx: Ctx, _arg: Rest<()>) -> Result<Self> {
 						Err(Exception::throw_internal(
-							ctx,
-							concat!(
-								"The '",
-								stringify!($name),
-								"' class is not available in this build of SurrealDB. In order to use '",
-								stringify!($name),
-								"', enable the 'http' feature."
-							),
-						))
+								ctx,
+								concat!(
+									"The '",
+									stringify!($name),
+									"' class is not available in this build of SurrealDB. In order to use '",
+									stringify!($name),
+									"', enable the 'http' feature."
+								),
+								))
 					}
 				}
 
