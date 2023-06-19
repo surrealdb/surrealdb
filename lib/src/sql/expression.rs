@@ -93,7 +93,7 @@ impl Expression {
 				o,
 				v,
 			} => {
-				let operand = v.compute(ctx, opt, txn, doc).await?;
+				let operand = v.compute(ctx, opt).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
 					Operator::Not => fnc::operate::not(operand),
@@ -107,7 +107,7 @@ impl Expression {
 			} => (l, o, r),
 		};
 
-		let l = l.compute(ctx, opt, txn, doc).await?;
+		let l = l.compute(ctx, opt).await?;
 		match o {
 			Operator::Or => {
 				if let true = l.is_truthy() {
