@@ -70,6 +70,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::all" => array::all,
 		"array::any" => array::any,
 		"array::append" => array::append,
+		"array::clump" => array::clump,
 		"array::combine" => array::combine,
 		"array::complement" => array::complement,
 		"array::concat" => array::concat,

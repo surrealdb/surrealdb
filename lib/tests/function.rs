@@ -179,6 +179,8 @@ async fn function_array_combine() -> Result<(), Error> {
 	Ok(())
 }
 
+//TODO: Add test for array::clump (waiting on #2146)
+
 #[tokio::test]
 async fn function_array_complement() -> Result<(), Error> {
 	let sql = r#"

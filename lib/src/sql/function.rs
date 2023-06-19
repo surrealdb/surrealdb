@@ -280,6 +280,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("all"),
 			tag("any"),
 			tag("append"),
+			tag("clump"),
 			tag("combine"),
 			tag("complement"),
 			tag("concat"),

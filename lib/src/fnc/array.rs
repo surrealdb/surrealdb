@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::array::Array;
+use crate::sql::array::Clump;
 use crate::sql::array::Combine;
 use crate::sql::array::Complement;
 use crate::sql::array::Concat;
@@ -40,6 +41,10 @@ pub fn any((array,): (Array,)) -> Result<Value, Error> {
 pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	array.push(value);
 	Ok(array.into())
+}
+
+pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
+	Ok(array.clump(clump_size as usize).into())
 }
 
 pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {

@@ -11,6 +11,7 @@ impl_module_def!(
 	"all" => run,
 	"any" => run,
 	"append" => run,
+	"clump" => run,
 	"combine" => run,
 	"complement" => run,
 	"concat" => run,
