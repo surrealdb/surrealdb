@@ -545,17 +545,7 @@ mod tests {
 	}
 
 	#[test]
-	fn array_fnc_uniq_normal() {
-		let sql = "[1,2,1,3,3,4]";
-		let res = array(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1.uniq();
-		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
-		assert_eq!(out.0.len(), 4);
-	}
-
-	#[test]
-	fn array_clump() {
+	fn array_fnc_clump() {
 		fn test(input_sql: &str, clump_size: usize, expected_result: &str) {
 			let arr_result = array(input_sql);
 			assert!(arr_result.is_ok());
@@ -571,7 +561,23 @@ mod tests {
 	}
 
 	#[test]
-	fn array_truthy_indices() {
+	fn array_fnc_transpose() {
+		fn test(input_sql: &str, expected_result: &str) {
+			let arr_result = array(input_sql);
+			assert!(arr_result.is_ok());
+			let arr = arr_result.unwrap().1;
+			let transposed_arr = arr.transpose();
+			assert_eq!(format!("{}", transposed_arr), expected_result);
+		}
+
+		test("[[0, 1], [2, 3]]", "[[0, 2], [1, 3]]");
+		test("[[0, 1], [2]]", "[[0, 2], [1]]");
+		test("[[0, 1, 2], [true, false]]", "[[0, true], [1, false], [2]]");
+		test("[[0, 1], [2, 3], [4, 5]]", "[[0, 2, 4], [1, 3, 5]]");
+	}
+
+	#[test]
+	fn array_fnc_truthy_indices() {
 		fn test(input_sql: &str, expected_result: &str) {
 			let arr_result = array(input_sql);
 			assert!(arr_result.is_ok());
@@ -585,18 +591,12 @@ mod tests {
 	}
 
 	#[test]
-	fn array_transpose() {
-		fn test(input_sql: &str, expected_result: &str) {
-			let arr_result = array(input_sql);
-			assert!(arr_result.is_ok());
-			let arr = arr_result.unwrap().1;
-			let transposed_arr = arr.transpose();
-			assert_eq!(format!("{}", transposed_arr), expected_result);
-		}
-
-		test("[[0, 1], [2, 3]]", "[[0, 2], [1, 3]]");
-		test("[[0, 1], [2]]", "[[0, 2], [1]]");
-		test("[[0, 1, 2], [true, false]]", "[[0, true], [1, false], [2]]");
-		test("[[0, 1], [2, 3], [4, 5]]", "[[0, 2, 4], [1, 3, 5]]");
+	fn array_fnc_uniq_normal() {
+		let sql = "[1,2,1,3,3,4]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1.uniq();
+		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
+		assert_eq!(out.0.len(), 4);
 	}
 }
