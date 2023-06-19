@@ -1,3 +1,4 @@
+//! How the keys are structured in the key value store
 ///
 /// KV              /
 /// NS              /!ns{ns}
@@ -34,11 +35,18 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
-/// BD              /*{ns}*{db}*{tb}¤{ix}{bd}{id}
-/// BL              /*{ns}*{db}*{tb}¤{ix}{bl}{id}
-/// BP              /*{ns}*{db}*{tb}¤{ix}{bp}{id}
-/// BT              /*{ns}*{db}*{tb}¤{ix}{bt}{id}
+/// BC              /*{ns}*{db}*{tb}!bc{ix}*{id}
+/// BD              /*{ns}*{db}*{tb}!bd{ix}*{id}
+/// BF              /*{ns}*{db}*{tb}!bf{ix}*{id}
+/// BI              /*{ns}*{db}*{tb}!bi{ix}*{id}
+/// BK              /*{ns}*{db}*{tb}!bk{ix}*{id}
+/// BL              /*{ns}*{db}*{tb}!bl{ix}*{id}
+/// BP              /*{ns}*{db}*{tb}!bp{ix}*{id}
+/// BS              /*{ns}*{db}*{tb}!bs{ix}
+/// BT              /*{ns}*{db}*{tb}!bt{ix}*{id}
+/// BU              /*{ns}*{db}*{tb}!bu{ix}*{id}
 pub mod az; // Stores a DEFINE ANALYZER config definition
+pub mod bc; // Stores Doc list for each term
 pub mod bd; // Stores BTree nodes for doc ids
 pub mod bf; // Stores Term/Doc frequency
 pub mod bi; // Stores doc keys for doc_ids

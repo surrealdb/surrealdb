@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -40,7 +39,7 @@ impl Default for Expression {
 
 impl Expression {
 	/// Create a new binary expression
-	fn new(l: Value, o: Operator, r: Value) -> Self {
+	pub(crate) fn new(l: Value, o: Operator, r: Value) -> Self {
 		Self::Binary {
 			l,
 			o,
@@ -88,13 +87,7 @@ impl Expression {
 	}
 
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let (l, o, r) = match self {
 			Self::Unary {
 				o,
@@ -138,7 +131,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = r.compute(ctx, opt, txn, doc).await?;
+		let r = self.r.compute(ctx, opt).await?;
 		match o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -174,6 +167,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
+			Operator::Matches(_) => fnc::operate::matches(ctx, self).await,
 			_ => unreachable!(),
 		}
 	}

@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -30,21 +29,15 @@ impl IfelseStatement {
 		self.close.as_ref().map_or(false, |v| v.writeable())
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(ctx, opt, txn, doc).await?;
+			let v = cond.compute(ctx, opt).await?;
 			if v.is_truthy() {
-				return then.compute(ctx, opt, txn, doc).await;
+				return then.compute(ctx, opt).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Some(ref v) => v.compute(ctx, opt).await,
 			None => Ok(Value::None),
 		}
 	}

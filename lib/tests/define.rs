@@ -3,7 +3,8 @@ use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::Idiom;
+use surrealdb::sql::{Part, Value};
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -897,15 +898,16 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	}
 	//
 	let tmp = res.remove(0).result;
+	println!("{:?}", tmp);
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result?;
@@ -925,7 +927,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 #[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
 		INFO FOR DB;
 	";
@@ -946,7 +948,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		"{
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
-				english: 'DEFINE ANALYZER english TOKENIZERS SPACE,CASE FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 			},
 			logins: {},
 			tokens: {},
@@ -965,21 +967,22 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS;
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
+		ANALYZE INDEX blog_title ON blog;
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 7);
+	assert_eq!(res.len(), 8);
 	//
-	for _ in 0..6 {
+	for i in 0..6 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		assert!(tmp.is_ok(), "{}", i);
 	}
 
 	let tmp = res.remove(0).result?;
@@ -988,9 +991,44 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2f,0.75f,100) HIGHLIGHTS' },
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) ORDER 100 HIGHLIGHTS' },
 		}",
 	);
 	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+
+	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(72)));
+
+	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(59)));
+
+	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
+
+	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
+
 	Ok(())
+}
+
+fn check_path<F>(val: &Value, path: &[&str], check: F)
+where
+	F: Fn(Value),
+{
+	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
+	let res = val.walk(&part);
+	for (i, v) in res {
+		assert_eq!(Idiom(part.clone()), i);
+		check(v);
+	}
 }

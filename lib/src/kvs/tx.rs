@@ -1316,6 +1316,20 @@ impl Transaction {
 		})?;
 		Ok(val.into())
 	}
+	/// Retrieve a specific analyzer definition.
+	pub async fn get_ix(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineIndexStatement, Error> {
+		let key = crate::key::ix::new(ns, db, tb, ix);
+		let val = self.get(key).await?.ok_or(Error::IxNotFound {
+			value: ix.to_owned(),
+		})?;
+		Ok(val.into())
+	}
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
 	pub async fn add_ns(
 		&mut self,

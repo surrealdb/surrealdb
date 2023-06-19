@@ -61,6 +61,10 @@ pub enum Error {
 	#[error("Transaction is too large")]
 	TxTooLarge,
 
+	/// The context does have any transaction
+	#[error("No transaction")]
+	NoTx,
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -267,6 +271,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested analyzer does not exist
+	#[error("The index '{value}' does not exist")]
+	IxNotFound {
+		value: String,
+	},
+
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
@@ -436,9 +446,15 @@ pub enum Error {
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
 
-	/// Represents an error when decoding a key-value entry
+	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]
 	CorruptedIndex,
+
+	/// The query planner did not find an index able to support the match @@ operator on a given expression
+	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	NoIndexFoundForMatch {
+		value: String,
+	},
 
 	/// Represents an error when analyzing a value
 	#[error("A string can't be analyzed: {0}")]
@@ -461,6 +477,10 @@ pub enum Error {
 	FeatureNotYetImplemented {
 		feature: &'static str,
 	},
+
+	#[doc(hidden)]
+	#[error("Bypass the query planner")]
+	BypassQueryPlanner,
 }
 
 impl From<Error> for String {
