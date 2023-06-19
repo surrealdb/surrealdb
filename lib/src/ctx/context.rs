@@ -1,6 +1,10 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::Transaction;
+use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use crate::sql::Thing;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -29,6 +33,14 @@ pub struct Context<'a> {
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
+	// An optional transaction
+	transaction: Option<Transaction>,
+	// An optional query executor
+	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
+	// An optional record id
+	thing: Option<&'a Thing>,
+	// An optional cursor document
+	cursor_doc: Option<&'a Value>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -44,6 +56,8 @@ impl<'a> Debug for Context<'a> {
 			.field("deadline", &self.deadline)
 			.field("cancelled", &self.cancelled)
 			.field("values", &self.values)
+			.field("thing", &self.thing)
+			.field("doc", &self.cursor_doc)
 			.finish()
 	}
 }
@@ -56,6 +70,10 @@ impl<'a> Context<'a> {
 			parent: None,
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
+			transaction: None,
+			query_executors: None,
+			thing: None,
+			cursor_doc: None,
 		}
 	}
 
@@ -66,6 +84,10 @@ impl<'a> Context<'a> {
 			parent: Some(parent),
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
+			transaction: parent.transaction.clone(),
+			query_executors: parent.query_executors.clone(),
+			thing: parent.thing,
+			cursor_doc: parent.cursor_doc,
 		}
 	}
 
@@ -91,6 +113,29 @@ impl<'a> Context<'a> {
 		self.add_deadline(Instant::now() + timeout)
 	}
 
+	pub fn add_transaction(&mut self, txn: Option<&Transaction>) {
+		if let Some(txn) = txn {
+			self.transaction = Some(txn.clone());
+		}
+	}
+
+	pub fn add_thing(&mut self, thing: &'a Thing) {
+		self.thing = Some(thing);
+	}
+
+	/// Add a cursor document to this context.
+	/// Usage: A new child context is created by an iterator for each document.
+	/// The iterator sets the value of the current document (known as cursor document).
+	/// The cursor document is copied do the child contexts.
+	pub(crate) fn add_cursor_doc(&mut self, doc: &'a Value) {
+		self.cursor_doc = Some(doc);
+	}
+
+	/// Set the query executors
+	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
+		self.query_executors = Some(Arc::new(executors));
+	}
+
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
 	pub fn add_value<K, V>(&mut self, key: K, value: V)
@@ -105,6 +150,29 @@ impl<'a> Context<'a> {
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
+	}
+
+	pub fn clone_transaction(&self) -> Result<Transaction, Error> {
+		match &self.transaction {
+			None => Err(Error::NoTx),
+			Some(txn) => Ok(txn.clone()),
+		}
+	}
+
+	pub fn thing(&self) -> Option<&Thing> {
+		self.thing
+	}
+
+	pub fn doc(&self) -> Option<&Value> {
+		self.cursor_doc
+	}
+
+	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
+		if let Some(qe) = &self.query_executors {
+			qe.get(tb)
+		} else {
+			None
+		}
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

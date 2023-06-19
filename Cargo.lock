@@ -1388,6 +1388,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "deunicode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1bba4f227a4a53d12b653f50ca7bf10c9119ae2aba56aff9e0338b5c98f36a"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3938,6 +3944,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-stemmers"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4531,6 +4547,7 @@ dependencies = [
  "bung",
  "chrono",
  "criterion",
+ "deunicode",
  "dmp",
  "echodb",
  "env_logger 0.10.0",
@@ -4562,6 +4579,7 @@ dependencies = [
  "roaring",
  "rocksdb",
  "rquickjs",
+ "rust-stemmers",
  "rust_decimal",
  "rustls 0.20.8",
  "scrypt",

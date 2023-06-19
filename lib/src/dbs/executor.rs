@@ -33,10 +33,6 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn txn(&self) -> Transaction {
-		self.txn.clone().expect("unreachable: txn was None after successful begin")
-	}
-
 	/// # Return
 	/// - true if a new transaction has begun
 	/// - false if
@@ -247,7 +243,10 @@ impl<'a> Executor<'a> {
 							// Check if the variable is a protected variable
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
-								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								false => {
+									ctx.add_transaction(self.txn.as_ref());
+									stm.compute(&ctx, &opt).await
+								}
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
 									// Move the parameter name, as we no longer need it
@@ -305,8 +304,9 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
+										ctx.add_transaction(self.txn.as_ref());
 										// Process the statement
-										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+										let res = stm.compute(&ctx, &opt).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
 											true => Err(Error::QueryTimedout),
@@ -314,7 +314,10 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
+									None => {
+										ctx.add_transaction(self.txn.as_ref());
+										stm.compute(&ctx, &opt).await
+									}
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {

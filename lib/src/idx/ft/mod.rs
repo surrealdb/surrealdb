@@ -1,34 +1,35 @@
+pub(crate) mod analyzer;
 pub(crate) mod docids;
 mod doclength;
 mod postings;
+mod scorer;
+mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
-use crate::error::Db::AnalyzerError;
-use crate::idx::ft::docids::{DocId, DocIds};
-use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, TermFrequency};
-use crate::idx::ft::terms::Terms;
+use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::docids::DocIds;
+use crate::idx::ft::doclength::DocLengths;
+use crate::idx::ft::postings::Postings;
+use crate::idx::ft::scorer::{BM25Scorer, Score};
+use crate::idx::ft::termdocs::TermDocs;
+use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
-use crate::sql::error::IResult;
-use nom::bytes::complete::take_while;
-use nom::character::complete::multispace0;
+use crate::sql::statements::DefineAnalyzerStatement;
+use crate::sql::{Array, Object, Thing, Value};
+use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::ops::BitAnd;
 
 pub(crate) struct FtIndex {
+	analyzer: Analyzer,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
 	bm25: Bm25Params,
-	btree_default_order: usize,
-}
-
-pub(crate) trait HitVisitor {
-	fn visit(&mut self, tx: &mut Transaction, doc_key: Key, score: Score);
+	btree_default_order: u32,
 }
 
 #[derive(Clone)]
@@ -46,11 +47,22 @@ impl Default for Bm25Params {
 	}
 }
 
-pub(super) struct Statistics {
+pub(crate) struct Statistics {
 	doc_ids: btree::Statistics,
 	terms: btree::Statistics,
 	doc_lengths: btree::Statistics,
 	postings: btree::Statistics,
+}
+
+impl From<Statistics> for Value {
+	fn from(stats: Statistics) -> Self {
+		let mut res = Object::default();
+		res.insert("doc_ids".to_owned(), Value::from(stats.doc_ids));
+		res.insert("terms".to_owned(), Value::from(stats.terms));
+		res.insert("doc_lengths".to_owned(), Value::from(stats.doc_lengths));
+		res.insert("postings".to_owned(), Value::from(stats.postings));
+		Value::from(res)
+	}
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -61,13 +73,12 @@ struct State {
 
 impl SerdeState for State {}
 
-type Score = f32;
-
 impl FtIndex {
 	pub(crate) async fn new(
 		tx: &mut Transaction,
+		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
-		btree_default_order: usize,
+		btree_default_order: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -81,6 +92,7 @@ impl FtIndex {
 			index_key_base,
 			bm25: Bm25Params::default(),
 			btree_default_order,
+			analyzer: az.into(),
 		})
 	}
 
@@ -90,6 +102,10 @@ impl FtIndex {
 
 	async fn terms(&self, tx: &mut Transaction) -> Result<Terms, Error> {
 		Terms::new(tx, self.index_key_base.clone(), self.btree_default_order).await
+	}
+
+	fn term_docs(&self) -> TermDocs {
+		TermDocs::new(self.index_key_base.clone())
 	}
 
 	async fn doc_lengths(&self, tx: &mut Transaction) -> Result<DocLengths, Error> {
@@ -103,11 +119,11 @@ impl FtIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: Key,
+		rid: &Thing,
 	) -> Result<(), Error> {
 		// Extract and remove the doc_id (if any)
 		let mut d = self.doc_ids(tx).await?;
-		if let Some(doc_id) = d.remove_doc(tx, doc_key).await? {
+		if let Some(doc_id) = d.remove_doc(tx, rid.into()).await? {
 			self.state.doc_count -= 1;
 
 			// Remove the doc length
@@ -123,10 +139,12 @@ impl FtIndex {
 				// Remove the postings
 				let mut p = self.postings(tx).await?;
 				let mut t = self.terms(tx).await?;
+				let td = self.term_docs();
 				for term_id in term_list {
 					p.remove_posting(tx, term_id, doc_id).await?;
 					// if the term is not present in any document in the index, we can remove it
-					if p.get_doc_count(tx, term_id).await? == 0 {
+					let doc_count = td.remove_doc(tx, term_id, doc_id).await?;
+					if doc_count == 0 {
 						t.remove_term_id(tx, term_id).await?;
 					}
 				}
@@ -142,18 +160,18 @@ impl FtIndex {
 	pub(crate) async fn index_document(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: Key,
-		field_content: &str,
+		rid: &Thing,
+		field_content: &Array,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut d = self.doc_ids(tx).await?;
-		let resolved = d.resolve_doc_id(tx, doc_key).await?;
+		let resolved = d.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies
 		let mut t = self.terms(tx).await?;
 		let (doc_length, terms_and_frequencies) =
-			Self::extract_sorted_terms_with_frequencies(field_content)?;
+			self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
@@ -172,15 +190,16 @@ impl FtIndex {
 			None
 		};
 
-		// Set the terms postings
-		let terms = t.resolve_term_ids(tx, terms_and_frequencies).await?;
+		// Set the terms postings and term docs
+		let term_docs = self.term_docs();
 		let mut terms_ids = RoaringTreemap::default();
 		let mut p = self.postings(tx).await?;
-		for (term_id, term_freq) in terms {
+		for (term_id, term_freq) in terms_and_frequencies {
 			p.update_posting(tx, term_id, doc_id, term_freq).await?;
 			if let Some(old_term_ids) = &mut old_term_ids {
 				old_term_ids.remove(term_id);
 			}
+			term_docs.set_doc(tx, term_id, doc_id).await?;
 			terms_ids.insert(term_id);
 		}
 
@@ -188,8 +207,9 @@ impl FtIndex {
 		if let Some(old_term_ids) = old_term_ids {
 			for old_term_id in old_term_ids {
 				p.remove_posting(tx, old_term_id, doc_id).await?;
+				let doc_count = term_docs.remove_doc(tx, old_term_id, doc_id).await?;
 				// if the term does not have anymore postings, we can remove the term
-				if p.get_doc_count(tx, old_term_id).await? == 0 {
+				if doc_count == 0 {
 					t.remove_term_id(tx, old_term_id).await?;
 				}
 			}
@@ -213,77 +233,77 @@ impl FtIndex {
 		Ok(())
 	}
 
-	// TODO: This is currently a place holder. It has to be replaced by the analyzer/token/filter logic.
-	fn extract_sorted_terms_with_frequencies(
-		input: &str,
-	) -> Result<(DocLength, HashMap<&str, TermFrequency>), Error> {
-		let mut doc_length = 0;
-		let mut terms = HashMap::new();
-		let mut rest = input;
-		while !rest.is_empty() {
-			// Extract the next token
-			match Self::next_token(rest) {
-				Ok((remaining_input, token)) => {
-					if !input.is_empty() {
-						doc_length += 1;
-						match terms.entry(token) {
-							Entry::Vacant(e) => {
-								e.insert(1);
-							}
-							Entry::Occupied(mut e) => {
-								e.insert(*e.get() + 1);
-							}
-						}
-					}
-					rest = remaining_input;
-				}
-				Err(e) => return Err(AnalyzerError(e.to_string())),
-			}
-		}
-		Ok((doc_length, terms))
-	}
-
-	/// Extracting the next token. The string is left trimmed first.
-	fn next_token(i: &str) -> IResult<&str, &str> {
-		let (i, _) = multispace0(i)?;
-		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
-	}
-
-	pub(super) async fn search<V>(
+	pub(super) async fn search(
 		&self,
 		tx: &mut Transaction,
-		term: &str,
-		visitor: &mut V,
-	) -> Result<(), Error>
-	where
-		V: HitVisitor + Send,
-	{
-		let terms = self.terms(tx).await?;
-		if let Some(term_id) = terms.get_term_id(tx, term).await? {
-			let postings = self.postings(tx).await?;
-			let term_doc_count = postings.get_doc_count(tx, term_id).await?;
-			let doc_lengths = self.doc_lengths(tx).await?;
-			let doc_ids = self.doc_ids(tx).await?;
-			if term_doc_count > 0 {
-				let mut scorer = BM25Scorer::new(
-					visitor,
+		query_string: String,
+	) -> Result<Option<HitsIterator>, Error> {
+		let t = self.terms(tx).await?;
+		let td = self.term_docs();
+		let terms = self.analyzer.extract_terms(&t, tx, query_string).await?;
+		let mut hits: Option<RoaringTreemap> = None;
+		let mut terms_docs = Vec::with_capacity(terms.len());
+		for term_id in terms {
+			if let Some(term_id) = term_id {
+				if let Some(term_docs) = td.get_docs(tx, term_id).await? {
+					if let Some(h) = hits {
+						hits = Some(h.bitand(&term_docs));
+					} else {
+						hits = Some(term_docs.clone());
+					}
+					terms_docs.push((term_id, term_docs));
+					continue;
+				}
+			}
+			return Ok(None);
+		}
+		if let Some(hits) = hits {
+			if !hits.is_empty() {
+				let postings = self.postings(tx).await?;
+				let doc_lengths = self.doc_lengths(tx).await?;
+				// TODO: Scoring should be optional
+				let scorer = BM25Scorer::new(
 					doc_lengths,
-					doc_ids,
 					self.state.total_docs_lengths,
 					self.state.doc_count,
-					term_doc_count as u64,
 					self.bm25.clone(),
 				);
-				let mut it = postings.new_postings_iterator(term_id);
-				while let Some((doc_id, term_freq)) = it.next(tx).await? {
-					scorer.visit(tx, doc_id, term_freq).await?;
+				let doc_ids = self.doc_ids(tx).await?;
+				return Ok(Some(HitsIterator::new(
+					doc_ids,
+					postings,
+					hits,
+					terms_docs,
+					Some(scorer),
+				)));
+			}
+		}
+		Ok(None)
+	}
+
+	pub(super) async fn match_id_value(
+		&self,
+		tx: &mut Transaction,
+		thg: &Thing,
+		term: &str,
+	) -> Result<bool, Error> {
+		let doc_key: Key = thg.into();
+		let doc_ids = self.doc_ids(tx).await?;
+		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
+			let terms = self.terms(tx).await?;
+			if let Some(term_id) = terms.get_term_id(tx, term).await? {
+				let postings = self.postings(tx).await?;
+				if let Some(term_freq) = postings.get_term_frequency(tx, term_id, doc_id).await? {
+					if term_freq > 0 {
+						return Ok(true);
+					}
 				}
 			}
 		}
-		Ok(())
+		Ok(false)
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		// TODO do parallel execution
 		Ok(Statistics {
 			doc_ids: self.doc_ids(tx).await?.statistics(tx).await?,
@@ -294,102 +314,113 @@ impl FtIndex {
 	}
 }
 
-struct BM25Scorer<'a, V>
-where
-	V: HitVisitor,
-{
-	visitor: &'a mut V,
-	doc_lengths: DocLengths,
+pub(crate) struct HitsIterator {
 	doc_ids: DocIds,
-	average_doc_length: f32,
-	doc_count: f32,
-	term_doc_count: f32,
-	bm25: Bm25Params,
+	postings: Postings,
+	iter: IntoIter,
+	terms_docs: Vec<(TermId, RoaringTreemap)>,
+	scorer: Option<BM25Scorer>,
 }
 
-impl<'a, V> BM25Scorer<'a, V>
-where
-	V: HitVisitor,
-{
+impl HitsIterator {
 	fn new(
-		visitor: &'a mut V,
-		doc_lengths: DocLengths,
 		doc_ids: DocIds,
-		total_docs_length: u128,
-		doc_count: u64,
-		term_doc_count: u64,
-		bm25: Bm25Params,
+		postings: Postings,
+		hits: RoaringTreemap,
+		terms_docs: Vec<(TermId, RoaringTreemap)>,
+		scorer: Option<BM25Scorer>,
 	) -> Self {
 		Self {
-			visitor,
-			doc_lengths,
 			doc_ids,
-			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
-			doc_count: doc_count as f32,
-			term_doc_count: term_doc_count as f32,
-			bm25,
+			postings,
+			iter: hits.into_iter(),
+			terms_docs,
+			scorer,
 		}
 	}
 
-	// https://en.wikipedia.org/wiki/Okapi_BM25
-	// Including the lower-bounding term frequency normalization (2011 CIKM)
-	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
-		// (n(qi) + 0.5)
-		let denominator = term_doc_count + 0.5;
-		// (N - n(qi) + 0.5)
-		let numerator = self.doc_count - term_doc_count + 0.5;
-		let idf = (numerator / denominator).ln();
-		if idf.is_nan() || idf <= 0.0 {
-			return 0.0;
-		}
-		let tf_prim = 1.0 + term_freq.ln();
-		// idf * (k1 + 1)
-		let numerator = idf * (self.bm25.k1 + 1.0) * tf_prim;
-		// 1 - b + b * (|D| / avgDL)
-		let denominator = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
-		// numerator / (k1 * denominator + 1)
-		numerator / (self.bm25.k1 * denominator + 1.0)
-	}
-
-	async fn visit(
+	pub(crate) async fn next(
 		&mut self,
 		tx: &mut Transaction,
-		doc_id: DocId,
-		term_frequency: TermFrequency,
-	) -> Result<(), Error> {
-		if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-			let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
-			let bm25_score = self.compute_bm25_score(
-				term_frequency as f32,
-				self.term_doc_count,
-				doc_length as f32,
-			);
-			self.visitor.visit(tx, doc_key, bm25_score);
+	) -> Result<Option<(Thing, Option<Score>)>, Error> {
+		loop {
+			if let Some(doc_id) = self.iter.next() {
+				if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
+					let score = if let Some(scorer) = &self.scorer {
+						let mut sc = 0.0;
+						for (term_id, docs) in &self.terms_docs {
+							if docs.contains(doc_id) {
+								if let Some(term_freq) =
+									self.postings.get_term_frequency(tx, *term_id, doc_id).await?
+								{
+									sc += scorer.score(tx, doc_id, docs.len(), term_freq).await?;
+								}
+							}
+						}
+						Some(sc)
+					} else {
+						None
+					};
+					return Ok(Some((doc_key.into(), score)));
+				}
+			} else {
+				break;
+			}
 		}
-		Ok(())
+		Ok(None)
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::{FtIndex, HitVisitor, Score};
+	use crate::idx::ft::{FtIndex, HitsIterator, Score};
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Key, Transaction};
+	use crate::kvs::{Datastore, Transaction};
+	use crate::sql::statements::define::analyzer;
+	use crate::sql::{Array, Thing};
 	use std::collections::HashMap;
 	use test_log::test;
+
+	async fn check_hits(
+		i: Option<HitsIterator>,
+		tx: &mut Transaction,
+		e: Vec<(&Thing, Option<Score>)>,
+	) {
+		if let Some(mut i) = i {
+			let mut map = HashMap::new();
+			while let Some((k, s)) = i.next(tx).await.unwrap() {
+				map.insert(k, s);
+			}
+			assert_eq!(map.len(), e.len());
+			for (k, p) in e {
+				assert_eq!(map.get(k), Some(&p));
+			}
+		} else {
+			panic!("hits is none");
+		}
+	}
 
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
+		let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 
 		let default_btree_order = 5;
+
+		let doc1: Thing = ("t", "doc1").into();
+		let doc2: Thing = ("t", "doc2").into();
+		let doc3: Thing = ("t", "doc3").into();
 
 		{
 			// Add one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc1".into(), "hello the world").await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
+			fti.index_document(&mut tx, &doc1, &Array::from(vec!["hello the world"]))
+				.await
+				.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -397,16 +428,20 @@ mod tests {
 			// Add two documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc2".into(), "a yellow hello").await.unwrap();
-			fti.index_document(&mut tx, "doc3".into(), "foo bar").await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
+			fti.index_document(&mut tx, &doc2, &Array::from(vec!["a yellow hello"])).await.unwrap();
+			fti.index_document(&mut tx, &doc3, &Array::from(vec!["foo bar"])).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 
 			// Check the statistics
 			let statistics = fti.statistics(&mut tx).await.unwrap();
@@ -416,74 +451,67 @@ mod tests {
 			assert_eq!(statistics.doc_lengths.keys_count, 3);
 
 			// Search & score
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+			let i = fti.search(&mut tx, "hello".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "world", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".into(), 0.4859746)]);
+			let i = fti.search(&mut tx, "world".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc1, Some(0.4859746))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "yellow", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc2".into(), 0.4859746)]);
+			let i = fti.search(&mut tx, "yellow".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc2, Some(0.4859746))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "bar".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-			visitor.check(Vec::<(Key, f32)>::new());
+			let i = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
+			assert!(i.is_none());
 		}
 
 		{
 			// Reindex one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc3".into(), "nobar foo").await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
+			fti.index_document(&mut tx, &doc3, &Array::from(vec!["nobar foo"])).await.unwrap();
 			tx.commit().await.unwrap();
 
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
 			// We can't anymore find 'bar'
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "bar".to_string()).await.unwrap();
+			assert!(i.is_none());
 
 			// We can now find 'nobar'
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "nobar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "nobar".to_string()).await.unwrap();
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 		}
 
 		{
 			// Remove documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.remove_document(&mut tx, "doc1".into()).await.unwrap();
-			fti.remove_document(&mut tx, "doc2".into()).await.unwrap();
-			fti.remove_document(&mut tx, "doc3".into()).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
+			fti.remove_document(&mut tx, &doc1).await.unwrap();
+			fti.remove_document(&mut tx, &doc2).await.unwrap();
+			fti.remove_document(&mut tx, &doc3).await.unwrap();
 			tx.commit().await.unwrap();
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "hello".to_string()).await.unwrap();
+			assert!(i.is_none());
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
+			assert!(i.is_none());
 		}
 	}
 
@@ -495,37 +523,57 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
+			let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+
+			let doc1: Thing = ("t", "doc1").into();
+			let doc2: Thing = ("t", "doc2").into();
+			let doc3: Thing = ("t", "doc3").into();
+			let doc4: Thing = ("t", "doc4").into();
 
 			let default_btree_order = 5;
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let mut fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+				let mut fti =
+					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+						.await
+						.unwrap();
 				fti.index_document(
 					&mut tx,
-					"doc1".into(),
-					"the quick brown fox jumped over the lazy dog",
+					&doc1,
+					&Array::from(vec!["the quick brown fox jumped over the lazy dog"]),
 				)
 				.await
 				.unwrap();
-				fti.index_document(&mut tx, "doc2".into(), "the fast fox jumped over the lazy dog")
-					.await
-					.unwrap();
-				fti.index_document(&mut tx, "doc3".into(), "the dog sat there and did nothing")
-					.await
-					.unwrap();
-				fti.index_document(&mut tx, "doc4".into(), "the other animals sat there watching")
-					.await
-					.unwrap();
+				fti.index_document(
+					&mut tx,
+					&doc2,
+					&Array::from(vec!["the fast fox jumped over the lazy dog"]),
+				)
+				.await
+				.unwrap();
+				fti.index_document(
+					&mut tx,
+					&doc3,
+					&Array::from(vec!["the dog sat there and did nothing"]),
+				)
+				.await
+				.unwrap();
+				fti.index_document(
+					&mut tx,
+					&doc4,
+					&Array::from(vec!["the other animals sat there watching"]),
+				)
+				.await
+				.unwrap();
 				tx.commit().await.unwrap();
 			}
 
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+				let fti =
+					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+						.await
+						.unwrap();
 
 				let statistics = fti.statistics(&mut tx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);
@@ -533,70 +581,47 @@ mod tests {
 				assert_eq!(statistics.doc_ids.keys_count, 4);
 				assert_eq!(statistics.doc_lengths.keys_count, 4);
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "the", &mut visitor).await.unwrap();
-				visitor.check(vec![
-					("doc1".into(), 0.0),
-					("doc2".into(), 0.0),
-					("doc3".into(), 0.0),
-					("doc4".into(), 0.0),
-				]);
+				let i = fti.search(&mut tx, "the".to_string()).await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![
+						(&doc1, Some(0.0)),
+						(&doc2, Some(0.0)),
+						(&doc3, Some(0.0)),
+						(&doc4, Some(0.0)),
+					],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "dog", &mut visitor).await.unwrap();
-				visitor.check(vec![
-					("doc1".into(), 0.0),
-					("doc2".into(), 0.0),
-					("doc3".into(), 0.0),
-				]);
+				let i = fti.search(&mut tx, "dog".to_string()).await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![(&doc1, Some(0.0)), (&doc2, Some(0.0)), (&doc3, Some(0.0))],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "fox", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "fox".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "over", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "over".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "lazy", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "lazy".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "jumped", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "jumped".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "nothing", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc3".into(), 0.87105393)]);
+				let i = fti.search(&mut tx, "nothing".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc3, Some(0.87105393))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "animals", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc4".into(), 0.92279965)]);
+				let i = fti.search(&mut tx, "animals".to_string()).await.unwrap();
+				check_hits(i, &mut tx, vec![(&doc4, Some(0.92279965))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-				visitor.check(Vec::<(Key, f32)>::new());
-			}
-		}
-	}
-
-	#[derive(Default)]
-	pub(super) struct HashHitVisitor {
-		map: HashMap<Key, Score>,
-	}
-
-	impl HitVisitor for HashHitVisitor {
-		fn visit(&mut self, _tx: &mut Transaction, doc_key: Key, score: Score) {
-			self.map.insert(doc_key, score);
-		}
-	}
-
-	impl HashHitVisitor {
-		pub(super) fn check(&self, res: Vec<(Key, Score)>) {
-			assert_eq!(res.len(), self.map.len(), "{:?}", self.map);
-			for (k, p) in res {
-				assert_eq!(self.map.get(&k), Some(&p));
+				let i = fti.search(&mut tx, "dummy".to_string()).await.unwrap();
+				assert!(i.is_none());
 			}
 		}
 	}
