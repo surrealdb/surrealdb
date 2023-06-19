@@ -131,7 +131,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = self.r.compute(ctx, opt).await?;
+		let r = r.compute(ctx, opt).await?;
 		match o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
