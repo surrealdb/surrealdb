@@ -105,13 +105,13 @@ impl<'a> TreeBuilder<'a> {
 				let right = self.eval_value(r).await?;
 				let mut index_option = None;
 				if let Some(ix) = left.is_indexed_field() {
-					if let Some(io) = IndexOption::found(ix, &e.o, &right, e) {
+					if let Some(io) = IndexOption::found(ix, o, &right, e) {
 						index_option = Some(io.clone());
 						self.add_index(e, io);
 					}
 				}
 				if let Some(ix) = right.is_indexed_field() {
-					if let Some(io) = IndexOption::found(ix, &e.o, &left, e) {
+					if let Some(io) = IndexOption::found(ix, o, &left, e) {
 						index_option = Some(io.clone());
 						self.add_index(e, io);
 					}
