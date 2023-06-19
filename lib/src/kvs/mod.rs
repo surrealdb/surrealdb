@@ -1,5 +1,5 @@
 //! The module defining the key value store.
-//! Everything related the transaction for the key value store is defined in the `tx.rs` file. 
+//! Everything related the transaction for the key value store is defined in the `tx.rs` file.
 //! This module enables the following operations on the key value store:
 //! - get
 //! - set
