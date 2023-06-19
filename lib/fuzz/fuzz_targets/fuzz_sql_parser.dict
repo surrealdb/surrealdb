@@ -157,6 +157,7 @@
 "array::concat("
 "array::difference("
 "array::distinct("
+"array::find("
 "array::flatten("
 "array::group("
 "array::insert("

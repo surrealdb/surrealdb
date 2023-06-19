@@ -17,6 +17,7 @@ impl_module_def!(
 	"concat" => run,
 	"difference" => run,
 	"distinct" => run,
+	"find" => run,
 	"flatten" => run,
 	"group" => run,
 	"insert" => run,

@@ -70,6 +70,14 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
+pub fn find((array, value): (Array, Value)) -> Result<Value, Error> {
+	Ok(array
+		.iter()
+		.enumerate()
+		.find(|(_i, v)| **v == value)
+		.map_or(Value::Null, |(i, _v)| i.into()))
+}
+
 pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().into())
 }

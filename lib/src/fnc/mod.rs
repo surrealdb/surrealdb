@@ -76,6 +76,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::find" => array::find,
 		"array::flatten" => array::flatten,
 		"array::group" => array::group,
 		"array::insert" => array::insert,

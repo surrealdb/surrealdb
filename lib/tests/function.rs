@@ -335,6 +335,16 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_find() -> Result<(), Error> {
+	let sql = r#"RETURN array::find([5, 6, 7], 7);
+RETURN array::find(["hello world", null, true], null);
+RETURN array::find([0, 1, 2], 3);"#;
+	let desired_responses = ["2", "1", "null"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_flatten() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::flatten([]);
@@ -972,11 +982,7 @@ async fn function_array_truthy_indices() -> Result<(), Error> {
 	let sql = r#"RETURN array::truthy_indices([true, true, false, false, true, false]);
 RETURN array::truthy_indices([true, 1, "true", [0], {has_something: true}]);
 RETURN array::truthy_indices([false, 0, "false", [], {}, "this one is good"]);"#;
-	let desired_responses = [
-		"[0, 1, 4]",
-		"[0, 1, 2, 3, 4]",
-		"[5]"
-	];
+	let desired_responses = ["[0, 1, 4]", "[0, 1, 2, 3, 4]", "[5]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
