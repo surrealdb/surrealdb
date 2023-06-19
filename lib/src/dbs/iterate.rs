@@ -64,7 +64,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
+		let txn = ctx.clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -221,10 +221,8 @@ impl Iterable {
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
-		// Claim transaction
-		let mut run = txn.lock().await;
 		// Check that the table exists
-		run.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &v.beg {
 			Bound::Unbounded => thing::prefix(opt.ns(), opt.db(), &v.tb),
