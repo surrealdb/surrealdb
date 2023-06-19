@@ -89,8 +89,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
-				o,
-				v,
+				..
 			} => {
 				return Err(Error::FeatureNotYetImplemented {
 					feature: "unary expressions in index",
