@@ -23,6 +23,7 @@ impl_module_def!(
 	"intersect" => run,
 	"join" => run,
 	"len" => run,
+	"matches" => run,
 	"max" => run,
 	"min" => run,
 	"pop" => run,

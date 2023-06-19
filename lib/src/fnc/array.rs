@@ -7,6 +7,7 @@ use crate::sql::array::Concat;
 use crate::sql::array::Difference;
 use crate::sql::array::Flatten;
 use crate::sql::array::Intersect;
+use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
@@ -109,6 +110,10 @@ pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
 
 pub fn len((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.len().into())
+}
+
+pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {
+	Ok(array.matches(compare_val).into())
 }
 
 pub fn max((array,): (Array,)) -> Result<Value, Error> {

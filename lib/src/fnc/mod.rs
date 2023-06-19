@@ -82,6 +82,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::intersect" => array::intersect,
 		"array::join" => array::join,
 		"array::len" => array::len,
+		"array::matches" => array::matches,
 		"array::max" => array::max,
 		"array::min" => array::min,
 		"array::pop" => array::pop,

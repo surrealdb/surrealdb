@@ -5,6 +5,20 @@ use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::{Number, Value};
 
+async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let response = db.execute(sql, &session, None, false).await?;
+	for (i, v) in response.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
+		if let Some(desired_response) = desired_responses.get(i) {
+			assert_eq!(v, &Value::parse(*desired_response))
+		} else {
+			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
+
 // --------------------------------------------------
 // array
 // --------------------------------------------------
@@ -187,22 +201,9 @@ async fn function_array_clump() -> Result<(), Error> {
 		RETURN array::clump([0, 1, 2], 3);
 		RETURN array::clump([0, 1, 2, 3, 4, 5], 3);
 	"#;
-	let desired_responses = [
-		"[[0, 1], [2, 3]]",
-		"[[0, 1], [2]]",
-		"[[0, 1, 2]]",
-		"[[0, 1, 2], [3, 4, 5]]",
-	];
-	let db = Datastore::new("memory").await?;
-	let session = Session::for_kv().with_ns("test").with_db("test");
-	let res = db.execute(sql, &session, None, false).await?;
-	for (i, v) in res.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
-		if let Some(desired_response) = desired_responses.get(i) {
-			assert_eq!(v, &Value::parse(*desired_response))
-		} else {
-			panic!("Response index {i} out of bounds of desired responses.");
-		}
-	}
+	let desired_responses =
+		["[[0, 1], [2, 3]]", "[[0, 1], [2]]", "[[0, 1, 2]]", "[[0, 1, 2], [3, 4, 5]]"];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -527,6 +528,18 @@ async fn function_array_len() -> Result<(), Error> {
 	let val = Value::from(6);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_matches() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::matches([0, 1, 2], 1);
+RETURN array::matches([[], [0]], []);
+RETURN array::matches([{id: "ohno:0"}, {id: "ohno:1"}], {id: "ohno:1"});"#,
+		&["[false, true, false]", "[true, false]", "[false, true]"],
+	)
+	.await?;
 	Ok(())
 }
 
@@ -938,16 +951,7 @@ async fn function_array_transpose() -> Result<(), Error> {
 		"[[0, 2, 4], [1, 3, 5]]",
 		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
 	];
-	let db = Datastore::new("memory").await?;
-	let session = Session::for_kv().with_ns("test").with_db("test");
-	let res = db.execute(sql, &session, None, false).await?;
-	for (i, v) in res.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
-		if let Some(desired_response) = desired_responses.get(i) {
-			assert_eq!(v, &Value::parse(*desired_response));
-		} else {
-			panic!("Response index {i} out of bounds of desired responses.");
-		}
-	}
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 

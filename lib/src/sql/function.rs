@@ -294,6 +294,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("intersect"),
 			tag("join"),
 			tag("len"),
+			tag("matches"),
 			tag("max"),
 			tag("min"),
 			tag("pop"),

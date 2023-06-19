@@ -336,16 +336,35 @@ impl Intersect<Self> for Array {
 // ------------------------------
 
 // Documented with the assumption that it is just for arrays.
+pub(crate) trait Matches<T> {
+	/// Returns an array complimenting the origional where each value is true or false
+	/// depending on whether it is == to the compared value.
+	/// 
+	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
+	/// to count the number of times an element appears in an array but it's nice to have
+	/// this in addition.
+	fn matches(self, compare_val: Value) -> T;
+}
+
+impl Matches<Array> for Array {
+	fn matches(self, compare_val: Value) -> Array {
+		self.iter().map(|arr_val| (arr_val == &compare_val).into()).collect::<Vec<Value>>().into()
+	}
+}
+
+// ------------------------------
+
+// Documented with the assumption that it is just for arrays.
 pub(crate) trait Transpose<T> {
 	/// Stacks arrays on top of each other. This can serve as 2d array transposition.
-	/// 
+	///
 	/// The input array can contain regular values which are treated as arrays with
 	/// a single element.
-	/// 
+	///
 	/// It's best to think of the function as creating a layered structure of the arrays
 	/// rather than transposing them when the input is not a 2d array. See the examples
 	/// for what happense when the input arrays are not all the same size.
-	/// 
+	///
 	/// Here's a diagram:
 	/// ```
 	/// [0, 1, 2, 3], [4, 5, 6]
@@ -355,14 +374,14 @@ pub(crate) trait Transpose<T> {
 	///  ^      ^      ^      ^
 	/// [0, 4] [1, 5] [2, 6] [3]
 	/// ```
-	/// 
+	///
 	/// # Examples
-	/// 
+	///
 	/// ```
 	/// fn array(sql: &str) -> Array {
 	/// 	/* ... */
 	/// }
-	/// 
+	///
 	/// // Example of `transpose` doing what it says on the tin.
 	/// assert_eq!(array("[[0, 1], [2, 3]]").transpose(), array("[[0, 2], [1, 3]]"));
 	/// // `transpose` can be thought of layering arrays on top of each other so when
@@ -387,7 +406,8 @@ impl Transpose<Array> for Array {
 				if let Value::Array(arr) = v {
 					Box::new(arr.iter().cloned()) as Box<dyn ExactSizeIterator<Item = Value>>
 				} else {
-					Box::new(std::iter::once(v).cloned()) as Box<dyn ExactSizeIterator<Item = Value>>
+					Box::new(std::iter::once(v).cloned())
+						as Box<dyn ExactSizeIterator<Item = Value>>
 				}
 			})
 			.collect::<Vec<_>>();
@@ -395,7 +415,8 @@ impl Transpose<Array> for Array {
 		// This is safe.
 		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
 		for _ in 0..longest_length {
-			transposed_vec.push(iters.iter_mut().filter_map(|i| i.next()).collect::<Vec<_>>().into());
+			transposed_vec
+				.push(iters.iter_mut().filter_map(|i| i.next()).collect::<Vec<_>>().into());
 		}
 		transposed_vec.into()
 	}
