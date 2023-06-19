@@ -57,7 +57,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 		CREATE blog:2 SET title = 'Foo Bar!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		SELECT id,search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE (title @1@ 'hello' AND id>0) OR (title @1@ 'world' AND id<99) EXPLAIN;
+		SELECT id,search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE (title @0@ 'hello' AND id>0) OR (title @1@ 'world' AND id<99) EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");

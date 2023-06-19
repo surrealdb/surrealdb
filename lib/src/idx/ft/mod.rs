@@ -309,7 +309,7 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		terms: &Vec<TermId>,
-	) -> Result<Option<Vec<(TermId, RoaringTreemap)>>, Error> {
+	) -> Result<Vec<(TermId, RoaringTreemap)>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		let td = self.term_docs();
 		for term_id in terms {
@@ -317,7 +317,7 @@ impl FtIndex {
 				terms_docs.push((*term_id, term_docs));
 			}
 		}
-		Ok(Some(terms_docs))
+		Ok(terms_docs)
 	}
 
 	pub(super) async fn new_hits_iterator(

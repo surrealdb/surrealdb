@@ -4,33 +4,33 @@ use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
 use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Ident, Object, Operator, Table, Thing, Value};
+use crate::sql::{Array, Expression, Ident, Idiom, Object, Operator, Thing, Value};
 use async_trait::async_trait;
 use roaring::RoaringTreemap;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct PlanBuilder {
-	indexes: Vec<IndexOption>,
+	indexes: Vec<(Expression, IndexOption)>,
 }
 
 impl PlanBuilder {
-	pub(super) fn add_index_option(&mut self, i: IndexOption) {
-		self.indexes.push(i);
+	pub(super) fn add_index_option(&mut self, e: Expression, i: IndexOption) {
+		self.indexes.push((e, i));
 	}
 
 	pub(super) fn build(mut self) -> Result<Plan, Error> {
 		// TODO select the best option if there are several (cost based)
-		if let Some(index) = self.indexes.pop() {
-			Ok(Plan::new(index))
+		if let Some((e, i)) = self.indexes.pop() {
+			Ok(Plan::new(e.clone(), i.clone()))
 		} else {
 			Err(Error::BypassQueryPlanner)
 		}
@@ -38,12 +38,14 @@ impl PlanBuilder {
 }
 
 pub(crate) struct Plan {
+	pub(super) e: Expression,
 	pub(super) i: IndexOption,
 }
 
 impl Plan {
-	pub(super) fn new(i: IndexOption) -> Self {
+	pub(super) fn new(e: Expression, i: IndexOption) -> Self {
 		Self {
+			e,
 			i,
 		}
 	}
@@ -58,54 +60,68 @@ impl Plan {
 	}
 
 	pub(crate) fn explain(&self) -> Value {
-		match &self.i {
-			IndexOption {
-				ix,
-				v,
-				op,
-				..
-			} => Value::Object(Object::from(HashMap::from([
-				("index", Value::from(ix.name.0.to_owned())),
-				("operator", Value::from(op.to_string())),
-				("value", v.clone()),
-			]))),
-		}
+		Value::Object(Object::from(HashMap::from([
+			("index", Value::from(self.i.ix().name.0.to_owned())),
+			("operator", Value::from(self.i.op().to_string())),
+			("value", self.i.value().clone()),
+		])))
 	}
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub(super) struct IndexOption {
+pub(super) struct IndexOption(Arc<Inner>);
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct Inner {
 	pub(super) ix: DefineIndexStatement,
+	pub(super) id: Idiom,
 	pub(super) v: Value,
+	pub(super) qs: Option<String>,
 	pub(super) op: Operator,
-	ep: Expression,
 	mr: Option<MatchRef>,
 }
 
 impl IndexOption {
-	pub(super) fn new(ix: DefineIndexStatement, op: Operator, v: Value, ep: Expression) -> Self {
-		let mr = if let Operator::Matches(mr) = ep.o {
-			mr
-		} else {
-			None
-		};
-		Self {
+	pub(super) fn new(
+		ix: DefineIndexStatement,
+		id: Idiom,
+		op: Operator,
+		v: Value,
+		qs: Option<String>,
+		mr: Option<MatchRef>,
+	) -> Self {
+		Self(Arc::new(Inner {
 			ix,
+			id,
 			op,
 			v,
-			ep,
+			qs,
 			mr,
-		}
+		}))
 	}
 
-	pub(super) async fn new_query_executor(
-		&self,
-		opt: &Options,
-		txn: &Transaction,
-		t: &Table,
-		i: IndexMap,
-	) -> Result<QueryExecutor, Error> {
-		QueryExecutor::new(opt, txn, t, i, Some(self.ep.clone())).await
+	pub(super) fn ix(&self) -> &DefineIndexStatement {
+		&self.0.ix
+	}
+
+	pub(super) fn op(&self) -> &Operator {
+		&self.0.op
+	}
+
+	pub(super) fn value(&self) -> &Value {
+		&self.0.v
+	}
+
+	pub(super) fn qs(&self) -> Option<&String> {
+		self.0.qs.as_ref()
+	}
+
+	pub(super) fn id(&self) -> &Idiom {
+		&self.0.id
+	}
+
+	pub(super) fn match_ref(&self) -> Option<&MatchRef> {
+		self.0.mr.as_ref()
 	}
 
 	async fn new_iterator(
@@ -114,35 +130,44 @@ impl IndexOption {
 		txn: &Transaction,
 		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
-		match &self.ix.index {
-			Index::Idx => match self.op {
+		match &self.ix().index {
+			Index::Idx => match self.op() {
 				Operator::Equal => {
-					Ok(Box::new(NonUniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
+					return Ok(Box::new(NonUniqueEqualThingIterator::new(
+						opt,
+						self.ix(),
+						self.value(),
+					)?));
 				}
-				_ => Err(Error::BypassQueryPlanner),
+				_ => {}
 			},
-			Index::Uniq => match self.op {
+			Index::Uniq => match self.op() {
 				Operator::Equal => {
-					Ok(Box::new(UniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
+					return Ok(Box::new(UniqueEqualThingIterator::new(
+						opt,
+						self.ix(),
+						self.value(),
+					)?));
 				}
-				_ => Err(Error::BypassQueryPlanner),
+				_ => {}
 			},
 			Index::Search {
 				az,
 				hl,
 				sc,
 				order,
-			} => match self.op {
+			} => match self.op() {
 				Operator::Matches(_) => {
 					let td = exe.pre_match_terms_docs();
-					Ok(Box::new(
-						MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, td)
+					return Ok(Box::new(
+						MatchesThingIterator::new(opt, txn, self.ix(), az, *hl, sc, *order, td)
 							.await?,
-					))
+					));
 				}
-				_ => Err(Error::BypassQueryPlanner),
+				_ => {}
 			},
 		}
+		Err(Error::BypassQueryPlanner)
 	}
 }
 
