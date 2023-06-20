@@ -36,6 +36,8 @@ impl<'a> Document<'a> {
 				self.table(ctx, opt, stm).await?;
 				// Run lives queries
 				self.lives(ctx, opt, stm).await?;
+				// Run change feeds queries
+				self.changefeeds(ctx, opt, stm).await?;
 				// Run event queries
 				self.event(ctx, opt, stm).await?;
 				// Yield document
@@ -63,6 +65,8 @@ impl<'a> Document<'a> {
 				self.table(ctx, opt, stm).await?;
 				// Run lives queries
 				self.lives(ctx, opt, stm).await?;
+				// Run change feeds queries
+				self.changefeeds(ctx, opt, stm).await?;
 				// Run event queries
 				self.event(ctx, opt, stm).await?;
 				// Yield document

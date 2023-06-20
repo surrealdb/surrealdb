@@ -16,7 +16,7 @@
 ///
 /// Database        /*{ns}*{db}
 /// AZ              /*{ns}*{db}!az{az}
-/// CF /*{ns}*{db}!cf{ts}
+/// CF              /*{ns}*{db}!cf{ts}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// PA              /*{ns}*{db}!pa{pa}

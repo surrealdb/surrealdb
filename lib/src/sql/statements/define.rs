@@ -971,12 +971,6 @@ fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
 	Ok((i, DefineTableOption::Drop))
 }
 
-fn table_changefeed(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = changefeed(i)?;
-	Ok((i, DefineTableOption::ChangeFeed(v)))
-}
-
 fn table_view(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = view(i)?;
@@ -999,6 +993,12 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i)?;
 	Ok((i, DefineTableOption::Permissions(v)))
+}
+
+fn table_changefeed(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = changefeed(i)?;
+	Ok((i, DefineTableOption::ChangeFeed(v)))
 }
 
 // --------------------------------------------------

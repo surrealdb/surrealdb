@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -27,10 +28,34 @@ pub struct ShowStatement {
 
 impl ShowStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "change feed",
-		})
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let txn = ctx.try_clone_transaction()?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Process the show query
+		let tb = self.table.as_deref();
+		let r = crate::cf::read(
+			&mut run,
+			opt.ns(),
+			opt.db(),
+			tb.map(|x| x.as_str()),
+			self.since,
+			self.limit,
+		)
+		.await?;
+		// Return the changes
+		let mut a = Vec::<Value>::new();
+		for r in r.iter() {
+			let v: Value = r.clone().into_value();
+			a.push(v);
+		}
+		let v: Value = Value::Array(crate::sql::array::Array(a));
+		Ok(v)
 	}
 }
 

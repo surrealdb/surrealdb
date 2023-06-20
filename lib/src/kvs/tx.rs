@@ -2,6 +2,7 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
+use crate::cf;
 use crate::dbs::cl::ClusterMembership;
 use crate::dbs::cl::Timestamp;
 use crate::err::Error;
@@ -14,6 +15,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::{Uuid, Value};
+use crate::vs::Versionstamp;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -29,6 +31,7 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
+use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -43,6 +46,7 @@ const LOG: &str = "surrealdb::txn";
 pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
+	pub(super) cf: cf::Writer,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -389,6 +393,120 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.set(key, val).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
+	}
+
+	/// Obtain a new change timestamp for a key
+	/// which is replaced with the current timestamp when the transaction is committed.
+	/// NOTE: This should be called when composing the change feed entries for this transaction,
+	/// which should be done immediately before the transaction commit.
+	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	#[allow(unused)]
+	pub async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Get Timestamp {:?}", key);
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(v),
+				..
+			} => v.get_timestamp(key),
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(v),
+				..
+			} => v.get_timestamp(key).await,
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(v),
+				..
+			} => v.get_timestamp(key).await,
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => v.get_timestamp(key, lock).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.get_timestamp().await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.get_timestamp(key).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
+	}
+
+	/// Insert or update a key in the datastore.
+	#[allow(unused_variables)]
+	pub async fn set_versionstamped_key<K, V>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+		val: V,
+	) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val)
+			}
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.set_versionstamped_key(prefix, suffix, val).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -1490,6 +1608,7 @@ impl Transaction {
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						changefeed: None,
 						..DefineTableStatement::default()
 					};
 					self.put(key, &val).await?;
@@ -1646,6 +1765,7 @@ impl Transaction {
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						changefeed: None,
 						..DefineTableStatement::default()
 					};
 					self.put(key, &val).await?;
@@ -1909,6 +2029,49 @@ impl Transaction {
 			}
 		}
 		// Everything exported
+		Ok(())
+	}
+
+	// change will record the change in the changefeed if enabled.
+	// To actually persist the record changes into the underlying kvs,
+	// you must call the `complete_changes` function and then commit the transaction.
+	pub(crate) fn record_change(
+		&mut self,
+		tb: &DefineTableStatement,
+		id: &Thing,
+		v: Cow<'_, Value>,
+	) {
+		if tb.changefeed.is_some() {
+			self.cf.update(tb.name.to_owned(), id.clone(), v)
+		}
+	}
+
+	// complete_changes will complete the changefeed recording for the given namespace and database.
+	//
+	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
+	// Every change must be recorded by calling this struct's `record_change` function beforehand.
+	// If there was no preceeding `record_change` function calls for this transaction, this function will do nothing.
+	//
+	// This function should be called only after all the changes have been made to the transaction.
+	// Otherwise, changes are missed in the change feed.
+	//
+	// This function should be called immediately before calling the commit function to guarantee that
+	// the lock, if needed by lock=true, is held only for the duration of the commit, not the entire transaction.
+	//
+	// This function is here because it needs access to mutably borrow the transaction.
+	//
+	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
+	// non-FDB backends.
+	pub(crate) async fn complete_changes(
+		&mut self,
+		ns: &str,
+		db: &str,
+		_lock: bool,
+	) -> Result<(), Error> {
+		let changes = self.cf.get(ns, db);
+		for (tskey, prefix, suffix, v) in changes {
+			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
+		}
 		Ok(())
 	}
 }

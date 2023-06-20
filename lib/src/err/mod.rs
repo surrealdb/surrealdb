@@ -1,6 +1,7 @@
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
@@ -462,6 +463,9 @@ pub enum Error {
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]
 	CorruptedIndex,
+
+	#[error("Versionstamp in key is corrupted: {0}")]
+	CorruptedVersionstampInKey(#[from] VersionstampError),
 
 	/// The query planner did not find an index able to support the match @@ operator on a given expression
 	#[error("There was no suitable full-text index supporting the expression '{value}'")]

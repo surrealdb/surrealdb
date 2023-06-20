@@ -107,6 +107,7 @@ extern crate log;
 mod mac;
 
 mod api;
+mod cf;
 mod ctx;
 mod doc;
 mod exe;
