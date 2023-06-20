@@ -298,33 +298,10 @@ impl Datastore {
 		vars: Variables,
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
-		// Create a new query options
-		let mut opt = Options::default();
-		// Create a new query executor
-		let mut exe = Executor::new(self);
-		// Create a default context
-		let mut ctx = Context::default();
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
-		}
-		// Start an execution context
-		let ctx = sess.context(ctx);
-		// Store the query variables
-		let ctx = vars.attach(ctx)?;
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
-		// Setup the auth options
-		opt.auth = sess.au.clone();
-		// Setup the live options
-		opt.live = sess.rt;
-		// Set current NS and DB
-		opt.ns = sess.ns();
-		opt.db = sess.db();
-		// Set strict config
-		opt.strict = strict;
-		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		// Process the AST
+		self.process(ast, sess, vars, strict).await
 	}
 
 	/// Execute a pre-parsed SQL query

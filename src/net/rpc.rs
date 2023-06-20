@@ -158,7 +158,7 @@ impl Rpc {
 
 	async fn connected(rpc: Arc<RwLock<Rpc>>, chn: Sender<Message>) {
 		// Fetch the unique id of the WebSocket
-		let id = rpc.read().await.uuid.clone();
+		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has connected
 		trace!(target: LOG, "WebSocket {} connected", id);
 		// Store this WebSocket in the list of WebSockets
@@ -167,7 +167,7 @@ impl Rpc {
 
 	async fn disconnected(rpc: Arc<RwLock<Rpc>>) {
 		// Fetch the unique id of the WebSocket
-		let id = rpc.read().await.uuid.clone();
+		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has disconnected
 		trace!(target: LOG, "WebSocket {} disconnected", id);
 		// Remove this WebSocket from the list of WebSockets
