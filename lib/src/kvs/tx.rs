@@ -825,9 +825,9 @@ impl Transaction {
 	fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-		return Timestamp {
+		Timestamp {
 			value: now as u64,
-		};
+		}
 	}
 
 	// Set heartbeat

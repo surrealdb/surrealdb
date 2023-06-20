@@ -143,9 +143,8 @@ impl Rpc {
 							}
 							Some(ws_sender) => {
 								msg_text
-									.send(rpc.read().await.format.clone(), ws_sender.clone().into())
+									.send(rpc.read().await.format.clone(), ws_sender.clone())
 									.await;
-								// ws_sender.send(msg_text).await.unwrap();
 								trace!(
 									target: LOG,
 									"Sent notification to WebSocket {:?} for lq: {:?}",
@@ -220,7 +219,7 @@ impl Rpc {
 		for (key, value) in locked_lq_map.iter() {
 			if value == &id {
 				trace!(target: LOG, "Removing live query: {}", key);
-				live_query_to_gc.push(key.clone());
+				live_query_to_gc.push(*key);
 			}
 		}
 		for key in live_query_to_gc {
@@ -739,8 +738,8 @@ impl Rpc {
 
 	async fn handle_live_query_results(&self, res: &Response) {
 		match &res.query_type {
-			QueryType::Live => match &res.result {
-				Ok(Value::Uuid(lqid)) => {
+			QueryType::Live => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
 					// Match on Uuid type
 					LIVE_QUERIES.write().await.insert(lqid.0, self.uuid);
 					trace!(
@@ -750,11 +749,10 @@ impl Rpc {
 						self.uuid
 					);
 				}
-				_ => {}
-			},
-			QueryType::Kill => match &res.result {
-				Ok(Value::Uuid(lqid)) => {
-					let ws_id = LIVE_QUERIES.write().await.remove(lqid);
+			}
+			QueryType::Kill => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
+					let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
 					if let Some(ws_id) = ws_id {
 						trace!(
 							target: LOG,
@@ -764,8 +762,7 @@ impl Rpc {
 						);
 					}
 				}
-				_ => {}
-			},
+			}
 			_ => {}
 		}
 	}

@@ -27,17 +27,17 @@ impl<'a> Document<'a> {
 			// Create a new statement
 			let lq = Statement::from(lv);
 			// Check LIVE SELECT where condition
-			if self.check(ctx, opt, &stm).await.is_err() {
+			if self.check(ctx, opt, stm).await.is_err() {
 				continue;
 			}
 			// Check what type of data change this is
 			if stm.is_delete() {
 				// Send a DELETE notification
 				if opt.id() == &lv.node.0 {
-					let thing = id.clone().to_owned();
+					let thing = (*id).clone();
 					opt.sender
 						.send(Notification {
-							id: lv.id.0.clone(),
+							id: lv.id.0,
 							action: Action::Delete,
 							result: Value::Thing(thing),
 						})
@@ -50,7 +50,7 @@ impl<'a> Document<'a> {
 				if opt.id() == &lv.node.0 {
 					opt.sender
 						.send(Notification {
-							id: lv.id.0.clone(),
+							id: lv.id.0,
 							action: Action::Create,
 							result: self.pluck(ctx, opt, &lq).await?,
 						})
@@ -63,7 +63,7 @@ impl<'a> Document<'a> {
 				if opt.id() == &lv.node.0 {
 					opt.sender
 						.send(Notification {
-							id: lv.id.0.clone(),
+							id: lv.id.0,
 							action: Action::Update,
 							result: self.pluck(ctx, opt, &lq).await?,
 						})
