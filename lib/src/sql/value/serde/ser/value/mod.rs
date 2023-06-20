@@ -748,7 +748,7 @@ mod tests {
 
 	#[test]
 	fn block() {
-		let block = Box::new(Block::default());
+		let block = Box::default();
 		let value = to_value(&block).unwrap();
 		let expected = Value::Block(block);
 		assert_eq!(value, expected);
