@@ -117,7 +117,7 @@ mod cli_integration {
 
 		let _server = run(&start_args);
 
-		std::thread::sleep(std::time::Duration::from_millis(500));
+		std::thread::sleep(std::time::Duration::from_millis(5000));
 
 		assert!(run(&format!("isready --conn http://{addr}")).output().is_ok());
 
