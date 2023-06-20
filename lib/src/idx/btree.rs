@@ -615,6 +615,7 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes<BK>(
 		tx: &mut Transaction,
 		keys: &mut BK,

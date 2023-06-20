@@ -225,6 +225,7 @@ struct MatchesThingIterator {
 }
 
 impl MatchesThingIterator {
+	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		opt: &Options,
 		txn: &Transaction,
