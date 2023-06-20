@@ -1,3 +1,5 @@
+//! Response class implementation
+
 use js::bind;
 
 mod init;

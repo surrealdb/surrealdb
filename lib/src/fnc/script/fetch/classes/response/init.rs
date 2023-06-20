@@ -8,6 +8,7 @@ use js::{
 
 use crate::fnc::script::fetch::{classes::HeadersClass, util};
 
+/// Struct containing data from the init argument from the Response constructor.
 #[derive(Clone)]
 pub struct ResponseInit {
 	// u16 instead of reqwest::StatusCode since javascript allows non valid status codes in some
@@ -40,6 +41,7 @@ impl<'js> FromJs<'js> for ResponseInit {
 	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
+		// Extract status.
 		let status =
 			if let Some(Coerced(status)) = object.get::<_, Option<Coerced<i32>>>("status")? {
 				if !(200..=599).contains(&status) {
@@ -50,6 +52,7 @@ impl<'js> FromJs<'js> for ResponseInit {
 				200u16
 			};
 
+		// Extract status text.
 		let status_text = if let Some(Coerced(string)) =
 			object.get::<_, Option<Coerced<StdString>>>("statusText")?
 		{
@@ -61,6 +64,7 @@ impl<'js> FromJs<'js> for ResponseInit {
 			StdString::new()
 		};
 
+		// Extract headers.
 		let headers = if let Some(headers) = object.get::<_, Option<Value>>("headers")? {
 			let headers = HeadersClass::new_inner(ctx, headers)?;
 			Class::instance(ctx, headers)?

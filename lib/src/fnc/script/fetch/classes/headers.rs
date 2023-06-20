@@ -1,3 +1,5 @@
+//! Headers class implementation
+
 use js::bind;
 
 pub use headers::Headers as HeadersClass;

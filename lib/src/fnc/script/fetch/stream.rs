@@ -3,6 +3,7 @@ use std::{future::Future, pin::Pin};
 use channel::Receiver;
 use futures::{FutureExt, Stream, StreamExt};
 
+/// A newtype struct over reciever implementing the [`Stream`] trait.
 pub struct ChannelStream<R>(Receiver<R>);
 
 impl<R> Stream for ChannelStream<R> {
@@ -15,6 +16,7 @@ impl<R> Stream for ChannelStream<R> {
 	}
 }
 
+/// A struct representing a Javascript `ReadableStream`.
 pub struct ReadableStream<R>(Pin<Box<dyn Stream<Item = R> + Send + Sync>>);
 
 impl<R> ReadableStream<R> {
@@ -28,8 +30,10 @@ impl<R> ReadableStream<R> {
 }
 
 impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
+	/// Turn the current stream into two separate streams.
 	pub fn tee(&mut self) -> (ReadableStream<R>, impl Future<Output = ()>) {
 		// replace the stream with a channel driven by as task.
+		// TODO: figure out how backpressure works in the stream API.
 		let (send_a, recv_a) = channel::bounded::<R>(16);
 		let (send_b, recv_b) = channel::bounded::<R>(16);
 		let new_stream = Box::pin(ChannelStream(recv_a));

@@ -1,3 +1,5 @@
+//! Blob class implementation
+
 use bytes::BytesMut;
 use js::{bind, prelude::Coerced, ArrayBuffer, Class, Ctx, Exception, FromJs, Result, Value};
 

@@ -1,3 +1,5 @@
+//! Contains the actual fetch function.
+
 use crate::fnc::script::fetch::{
 	body::{Body, BodyData, BodyKind},
 	classes::{
@@ -21,6 +23,7 @@ pub async fn fetch<'js>(
 	init: Opt<RequestInit>,
 	args: Rest<()>,
 ) -> Result<ResponseClass> {
+	// Create a request from the input.
 	let js_req = RequestClass::new(ctx, input, init, args)?;
 
 	let url = js_req.url;
@@ -35,6 +38,7 @@ pub async fn fetch<'js>(
 
 	let redirect = js_req.init.request_redirect;
 
+	// set the policy for redirecting requests.
 	let policy = redirect::Policy::custom(move |attempt| {
 		match redirect {
 			classes::RequestRedirect::Follow => {
@@ -54,6 +58,7 @@ pub async fn fetch<'js>(
 		Exception::throw_internal(ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
+	// Set the body for the request.
 	let mut req_builder = reqwest::RequestBuilder::from_parts(client, req);
 	if let Some(body) = js_req.init.body {
 		match body.data.replace(BodyData::Used) {
@@ -84,12 +89,14 @@ pub async fn fetch<'js>(
 		}
 	}
 
+	// make the request
 	let response = req_builder
 		.headers(headers)
 		.send()
 		.await
 		.map_err(|e| Exception::throw_type(ctx, &e.to_string()))?;
 
+	// Extract the headers
 	let headers = HeadersClass::from_map(response.headers().clone());
 	let headers = Class::instance(ctx, headers)?;
 	let headers = Persistent::save(ctx, headers);
@@ -99,6 +106,7 @@ pub async fn fetch<'js>(
 		status_text: response.status().canonical_reason().unwrap_or("").to_owned(),
 	};
 
+	// Extract the body
 	let body = Body::stream(
 		BodyKind::Buffer,
 		response.bytes_stream().map_err(Arc::new).map_err(RequestError::Reqwest),

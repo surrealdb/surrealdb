@@ -1,3 +1,5 @@
+//! FormData class implementation
+
 use js::{
 	bind, function::Opt, prelude::Coerced, Class, Ctx, Exception, FromJs, Persistent, Result,
 	String, Value,

@@ -1,3 +1,5 @@
+//! Request class implementation
+//!
 use js::{
 	bind,
 	class::{HasRefs, RefsMarker},
@@ -282,6 +284,7 @@ mod request {
 			}
 		}
 
+		/// Clone the response, teeing any possible underlying streams.
 		#[quickjs(rename = "clone")]
 		pub fn clone_js(&self, ctx: Ctx<'_>, _rest: Rest<()>) -> Result<Self> {
 			Ok(Self {
@@ -328,6 +331,7 @@ mod request {
 			String::from("[object Request]")
 		}
 
+		/// Takes the buffer from the body leaving it used.
 		#[quickjs(skip)]
 		async fn take_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<Bytes> {
 			let Some(body) = self.init.body.as_ref() else {
@@ -336,7 +340,7 @@ mod request {
 			match body.to_buffer().await {
 				Ok(Some(x)) => Ok(x),
 				Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
-				Err(e) => match &*e {
+				Err(e) => match e {
 					RequestError::Reqwest(e) => {
 						Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
 					}

@@ -26,6 +26,7 @@ pub enum BodyData {
 	Used,
 }
 
+/// A stream returning the data from a body.
 pub enum BodyStream {
 	Buffer(Option<Bytes>),
 	Stream(RefCell<ReadableStream<StreamItem>>),
@@ -45,8 +46,13 @@ impl Stream for BodyStream {
 	}
 }
 
+/// A struct representing the body mixin.
+///
+/// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any `TypedBuffer` and `String`.
 pub struct Body {
+	/// The type of body
 	pub kind: BodyKind,
+	/// The data of the body
 	pub data: Cell<BodyData>,
 }
 
@@ -57,6 +63,7 @@ impl Default for Body {
 }
 
 impl Body {
+	/// Create a new used body.
 	pub fn new() -> Self {
 		Body {
 			kind: BodyKind::Buffer,
@@ -64,6 +71,7 @@ impl Body {
 		}
 	}
 
+	/// Returns wther the body is alread used.
 	pub fn used(&self) -> bool {
 		match self.data.replace(BodyData::Used) {
 			BodyData::Used => true,
@@ -74,6 +82,7 @@ impl Body {
 		}
 	}
 
+	/// Create a body from a buffer.
 	pub fn buffer<B>(kind: BodyKind, buffer: B) -> Self
 	where
 		B: Into<Bytes>,
@@ -85,6 +94,7 @@ impl Body {
 		}
 	}
 
+	/// Create a body from a stream.
 	pub fn stream<S>(kind: BodyKind, stream: S) -> Self
 	where
 		S: Stream<Item = StreamItem> + Send + Sync + 'static,
@@ -95,7 +105,10 @@ impl Body {
 		}
 	}
 
-	pub async fn to_buffer(&self) -> StdResult<Option<Bytes>, Arc<RequestError>> {
+	/// Returns the data from the body as a buffer.
+	///
+	/// if the body is a stream this future only returns when the full body is consumed.
+	pub async fn to_buffer(&self) -> StdResult<Option<Bytes>, RequestError> {
 		match self.data.replace(BodyData::Used) {
 			BodyData::Buffer(x) => Ok(Some(x)),
 			BodyData::Stream(stream) => {
