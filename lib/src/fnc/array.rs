@@ -46,6 +46,50 @@ pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let longest_length = lh.len().max(rh.len());
+	let mut results = Array::with_capacity(longest_length);
+	for i in 0..longest_length {
+		let lhv = lh.get(i);
+		let rhv = rh.get(i);
+		results.push(
+			(lhv.map_or(false, |v| v.is_truthy()) && rhv.map_or(false, |v| v.is_truthy())).into(),
+		);
+	}
+	Ok(results.into())
+}
+
+pub fn boolean_not((mut array,): (Array,)) -> Result<Value, Error> {
+	array.iter_mut().for_each(|v| *v = (!v.is_truthy()).into());
+	Ok(array.into())
+}
+
+pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let longest_length = lh.len().max(rh.len());
+	let mut results = Array::with_capacity(longest_length);
+	for i in 0..longest_length {
+		let lhv = lh.get(i);
+		let rhv = rh.get(i);
+		results.push(
+			(lhv.map_or(false, |v| v.is_truthy()) || rhv.map_or(false, |v| v.is_truthy())).into(),
+		);
+	}
+	Ok(results.into())
+}
+
+pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let longest_length = lh.len().max(rh.len());
+	let mut results = Array::with_capacity(longest_length);
+	for i in 0..longest_length {
+		let lhv = lh.get(i);
+		let rhv = rh.get(i);
+		results.push(
+			(lhv.map_or(false, |v| v.is_truthy()) ^ rhv.map_or(false, |v| v.is_truthy())).into(),
+		);
+	}
+	Ok(results.into())
+}
+
 pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.clump(clump_size as usize).into())
 }
@@ -119,50 +163,6 @@ pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
 
 pub fn len((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.len().into())
-}
-
-pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) && rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
-	}
-	Ok(results.into())
-}
-
-pub fn boolean_not((mut array,): (Array,)) -> Result<Value, Error> {
-	array.iter_mut().for_each(|v| *v = (!v.is_truthy()).into());
-	Ok(array.into())
-}
-
-pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) || rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
-	}
-	Ok(results.into())
-}
-
-pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) ^ rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
-	}
-	Ok(results.into())
 }
 
 pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {

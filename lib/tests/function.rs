@@ -161,6 +161,41 @@ async fn function_array_append() -> Result<(), Error> {
 	Ok(())
 }
 
+// Skipping array_boolean_and since it's similar enough to 'or'.
+
+#[tokio::test]
+async fn function_array_boolean_not() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_not([false, true, 0, 1])"#,
+		&["[true, false, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_or([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_or([true, false], [false]);
+RETURN array::boolean_or([true, true], [false]);"#,
+		&["[false, true, true, true]", "[false, true, true, true], [true, false], []"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_xor([false, true, false, true], [false, false, true, true]);"#,
+		&["[false, true, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_array_combine() -> Result<(), Error> {
 	let sql = r#"
@@ -538,41 +573,6 @@ async fn function_array_len() -> Result<(), Error> {
 	let val = Value::from(6);
 	assert_eq!(tmp, val);
 	//
-	Ok(())
-}
-
-// Skipping array_boolean_and since it's similar enough to 'or'.
-
-#[tokio::test]
-async fn function_array_boolean_not() -> Result<(), Error> {
-	test_queries(
-		r#"RETURN array::logical_not([false, true, 0, 1])"#,
-		&["[true, false, true, false]"],
-	)
-	.await?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_array_boolean_or() -> Result<(), Error> {
-	test_queries(
-		r#"RETURN array::boolean_or([false, true, false, true], [false, false, true, true]);
-RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
-RETURN array::boolean_or([true, false], [false]);
-RETURN array::boolean_or([true, true], [false]);"#,
-		&["[false, true, true, true]", "[false, true, true, true], [true, false], []"],
-	)
-	.await?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_array_boolean_xor() -> Result<(), Error> {
-	test_queries(
-		r#"RETURN array::boolean_xor([false, true, false, true], [false, false, true, true]);"#,
-		&["[false, true, true, false]"],
-	)
-	.await?;
 	Ok(())
 }
 
