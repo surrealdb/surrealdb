@@ -2830,52 +2830,52 @@ mod tests {
 
 	#[test]
 	fn check_none() {
-		assert_eq!(true, Value::None.is_none());
-		assert_eq!(false, Value::Null.is_none());
-		assert_eq!(false, Value::from(1).is_none());
+		assert!(Value::None.is_none());
+		assert!(!Value::None.is_none());
+		assert!(!Value::from(1).is_none());
 	}
 
 	#[test]
 	fn check_null() {
-		assert_eq!(true, Value::Null.is_null());
-		assert_eq!(false, Value::None.is_null());
-		assert_eq!(false, Value::from(1).is_null());
+		assert!(Value::Null.is_null());
+		assert!(!Value::None.is_null());
+		assert!(!Value::from(1).is_null());
 	}
 
 	#[test]
 	fn check_true() {
-		assert_eq!(false, Value::None.is_true());
-		assert_eq!(true, Value::Bool(true).is_true());
-		assert_eq!(false, Value::Bool(false).is_true());
-		assert_eq!(false, Value::from(1).is_true());
-		assert_eq!(false, Value::from("something").is_true());
+		assert!(!Value::None.is_true());
+		assert!(Value::Bool(true).is_true());
+		assert!(!Value::Bool(false).is_true());
+		assert!(!Value::from(1).is_true());
+		assert!(!Value::from("something").is_true());
 	}
 
 	#[test]
 	fn check_false() {
-		assert_eq!(false, Value::None.is_false());
-		assert_eq!(false, Value::Bool(true).is_false());
-		assert_eq!(true, Value::Bool(false).is_false());
-		assert_eq!(false, Value::from(1).is_false());
-		assert_eq!(false, Value::from("something").is_false());
+		assert!(!Value::None.is_false());
+		assert!(!Value::Bool(true).is_false());
+		assert!(Value::Bool(false).is_false());
+		assert!(!Value::from(1).is_false());
+		assert!(!Value::from("something").is_false());
 	}
 
 	#[test]
 	fn convert_truthy() {
-		assert_eq!(false, Value::None.is_truthy());
-		assert_eq!(false, Value::Null.is_truthy());
-		assert_eq!(true, Value::Bool(true).is_truthy());
-		assert_eq!(false, Value::Bool(false).is_truthy());
-		assert_eq!(false, Value::from(0).is_truthy());
-		assert_eq!(true, Value::from(1).is_truthy());
-		assert_eq!(true, Value::from(-1).is_truthy());
-		assert_eq!(true, Value::from(1.1).is_truthy());
-		assert_eq!(true, Value::from(-1.1).is_truthy());
-		assert_eq!(true, Value::from("true").is_truthy());
-		assert_eq!(false, Value::from("false").is_truthy());
-		assert_eq!(true, Value::from("falsey").is_truthy());
-		assert_eq!(true, Value::from("something").is_truthy());
-		assert_eq!(true, Value::from(Uuid::new()).is_truthy());
+		assert!(!Value::None.is_truthy());
+		assert!(!Value::Null.is_truthy());
+		assert!(Value::Bool(true).is_truthy());
+		assert!(!Value::Bool(false).is_truthy());
+		assert!(!Value::from(0).is_truthy());
+		assert!(Value::from(1).is_truthy());
+		assert!(Value::from(-1).is_truthy());
+		assert!(Value::from(1.1).is_truthy());
+		assert!(Value::from(-1.1).is_truthy());
+		assert!(Value::from("true").is_truthy());
+		assert!(!Value::from("false").is_truthy());
+		assert!(Value::from("falsey").is_truthy());
+		assert!(Value::from("something").is_truthy());
+		assert!(Value::from(Uuid::new()).is_truthy());
 	}
 
 	#[test]
