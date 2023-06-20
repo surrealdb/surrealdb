@@ -55,7 +55,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Transaction),
+	FoundationDB(super::fdb::Transaction),
 }
 
 impl fmt::Display for Transaction {
@@ -73,7 +73,7 @@ impl fmt::Display for Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
+			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -122,7 +122,7 @@ impl Transaction {
 			} => v.closed(),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.closed(),
 			#[allow(unreachable_patterns)]
@@ -164,7 +164,7 @@ impl Transaction {
 			} => v.cancel().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
@@ -206,7 +206,7 @@ impl Transaction {
 			} => v.commit().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -250,7 +250,7 @@ impl Transaction {
 			} => v.del(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
@@ -294,7 +294,7 @@ impl Transaction {
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.exi(key).await,
 			#[allow(unreachable_patterns)]
@@ -338,7 +338,7 @@ impl Transaction {
 			} => v.get(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -383,7 +383,7 @@ impl Transaction {
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -428,7 +428,7 @@ impl Transaction {
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.put(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -474,7 +474,7 @@ impl Transaction {
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
@@ -519,7 +519,7 @@ impl Transaction {
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
@@ -564,7 +564,7 @@ impl Transaction {
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]

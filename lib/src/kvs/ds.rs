@@ -38,7 +38,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Datastore),
+	FoundationDB(super::fdb::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -56,7 +56,7 @@ impl fmt::Display for Datastore {
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
+			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -191,7 +191,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).await.map(Inner::FDB);
+					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
@@ -259,9 +259,9 @@ impl Datastore {
 				super::tx::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(v) => {
+			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::FDB(tx)
+				super::tx::Inner::FoundationDB(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),

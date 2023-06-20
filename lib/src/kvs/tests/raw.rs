@@ -18,9 +18,9 @@ async fn exi() {
 	// Create a readonly transaction
 	let mut tx = ds.transaction(false, false).await.unwrap();
 	let val = tx.exi("test").await.unwrap();
-	assert_eq!(val, true);
+	assert!(val);
 	let val = tx.exi("none").await.unwrap();
-	assert_eq!(val, false);
+	assert!(!val);
 	tx.cancel().await.unwrap();
 }
 

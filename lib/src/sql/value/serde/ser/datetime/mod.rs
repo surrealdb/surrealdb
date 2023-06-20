@@ -63,7 +63,7 @@ impl serde::ser::SerializeTuple for SerializeDatetime {
 		} else if self.nanos.is_none() {
 			self.nanos = Some(value.serialize(ser::primitive::u32::Serializer.wrap())?);
 		} else {
-			return Err(Error::custom(format!("unexpected `Datetime` 3rd field`")));
+			return Err(Error::custom("unexpected `Datetime` 3rd field`".to_string()));
 		}
 		Ok(())
 	}

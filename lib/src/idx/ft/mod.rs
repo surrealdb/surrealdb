@@ -463,28 +463,24 @@ impl HitsIterator {
 		&mut self,
 		tx: &mut Transaction,
 	) -> Result<Option<(Thing, Option<Score>)>, Error> {
-		loop {
-			if let Some(doc_id) = self.iter.next() {
-				if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-					let score = if let Some(scorer) = &self.scorer {
-						let mut sc = 0.0;
-						for (term_id, docs) in &self.terms_docs {
-							if docs.contains(doc_id) {
-								if let Some(term_freq) =
-									self.postings.get_term_frequency(tx, *term_id, doc_id).await?
-								{
-									sc += scorer.score(tx, doc_id, docs.len(), term_freq).await?;
-								}
+		for doc_id in self.iter.by_ref() {
+			if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
+				let score = if let Some(scorer) = &self.scorer {
+					let mut sc = 0.0;
+					for (term_id, docs) in &self.terms_docs {
+						if docs.contains(doc_id) {
+							if let Some(term_freq) =
+								self.postings.get_term_frequency(tx, *term_id, doc_id).await?
+							{
+								sc += scorer.score(tx, doc_id, docs.len(), term_freq).await?;
 							}
 						}
-						Some(sc)
-					} else {
-						None
-					};
-					return Ok(Some((doc_key.into(), score)));
-				}
-			} else {
-				break;
+					}
+					Some(sc)
+				} else {
+					None
+				};
+				return Ok(Some((doc_key.into(), score)));
 			}
 		}
 		Ok(None)

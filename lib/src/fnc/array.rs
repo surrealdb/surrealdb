@@ -260,9 +260,9 @@ mod tests {
 			"true is false is true",
 		);
 		test(
-			vec![Value::from(3.14), Value::from(2.72), Value::from(1.61)].into(),
+			vec![Value::from(3.56), Value::from(2.72), Value::from(1.61)].into(),
 			" is not ",
-			"3.14f is not 2.72f is not 1.61f",
+			"3.56f is not 2.72f is not 1.61f",
 		);
 	}
 }

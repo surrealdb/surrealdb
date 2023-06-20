@@ -20,7 +20,7 @@ async fn function_array_add() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -60,7 +60,7 @@ async fn function_array_all() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -92,7 +92,7 @@ async fn function_array_any() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -124,7 +124,7 @@ async fn function_array_append() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -156,7 +156,7 @@ async fn function_array_combine() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -188,7 +188,7 @@ async fn function_array_complement() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -220,7 +220,7 @@ async fn function_array_concat() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -252,7 +252,7 @@ async fn function_array_difference() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -283,7 +283,7 @@ async fn function_array_distinct() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -316,7 +316,7 @@ async fn function_array_flatten() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -352,7 +352,7 @@ async fn function_array_group() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -385,7 +385,7 @@ async fn function_array_insert() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -416,7 +416,7 @@ async fn function_array_intersect() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -449,7 +449,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -480,7 +480,7 @@ async fn function_array_len() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -512,7 +512,7 @@ async fn function_array_max() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -544,7 +544,7 @@ async fn function_array_min() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -576,7 +576,7 @@ async fn function_array_pop() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -608,7 +608,7 @@ async fn function_array_prepend() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -640,7 +640,7 @@ async fn function_array_push() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -673,7 +673,7 @@ async fn function_array_remove() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -704,7 +704,7 @@ async fn function_array_reverse() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -740,7 +740,7 @@ async fn function_array_slice() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
@@ -792,7 +792,7 @@ async fn function_array_sort() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
@@ -840,7 +840,7 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -872,7 +872,7 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -904,7 +904,7 @@ async fn function_array_union() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -941,7 +941,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -983,7 +983,7 @@ async fn function_count() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -1020,7 +1020,7 @@ async fn function_crypto_md5() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1037,7 +1037,7 @@ async fn function_crypto_sha1() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1054,7 +1054,7 @@ async fn function_crypto_sha256() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1071,7 +1071,7 @@ async fn function_crypto_sha512() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1094,7 +1094,7 @@ async fn function_duration_days() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1121,7 +1121,7 @@ async fn function_duration_hours() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1148,7 +1148,7 @@ async fn function_duration_micros() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1175,7 +1175,7 @@ async fn function_duration_millis() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1202,7 +1202,7 @@ async fn function_duration_mins() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1229,7 +1229,7 @@ async fn function_duration_nanos() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1256,7 +1256,7 @@ async fn function_duration_secs() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1283,7 +1283,7 @@ async fn function_duration_weeks() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1310,7 +1310,7 @@ async fn function_duration_years() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1336,7 +1336,7 @@ async fn function_duration_from_days() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1358,7 +1358,7 @@ async fn function_duration_from_hours() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1380,7 +1380,7 @@ async fn function_duration_from_micros() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1402,7 +1402,7 @@ async fn function_duration_from_millis() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1424,7 +1424,7 @@ async fn function_duration_from_mins() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1446,7 +1446,7 @@ async fn function_duration_from_nanos() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1468,7 +1468,7 @@ async fn function_duration_from_secs() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1490,7 +1490,7 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1516,7 +1516,7 @@ async fn function_encoding_base64_decode() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1538,7 +1538,7 @@ async fn function_encoding_base64_encode() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1570,7 +1570,7 @@ async fn function_parse_geo_area() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1596,7 +1596,7 @@ async fn function_parse_geo_bearing() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1620,7 +1620,7 @@ async fn function_parse_geo_centroid() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1654,7 +1654,7 @@ async fn function_parse_geo_distance() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1674,7 +1674,7 @@ async fn function_parse_geo_hash_encode() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1691,7 +1691,7 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -1721,7 +1721,7 @@ async fn function_parse_is_alphanum() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1743,7 +1743,7 @@ async fn function_parse_is_alpha() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1765,7 +1765,7 @@ async fn function_parse_is_ascii() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1787,7 +1787,7 @@ async fn function_parse_is_datetime() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1809,7 +1809,7 @@ async fn function_parse_is_domain() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1831,7 +1831,7 @@ async fn function_parse_is_email() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1853,7 +1853,7 @@ async fn function_parse_is_hexadecimal() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1875,7 +1875,7 @@ async fn function_parse_is_latitude() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1897,7 +1897,7 @@ async fn function_parse_is_longitude() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1919,7 +1919,7 @@ async fn function_parse_is_numeric() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1941,7 +1941,7 @@ async fn function_parse_is_semver() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1963,7 +1963,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -1985,7 +1985,7 @@ async fn function_parse_is_uuid() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2012,7 +2012,7 @@ async fn function_math_abs() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2039,7 +2039,7 @@ async fn function_math_bottom() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -2070,7 +2070,7 @@ async fn function_math_ceil() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2093,7 +2093,7 @@ async fn function_math_fixed() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -2124,7 +2124,7 @@ async fn function_math_floor() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2147,7 +2147,7 @@ async fn function_math_interquartile() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2173,7 +2173,7 @@ async fn function_math_max() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2200,7 +2200,7 @@ async fn function_math_mean() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2226,7 +2226,7 @@ async fn function_math_median() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2253,7 +2253,7 @@ async fn function_math_midhinge() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2279,7 +2279,7 @@ async fn function_math_min() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2306,7 +2306,7 @@ async fn function_math_mode() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2332,7 +2332,7 @@ async fn function_math_nearestrank() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2358,7 +2358,7 @@ async fn function_math_percentile() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2383,7 +2383,7 @@ async fn function_math_pow() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2406,7 +2406,7 @@ async fn function_math_product() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2432,7 +2432,7 @@ async fn function_math_round() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2455,7 +2455,7 @@ async fn function_math_spread() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2480,7 +2480,7 @@ async fn function_math_sqrt() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2503,7 +2503,7 @@ async fn function_math_stddev() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2529,7 +2529,7 @@ async fn function_math_sum() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2556,7 +2556,7 @@ async fn function_math_top() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -2588,7 +2588,7 @@ async fn function_math_trimean() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2614,7 +2614,7 @@ async fn function_math_variance() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2642,7 +2642,7 @@ async fn function_parse_meta_id() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2659,7 +2659,7 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2676,7 +2676,7 @@ async fn function_parse_meta_tb() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2703,7 +2703,7 @@ async fn function_not() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
@@ -2748,7 +2748,7 @@ async fn function_parse_email_host() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2765,7 +2765,7 @@ async fn function_parse_email_user() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2782,7 +2782,7 @@ async fn function_parse_url_domain() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2799,7 +2799,7 @@ async fn function_parse_url_fragment() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2816,7 +2816,7 @@ async fn function_parse_url_host() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2833,7 +2833,7 @@ async fn function_parse_url_path() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2850,7 +2850,7 @@ async fn function_parse_url_port() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2867,7 +2867,7 @@ async fn function_parse_url_query() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2884,7 +2884,7 @@ async fn function_parse_url_scheme() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2905,7 +2905,7 @@ async fn function_rand() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2921,7 +2921,7 @@ async fn function_rand_bool() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2937,7 +2937,7 @@ async fn function_rand_enum() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -2954,7 +2954,7 @@ async fn function_rand_float() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -2975,7 +2975,7 @@ async fn function_rand_guid() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -2998,7 +2998,7 @@ async fn function_rand_int() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3019,7 +3019,7 @@ async fn function_rand_string() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3042,7 +3042,7 @@ async fn function_rand_time() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3061,7 +3061,7 @@ async fn function_rand_ulid() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -3077,7 +3077,7 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -3093,7 +3093,7 @@ async fn function_rand_uuid_v4() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -3109,7 +3109,7 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -3131,7 +3131,7 @@ async fn function_string_concat() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3170,7 +3170,7 @@ async fn function_string_contains() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 15);
 	// 1
 	let tmp = res.remove(0).result?;
@@ -3245,7 +3245,7 @@ async fn function_string_ends_with() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3272,7 +3272,7 @@ async fn function_string_join() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3299,7 +3299,7 @@ async fn function_string_len() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3326,7 +3326,7 @@ async fn function_string_lowercase() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3353,7 +3353,7 @@ async fn function_string_repeat() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3380,7 +3380,7 @@ async fn function_string_replace() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3407,7 +3407,7 @@ async fn function_string_reverse() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3438,7 +3438,7 @@ async fn function_string_slice() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
@@ -3481,7 +3481,7 @@ async fn function_string_slug() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3508,7 +3508,7 @@ async fn function_string_split() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3535,7 +3535,7 @@ async fn function_string_starts_with() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3562,7 +3562,7 @@ async fn function_string_trim() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3589,7 +3589,7 @@ async fn function_string_uppercase() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3616,7 +3616,7 @@ async fn function_string_words() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3647,7 +3647,7 @@ async fn function_time_ceil() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3673,7 +3673,7 @@ async fn function_time_day() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3695,7 +3695,7 @@ async fn function_time_floor() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -3721,7 +3721,7 @@ async fn function_time_format() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3743,7 +3743,7 @@ async fn function_time_group() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3765,7 +3765,7 @@ async fn function_time_hour() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3786,7 +3786,7 @@ async fn function_time_minute() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3807,7 +3807,7 @@ async fn function_time_month() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3828,7 +3828,7 @@ async fn function_time_nano() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3848,7 +3848,7 @@ async fn function_time_now() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -3865,7 +3865,7 @@ async fn function_time_round() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3887,7 +3887,7 @@ async fn function_time_second() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3908,7 +3908,7 @@ async fn function_time_unix() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3929,7 +3929,7 @@ async fn function_time_wday() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3950,7 +3950,7 @@ async fn function_time_week() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3971,7 +3971,7 @@ async fn function_time_yday() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -3992,7 +3992,7 @@ async fn function_time_year() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4013,7 +4013,7 @@ async fn function_time_from_micros() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4035,7 +4035,7 @@ async fn function_time_from_millis() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4057,7 +4057,7 @@ async fn function_time_from_secs() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4079,7 +4079,7 @@ async fn function_time_from_unix() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4105,7 +4105,7 @@ async fn function_type_bool() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4127,7 +4127,7 @@ async fn function_type_datetime() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4149,7 +4149,7 @@ async fn function_type_decimal() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4173,7 +4173,7 @@ async fn function_type_duration() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4195,7 +4195,7 @@ async fn function_type_float() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4217,7 +4217,7 @@ async fn function_type_int() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4239,7 +4239,7 @@ async fn function_type_number() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4261,7 +4261,7 @@ async fn function_type_point() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4299,7 +4299,7 @@ async fn function_type_string() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4321,7 +4321,7 @@ async fn function_type_table() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -4345,7 +4345,7 @@ async fn function_type_thing() -> Result<(), Error> {
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;

@@ -516,9 +516,7 @@ impl<'a> KeysIterator<'a> {
 				}
 			} else {
 				self.current_node = self.node_queue.pop_front();
-				if self.current_node.is_none() {
-					return None;
-				}
+				self.current_node.as_ref()?;
 			}
 		}
 	}
