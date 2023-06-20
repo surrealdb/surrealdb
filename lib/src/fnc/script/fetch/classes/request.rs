@@ -3,6 +3,7 @@
 use js::{
 	bind,
 	class::{HasRefs, RefsMarker},
+	prelude::Coerced,
 	Class, Ctx, Exception, FromJs, Object, Persistent, Result, Value,
 };
 use reqwest::Method;
@@ -22,11 +23,67 @@ pub enum RequestMode {
 	Cors,
 }
 
+impl<'js> FromJs<'js> for RequestMode {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
+			match x.as_str() {
+				"navigate" => RequestMode::Navigate,
+				"same-origin" => RequestMode::SameOrigin,
+				"no-cors" => RequestMode::NoCors,
+				"cors" => RequestMode::Cors,
+				x => {
+					return Err(Exception::throw_type(
+						ctx,
+						&format!(
+							"unexpected request mode `{}`, expected one of \
+							`navigate`,\
+							`same-origin`,\
+							`no-cors`,\
+							or `cors`",
+							x
+						),
+					))
+				}
+			}
+		} else {
+			RequestMode::Cors
+		};
+		Ok(res)
+	}
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestCredentials {
 	Omit,
 	SameOrigin,
 	Include,
+}
+
+impl<'js> FromJs<'js> for RequestCredentials {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
+			match x.as_str() {
+				"omit" => RequestCredentials::Omit,
+				"same-origin" => RequestCredentials::SameOrigin,
+				"include" => RequestCredentials::Include,
+				x => {
+					return Err(Exception::throw_type(
+						ctx,
+						&format!(
+							"unexpected request credentials `{}`, expected one of \
+								`omit`\
+								, `same-oring`\
+								, or `include`",
+							x
+						),
+					))
+				}
+			}
+		} else {
+			RequestCredentials::Omit
+		};
+		Ok(res)
+	}
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -39,6 +96,39 @@ pub enum RequestCache {
 	OnlyIfCached,
 }
 
+impl<'js> FromJs<'js> for RequestCache {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
+			match x.as_str() {
+				"default" => RequestCache::Default,
+				"no-store" => RequestCache::NoStore,
+				"reload" => RequestCache::Reload,
+				"no-cache" => RequestCache::NoCache,
+				"force-cache" => RequestCache::ForceCache,
+				"only-if-cached" => RequestCache::OnlyIfCached,
+				x => {
+					return Err(Exception::throw_type(
+						ctx,
+						&format!(
+							"unexpected request cache `{}`, expected one of \
+								`default`\
+								, `no-store`\
+								, `reload`\
+								, `no-cache`\
+								, `force-cache`\
+								, or `only-if-cached`",
+							x
+						),
+					))
+				}
+			}
+		} else {
+			RequestCache::Default
+		};
+		Ok(res)
+	}
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestRedirect {
 	Follow,
@@ -46,9 +136,31 @@ pub enum RequestRedirect {
 	Manual,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum RequestDuplex {
-	Half,
+impl<'js> FromJs<'js> for RequestRedirect {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
+			match x.as_str() {
+				"follow" => RequestRedirect::Follow,
+				"error" => RequestRedirect::Error,
+				"manual" => RequestRedirect::Manual,
+				x => {
+					return Err(Exception::throw_type(
+						ctx,
+						&format!(
+							"unexpected request redirect `{}`, expected one of \
+							`follow`,\
+							`error`,\
+							or `manual`",
+							x
+						),
+					))
+				}
+			}
+		} else {
+			RequestRedirect::Follow
+		};
+		Ok(res)
+	}
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -64,19 +176,56 @@ pub enum ReferrerPolicy {
 	UnsafeUrl,
 }
 
+impl<'js> FromJs<'js> for ReferrerPolicy {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
+			match x.as_str() {
+				"" => ReferrerPolicy::Empty,
+				"no-referrer" => ReferrerPolicy::NoReferrer,
+				"no-referrer-when-downgrade" => ReferrerPolicy::NoReferrerWhenDowngrade,
+				"same-origin" => ReferrerPolicy::SameOrigin,
+				"origin" => ReferrerPolicy::Origin,
+				"strict-origin" => ReferrerPolicy::StrictOrigin,
+				"origin-when-cross-origin" => ReferrerPolicy::OriginWhenCrossOrigin,
+				"strict-origin-when-cross-origin" => ReferrerPolicy::StrictOriginWhenCrossOrigin,
+				"unsafe-url" => ReferrerPolicy::UnsafeUrl,
+				x => {
+					return Err(Exception::throw_type(
+						ctx,
+						&format!(
+							"unexpected referrer policy `{}`, expected one of \
+							, ``\
+							, `no-referrer`\
+							, `no-referrer-when-downgrade`\
+							, `same-origin`\
+							, `strict-origin`\
+							, `origin-when-cross-origin`\
+							, `strict-origin-when-cross-origin`\
+							, or `unsafe-url1`",
+							x
+						),
+					))
+				}
+			}
+		} else {
+			ReferrerPolicy::Empty
+		};
+		Ok(res)
+	}
+}
+
 pub struct RequestInit {
 	pub method: Method,
 	pub headers: Persistent<Class<'static, HeadersClass>>,
 	pub body: Option<Body>,
 	pub referrer: String,
-	pub referer_policy: ReferrerPolicy,
+	pub referrer_policy: ReferrerPolicy,
 	pub request_mode: RequestMode,
-	pub request_credentails: RequestCredentials,
+	pub request_credentials: RequestCredentials,
 	pub request_cache: RequestCache,
 	pub request_redirect: RequestRedirect,
 	pub integrity: String,
 	pub keep_alive: bool,
-	pub duplex: RequestDuplex,
 }
 
 impl HasRefs for RequestInit {
@@ -93,14 +242,13 @@ impl RequestInit {
 			headers,
 			body: None,
 			referrer: "client".to_string(),
-			referer_policy: ReferrerPolicy::Empty,
+			referrer_policy: ReferrerPolicy::Empty,
 			request_mode: RequestMode::Cors,
-			request_credentails: RequestCredentials::SameOrigin,
+			request_credentials: RequestCredentials::SameOrigin,
 			request_cache: RequestCache::Default,
 			request_redirect: RequestRedirect::Follow,
 			integrity: String::new(),
 			keep_alive: false,
-			duplex: RequestDuplex::Half,
 		})
 	}
 
@@ -115,14 +263,13 @@ impl RequestInit {
 			headers,
 			body,
 			referrer: self.referrer.clone(),
-			referer_policy: self.referer_policy,
+			referrer_policy: self.referrer_policy,
 			request_mode: self.request_mode,
-			request_credentails: self.request_credentails,
+			request_credentials: self.request_credentials,
 			request_cache: self.request_cache,
 			request_redirect: self.request_redirect,
 			integrity: self.integrity.clone(),
 			keep_alive: self.keep_alive,
-			duplex: self.duplex,
 		})
 	}
 }
@@ -167,13 +314,37 @@ impl<'js> FromJs<'js> for RequestInit {
 	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
-		let referrer =
-			object.get::<_, Option<String>>("referrer")?.unwrap_or_else(|| "client".to_owned());
+		let referrer = object
+			.get::<_, Option<Coerced<String>>>("referrer")?
+			.map(|x| x.0)
+			.unwrap_or_else(|| "client".to_owned());
 		let method = object
 			.get::<_, Option<String>>("method")?
 			.map(|m| normalize_method(ctx, m))
 			.transpose()?
 			.unwrap_or(Method::GET);
+
+		let referrer_policy = object.get("referrerPolicy")?;
+		let request_mode = object.get("mode")?;
+		let request_redirect = object.get("redirect")?;
+		let request_cache = object.get("cache")?;
+		let request_credentials = object.get("credentials")?;
+		let integrity = object
+			.get::<_, Option<Coerced<String>>>("integrity")?
+			.map(|x| x.0)
+			.unwrap_or_else(String::new);
+		let keep_alive =
+			object.get::<_, Option<Coerced<bool>>>("keep_alive")?.map(|x| x.0).unwrap_or_default();
+
+		// duplex can only be `half`
+		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex") {
+			if x != "half" {
+				return Err(Exception::throw_type(
+					ctx,
+					&format!("unexpected request duplex `{}` expected `half`", x),
+				));
+			}
+		}
 
 		let headers = if let Some(hdrs) = object.get::<_, Option<Object>>("headers")? {
 			if let Ok(cls) = Class::<HeadersClass>::from_object(hdrs.clone()) {
@@ -193,14 +364,13 @@ impl<'js> FromJs<'js> for RequestInit {
 			headers,
 			body,
 			referrer,
-			referer_policy: ReferrerPolicy::Empty,
-			request_mode: RequestMode::Cors,
-			request_credentails: RequestCredentials::SameOrigin,
-			request_cache: RequestCache::Default,
-			request_redirect: RequestRedirect::Follow,
-			integrity: String::new(),
-			keep_alive: false,
-			duplex: RequestDuplex::Half,
+			referrer_policy,
+			request_mode,
+			request_credentials,
+			request_cache,
+			request_redirect,
+			integrity,
+			keep_alive,
 		})
 	}
 }

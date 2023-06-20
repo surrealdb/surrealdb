@@ -197,3 +197,40 @@ mod blob {
 		}
 	}
 }
+
+#[cfg(test)]
+mod test {
+	use crate::fnc::script::fetch::test::create_test_context;
+
+	#[tokio::test]
+	async fn basic_blob_use() {
+		create_test_context!(ctx => {
+			#[cfg(windows)]
+			const NATIVE_FILE_ENDING: &str = "\r\n";
+			#[cfg(not(windows))]
+			const NATIVE_FILE_ENDING: &str = "\n";
+
+			ctx.globals().set("NATIVE_FILE_ENDING",NATIVE_FILE_ENDING).unwrap();
+			ctx.eval::<(),_>(r#"
+				let blob = new Blob();
+				assert.eq(blob.size,0);
+				assert.eq(blob.type,"");
+
+				blob = new Blob(["text"],{type: "some-text"});
+				assert.eq(blob.size,4);
+				assert.eq(blob.type,"some-text");
+				assert.eq(blob.text(),"text");
+				assert.eq(blob.slice(2,4).text(),"xt");
+
+				blob = new Blob(["\n \n\r"],{endings: "transparent"});
+				assert.eq(blob.text,"\n \n\r");
+				blob = new Blob(["\n \n\r"],{endings: "native"});
+				assert.eq(blob.text,`${NATIVE_FILE_ENDING} ${NATIVE_FILE_ENDING}`);
+
+				assert.mustThrow(() => new Blob("text"));
+				assert.mustThrow(() => new Blob(["text"], {endings: "invalid value"}));
+			"#).unwrap()
+		})
+		.await
+	}
+}

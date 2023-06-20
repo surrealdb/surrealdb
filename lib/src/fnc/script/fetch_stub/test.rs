@@ -2,26 +2,18 @@ use js::{CatchResultExt, CaughtError};
 
 macro_rules! create_test_context{
 	($ctx:ident => { $($t:tt)* }) => {
+		let rt = js::AsyncRuntime::new().unwrap();
+		let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
-		tokio::runtime::Builder::new_current_thread()
-			.enable_all()
-			.build()
-			.unwrap()
-			.block_on(async {
-
-				let rt = js::AsyncRuntime::new().unwrap();
-				let ctx = js::AsyncContext::full(&rt).await.unwrap();
-
-				js::async_with!(ctx => |$ctx|{
-					super::register($ctx).unwrap();
-					$($t)*
-				}).await;
-			});
+		js::async_with!(ctx => |$ctx|{
+			super::register($ctx).unwrap();
+			$($t)*
+		}).await;
 	};
 }
 
-#[test]
-fn fetch() {
+#[tokio::test]
+async fn fetch() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("fetch()").catch(ctx);
 		match res{
@@ -35,8 +27,8 @@ fn fetch() {
 	});
 }
 
-#[test]
-fn request() {
+#[tokio::test]
+async fn request() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("new Request('http://a',{ body: 'test' })").catch(ctx);
 		match res{
@@ -50,8 +42,8 @@ fn request() {
 	});
 }
 
-#[test]
-fn response() {
+#[tokio::test]
+async fn response() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("new Response('test')").catch(ctx);
 		match res{
@@ -65,8 +57,8 @@ fn response() {
 	});
 }
 
-#[test]
-fn headers() {
+#[tokio::test]
+async fn headers() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("new Headers({ foo: 'bar'})").catch(ctx);
 		match res{
@@ -80,8 +72,8 @@ fn headers() {
 	});
 }
 
-#[test]
-fn blob() {
+#[tokio::test]
+async fn blob() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("new Blob()").catch(ctx);
 		match res{
@@ -95,8 +87,8 @@ fn blob() {
 	});
 }
 
-#[test]
-fn form_data() {
+#[tokio::test]
+async fn form_data() {
 	create_test_context!(ctx => {
 		let res = ctx.eval::<(),_>("new FormData()").catch(ctx);
 		match res{
