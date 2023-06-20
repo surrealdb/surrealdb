@@ -718,7 +718,7 @@ mod tests {
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
 			"Ālea iacta est",
-			&vec!["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
+			&["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
 		);
 	}
 
@@ -727,7 +727,7 @@ mod tests {
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
-			&vec!["āl", "āle", "ia", "iac", "es", "est"],
+			&["āl", "āle", "ia", "iac", "es", "est"],
 		);
 	}
 }
