@@ -430,6 +430,10 @@ pub enum Error {
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),
 
+	/// Cannot perform negation
+	#[error("Cannot negate the value '{0}'")]
+	TryNeg(String),
+
 	/// It's is not possible to convert between the two types
 	#[error("Cannot convert from '{0}' to '{1}'")]
 	TryFrom(String, &'static str),

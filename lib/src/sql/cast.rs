@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Cast")]
 pub struct Cast(pub Kind, pub Value);

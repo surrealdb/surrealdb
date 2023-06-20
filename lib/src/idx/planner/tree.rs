@@ -87,27 +87,42 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
-		let left = self.eval_value(&e.l).await?;
-		let right = self.eval_value(&e.r).await?;
-		let mut index_option = None;
-		if let Some(ix) = left.is_indexed_field() {
-			if let Some(io) = IndexOption::found(ix, &e.o, &right, e) {
-				index_option = Some(io.clone());
-				self.add_index(e, io);
+		match e {
+			Expression::Unary {
+				..
+			} => {
+				return Err(Error::FeatureNotYetImplemented {
+					feature: "unary expressions in index",
+				});
+			}
+			Expression::Binary {
+				l,
+				o,
+				r,
+			} => {
+				let left = self.eval_value(l).await?;
+				let right = self.eval_value(r).await?;
+				let mut index_option = None;
+				if let Some(ix) = left.is_indexed_field() {
+					if let Some(io) = IndexOption::found(ix, o, &right, e) {
+						index_option = Some(io.clone());
+						self.add_index(e, io);
+					}
+				}
+				if let Some(ix) = right.is_indexed_field() {
+					if let Some(io) = IndexOption::found(ix, o, &left, e) {
+						index_option = Some(io.clone());
+						self.add_index(e, io);
+					}
+				}
+				Ok(Node::Expression {
+					index_option,
+					left: Box::new(left),
+					right: Box::new(right),
+					operator: o.to_owned(),
+				})
 			}
 		}
-		if let Some(ix) = right.is_indexed_field() {
-			if let Some(io) = IndexOption::found(ix, &e.o, &left, e) {
-				index_option = Some(io.clone());
-				self.add_index(e, io);
-			}
-		}
-		Ok(Node::Expression {
-			index_option,
-			left: Box::new(left),
-			right: Box::new(right),
-			operator: e.o.to_owned(),
-		})
 	}
 
 	fn add_index(&mut self, e: &Expression, io: IndexOption) {
