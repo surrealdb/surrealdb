@@ -4,6 +4,7 @@ use js::{bind, prelude::*, Ctx, Exception, Result};
 #[cfg(test)]
 mod test;
 
+/// Register the fetch types in the context.
 pub fn register(ctx: Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
 	globals.init_def::<Fetch>()?;

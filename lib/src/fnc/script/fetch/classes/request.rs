@@ -344,9 +344,6 @@ mod request {
 					RequestError::Reqwest(e) => {
 						Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
 					}
-					RequestError::Io(e) => {
-						Err(Exception::throw_message(ctx, &format!("Io Error: {e}")))
-					}
 				},
 			}
 		}

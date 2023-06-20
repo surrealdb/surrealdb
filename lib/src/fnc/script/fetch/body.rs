@@ -6,7 +6,6 @@ use std::{
 	cell::{Cell, RefCell},
 	pin::Pin,
 	result::Result as StdResult,
-	sync::Arc,
 	task::Poll,
 };
 

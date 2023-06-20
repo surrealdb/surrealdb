@@ -175,12 +175,9 @@ pub mod response {
 			match self.body.to_buffer().await {
 				Ok(Some(x)) => Ok(x),
 				Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
-				Err(e) => match &*e {
+				Err(e) => match e {
 					RequestError::Reqwest(e) => {
 						Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
-					}
-					RequestError::Io(e) => {
-						Err(Exception::throw_message(ctx, &format!("Io Error: {e}")))
 					}
 				},
 			}

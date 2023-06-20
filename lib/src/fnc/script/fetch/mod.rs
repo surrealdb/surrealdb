@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, io, sync::Arc};
+use std::{error::Error, fmt, sync::Arc};
 
 use js::{Ctx, Result};
 
@@ -12,18 +12,17 @@ mod util;
 use classes::{Blob, FormData, Headers, Request, Response};
 use func::Fetch;
 
+// Anoyingly errors aren't clone,
+// But with how we implement streams RequestError must be clone.
+/// Error returned by the request.
 #[derive(Debug, Clone)]
 pub enum RequestError {
-	// Anoyingly errors aren't clone,
-	// But with how we implement streams RequestError must be clone.
-	Io(Arc<io::Error>),
 	Reqwest(Arc<reqwest::Error>),
 }
 
 impl fmt::Display for RequestError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match *self {
-			RequestError::Io(ref e) => writeln!(f, "io error: {e}"),
 			RequestError::Reqwest(ref e) => writeln!(f, "request error: {e}"),
 		}
 	}
@@ -31,6 +30,7 @@ impl fmt::Display for RequestError {
 
 impl Error for RequestError {}
 
+/// Register the fetch types in the context.
 pub fn register(ctx: Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
 	globals.init_def::<Fetch>()?;
