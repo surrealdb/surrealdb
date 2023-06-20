@@ -44,16 +44,20 @@ fn append_blob_part<'js>(
 		while let Some(x) = iter.next() {
 			if x == b'\r' {
 				// \r\n
-				data.extend(LINE_ENDING);
 				if let Some(x) = iter.next() {
 					if x != b'\n' {
-						data.extend([x])
+						data.extend([b'\r', x])
+					} else {
+						data.extend(LINE_ENDING);
 					}
+				} else {
+					data.extend([b'\r'])
 				}
-			}
-			if x == b'\n' {
+			} else if x == b'\n' {
 				// \n
 				data.extend(LINE_ENDING);
+			} else {
+				data.extend([x])
 			}
 		}
 	}
@@ -154,6 +158,7 @@ mod blob {
 		}
 
 		#[quickjs(get)]
+		#[quickjs(rename = "type")]
 		pub fn r#type(&self) -> String {
 			self.mime.clone()
 		}
@@ -167,9 +172,17 @@ mod blob {
 		) -> Blob {
 			// see https://w3c.github.io/FileAPI/#slice-blob
 			let start = start.into_inner().unwrap_or_default();
-			let start = (self.data.len() as isize + start).max(0) as usize;
+			let start = if start < 0 {
+				(self.data.len() as isize + start).max(0) as usize
+			} else {
+				start as usize
+			};
 			let end = end.into_inner().unwrap_or_default();
-			let end = (self.data.len() as isize + end).max(0) as usize;
+			let end = if end < 0 {
+				(self.data.len() as isize + end).max(0) as usize
+			} else {
+				end as usize
+			};
 			let data = self.data.slice(start..end);
 			let content_type = content_type.into_inner().map(normalize_type).unwrap_or_default();
 			Blob {
@@ -178,12 +191,16 @@ mod blob {
 			}
 		}
 
-		pub async fn text(&self) -> Result<String> {
+		pub async fn text(&self, _rest: Rest<()>) -> Result<String> {
 			let text = String::from_utf8(self.data.to_vec())?;
 			Ok(text)
 		}
 
-		pub async fn arrayBuffer<'js>(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
+		pub async fn arrayBuffer<'js>(
+			&self,
+			ctx: Ctx<'js>,
+			_rest: Rest<()>,
+		) -> Result<ArrayBuffer<'js>> {
 			ArrayBuffer::new(ctx, self.data.to_vec())
 		}
 
@@ -192,7 +209,7 @@ mod blob {
 		// ------------------------------
 
 		// Convert the object to a string
-		pub fn toString(&self) -> String {
+		pub fn toString(&self, _rest: Rest<()>) -> String {
 			String::from("[object Blob]")
 		}
 	}
@@ -201,17 +218,18 @@ mod blob {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
+	use js::{promise::Promise, CatchResultExt};
 
 	#[tokio::test]
 	async fn basic_blob_use() {
 		create_test_context!(ctx => {
 			#[cfg(windows)]
-			const NATIVE_FILE_ENDING: &str = "\r\n";
+			const NATIVE_LINE_ENDING: &str = "\r\n";
 			#[cfg(not(windows))]
-			const NATIVE_FILE_ENDING: &str = "\n";
+			const NATIVE_LINE_ENDING: &str = "\n";
 
-			ctx.globals().set("NATIVE_FILE_ENDING",NATIVE_FILE_ENDING).unwrap();
-			ctx.eval::<(),_>(r#"
+			ctx.globals().set("NATIVE_LINE_ENDING",NATIVE_LINE_ENDING).unwrap();
+			ctx.eval::<Promise<()>,_>(r#"(async () => {
 				let blob = new Blob();
 				assert.eq(blob.size,0);
 				assert.eq(blob.type,"");
@@ -219,17 +237,22 @@ mod test {
 				blob = new Blob(["text"],{type: "some-text"});
 				assert.eq(blob.size,4);
 				assert.eq(blob.type,"some-text");
-				assert.eq(blob.text(),"text");
-				assert.eq(blob.slice(2,4).text(),"xt");
+				assert.eq(await blob.text(),"text");
+				assert.eq(await blob.slice(2,4).text(),"xt");
 
-				blob = new Blob(["\n \n\r"],{endings: "transparent"});
-				assert.eq(blob.text,"\n \n\r");
-				blob = new Blob(["\n \n\r"],{endings: "native"});
-				assert.eq(blob.text,`${NATIVE_FILE_ENDING} ${NATIVE_FILE_ENDING}`);
+				blob = new Blob(["\n\r\n \n\r"],{endings: "transparent"});
+				assert.eq(blob.size,6)
+				assert.eq(await blob.text(),"\n\r\n \n\r");
+				blob = new Blob(["\n\r\n \n\r"],{endings: "native"});
+				// \n \r\n and the \n from \n\r are converted.
+				// the part of the string which isn't converted is the space and the \r
+				assert.eq(await blob.text(),`${NATIVE_LINE_ENDING}${NATIVE_LINE_ENDING} ${NATIVE_LINE_ENDING}\r`);
+				assert.eq(blob.size,NATIVE_LINE_ENDING.length*3 + 2)
 
 				assert.mustThrow(() => new Blob("text"));
 				assert.mustThrow(() => new Blob(["text"], {endings: "invalid value"}));
-			"#).unwrap()
+			})()
+			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
 		})
 		.await
 	}

@@ -37,7 +37,7 @@ mod headers {
 		// ------------------------------
 
 		// Convert the object to a string
-		pub fn toString(&self) -> String {
+		pub fn toString(&self, args: Rest<()>) -> String {
 			String::from("[object Header]")
 		}
 
@@ -89,16 +89,23 @@ mod headers {
 
 			// Header value came from a string, so it should also be able to be cast back
 			// to a string
-			let all = all.iter().map(|x| x.to_str().unwrap()).collect::<Vec<&str>>().join(", ");
-			if all.is_empty() {
+			let mut res = String::new();
+			for (idx, v) in all.iter().enumerate() {
+				if idx != 0 {
+					res.push_str(", ");
+				}
+				res.push_str(v.to_str().unwrap());
+			}
+
+			if res.is_empty() {
 				return Ok(None);
 			}
-			Ok(Some(all))
+			Ok(Some(res))
 		}
 
 		// Returns all values for the `Set-Cookie` header.
 		#[quickjs(rename = "getSetCookie")]
-		pub fn get_set_cookie(&self, key: String) -> Vec<String> {
+		pub fn get_set_cookie(&self, args: Rest<()>) -> Vec<String> {
 			// This should always be a correct cookie;
 			let key = HeaderName::from_str("set-cookie").unwrap();
 			self.inner
@@ -120,6 +127,7 @@ mod headers {
 
 		// Returns all header keys contained in the header set
 		pub fn keys(&self, args: Rest<()>) -> Vec<String> {
+			// TODO: Incorrect, should return an iterator but iterators are not supported yet by quickjs
 			self.inner.borrow().keys().map(|v| v.as_str().to_owned()).collect::<Vec<String>>()
 		}
 
@@ -255,10 +263,72 @@ mod headers {
 				}
 			};
 
-			self.inner.borrow_mut().insert(key, val);
+			self.inner.borrow_mut().append(key, val);
 
-			// Everything ok
 			Ok(())
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::fnc::script::fetch::test::create_test_context;
+	use js::CatchResultExt;
+
+	#[tokio::test]
+	async fn basic_headers_use() {
+		create_test_context!(ctx => {
+			ctx.eval::<(),_>(r#"
+				let headers = new Headers([
+					["a","b"],
+					["a","c"],
+					["d","e"],
+				]);
+				assert(headers.has("a"));
+				assert(headers.has("d"));
+				assert(headers.has("d"));
+
+				let keys = [];
+				for(const key of headers.keys()){
+					keys.push(key);
+				}
+				assert.seq(keys[0], "a");
+				assert.seq(keys[1], "d");
+				assert.seq(headers.get("a"), "b, c");
+
+				let values = [];
+				for(const v of headers.values()){
+					values.push(v);
+				}
+				assert.seq(values[0], "b, c");
+				assert.seq(values[1], "e");
+
+				headers.set("a","f");
+				assert.seq(headers.get("a"), "f");
+				assert.seq(headers.get("A"), "f");
+				headers.append("a","g");
+				assert.seq(headers.get("a"), "f, g");
+				headers.delete("a");
+				assert(!headers.has("a"));
+
+				headers.set("Set-Cookie","somecookie");
+				let cookies = headers.getSetCookie();
+				assert.seq(cookies.length,1);
+				assert.seq(cookies[0],"somecookie");
+				headers.append("sEt-cOoKiE","memecookie");
+				cookies = headers.getSetCookie();
+				assert.seq(cookies.length,2);
+				assert.seq(cookies[0],"somecookie");
+				assert.seq(cookies[1],"memecookie");
+
+				headers = new Headers({
+					"f": "g",
+					"h": "j",
+				});
+				assert.seq(headers.get("f"), "g");
+				assert.seq(headers.get("h"), "j");
+			"#).catch(ctx).unwrap();
+		})
+		.await
 	}
 }

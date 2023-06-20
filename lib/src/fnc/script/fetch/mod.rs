@@ -58,7 +58,8 @@ mod test {
 				js::async_with!(ctx => |$ctx|{
 					crate::fnc::script::fetch::register($ctx).unwrap();
 
-					$ctx.eval::<(),_>(r#"globalThis.assert = (...arg) => {
+					$ctx.eval::<(),_>(r#"
+					globalThis.assert = (...arg) => {
 						arg.forEach(x => {
 							if (!x) {
 								throw new Error('assertion failed')

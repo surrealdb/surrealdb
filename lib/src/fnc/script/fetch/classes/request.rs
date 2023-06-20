@@ -337,7 +337,7 @@ impl<'js> FromJs<'js> for RequestInit {
 			object.get::<_, Option<Coerced<bool>>>("keep_alive")?.map(|x| x.0).unwrap_or_default();
 
 		// duplex can only be `half`
-		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex") {
+		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex")? {
 			if x != "half" {
 				return Err(Exception::throw_type(
 					ctx,
@@ -564,5 +564,44 @@ mod request {
 
 #[cfg(test)]
 mod test {
-	fn method() {}
+	use crate::fnc::script::fetch::test::create_test_context;
+	use js::CatchResultExt;
+
+	#[tokio::test]
+	async fn basic_request_use() {
+		create_test_context!(ctx => {
+			ctx.eval::<(),_>(r#"
+				assert.mustThrow(() => {
+					new Request("invalid url")
+				});
+				assert.mustThrow(() => {
+					new Request("http://invalid url")
+				});
+				// no credentials
+				assert.mustThrow(() => {
+					new Request("http://username:password@some_url.com")
+				});
+				// invalid option value
+				assert.mustThrow(() => {
+					new Request("http://a",{ referrerPolicy: "invalid value"})
+				});
+				assert.mustThrow(() => {
+					new Request("http://a",{ mode: "invalid value"})
+				});
+				assert.mustThrow(() => {
+					new Request("http://a",{ redirect: "invalid value"})
+				});
+				assert.mustThrow(() => {
+					new Request("http://a",{ cache: "invalid value"})
+				});
+				assert.mustThrow(() => {
+					new Request("http://a",{ credentials: "invalid value"})
+				});
+				assert.mustThrow(() => {
+					new Request("http://a",{ duplex: "invalid value"})
+				});
+			"#).catch(ctx).unwrap();
+		})
+		.await;
+	}
 }

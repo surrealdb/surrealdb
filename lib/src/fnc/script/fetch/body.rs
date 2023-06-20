@@ -1,12 +1,10 @@
 use crate::fnc::script::fetch::{classes::BlobClass, stream::ReadableStream, RequestError};
 use bytes::{Bytes, BytesMut};
-use futures::{future, Stream, StreamExt, TryStreamExt};
+use futures::{future, Stream, TryStreamExt};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
 use std::{
 	cell::{Cell, RefCell},
-	pin::Pin,
 	result::Result as StdResult,
-	task::Poll,
 };
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
@@ -23,26 +21,6 @@ pub enum BodyData {
 	Stream(RefCell<ReadableStream<StreamItem>>),
 	// Returned when the body is already taken
 	Used,
-}
-
-/// A stream returning the data from a body.
-pub enum BodyStream {
-	Buffer(Option<Bytes>),
-	Stream(RefCell<ReadableStream<StreamItem>>),
-}
-
-impl Stream for BodyStream {
-	type Item = StreamItem;
-
-	fn poll_next(
-		mut self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-	) -> std::task::Poll<Option<Self::Item>> {
-		match &mut *self {
-			BodyStream::Buffer(ref mut x) => Poll::Ready(x.take().map(Ok)),
-			BodyStream::Stream(ref mut x) => x.borrow_mut().poll_next_unpin(cx),
-		}
-	}
 }
 
 /// A struct representing the body mixin.
@@ -122,16 +100,6 @@ impl Body {
 				Ok(Some(res.freeze()))
 			}
 			BodyData::Used => Ok(None),
-		}
-	}
-
-	/// turns the body into a stream,
-	/// returns None if the body was already used.
-	pub fn to_stream(&self) -> Option<impl Stream<Item = StreamItem>> {
-		match self.data.replace(BodyData::Used) {
-			BodyData::Buffer(x) => Some(BodyStream::Buffer(Some(x))),
-			BodyData::Stream(x) => Some(BodyStream::Stream(x)),
-			BodyData::Used => None,
 		}
 	}
 
