@@ -64,7 +64,7 @@ pub fn check_order_by_fields<'a>(
 	if let Some(orders) = orders {
 		// Loop over each of the expressions in the ORDER BY clause
 		for order in orders.iter() {
-			if !contains_idiom(fields, &*order) {
+			if !contains_idiom(fields, order) {
 				// If the expression isn't specified in the SELECT clause, then error
 				return Err(Failure(Error::Order(i, order.to_string())));
 			}

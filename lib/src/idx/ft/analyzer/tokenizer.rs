@@ -111,7 +111,7 @@ impl Tokenizer {
 		res
 	}
 
-	pub(super) fn tokenize(t: &Vec<SqlTokenizer>, i: String) -> Tokens {
+	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
 		let mut w = Tokenizer::new(t);
 		let mut last_pos = 0;
 		let mut current_pos = 0;
