@@ -9,9 +9,10 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	let db = Datastore::new("memory").await?;
 	let session = Session::for_kv().with_ns("test").with_db("test");
 	let response = db.execute(sql, &session, None, false).await?;
-	for (i, v) in response.iter().map(|r| r.result.as_ref().unwrap()).enumerate() {
+	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
+		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			assert_eq!(v, &Value::parse(*desired_response))
+			assert_eq!(v, Value::parse(*desired_response))
 		} else {
 			panic!("Response index {i} out of bounds of desired responses.");
 		}
@@ -180,7 +181,7 @@ async fn function_array_boolean_or() -> Result<(), Error> {
 RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
 RETURN array::boolean_or([true, false], [false]);
 RETURN array::boolean_or([true, true], [false]);"#,
-		&["[false, true, true, true]", "[false, true, true, true], [true, false], []"],
+		&["[false, true, true, true]", "[false, true, true, true]", "[true, false]", "[true, true]"],
 	)
 	.await?;
 	Ok(())
