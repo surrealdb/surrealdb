@@ -133,7 +133,7 @@ impl Filter {
 				if c.eq(n) {
 					ng.push(Term::Unchanged);
 				} else {
-					ng.push(Term::NewTerm(n.into_iter().collect()));
+					ng.push(Term::NewTerm(n.iter().collect()));
 				}
 			}
 		}
@@ -159,7 +159,7 @@ impl Filter {
 			if c.eq(n) {
 				ng.push(Term::Unchanged);
 			} else {
-				ng.push(Term::NewTerm(n.into_iter().collect()));
+				ng.push(Term::NewTerm(n.iter().collect()));
 			}
 		}
 		FilterResult::Terms(ng)
