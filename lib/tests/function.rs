@@ -181,7 +181,12 @@ async fn function_array_boolean_or() -> Result<(), Error> {
 RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
 RETURN array::boolean_or([true, false], [false]);
 RETURN array::boolean_or([true, true], [false]);"#,
-		&["[false, true, true, true]", "[false, true, true, true]", "[true, false]", "[true, true]"],
+		&[
+			"[false, true, true, true]",
+			"[false, true, true, true]",
+			"[true, false]",
+			"[true, true]",
+		],
 	)
 	.await?;
 	Ok(())
