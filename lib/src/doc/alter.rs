@@ -71,7 +71,7 @@ impl<'a> Document<'a> {
 				}
 				Data::UnsetExpression(i) => {
 					for i in i.iter() {
-						self.current.to_mut().del(ctx, opt, &i).await?
+						self.current.to_mut().del(ctx, opt, i).await?
 					}
 				}
 				Data::UpdateExpression(x) => {

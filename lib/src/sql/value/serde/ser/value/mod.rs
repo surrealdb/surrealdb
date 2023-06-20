@@ -563,7 +563,7 @@ mod tests {
 	#[test]
 	fn none() {
 		let expected = Value::None;
-		assert_eq!(expected, to_value(&None::<u32>).unwrap());
+		assert_eq!(expected, to_value(None::<u32>).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
@@ -576,14 +576,14 @@ mod tests {
 	#[test]
 	fn r#false() {
 		let expected = Value::Bool(false);
-		assert_eq!(expected, to_value(&false).unwrap());
+		assert_eq!(expected, to_value(false).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
 	#[test]
 	fn r#true() {
 		let expected = Value::Bool(true);
-		assert_eq!(expected, to_value(&true).unwrap());
+		assert_eq!(expected, to_value(true).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
@@ -623,7 +623,7 @@ mod tests {
 		assert_eq!(expected, to_value(&expected).unwrap());
 
 		let strand = "foobar";
-		let value = to_value(&strand).unwrap();
+		let value = to_value(strand).unwrap();
 		let expected = Value::Strand(Strand(strand.to_owned()));
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());
@@ -850,7 +850,7 @@ mod tests {
 			bar,
 			foo: foo.to_owned(),
 		};
-		let value = to_value(&foo_bar).unwrap();
+		let value = to_value(foo_bar).unwrap();
 		let expected = Value::Object(
 			map! {
 				"foo".to_owned() => foo.into(),

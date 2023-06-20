@@ -200,7 +200,7 @@ impl Iterable {
 					let rid = Thing::from((key.tb, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
-					let mut child_ctx = Context::new(&ctx);
+					let mut child_ctx = Context::new(ctx);
 					child_ctx.add_thing(&rid);
 					// Process the record
 					ite.process(&child_ctx, opt, stm, val).await;
@@ -472,7 +472,7 @@ impl Iterable {
 				let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
 				let val = txn.lock().await.get(key.clone()).await?;
 				let rid = Thing::from((key.tb, key.id));
-				let mut ctx = Context::new(&ctx);
+				let mut ctx = Context::new(ctx);
 				ctx.add_thing(&rid);
 				// Parse the data from the store
 				let val = Operable::Value(match val {
