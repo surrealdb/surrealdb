@@ -511,7 +511,7 @@ mod tests {
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
 		let t = fti.extract_terms(tx, qs.to_string()).await.unwrap();
-		let td = Arc::new(fti.get_terms_docs(tx, &t).await.unwrap().unwrap());
+		let td = Arc::new(fti.get_terms_docs(tx, &t).await.unwrap());
 		let scr = fti.new_scorer(tx, td.clone()).await.unwrap().unwrap();
 		let hits = fti.new_hits_iterator(tx, td).await.unwrap();
 		(hits, scr)
