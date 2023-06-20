@@ -379,7 +379,7 @@ pub(crate) trait Transpose<T> {
 	///
 	/// ```
 	/// fn array(sql: &str) -> Array {
-	/// 	/* ... */
+	///     /* ... */
 	/// }
 	///
 	/// // Example of `transpose` doing what it says on the tin.

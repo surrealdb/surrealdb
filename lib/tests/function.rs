@@ -167,7 +167,7 @@ async fn function_array_append() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_boolean_not() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_not([false, true, 0, 1])"#,
+		r#"RETURN array::logical_not([false, true, 0, 1]);"#,
 		&["[true, false, true, false]"],
 	)
 	.await?;
