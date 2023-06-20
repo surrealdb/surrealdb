@@ -211,7 +211,7 @@ where
 	{
 		if let Some(root_id) = self.state.root {
 			let root = self.keys.load_node::<BK>(tx, root_id).await?;
-			if root.node.keys().len() as u32 == self.full_size {
+			if root.node.keys().len() == self.full_size {
 				let new_root_id = self.new_node_id();
 				let new_root =
 					self.new_node(new_root_id, Node::Internal(BK::default(), vec![root_id]));
@@ -257,7 +257,7 @@ where
 					}
 					let child_idx = keys.get_child_idx(&key);
 					let child = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
-					let next = if child.node.keys().len() as u32 == self.full_size {
+					let next = if child.node.keys().len() == self.full_size {
 						let split_result =
 							self.split_child::<BK>(tx, node, child_idx, child).await?;
 						if key.gt(&split_result.median_key) {
@@ -432,7 +432,7 @@ where
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
 		let mut left_node = self.keys.load_node::<BK>(tx, left_id).await?;
-		if left_node.node.keys().len() as u32 >= self.state.minimum_degree {
+		if left_node.node.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.node.keys().get_last_key() {
 				keys.remove(&key_to_delete);
@@ -616,6 +616,7 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes<BK>(
 		tx: &mut Transaction,
 		keys: &mut BK,

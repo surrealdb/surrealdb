@@ -236,7 +236,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 
 pub fn matches(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('@')(i)?;
-	let (i, reference) = opt(|i| uint8(i))(i)?;
+	// let (i, reference) = opt(|i| uint8(i))(i)?;
+	let (i, reference) = opt(uint8)(i)?;
 	let (i, _) = char('@')(i)?;
 	Ok((i, Operator::Matches(reference)))
 }

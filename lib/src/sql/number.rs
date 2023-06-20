@@ -318,7 +318,7 @@ impl Number {
 		match self {
 			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
 			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
-			Number::Decimal(v) => v.clone(),
+			Number::Decimal(v) => *v,
 		}
 	}
 

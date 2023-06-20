@@ -458,13 +458,9 @@ impl HitsIterator {
 		&mut self,
 		tx: &mut Transaction,
 	) -> Result<Option<(Thing, DocId)>, Error> {
-		loop {
-			if let Some(doc_id) = self.iter.next() {
-				if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-					return Ok(Some((doc_key.into(), doc_id)));
-				}
-			} else {
-				break;
+		for doc_id in self.iter.by_ref() {
+			if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
+				return Ok(Some((doc_key.into(), doc_id)));
 			}
 		}
 		Ok(None)
