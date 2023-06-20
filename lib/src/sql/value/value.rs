@@ -2831,7 +2831,7 @@ mod tests {
 	#[test]
 	fn check_none() {
 		assert!(Value::None.is_none());
-		assert!(!Value::None.is_none());
+		assert!(!Value::Null.is_none());
 		assert!(!Value::from(1).is_none());
 	}
 
