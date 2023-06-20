@@ -79,7 +79,7 @@ impl Analyzer {
 		for tokens in &inputs {
 			for token in tokens.list() {
 				doc_length += 1;
-				match terms.entry(tokens.get_token_string(&token)) {
+				match terms.entry(tokens.get_token_string(token)) {
 					Entry::Vacant(e) => {
 						e.insert(1);
 					}

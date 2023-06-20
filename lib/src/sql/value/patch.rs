@@ -16,12 +16,12 @@ impl Value {
 					if let Value::Strand(p) = o.value {
 						if let Value::Strand(v) = self.pick(&o.path) {
 							let dmp = dmp::new();
-							let mut pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
+							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
 								Error::InvalidPatch {
 									message: format!("{e:?}"),
 								}
 							})?;
-							let (txt, _) = dmp.patch_apply(&mut pch, v.as_str()).map_err(|e| {
+							let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
 								Error::InvalidPatch {
 									message: format!("{e:?}"),
 								}

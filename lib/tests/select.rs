@@ -15,7 +15,7 @@ async fn select_field_value() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -77,7 +77,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -121,7 +121,7 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -209,7 +209,7 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -253,7 +253,7 @@ async fn select_where_and_with_unique_index() -> Result<(), Error> {
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -298,7 +298,7 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;

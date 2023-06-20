@@ -47,18 +47,18 @@ impl Plan {
 	}
 
 	pub(crate) fn explain(&self) -> Value {
-		match &self.i {
-			IndexOption {
-				ix,
-				v,
-				op,
-				..
-			} => Value::Object(Object::from(HashMap::from([
-				("index", Value::from(ix.name.0.to_owned())),
-				("operator", Value::from(op.to_string())),
-				("value", v.clone()),
-			]))),
-		}
+		let IndexOption {
+			ix,
+			v,
+			op,
+			..
+		} = &self.i;
+
+		Value::Object(Object::from(HashMap::from([
+			("index", Value::from(ix.name.0.to_owned())),
+			("operator", Value::from(op.to_string())),
+			("value", v.clone()),
+		])))
 	}
 }
 
@@ -225,6 +225,7 @@ struct MatchesThingIterator {
 }
 
 impl MatchesThingIterator {
+	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		opt: &Options,
 		txn: &Transaction,
