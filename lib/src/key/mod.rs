@@ -1,3 +1,4 @@
+//! How the keys are structured in the key value store
 ///
 /// KV              /
 /// NS              /!ns{ns}
