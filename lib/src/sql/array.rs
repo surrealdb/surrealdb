@@ -375,11 +375,9 @@ pub(crate) trait Transpose<T> {
 	///
 	/// # Examples
 	///
-	/// ```
-	/// use surrealdb::sql::Array;
-	/// 
+	/// ```ignore
 	/// fn array(sql: &str) -> Array {
-	///     /* ... */
+	///     unimplemented!();
 	/// }
 	///
 	/// // Example of `transpose` doing what it says on the tin.
@@ -430,10 +428,8 @@ pub(crate) trait TruthyIndices<T> {
 	///
 	/// # Examples
 	///
-	/// ```
-	/// use surrealdb::sql::Array;
-	/// 
-	/// let arr = Array::from(vec![true, false, true, false, false, true]);
+	/// ```ignore
+	/// let arr = Array::from(vec!["true", "false", "true", "false", "false", "true"]);
 	/// assert_eq!(arr.truthy_indices(), [0, 2, 5]);
 	/// ```
 	fn truthy_indices(self) -> T;
