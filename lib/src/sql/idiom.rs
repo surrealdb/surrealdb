@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
@@ -128,27 +127,21 @@ impl Idiom {
 		self.0.iter().any(|v| v.writeable())
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Value(v)) => {
-				v.compute(ctx, opt, txn, doc)
+				v.compute(ctx, opt)
 					.await?
-					.get(ctx, opt, txn, doc, self.as_ref().next())
+					.get(ctx, opt, self.as_ref().next())
 					.await?
-					.compute(ctx, opt, txn, doc)
+					.compute(ctx, opt)
 					.await
 			}
 			// Otherwise use the current document
-			_ => match doc {
+			_ => match ctx.doc() {
 				// There is a current document
-				Some(v) => v.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.get(ctx, opt, self).await?.compute(ctx, opt).await,
 				// There isn't any document
 				None => Ok(Value::None),
 			},

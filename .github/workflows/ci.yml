@@ -24,8 +24,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
+
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
 
   check:
     name: Check workspace
@@ -81,7 +84,7 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo clippy
-        run: cargo clippy --no-deps -- -W warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   cli:
     name: Test command line

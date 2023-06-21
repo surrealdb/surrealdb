@@ -3,7 +3,6 @@ use crate::dbs::Iterable;
 use crate::dbs::Operable;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::key::graph;
 use crate::key::thing;
@@ -19,11 +18,12 @@ impl Iterable {
 		self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 		chn: Sender<(Option<Thing>, Operable)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
+			// Clone transaction
+			let txn = ctx.try_clone_transaction()?;
 			match self {
 				Iterable::Value(v) => {
 					// Pass the value through
@@ -350,6 +350,9 @@ impl Iterable {
 							break;
 						}
 					}
+				}
+				Iterable::Index(_t, _p) => {
+					todo!()
 				}
 			}
 		}

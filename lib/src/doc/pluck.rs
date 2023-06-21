@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
@@ -15,7 +14,6 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -26,29 +24,55 @@ impl<'a> Document<'a> {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
-				Output::After => self.current.compute(ctx, opt, txn, Some(&self.current)).await,
-				Output::Before => self.initial.compute(ctx, opt, txn, Some(&self.initial)).await,
-				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
+				Output::After => {
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					self.current.compute(&ctx, opt).await
+				}
+				Output::Before => {
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.initial);
+					self.initial.compute(&ctx, opt).await
+				}
+				Output::Fields(v) => {
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					v.compute(&ctx, opt, false).await
+				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
 					0 => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
-					_ => s.expr.compute(ctx, opt, txn, Some(&self.current), false).await,
+					_ => {
+						let mut ctx = Context::new(ctx);
+						ctx.add_cursor_doc(&self.current);
+						s.expr.compute(&ctx, opt, false).await
+					}
 				},
 				Statement::Select(s) => {
-					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					s.expr.compute(&ctx, opt, s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					self.current.compute(&ctx, opt).await
 				}
 				Statement::Update(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					self.current.compute(&ctx, opt).await
 				}
 				Statement::Relate(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					self.current.compute(&ctx, opt).await
 				}
 				Statement::Insert(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
+					self.current.compute(&ctx, opt).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -57,14 +81,16 @@ impl<'a> Document<'a> {
 		if self.id.is_some() {
 			// Should we run permissions checks?
 			if opt.perms && opt.auth.perms() {
+				// Clone transaction
+				let txn = ctx.try_clone_transaction()?;
 				// Loop through all field statements
-				for fd in self.fd(opt, txn).await?.iter() {
+				for fd in self.fd(opt, &txn).await?.iter() {
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
 						match &fd.permissions.select {
 							Permission::Full => (),
-							Permission::None => out.del(ctx, opt, txn, k).await?,
+							Permission::None => out.del(ctx, opt, k).await?,
 							Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.perms(false);
@@ -73,13 +99,10 @@ impl<'a> Document<'a> {
 								// Configure the context
 								let mut ctx = Context::new(ctx);
 								ctx.add_value("value", &val);
+								ctx.add_cursor_doc(&self.current);
 								// Process the PERMISSION clause
-								if !e
-									.compute(&ctx, opt, txn, Some(&self.current))
-									.await?
-									.is_truthy()
-								{
-									out.del(&ctx, opt, txn, k).await?
+								if !e.compute(&ctx, opt).await?.is_truthy() {
+									out.del(&ctx, opt, k).await?
 								}
 							}
 						}
@@ -88,7 +111,7 @@ impl<'a> Document<'a> {
 			}
 		}
 		// Remove metadata fields on output
-		out.del(ctx, opt, txn, &*META).await?;
+		out.del(ctx, opt, &*META).await?;
 		// Output result
 		Ok(out)
 	}

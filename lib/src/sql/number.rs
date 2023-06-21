@@ -16,7 +16,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
-use std::ops;
+use std::ops::{self, Neg};
 use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
@@ -318,7 +318,7 @@ impl Number {
 		match self {
 			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
 			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
-			Number::Decimal(v) => v.clone(),
+			Number::Decimal(v) => *v,
 		}
 	}
 
@@ -568,6 +568,18 @@ impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v / *w as f64),
 			(v, w) => Number::from(v.to_decimal() / w.to_decimal()),
+		}
+	}
+}
+
+impl Neg for Number {
+	type Output = Self;
+
+	fn neg(self) -> Self::Output {
+		match self {
+			Self::Int(n) => Number::Int(-n),
+			Self::Float(n) => Number::Float(-n),
+			Self::Decimal(n) => Number::Decimal(-n),
 		}
 	}
 }

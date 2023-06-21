@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -25,13 +24,7 @@ pub enum InfoStatement {
 
 impl InfoStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
 			InfoStatement::Kv => {
@@ -39,12 +32,12 @@ impl InfoStatement {
 				opt.needs(Level::Kv)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
-				// Claim transaction
-				let mut run = run.lock().await;
 				// Create the result set
 				let mut res = Object::default();
+				// Clone transaction
+				let txn = ctx.try_clone_transaction()?;
+				// Claim transaction
+				let mut run = txn.lock().await;
 				// Process the statement
 				let mut tmp = Object::default();
 				for v in run.all_ns().await?.iter() {
@@ -60,9 +53,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
@@ -92,9 +85,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the logins
@@ -148,9 +141,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the tokens
@@ -168,9 +161,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the events

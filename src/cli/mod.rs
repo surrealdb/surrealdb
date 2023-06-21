@@ -46,6 +46,7 @@ struct Cli {
 	command: Commands,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
 	#[command(about = "Start the database server")]

@@ -2,7 +2,6 @@
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
@@ -16,7 +15,7 @@ use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
@@ -59,6 +58,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
+use std::ops::Neg;
 use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
@@ -2478,34 +2478,28 @@ impl Value {
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
-			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
+			Value::Expression(v) => v.writeable(),
 			_ => false,
 		}
 	}
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&'async_recursion Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self {
-			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Cast(v) => v.compute(ctx, opt).await,
+			Value::Thing(v) => v.compute(ctx, opt).await,
+			Value::Block(v) => v.compute(ctx, opt).await,
+			Value::Range(v) => v.compute(ctx, opt).await,
+			Value::Param(v) => v.compute(ctx, opt).await,
+			Value::Idiom(v) => v.compute(ctx, opt).await,
+			Value::Array(v) => v.compute(ctx, opt).await,
+			Value::Object(v) => v.compute(ctx, opt).await,
+			Value::Future(v) => v.compute(ctx, opt).await,
+			Value::Constant(v) => v.compute(ctx, opt).await,
+			Value::Function(v) => v.compute(ctx, opt).await,
+			Value::Subquery(v) => v.compute(ctx, opt).await,
+			Value::Expression(v) => v.compute(ctx, opt).await,
 			_ => Ok(self.to_owned()),
 		}
 	}
@@ -2665,9 +2659,24 @@ impl TryPow for Value {
 
 // ------------------------------
 
-/// Parse any `Value` including binary expressions
+pub(crate) trait TryNeg<Rhs = Self> {
+	type Output;
+	fn try_neg(self) -> Result<Self::Output, Error>;
+}
+
+impl TryNeg for Value {
+	type Output = Self;
+	fn try_neg(self) -> Result<Self, Error> {
+		match self {
+			Self::Number(n) if !matches!(n, Number::Int(i64::MIN)) => Ok(Self::Number(n.neg())),
+			v => Err(Error::TryNeg(v.to_string())),
+		}
+	}
+}
+
+/// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(expression, Value::from), single))(i)
+	alt((map(binary, Value::from), single))(i)
 }
 
 /// Parse any `Value` excluding binary expressions
@@ -2691,8 +2700,11 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
+			map(unary, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
+		)),
+		alt((
 			map(block, Value::from),
 			map(param, Value::from),
 			map(regex, Value::from),
@@ -2709,7 +2721,8 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 pub fn select(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
-			map(expression, Value::from),
+			map(unary, Value::from),
+			map(binary, Value::from),
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::Bool(true)),
@@ -2837,52 +2850,52 @@ mod tests {
 
 	#[test]
 	fn check_none() {
-		assert_eq!(true, Value::None.is_none());
-		assert_eq!(false, Value::Null.is_none());
-		assert_eq!(false, Value::from(1).is_none());
+		assert!(Value::None.is_none());
+		assert!(!Value::Null.is_none());
+		assert!(!Value::from(1).is_none());
 	}
 
 	#[test]
 	fn check_null() {
-		assert_eq!(true, Value::Null.is_null());
-		assert_eq!(false, Value::None.is_null());
-		assert_eq!(false, Value::from(1).is_null());
+		assert!(Value::Null.is_null());
+		assert!(!Value::None.is_null());
+		assert!(!Value::from(1).is_null());
 	}
 
 	#[test]
 	fn check_true() {
-		assert_eq!(false, Value::None.is_true());
-		assert_eq!(true, Value::Bool(true).is_true());
-		assert_eq!(false, Value::Bool(false).is_true());
-		assert_eq!(false, Value::from(1).is_true());
-		assert_eq!(false, Value::from("something").is_true());
+		assert!(!Value::None.is_true());
+		assert!(Value::Bool(true).is_true());
+		assert!(!Value::Bool(false).is_true());
+		assert!(!Value::from(1).is_true());
+		assert!(!Value::from("something").is_true());
 	}
 
 	#[test]
 	fn check_false() {
-		assert_eq!(false, Value::None.is_false());
-		assert_eq!(false, Value::Bool(true).is_false());
-		assert_eq!(true, Value::Bool(false).is_false());
-		assert_eq!(false, Value::from(1).is_false());
-		assert_eq!(false, Value::from("something").is_false());
+		assert!(!Value::None.is_false());
+		assert!(!Value::Bool(true).is_false());
+		assert!(Value::Bool(false).is_false());
+		assert!(!Value::from(1).is_false());
+		assert!(!Value::from("something").is_false());
 	}
 
 	#[test]
 	fn convert_truthy() {
-		assert_eq!(false, Value::None.is_truthy());
-		assert_eq!(false, Value::Null.is_truthy());
-		assert_eq!(true, Value::Bool(true).is_truthy());
-		assert_eq!(false, Value::Bool(false).is_truthy());
-		assert_eq!(false, Value::from(0).is_truthy());
-		assert_eq!(true, Value::from(1).is_truthy());
-		assert_eq!(true, Value::from(-1).is_truthy());
-		assert_eq!(true, Value::from(1.1).is_truthy());
-		assert_eq!(true, Value::from(-1.1).is_truthy());
-		assert_eq!(true, Value::from("true").is_truthy());
-		assert_eq!(false, Value::from("false").is_truthy());
-		assert_eq!(true, Value::from("falsey").is_truthy());
-		assert_eq!(true, Value::from("something").is_truthy());
-		assert_eq!(true, Value::from(Uuid::new()).is_truthy());
+		assert!(!Value::None.is_truthy());
+		assert!(!Value::Null.is_truthy());
+		assert!(Value::Bool(true).is_truthy());
+		assert!(!Value::Bool(false).is_truthy());
+		assert!(!Value::from(0).is_truthy());
+		assert!(Value::from(1).is_truthy());
+		assert!(Value::from(-1).is_truthy());
+		assert!(Value::from(1.1).is_truthy());
+		assert!(Value::from(-1.1).is_truthy());
+		assert!(Value::from("true").is_truthy());
+		assert!(!Value::from("false").is_truthy());
+		assert!(Value::from("falsey").is_truthy());
+		assert!(Value::from("something").is_truthy());
+		assert!(Value::from(Uuid::new()).is_truthy());
 	}
 
 	#[test]
