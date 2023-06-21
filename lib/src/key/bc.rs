@@ -41,18 +41,24 @@ impl<'a> Bc<'a> {
 
 #[cfg(test)]
 mod tests {
+
 	#[test]
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Bc::new(
-			"test",
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
 			7
 		);
 		let enc = Bc::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\x00*testdb\x00*testtb\x00!bctestix\x00*\x00\x00\x00\x00\x00\x00\x00\x07"
+		);
+
 		let dec = Bc::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

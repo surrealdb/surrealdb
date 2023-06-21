@@ -53,11 +53,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Dl::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testdl",
 		);
 		let enc = Dl::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\x00*testdb\x00!dltestdl\x00");
+
 		let dec = Dl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
