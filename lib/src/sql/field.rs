@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
@@ -14,6 +13,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
@@ -75,138 +75,90 @@ impl Fields {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);
 		//
-		let doc = doc.unwrap_or(&Value::None);
+		let doc = ctx.doc().unwrap_or(&Value::None);
+		let mut ctx = Context::new(ctx);
+		ctx.add_cursor_doc(doc);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.compute(ctx, opt, txn, Some(doc)).await?,
+			true => doc.compute(&ctx, opt).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {
 			match v {
 				Field::All => (),
-				Field::Alone(v) => match v {
-					// This expression is a grouped aggregate function
-					Value::Function(f) if group && f.is_aggregate() => {
-						let x = match f.args().len() {
-							// If no function arguments, then compute the result
-							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
-							// If arguments, then pass the first value through
-							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
-						};
-						// Check if this is a single VALUE field expression
-						match self.single().is_some() {
-							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
-							true => out = x,
-						}
-					}
-					// This expression is a multi-output graph traversal
-					Value::Idiom(v) if v.is_multi_yield() => {
-						// Store the different output yields here
-						let mut res: Vec<(&[Part], Value)> = Vec::new();
-						// Split the expression by each output alias
-						for v in v.split_inclusive(Idiom::split_multi_yield) {
-							// Use the last fetched value for each fetch
-							let x = match res.last() {
-								Some((_, r)) => r,
-								None => doc,
+				Field::Single {
+					expr,
+					alias,
+				} => {
+					let idiom = alias
+						.as_ref()
+						.map(Cow::Borrowed)
+						.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
+					match expr {
+						// This expression is a grouped aggregate function
+						Value::Function(f) if group && f.is_aggregate() => {
+							let x = match f.args().len() {
+								// If no function arguments, then compute the result
+								0 => f.compute(&ctx, opt).await?,
+								// If arguments, then pass the first value through
+								_ => f.args()[0].compute(&ctx, opt).await?,
 							};
-							// Continue fetching the next idiom part
-							let x = x
-								.get(ctx, opt, txn, Some(doc), v)
-								.await?
-								.compute(ctx, opt, txn, Some(doc))
-								.await?
-								.flatten();
-							// Add the result to the temporary store
-							res.push((v, x));
-						}
-						// Assign each fetched yield to the output
-						for (p, x) in res {
-							match p.last().unwrap().alias() {
-								// This is an alias expression part
-								Some(a) => out.set(ctx, opt, txn, a, x).await?,
-								// This is the end of the expression
-								None => out.set(ctx, opt, txn, v, x).await?,
+							// Check if this is a single VALUE field expression
+							match self.single().is_some() {
+								false => out.set(&ctx, opt, idiom.as_ref(), x).await?,
+								true => out = x,
 							}
 						}
-					}
-					// This expression is a normal field expression
-					_ => {
-						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
-						// Check if this is a single VALUE field expression
-						match self.single().is_some() {
-							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
-							true => out = x,
-						}
-					}
-				},
-				Field::Alias(v, i) => match v {
-					// This expression is a grouped aggregate function
-					Value::Function(f) if group && f.is_aggregate() => {
-						let x = match f.args().len() {
-							// If no function arguments, then compute the result
-							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
-							// If arguments, then pass the first value through
-							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
-						};
-						// Check if this is a single VALUE field expression
-						match self.single().is_some() {
-							false => out.set(ctx, opt, txn, i, x).await?,
-							true => out = x,
-						}
-					}
-					// This expression is a multi-output graph traversal
-					Value::Idiom(v) if v.is_multi_yield() => {
-						// Store the different output yields here
-						let mut res: Vec<(&[Part], Value)> = Vec::new();
-						// Split the expression by each output alias
-						for v in v.split_inclusive(Idiom::split_multi_yield) {
-							// Use the last fetched value for each fetch
-							let x = match res.last() {
-								Some((_, r)) => r,
-								None => doc,
-							};
-							// Continue fetching the next idiom part
-							let x = x
-								.get(ctx, opt, txn, Some(doc), v)
-								.await?
-								.compute(ctx, opt, txn, Some(doc))
-								.await?
-								.flatten();
-							// Add the result to the temporary store
-							res.push((v, x));
-						}
-						// Assign each fetched yield to the output
-						for (p, x) in res {
-							match p.last().unwrap().alias() {
-								// This is an alias expression part
-								Some(a) => {
-									let v = x.clone();
-									out.set(ctx, opt, txn, a, x).await?;
-									out.set(ctx, opt, txn, i, v).await?;
+						// This expression is a multi-output graph traversal
+						Value::Idiom(v) if v.is_multi_yield() => {
+							// Store the different output yields here
+							let mut res: Vec<(&[Part], Value)> = Vec::new();
+							// Split the expression by each output alias
+							for v in v.split_inclusive(Idiom::split_multi_yield) {
+								// Use the last fetched value for each fetch
+								let x = match res.last() {
+									Some((_, r)) => r,
+									None => doc,
+								};
+								// Continue fetching the next idiom part
+								let x =
+									x.get(&ctx, opt, v).await?.compute(&ctx, opt).await?.flatten();
+								// Add the result to the temporary store
+								res.push((v, x));
+							}
+							// Assign each fetched yield to the output
+							for (p, x) in res {
+								match p.last().unwrap().alias() {
+									// This is an alias expression part
+									Some(a) => {
+										if let Some(i) = alias {
+											out.set(&ctx, opt, i, x.clone()).await?;
+										}
+										out.set(&ctx, opt, a, x).await?;
+									}
+									// This is the end of the expression
+									None => {
+										out.set(&ctx, opt, alias.as_ref().unwrap_or(v), x).await?
+									}
 								}
-								// This is the end of the expression
-								None => out.set(ctx, opt, txn, i, x).await?,
+							}
+						}
+						// This expression is a normal field expression
+						_ => {
+							let x = expr.compute(&ctx, opt).await?;
+							// Check if this is a single VALUE field expression
+							match self.single().is_some() {
+								false => out.set(&ctx, opt, idiom.as_ref(), x).await?,
+								true => out = x,
 							}
 						}
 					}
-					// This expression is a normal field expression
-					_ => {
-						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
-						// Check if this is a single VALUE field expression
-						match self.single().is_some() {
-							false => out.set(ctx, opt, txn, i, x).await?,
-							true => out = x,
-						}
-					}
-				},
+				}
 			}
 		}
 		Ok(out)
@@ -230,25 +182,35 @@ fn field_many(i: &str) -> IResult<&str, Fields> {
 	Ok((i, Fields(v, false)))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Field {
+	/// The `*` in `SELECT * FROM ...`
+	#[default]
 	All,
-	Alone(Value),
-	Alias(Value, Idiom),
-}
-
-impl Default for Field {
-	fn default() -> Self {
-		Self::All
-	}
+	/// The 'rating' in `SELECT rating FROM ...`
+	Single {
+		expr: Value,
+		/// The `quality` in `SELECT rating AS quality FROM ...`
+		alias: Option<Idiom>,
+	},
 }
 
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::All => f.write_char('*'),
-			Self::Alone(e) => Display::fmt(e, f),
-			Self::Alias(e, a) => write!(f, "{e} AS {a}"),
+			Self::Single {
+				expr,
+				alias,
+			} => {
+				Display::fmt(expr, f)?;
+				if let Some(alias) = alias {
+					f.write_str(" AS ")?;
+					Display::fmt(alias, f)
+				} else {
+					Ok(())
+				}
+			}
 		}
 	}
 }
@@ -263,17 +225,29 @@ pub fn all(i: &str) -> IResult<&str, Field> {
 }
 
 pub fn alone(i: &str) -> IResult<&str, Field> {
-	let (i, f) = value(i)?;
-	Ok((i, Field::Alone(f)))
+	let (i, expr) = value(i)?;
+	Ok((
+		i,
+		Field::Single {
+			expr,
+			alias: None,
+		},
+	))
 }
 
 pub fn alias(i: &str) -> IResult<&str, Field> {
-	let (i, f) = value(i)?;
+	let (i, expr) = value(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("AS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, a) = idiom(i)?;
-	Ok((i, Field::Alias(f, a)))
+	let (i, alias) = idiom(i)?;
+	Ok((
+		i,
+		Field::Single {
+			expr,
+			alias: Some(alias),
+		},
+	))
 }
 
 #[cfg(test)]

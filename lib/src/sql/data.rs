@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -22,6 +21,7 @@ use std::fmt::{self, Display, Formatter};
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
+	UnsetExpression(Vec<Idiom>),
 	PatchExpression(Value),
 	MergeExpression(Value),
 	ReplaceExpression(Value),
@@ -43,26 +43,25 @@ impl Data {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		tb: &Table,
 	) -> Result<Thing, Error> {
 		match self {
 			Self::MergeExpression(v) => {
 				// This MERGE expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				v.compute(ctx, opt).await?.rid().generate(tb, false)
 			}
 			Self::ReplaceExpression(v) => {
 				// This REPLACE expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				v.compute(ctx, opt).await?.rid().generate(tb, false)
 			}
 			Self::ContentExpression(v) => {
 				// This CONTENT expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				v.compute(ctx, opt).await?.rid().generate(tb, false)
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
+					v.compute(ctx, opt).await?.generate(tb, false)
 				}
 				// This SET expression had no 'id' field
 				_ => Ok(tb.generate()),
@@ -83,6 +82,11 @@ impl Display for Data {
 				Fmt::comma_separated(
 					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
 				)
+			),
+			Self::UnsetExpression(v) => write!(
+				f,
+				"UNSET {}",
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |l, f| write!(f, "{l}",))))
 			),
 			Self::PatchExpression(v) => write!(f, "PATCH {v}"),
 			Self::MergeExpression(v) => write!(f, "MERGE {v}"),
@@ -111,7 +115,7 @@ impl Display for Data {
 }
 
 pub fn data(i: &str) -> IResult<&str, Data> {
-	alt((set, patch, merge, replace, content))(i)
+	alt((set, unset, patch, merge, replace, content))(i)
 }
 
 fn set(i: &str) -> IResult<&str, Data> {
@@ -126,6 +130,13 @@ fn set(i: &str) -> IResult<&str, Data> {
 		Ok((i, (l, o, r)))
 	})(i)?;
 	Ok((i, Data::SetExpression(v)))
+}
+
+fn unset(i: &str) -> IResult<&str, Data> {
+	let (i, _) = tag_no_case("UNSET")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = separated_list1(commas, idiom)(i)?;
+	Ok((i, Data::UnsetExpression(v)))
 }
 
 fn patch(i: &str) -> IResult<&str, Data> {
@@ -220,6 +231,24 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true, other.field = false", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement() {
+		let sql = "UNSET field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement_multiple_fields() {
+		let sql = "UNSET field, other.field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field, other.field", format!("{}", out));
 	}
 
 	#[test]

@@ -1,3 +1,4 @@
+//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -19,6 +20,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod script;
+pub mod search;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -29,6 +31,7 @@ pub mod util;
 /// Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	if name.eq("sleep")
+		|| name.starts_with("search")
 		|| name.starts_with("http")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
@@ -225,6 +228,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
+		"time::ceil" => time::ceil,
 		"time::day" => time::day,
 		"time::floor" => time::floor,
 		"time::format" => time::format,
@@ -298,6 +302,9 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
+		"search::highlight" => search::highlight(ctx).await,
+		"search::offsets" => search::offsets(ctx).await,
+		//
 		"sleep" => sleep::sleep(ctx).await,
 	)
 }
@@ -322,7 +329,7 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			if crate::sql::function::function_names(&name).is_err() {
+			if crate::sql::function::function_names(name).is_err() {
 				problems.push(format!("couldn't parse {name} function"));
 			}
 

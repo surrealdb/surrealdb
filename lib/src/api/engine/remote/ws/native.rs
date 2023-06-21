@@ -14,7 +14,6 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
@@ -128,12 +127,9 @@ impl Connection for Client {
 
 			router(url, maybe_connector, capacity, config, socket, route_rx);
 
-			let mut features = HashSet::new();
-			features.insert(ExtraFeatures::Auth);
-
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {
-					features,
+					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -292,7 +288,7 @@ pub(crate) fn router(
 										if let Some(response) = option {
 											trace!(target: LOG, "{response:?}");
 											if let Some(Ok(id)) =
-												response.id.map(Value::convert_to_i64)
+												response.id.map(Value::coerce_to_i64)
 											{
 												if let Some((method, sender)) = routes.remove(&id) {
 													let _res = sender
@@ -306,7 +302,8 @@ pub(crate) fn router(
 										}
 									}
 									Err(_error) => {
-										trace!(target: LOG, "Failed to deserialise message");
+										// Unfortunately, we don't know which response failed to deserialize
+										warn!(target: LOG, "Failed to deserialise message");
 									}
 								},
 								Err(error) => {

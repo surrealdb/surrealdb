@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -9,9 +8,8 @@ use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
-use crate::sql::value::{single, value, Value};
+use crate::sql::value::{value, Value};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use nom::branch::alt;
@@ -21,7 +19,6 @@ use nom::character::complete::char;
 use nom::combinator::recognize;
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
-use nom::sequence::delimited;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -32,7 +29,6 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 pub enum Function {
-	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
@@ -69,7 +65,6 @@ impl Function {
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
-			Self::Cast(_, v) => v.to_idiom(),
 		}
 	}
 	/// Convert this function to an aggregate
@@ -136,28 +131,16 @@ impl Function {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&'async_recursion Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
 		// Ensure futures are run
 		let opt = &opt.futures(true);
 		// Process the function type
 		match self {
-			Self::Cast(k, x) => {
-				// Compute the value to be cast
-				let a = x.compute(ctx, opt, txn, doc).await?;
-				// Run the cast function
-				a.convert_to(k)
-			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 				// Run the normal function
 				fnc::run(ctx, s, a).await
 			}
@@ -165,9 +148,9 @@ impl Function {
 				// Get the function definition
 				let val = {
 					// Clone transaction
-					let run = txn.clone();
+					let txn = ctx.try_clone_transaction()?;
 					// Claim transaction
-					let mut run = run.lock().await;
+					let mut run = txn.lock().await;
 					// Get the function definition
 					run.get_fc(opt.ns(), opt.db(), s).await?
 				};
@@ -182,24 +165,24 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(name.to_raw(), val.convert_to(&kind)?);
+					ctx.add_value(name.to_raw(), val.coerce_to(&kind)?);
 				}
 				// Run the custom function
-				val.block.compute(&ctx, opt, txn, doc).await
+				val.block.compute(&ctx, opt).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
 					// Compute the function arguments
-					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
 					// Run the script function
-					fnc::script::run(ctx, opt, txn, doc, s, a).await
+					fnc::script::run(ctx, opt, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
@@ -215,7 +198,6 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(k, e) => write!(f, "<{k}> {e}"),
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
@@ -224,7 +206,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, custom, script, cast))(i)
+	alt((normal, custom, script))(i)
 }
 
 pub fn normal(i: &str) -> IResult<&str, Function> {
@@ -259,13 +241,6 @@ fn script(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Script(v, a)))
 }
 
-fn cast(i: &str) -> IResult<&str, Function> {
-	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = single(i)?;
-	Ok((i, Function::Cast(k, v)))
-}
-
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		preceded(tag("array::"), function_array),
@@ -280,6 +255,7 @@ pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 		preceded(tag("meta::"), function_meta),
 		preceded(tag("parse::"), function_parse),
 		preceded(tag("rand::"), function_rand),
+		preceded(tag("search::"), function_search),
 		preceded(tag("session::"), function_session),
 		preceded(tag("string::"), function_string),
 		preceded(tag("time::"), function_time),
@@ -478,6 +454,10 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 	))(i)
 }
 
+fn function_search(i: &str) -> IResult<&str, &str> {
+	alt((tag("highlight"), tag("offsets")))(i)
+}
+
 fn function_session(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("db"),
@@ -514,6 +494,7 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 
 fn function_time(i: &str) -> IResult<&str, &str> {
 	alt((
+		tag("ceil"),
 		tag("day"),
 		tag("floor"),
 		tag("format"),
@@ -569,12 +550,12 @@ mod tests {
 
 	#[test]
 	fn function_single_not() {
-		let sql = "not(1.2345)";
+		let sql = "not(10)";
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("not(1.2345)", format!("{}", out));
-		assert_eq!(out, Function::Normal("not".to_owned(), vec![1.2345.into()]));
+		assert_eq!("not(10)", format!("{}", out));
+		assert_eq!(out, Function::Normal("not".to_owned(), vec![10.into()]));
 	}
 
 	#[test]
@@ -595,26 +576,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("is::numeric(NULL)", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("is::numeric"), vec![Value::Null]));
-	}
-
-	#[test]
-	fn function_casting_number() {
-		let sql = "<int>1.2345";
-		let res = function(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<int> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(Kind::Int, 1.2345.into()));
-	}
-
-	#[test]
-	fn function_casting_string() {
-		let sql = "<string>1.2345";
-		let res = function(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<string> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(Kind::String, 1.2345.into()));
 	}
 
 	#[test]

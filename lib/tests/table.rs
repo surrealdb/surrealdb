@@ -28,7 +28,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -40,10 +40,10 @@ async fn define_foreign_table() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			ev: {},
-			fd: {},
-			ft: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average FROM person GROUP BY age' },
-			ix: {},
+			events: {},
+			fields: {},
+			tables: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average FROM person GROUP BY age' },
+			indexes: {},
 		}",
 	);
 	assert_eq!(tmp, val);

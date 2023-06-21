@@ -19,7 +19,7 @@ impl Default for Kv {
 impl Kv {
 	pub fn new() -> Kv {
 		Kv {
-			__: 0x2f, // /
+			__: b'/',
 		}
 	}
 }

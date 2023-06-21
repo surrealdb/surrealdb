@@ -22,7 +22,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 11);
 	//
 	let tmp = res.remove(0).result?;
@@ -246,7 +246,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -311,7 +311,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			},
 			{
 				group: 2,
-				one: 7.6,
+				one: 7.6000000000000005,
 				two: 12.7,
 			}
 		]",
@@ -328,7 +328,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			},
 			{
 				group: 2,
-				one: 7.6,
+				one: 7.6000000000000005,
 				two: 12.7,
 			}
 		]",
@@ -351,7 +351,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
@@ -451,7 +451,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 			{
 				group: 2,
 				one: 9,
-				two: 14,
+				two: 13,
 			}
 		]",
 	);

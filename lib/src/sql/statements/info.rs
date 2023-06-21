@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -25,13 +24,7 @@ pub enum InfoStatement {
 
 impl InfoStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
 			InfoStatement::Kv => {
@@ -39,18 +32,18 @@ impl InfoStatement {
 				opt.needs(Level::Kv)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
-				// Claim transaction
-				let mut run = run.lock().await;
 				// Create the result set
 				let mut res = Object::default();
+				// Clone transaction
+				let txn = ctx.try_clone_transaction()?;
+				// Claim transaction
+				let mut run = txn.lock().await;
 				// Process the statement
 				let mut tmp = Object::default();
 				for v in run.all_ns().await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("ns".to_owned(), tmp.into());
+				res.insert("namespaces".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -60,9 +53,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
@@ -70,19 +63,19 @@ impl InfoStatement {
 				for v in run.all_db(opt.ns()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("db".to_owned(), tmp.into());
+				res.insert("databases".to_owned(), tmp.into());
 				// Process the logins
 				let mut tmp = Object::default();
 				for v in run.all_nl(opt.ns()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("nl".to_owned(), tmp.into());
+				res.insert("logins".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_nt(opt.ns()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("nt".to_owned(), tmp.into());
+				res.insert("tokens".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -92,9 +85,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the logins
@@ -102,43 +95,43 @@ impl InfoStatement {
 				for v in run.all_dl(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("dl".to_owned(), tmp.into());
+				res.insert("logins".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_dt(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("dt".to_owned(), tmp.into());
+				res.insert("tokens".to_owned(), tmp.into());
 				// Process the functions
 				let mut tmp = Object::default();
 				for v in run.all_fc(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("fc".to_owned(), tmp.into());
+				res.insert("functions".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
 				for v in run.all_pa(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("pa".to_owned(), tmp.into());
+				res.insert("params".to_owned(), tmp.into());
 				// Process the scopes
 				let mut tmp = Object::default();
 				for v in run.all_sc(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("sc".to_owned(), tmp.into());
+				res.insert("scopes".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
 				for v in run.all_tb(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("tb".to_owned(), tmp.into());
+				res.insert("tables".to_owned(), tmp.into());
 				// Process the analyzers
 				let mut tmp = Object::default();
 				for v in run.all_az(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("az".to_owned(), tmp.into());
+				res.insert("analyzers".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -148,9 +141,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the tokens
@@ -158,7 +151,7 @@ impl InfoStatement {
 				for v in run.all_st(opt.ns(), opt.db(), sc).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("st".to_owned(), tmp.into());
+				res.insert("tokens".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -168,9 +161,9 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the events
@@ -178,25 +171,25 @@ impl InfoStatement {
 				for v in run.all_ev(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("ev".to_owned(), tmp.into());
+				res.insert("events".to_owned(), tmp.into());
 				// Process the fields
 				let mut tmp = Object::default();
 				for v in run.all_fd(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("fd".to_owned(), tmp.into());
+				res.insert("fields".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
 				for v in run.all_ft(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("ft".to_owned(), tmp.into());
+				res.insert("tables".to_owned(), tmp.into());
 				// Process the indexes
 				let mut tmp = Object::default();
 				for v in run.all_ix(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("ix".to_owned(), tmp.into());
+				res.insert("indexes".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}

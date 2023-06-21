@@ -28,6 +28,8 @@ impl ser::Serializer for Serializer {
 		variant: &'static str,
 	) -> Result<Self::Ok, Error> {
 		match variant {
+			"Neg" => Ok(Operator::Neg),
+			"Not" => Ok(Operator::Not),
 			"Or" => Ok(Operator::Or),
 			"And" => Ok(Operator::And),
 			"Tco" => Ok(Operator::Tco),

@@ -1,19 +1,25 @@
-use crate::cli::CF;
 use crate::cnf::SERVER_NAME;
-use crate::dbs::DB;
+use crate::dbs::Auth;
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
+use crate::kvs::Datastore;
+use crate::opt::auth::Root;
+use crate::sql::Object;
+use crate::sql::Value;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
-use surrealdb::dbs::Auth;
-use surrealdb::dbs::Session;
-use surrealdb::sql::Object;
-use surrealdb::sql::Value;
 
-pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String>, Error> {
+pub async fn signin(
+	kvs: &Datastore,
+	configured_root: &Option<Root<'_>>,
+	strict: bool,
+	session: &mut Session,
+	vars: Object,
+) -> Result<Option<String>, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -26,7 +32,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 			let db = db.to_raw_string();
 			let sc = sc.to_raw_string();
 			// Attempt to signin to specified scope
-			super::signin::sc(session, ns, db, sc, vars).await
+			super::signin::sc(kvs, strict, session, ns, db, sc, vars).await
 		}
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
@@ -42,7 +48,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to database
-					super::signin::db(session, ns, db, user, pass).await
+					super::signin::db(kvs, session, ns, db, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -61,7 +67,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to namespace
-					super::signin::ns(session, ns, user, pass).await
+					super::signin::ns(kvs, session, ns, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -79,7 +85,8 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to namespace
-					super::signin::su(session, user, pass).await
+					super::signin::su(configured_root, session, user, pass)?;
+					Ok(None)
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -90,16 +97,14 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 }
 
 pub async fn sc(
+	kvs: &Datastore,
+	strict: bool,
 	session: &mut Session,
 	ns: String,
 	db: String,
 	sc: String,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
-	// Get local copy of options
-	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied NS Login exists
@@ -113,7 +118,7 @@ pub async fn sc(
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars, opt.strict).await {
+					match kvs.compute(val, &sess, vars, strict).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
@@ -174,14 +179,13 @@ pub async fn sc(
 }
 
 pub async fn db(
+	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
 	db: String,
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied DB Login exists
@@ -230,13 +234,12 @@ pub async fn db(
 }
 
 pub async fn ns(
+	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied NS Login exists
@@ -282,18 +285,17 @@ pub async fn ns(
 	}
 }
 
-pub async fn su(
+pub fn su(
+	configured_root: &Option<Root<'_>>,
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
-	// Get the config options
-	let opts = CF.get().unwrap();
+) -> Result<(), Error> {
 	// Attempt to verify the root user
-	if let Some(root) = &opts.pass {
-		if user == opts.user && &pass == root {
+	if let Some(root) = configured_root {
+		if user == root.username && pass == root.password {
 			session.au = Arc::new(Auth::Kv);
-			return Ok(None);
+			return Ok(());
 		}
 	}
 	// The specified user login does not exist

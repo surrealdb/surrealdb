@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Array, Bytes, Datetime, Duration, Number, Strand, Thing};
+use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Strand, Thing};
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
 pub trait FromArg: Sized {
@@ -15,85 +15,85 @@ impl FromArg for Value {
 
 impl FromArg for String {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_string()
+		arg.coerce_to_string()
 	}
 }
 
 impl FromArg for Strand {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_strand()
+		arg.coerce_to_strand()
 	}
 }
 
 impl FromArg for Number {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_number()
+		arg.coerce_to_number()
 	}
 }
 
 impl FromArg for Datetime {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_datetime()
+		arg.coerce_to_datetime()
 	}
 }
 
 impl FromArg for Duration {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_duration()
+		arg.coerce_to_duration()
 	}
 }
 
 impl FromArg for Thing {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_record()
+		arg.coerce_to_record()
 	}
 }
 
 impl FromArg for Array {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_array()
+		arg.coerce_to_array()
 	}
 }
 
 impl FromArg for Bytes {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_bytes()
+		arg.coerce_to_bytes()
 	}
 }
 
 impl FromArg for i64 {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_i64()
+		arg.coerce_to_i64()
 	}
 }
 
 impl FromArg for u64 {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_u64()
+		arg.coerce_to_u64()
 	}
 }
 
 impl FromArg for f64 {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_f64()
+		arg.coerce_to_f64()
 	}
 }
 
 impl FromArg for isize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.convert_to_i64()? as isize)
+		Ok(arg.coerce_to_i64()? as isize)
 	}
 }
 
 impl FromArg for usize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.convert_to_u64()? as usize)
+		Ok(arg.coerce_to_u64()? as usize)
 	}
 }
 
 impl FromArg for Vec<Number> {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.convert_to_array()?.into_iter().map(Value::convert_to_number).collect()
+		arg.coerce_to_array_type(&Kind::Number)?.into_iter().map(Value::try_into).collect()
 	}
 }
 

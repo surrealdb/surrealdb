@@ -1,3 +1,4 @@
+use crate::key::CHAR_PATH;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -19,12 +20,12 @@ pub fn new<'a>(ns: &'a str, db: &'a str, sc: &'a str) -> Scope<'a> {
 impl<'a> Scope<'a> {
 	pub fn new(ns: &'a str, db: &'a str, sc: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0xb1, // ±
+			_c: CHAR_PATH,
 			sc,
 		}
 	}

@@ -1,7 +1,6 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::{closebraces, colons, openbraces};
@@ -20,7 +19,7 @@ use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::multi::many0;
-use nom::multi::separated_list1;
+use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -52,13 +51,7 @@ impl Block {
 		self.iter().any(Entry::writeable)
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Duplicate context
 		let mut ctx = Context::new(ctx);
 		// Loop over the statements
@@ -68,7 +61,7 @@ impl Block {
 					// Check if the variable is a protected variable
 					let val = match PROTECTED_PARAM_NAMES.contains(&v.name.as_str()) {
 						// The variable isn't protected and can be stored
-						false => v.compute(&ctx, opt, txn, doc).await,
+						false => v.compute(&ctx, opt).await,
 						// The user tried to set a protected variable
 						true => {
 							return Err(Error::InvalidParam {
@@ -80,31 +73,31 @@ impl Block {
 					ctx.add_value(v.name.to_owned(), val);
 				}
 				Entry::Ifelse(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Select(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Create(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Update(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Delete(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Relate(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Insert(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt).await?;
 				}
 				Entry::Output(v) => {
-					return v.compute(&ctx, opt, txn, doc).await;
+					return v.compute(&ctx, opt).await;
 				}
 				Entry::Value(v) => {
-					return v.compute(&ctx, opt, txn, doc).await;
+					return v.compute(&ctx, opt).await;
 				}
 			}
 		}
@@ -117,6 +110,7 @@ impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
+			(0, _) => f.write_str("{}"),
 			(1, Some(Entry::Value(v))) => {
 				write!(f, "{{ {v} }}")
 			}
@@ -159,7 +153,7 @@ impl Display for Block {
 
 pub fn block(i: &str) -> IResult<&str, Block> {
 	let (i, _) = openbraces(i)?;
-	let (i, v) = separated_list1(colons, entry)(i)?;
+	let (i, v) = separated_list0(colons, entry)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
 	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
@@ -244,6 +238,15 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn block_empty() {
+		let sql = "{}";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
 
 	#[test]
 	fn block_value() {

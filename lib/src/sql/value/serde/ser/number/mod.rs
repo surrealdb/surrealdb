@@ -1,8 +1,7 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Number;
-use bigdecimal::BigDecimal;
-use bigdecimal::FromPrimitive as _;
+use rust_decimal::Decimal;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
@@ -44,9 +43,10 @@ impl ser::Serializer for Serializer {
 	}
 
 	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Error> {
-		match BigDecimal::from_i128(value) {
-			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+		// TODO: Replace with native 128-bit integer support.
+		match Decimal::try_from(value) {
+			Ok(decimal) => Ok(decimal.into()),
+			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
 		}
 	}
 
@@ -71,9 +71,10 @@ impl ser::Serializer for Serializer {
 	}
 
 	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Error> {
-		match BigDecimal::from_u128(value) {
-			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+		// TODO: Replace with native 128-bit integer support.
+		match Decimal::try_from(value) {
+			Ok(decimal) => Ok(decimal.into()),
+			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
 		}
 	}
 
@@ -89,7 +90,7 @@ impl ser::Serializer for Serializer {
 
 	#[inline]
 	fn serialize_str(self, value: &str) -> Result<Self::Ok, Error> {
-		let decimal = value.parse::<BigDecimal>().map_err(Error::custom)?;
+		let decimal = value.parse::<Decimal>().map_err(Error::custom)?;
 		Ok(decimal.into())
 	}
 

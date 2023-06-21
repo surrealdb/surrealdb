@@ -20,7 +20,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -36,28 +36,45 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a number"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a number",
+
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a number"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a number"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NULL for field `age`, with record `person:test`, but expected a number"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found NULL for field `age`, with record `person:test`, but expected a number"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found 0 for field `age`, with record `person:test`, but field must conform to: $value > 0"
-	));
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found 0 for field `age`, with record `person:test`, but field must conform to: $value > 0"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -86,7 +103,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -135,7 +152,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -189,7 +206,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -241,7 +258,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;

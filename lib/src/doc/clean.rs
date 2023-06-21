@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
@@ -11,17 +10,18 @@ impl<'a> Document<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Clone transaction
+		let txn = ctx.try_clone_transaction()?;
 		// Get the table
-		let tb = self.tb(opt, txn).await?;
+		let tb = self.tb(opt, &txn).await?;
 		// This table is schemafull
 		if tb.full {
 			// Create a vector to store the keys
 			let mut keys: Vec<Idiom> = vec![];
 			// Loop through all field statements
-			for fd in self.fd(opt, txn).await?.iter() {
+			for fd in self.fd(opt, &txn).await?.iter() {
 				// Is this a schemaless field?
 				match fd.flex {
 					false => {
@@ -46,7 +46,7 @@ impl<'a> Document<'a> {
 						fd if fd.is_in() => continue,
 						fd if fd.is_out() => continue,
 						fd if fd.is_meta() => continue,
-						fd => self.current.to_mut().del(ctx, opt, txn, fd).await?,
+						fd => self.current.to_mut().del(ctx, opt, fd).await?,
 					}
 				}
 			}

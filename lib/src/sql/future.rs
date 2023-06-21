@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::block::{block, Block};
 use crate::sql::comment::mightbespace;
@@ -25,18 +24,12 @@ impl From<Value> for Future {
 
 impl Future {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Prevent long future chains
 		let opt = &opt.dive(1)?;
 		// Process the future if enabled
 		match opt.futures {
-			true => self.0.compute(ctx, opt, txn, doc).await?.ok(),
+			true => self.0.compute(ctx, opt).await?.ok(),
 			false => Ok(self.clone().into()),
 		}
 	}
@@ -65,11 +58,11 @@ mod tests {
 
 	#[test]
 	fn future_expression() {
-		let sql = "<future> { 1.2345 + 5.4321 }";
+		let sql = "<future> { 5 + 10 }";
 		let res = future(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
-		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("1.2345 + 5.4321")))));
+		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
+		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));
 	}
 }

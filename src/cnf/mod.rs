@@ -16,9 +16,6 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 /// The publicly visible name of the server
 pub const PKG_NAME: &str = "surrealdb";
 
-/// The publicly visible name of the server
-pub const SERVER_NAME: &str = "SurrealDB";
-
 /// The publicly visible user-agent of the command-line tool
 pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
 

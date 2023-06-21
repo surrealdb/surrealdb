@@ -16,7 +16,7 @@ async fn define_global_param() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -25,13 +25,13 @@ async fn define_global_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			az: {},
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: { test: 'DEFINE PARAM $test VALUE 12345' },
-			sc: {},
-			tb: {},
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: { test: 'DEFINE PARAM $test VALUE 12345' },
+			scopes: {},
+			tables: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -59,7 +59,7 @@ async fn define_protected_param() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;

@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
@@ -17,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -29,25 +29,36 @@ pub struct Range {
 	pub end: Bound<Id>,
 }
 
+impl FromStr for Range {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<&str> for Range {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match range(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
+	}
+}
+
 impl Range {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		Ok(Value::Range(Box::new(Range {
 			tb: self.tb.clone(),
 			beg: match &self.beg {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 			end: match &self.end {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 		})))

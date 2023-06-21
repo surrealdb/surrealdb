@@ -17,7 +17,7 @@ pub struct Signin;
 pub trait Credentials<Action, Response>: Serialize {}
 
 /// Credentials for the root user
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Root<'a> {
 	/// The username of the root user
 	#[serde(rename = "user")]
@@ -30,7 +30,7 @@ pub struct Root<'a> {
 impl Credentials<Signin, ()> for Root<'_> {}
 
 /// Credentials for the namespace user
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Namespace<'a> {
 	/// The namespace the user has access to
 	#[serde(rename = "ns")]
@@ -46,7 +46,7 @@ pub struct Namespace<'a> {
 impl Credentials<Signin, Jwt> for Namespace<'_> {}
 
 /// Credentials for the database user
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Database<'a> {
 	/// The namespace the user has access to
 	#[serde(rename = "ns")]
