@@ -1,6 +1,5 @@
 [build]
-rustflags = ["--cfg", "uuid_unstable", "-C", "link-arg=-fuse-ld=mold"]
-
+rustflags = ["--cfg", "uuid_unstable"]
 
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
