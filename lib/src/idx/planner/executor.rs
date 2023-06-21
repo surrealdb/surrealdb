@@ -108,26 +108,6 @@ impl QueryExecutor {
 		}
 	}
 
-	pub(crate) async fn get_doc_id(
-		&self,
-		txn: &Transaction,
-		match_ref: &Value,
-		rid: &Thing,
-		doc_id: Option<DocId>,
-	) -> Result<Option<DocId>, Error> {
-		if let Some(doc_id) = doc_id {
-			return Ok(Some(doc_id));
-		}
-		if let Some(mr) = Self::get_match_ref(match_ref) {
-			if let Some(e) = self.mr_entries.get(&mr) {
-				let key: Key = rid.into();
-				let mut run = txn.lock().await;
-				return e.0.doc_ids.get_doc_id(&mut run, key).await;
-			}
-		}
-		Ok(None)
-	}
-
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,
@@ -219,14 +199,21 @@ impl QueryExecutor {
 		&self,
 		txn: Transaction,
 		match_ref: &Value,
-		doc_id: DocId,
+		rid: &Thing,
+		mut doc_id: Option<DocId>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
 				let mut run = txn.lock().await;
-				let score = scorer.score(&mut run, doc_id).await?;
-				if let Some(score) = score {
-					return Ok(Value::from(score));
+				if doc_id.is_none() {
+					let key: Key = rid.into();
+					doc_id = e.0.doc_ids.get_doc_id(&mut run, key).await?;
+				};
+				if let Some(doc_id) = doc_id {
+					let score = scorer.score(&mut run, doc_id).await?;
+					if let Some(score) = score {
+						return Ok(Value::from(score));
+					}
 				}
 			}
 		}

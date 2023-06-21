@@ -6,9 +6,7 @@ pub async fn score(ctx: &Context<'_>, (match_ref,): (Value,)) -> Result<Value, E
 	if let Some(thg) = ctx.thing() {
 		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
 			let txn = ctx.try_clone_transaction()?;
-			if let Some(doc_id) = exe.get_doc_id(&txn, &match_ref, thg, ctx.doc_id()).await? {
-				return exe.score(txn, &match_ref, doc_id).await;
-			}
+			return exe.score(txn, &match_ref, thg, ctx.doc_id()).await;
 		}
 	}
 	Ok(Value::None)
