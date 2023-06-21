@@ -90,11 +90,9 @@ impl<'a> TreeBuilder<'a> {
 		match e {
 			Expression::Unary {
 				..
-			} => {
-				return Err(Error::FeatureNotYetImplemented {
-					feature: "unary expressions in index",
-				});
-			}
+			} => Err(Error::FeatureNotYetImplemented {
+				feature: "unary expressions in index",
+			}),
 			Expression::Binary {
 				l,
 				o,
