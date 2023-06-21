@@ -366,18 +366,18 @@ pub(crate) trait Transpose<T> {
 	/// for what happense when the input arrays are not all the same size.
 	///
 	/// Here's a diagram:
-	/// ```
 	/// [0, 1, 2, 3], [4, 5, 6]
 	/// ->
 	/// [0    | 1    | 2   |  3]
 	/// [4    | 5    | 6   ]
 	///  ^      ^      ^      ^
 	/// [0, 4] [1, 5] [2, 6] [3]
-	/// ```
 	///
 	/// # Examples
 	///
 	/// ```
+	/// use surrealdb::sql::Array;
+	/// 
 	/// fn array(sql: &str) -> Array {
 	///     /* ... */
 	/// }
@@ -431,6 +431,8 @@ pub(crate) trait TruthyIndices<T> {
 	/// # Examples
 	///
 	/// ```
+	/// use surrealdb::sql::Array;
+	/// 
 	/// let arr = Array::from(vec![true, false, true, false, false, true]);
 	/// assert_eq!(arr.truthy_indices(), [0, 2, 5]);
 	/// ```
