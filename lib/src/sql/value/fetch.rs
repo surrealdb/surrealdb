@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
@@ -18,7 +17,6 @@ impl Value {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 	) -> Result<(), Error> {
 		match path.first() {
@@ -27,51 +25,53 @@ impl Value {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => Value::Thing(v).fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
-					Part::All => self.fetch(ctx, opt, txn, path.next()).await,
+					Part::All => self.fetch(ctx, opt, path.next()).await,
 					_ => Ok(()),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 						try_join_all(futs).await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-								v.fetch(ctx, opt, txn, path).await?;
+							let mut child_ctx = Context::new(ctx);
+							child_ctx.add_cursor_doc(v);
+							if w.compute(&child_ctx, opt).await?.is_truthy() {
+								v.fetch(ctx, opt, path).await?;
 							}
 						}
 						Ok(())
 					}
 					_ => {
-						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 						try_join_all(futs).await?;
 						Ok(())
 					}
@@ -95,10 +95,10 @@ impl Value {
 								..SelectStatement::default()
 							};
 							*self = stm
-								.compute(ctx, opt, txn, None)
+								.compute(ctx, opt)
 								.await?
 								.all()
-								.get(ctx, opt, txn, None, path.next())
+								.get(ctx, opt, path.next())
 								.await?
 								.flatten()
 								.ok()?;
@@ -111,7 +111,7 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							*self = stm.compute(ctx, opt, txn, None).await?.first();
+							*self = stm.compute(ctx, opt).await?.first();
 							Ok(())
 						}
 					}
@@ -123,7 +123,7 @@ impl Value {
 			None => match self {
 				// Current path part is an array
 				Value::Array(v) => {
-					let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+					let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 					try_join_all(futs).await?;
 					Ok(())
 				}
@@ -137,7 +137,7 @@ impl Value {
 						what: Values(vec![Value::from(val)]),
 						..SelectStatement::default()
 					};
-					*self = stm.compute(ctx, opt, txn, None).await?.first();
+					*self = stm.compute(ctx, opt).await?.first();
 					Ok(())
 				}
 				// Ignore everything else

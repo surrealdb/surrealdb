@@ -2,8 +2,6 @@ use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::conn::Router;
 use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::sql::Value;
 use serde::de::DeserializeOwned;
@@ -37,9 +35,6 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = router?;
-			if !router.features.contains(&ExtraFeatures::Auth) {
-				return Err(Error::AuthNotSupported.into());
-			}
 			let mut conn = Client::new(Method::Signin);
 			conn.execute(router, Param::new(vec![credentials?])).await
 		})

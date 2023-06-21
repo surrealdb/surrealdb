@@ -22,18 +22,18 @@ pub struct Bi<'a> {
 impl<'a> Bi<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Bi {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x62, // b
-			_f: 0x69, // i
+			_d: b'!',
+			_e: b'b',
+			_f: b'i',
 			ix,
-			_g: 0x2a, // *
+			_g: b'*',
 			node_id,
 		}
 	}

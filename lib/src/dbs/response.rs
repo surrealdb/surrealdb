@@ -6,11 +6,23 @@ use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
+#[derive(Debug)]
+pub enum QueryType {
+	// Any kind of query
+	Other,
+	// Indicates that the response live query id must be tracked
+	Live,
+	// Indicates that the live query should be removed from tracking
+	Kill,
+}
+
 /// The return value when running a query set on the database.
 #[derive(Debug)]
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<Value, Error>,
+	// Record the query type in case processing the response is necessary (such as tracking live queries).
+	pub query_type: QueryType,
 }
 
 impl Response {

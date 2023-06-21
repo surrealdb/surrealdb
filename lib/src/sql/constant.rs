@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
@@ -30,6 +29,7 @@ pub enum Constant {
 	MathFracPi4,
 	MathFracPi6,
 	MathFracPi8,
+	MathInf,
 	MathLn10,
 	MathLn2,
 	MathLog102,
@@ -63,6 +63,7 @@ impl Constant {
 			Self::MathFracPi4 => ConstantValue::Float(f64c::FRAC_PI_4),
 			Self::MathFracPi6 => ConstantValue::Float(f64c::FRAC_PI_6),
 			Self::MathFracPi8 => ConstantValue::Float(f64c::FRAC_PI_8),
+			Self::MathInf => ConstantValue::Float(f64::INFINITY),
 			Self::MathLn10 => ConstantValue::Float(f64c::LN_10),
 			Self::MathLn2 => ConstantValue::Float(f64c::LN_2),
 			Self::MathLog102 => ConstantValue::Float(f64c::LOG10_2),
@@ -77,13 +78,7 @@ impl Constant {
 	}
 
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
 		Ok(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),
@@ -104,6 +99,7 @@ impl fmt::Display for Constant {
 			Self::MathFracPi4 => "math::FRAC_PI_4",
 			Self::MathFracPi6 => "math::FRAC_PI_6",
 			Self::MathFracPi8 => "math::FRAC_PI_8",
+			Self::MathInf => "math::INF",
 			Self::MathLn10 => "math::LN_10",
 			Self::MathLn2 => "math::LN_2",
 			Self::MathLog102 => "math::LOG10_2",
@@ -136,6 +132,7 @@ fn constant_math(i: &str) -> IResult<&str, Constant> {
 			map(tag_no_case("FRAC_PI_4"), |_| Constant::MathFracPi4),
 			map(tag_no_case("FRAC_PI_6"), |_| Constant::MathFracPi6),
 			map(tag_no_case("FRAC_PI_8"), |_| Constant::MathFracPi8),
+			map(tag_no_case("INF"), |_| Constant::MathInf),
 			map(tag_no_case("LN_10"), |_| Constant::MathLn10),
 			map(tag_no_case("LN_2"), |_| Constant::MathLn2),
 			map(tag_no_case("LOG10_2"), |_| Constant::MathLog102),

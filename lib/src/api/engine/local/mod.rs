@@ -46,6 +46,7 @@ use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::opt::auth::Root;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Query;
@@ -402,9 +403,10 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Datastore,
+	configured_root: &Option<Root<'_>>,
+	strict: bool,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
-	strict: bool,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 
@@ -425,8 +427,35 @@ async fn router(
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Signin | Method::Signup | Method::Authenticate | Method::Invalidate => {
-			unreachable!()
+		Method::Signup => {
+			let credentials = match &mut params[..] {
+				[Value::Object(credentials)] => mem::take(credentials),
+				_ => unreachable!(),
+			};
+			let response = crate::iam::signup::signup(kvs, strict, session, credentials).await?;
+			Ok(DbResponse::Other(response.into()))
+		}
+		Method::Signin => {
+			let credentials = match &mut params[..] {
+				[Value::Object(credentials)] => mem::take(credentials),
+				_ => unreachable!(),
+			};
+			let response =
+				crate::iam::signin::signin(kvs, configured_root, strict, session, credentials)
+					.await?;
+			Ok(DbResponse::Other(response.into()))
+		}
+		Method::Authenticate => {
+			let token = match &mut params[..] {
+				[Value::Strand(Strand(token))] => mem::take(token),
+				_ => unreachable!(),
+			};
+			crate::iam::verify::token(kvs, session, token).await?;
+			Ok(DbResponse::Other(Value::None))
+		}
+		Method::Invalidate => {
+			crate::iam::clear::clear(session)?;
+			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Create => {
 			let statement = create_statement(&mut params);

@@ -1,11 +1,12 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
-use crate::dbs::Auth;
 use crate::dbs::Level;
+use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::LOG;
+use crate::dbs::{Auth, QueryType};
 use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::sql::paths::DB;
@@ -13,6 +14,7 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use std::sync::Arc;
 use tracing::instrument;
@@ -31,10 +33,6 @@ impl<'a> Executor<'a> {
 			txn: None,
 			err: false,
 		}
-	}
-
-	fn txn(&self) -> Transaction {
-		self.txn.clone().expect("unreachable: txn was None after successful begin")
 	}
 
 	/// # Return
@@ -101,6 +99,7 @@ impl<'a> Executor<'a> {
 		Response {
 			time: v.time,
 			result: Err(Error::QueryCancelled),
+			query_type: QueryType::Other,
 		}
 	}
 
@@ -117,8 +116,24 @@ impl<'a> Executor<'a> {
 						.unwrap_or(Error::QueryNotExecuted)),
 					Err(e) => Err(e),
 				},
+				query_type: QueryType::Other,
 			},
 			_ => v,
+		}
+	}
+
+	/// Consume the live query notifications
+	async fn clear(&self, _: Sender<Notification>, rcv: Receiver<Notification>) {
+		while rcv.try_recv().is_ok() {
+			// Ignore notification
+		}
+	}
+
+	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
+	/// This is because we don't want to broadcast notifications to the user for failed transactions.
+	async fn flush(&self, chn: Sender<Notification>, rcv: Receiver<Notification>) {
+		while let Ok(v) = rcv.try_recv() {
+			let _ = chn.send(v).await;
 		}
 	}
 
@@ -140,9 +155,15 @@ impl<'a> Executor<'a> {
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,
-		mut opt: Options,
+		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
+		// Take the notification channel
+		let chn = opt.sender.clone();
+		// Create a notification channel
+		let (send, recv) = channel::unbounded();
+		// Swap the notification channel
+		let mut opt = opt.sender(send);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
@@ -160,7 +181,7 @@ impl<'a> Executor<'a> {
 			// Check if this is a RETURN statement
 			let clr = matches!(stm, Statement::Output(_));
 			// Process a single statement
-			let res = match stm {
+			let res = match stm.clone() {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
@@ -189,17 +210,21 @@ impl<'a> Executor<'a> {
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
 					self.cancel(true).await;
+					self.clear(chn.clone(), recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
+					self.txn = None;
 					continue;
 				}
 				// Commit a running transaction
 				Statement::Commit(_) => {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
+					self.flush(chn.clone(), recv.clone()).await;
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
+					self.txn = None;
 					continue;
 				}
 				// Switch to a different NS or DB
@@ -247,7 +272,10 @@ impl<'a> Executor<'a> {
 							// Check if the variable is a protected variable
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
-								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								false => {
+									ctx.add_transaction(self.txn.as_ref());
+									stm.compute(&ctx, &opt).await
+								}
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
 									// Move the parameter name, as we no longer need it
@@ -264,13 +292,22 @@ impl<'a> Executor<'a> {
 									// Finalise transaction, returning nothing unless it couldn't commit
 									if writeable {
 										match self.commit(loc).await {
-											Err(e) => Err(Error::QueryNotExecutedDetail {
-												message: e.to_string(),
-											}),
-											Ok(_) => Ok(Value::None),
+											Err(e) => {
+												// Clear live query notifications
+												self.clear(chn.clone(), recv.clone()).await;
+												Err(Error::QueryNotExecutedDetail {
+													message: e.to_string(),
+												})
+											}
+											Ok(_) => {
+												// Flush live query notifications
+												self.flush(chn.clone(), recv.clone()).await;
+												Ok(Value::None)
+											}
 										}
 									} else {
 										self.cancel(loc).await;
+										self.clear(chn.clone(), recv.clone()).await;
 										Ok(Value::None)
 									}
 								}
@@ -305,8 +342,9 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
+										ctx.add_transaction(self.txn.as_ref());
 										// Process the statement
-										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+										let res = stm.compute(&ctx, &opt).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
 											true => Err(Error::QueryTimedout),
@@ -314,23 +352,36 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
+									None => {
+										ctx.add_transaction(self.txn.as_ref());
+										stm.compute(&ctx, &opt).await
+									}
+								};
+								// Catch global timeout
+								let res = match ctx.is_timedout() {
+									true => Err(Error::QueryTimedout),
+									false => res,
 								};
 								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
 									if let Err(e) = self.commit(loc).await {
+										// Clear live query notification details
+										self.clear(chn.clone(), recv.clone()).await;
 										// The commit failed
 										Err(Error::QueryNotExecutedDetail {
 											message: e.to_string(),
 										})
 									} else {
+										// Flush the live query change notifications
+										self.flush(chn.clone(), recv.clone()).await;
 										// Successful, committed result
 										res
 									}
 								} else {
 									self.cancel(loc).await;
-
-									// An error
+									// Clear live query notification details
+									self.clear(chn.clone(), recv.clone()).await;
+									// Return an error
 									res
 								}
 							}
@@ -348,6 +399,11 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
+				query_type: match stm {
+					Statement::Live(_) => QueryType::Live,
+					Statement::Kill(_) => QueryType::Kill,
+					_ => QueryType::Other,
+				},
 			};
 			// Output the response
 			if self.txn.is_some() {

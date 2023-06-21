@@ -13,7 +13,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -30,11 +30,11 @@ jobs:
       - name: Run cargo test
         run: |
           (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
-          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
+          cargo test --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -54,11 +54,14 @@ jobs:
       - name: Run cargo check
         run: cargo check --workspace
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
 
-      - name: Run cargo clippy
-        run: cargo clippy -- -W warnings
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+
+      - name: Check linting with clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run WebAssembly check
         run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
@@ -79,11 +82,11 @@ jobs:
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-latest-16-cores
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-latest-16-cores
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
@@ -219,7 +222,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -261,7 +264,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources

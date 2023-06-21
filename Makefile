@@ -21,8 +21,9 @@ test:
 .PHONY: check
 check:
 	cargo check --workspace
-	cargo fmt --all -- --check
-	cargo clippy -- -W warnings
+	cargo fmt --all --check
+	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+	cargo clippy --all-targets --all-features -- -D warnings
 
 .PHONY: clean
 clean:

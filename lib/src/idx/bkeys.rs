@@ -11,7 +11,7 @@ use std::io;
 
 pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
-	fn len(&self) -> usize;
+	fn len(&self) -> u32;
 	fn get(&self, key: &Key) -> Option<Payload>;
 	// It is okay to return a owned Vec rather than an iterator,
 	// because BKeys are intended to be stored as Node in the BTree.
@@ -48,7 +48,7 @@ pub(super) struct FstKeys {
 	map: Map<Vec<u8>>,
 	additions: Trie<Key, Payload>,
 	deletions: Trie<Key, bool>,
-	len: usize,
+	len: u32,
 }
 
 impl BKeys for FstKeys {
@@ -58,7 +58,7 @@ impl BKeys for FstKeys {
 		Ok(Self::try_from(builder)?)
 	}
 
-	fn len(&self) -> usize {
+	fn len(&self) -> u32 {
 		self.len
 	}
 
@@ -255,7 +255,7 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	type Error = fst::Error;
 	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
 		let map = Map::new(bytes)?;
-		let len = map.len();
+		let len = map.len() as u32;
 		Ok(Self {
 			map,
 			len,
@@ -371,8 +371,8 @@ impl BKeys for TrieKeys {
 		Ok(trie_keys)
 	}
 
-	fn len(&self) -> usize {
-		self.keys.len()
+	fn len(&self) -> u32 {
+		self.keys.len() as u32
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {
@@ -516,9 +516,7 @@ impl<'a> KeysIterator<'a> {
 				}
 			} else {
 				self.current_node = self.node_queue.pop_front();
-				if self.current_node.is_none() {
-					return None;
-				}
+				self.current_node.as_ref()?;
 			}
 		}
 	}
@@ -563,7 +561,7 @@ mod tests {
 			keys.insert(key.clone(), i);
 			keys.compile();
 			assert_eq!(keys.get(&key), Some(i));
-			assert_eq!(keys.len(), term_set.len());
+			assert_eq!(keys.len() as usize, term_set.len());
 			i += 1;
 		}
 	}
