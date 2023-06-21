@@ -81,15 +81,15 @@ impl AllAndStrategy {
 	fn eval_node(&mut self, node: &Node) -> Result<(), Error> {
 		match node {
 			Node::Expression {
-				index_option,
+				io: index_option,
 				left,
 				right,
-				expression,
+				exp: expression,
 			} => {
 				if let Some(io) = index_option {
 					self.b.add_index_option(expression.clone(), io.clone());
 				}
-				self.eval_expression(left, right, &expression.o)
+				self.eval_expression(left, right, expression.operator())
 			}
 			Node::Unsupported => Err(Error::BypassQueryPlanner),
 			_ => Ok(()),

@@ -360,28 +360,6 @@ impl FtIndex {
 		Ok(None)
 	}
 
-	pub(super) async fn match_id_value(
-		&self,
-		tx: &mut Transaction,
-		thg: &Thing,
-		term: &str,
-	) -> Result<bool, Error> {
-		let doc_key: Key = thg.into();
-		let doc_ids = self.doc_ids(tx).await?;
-		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
-			let terms = self.terms(tx).await?;
-			if let Some(term_id) = terms.get_term_id(tx, term).await? {
-				let postings = self.postings(tx).await?;
-				if let Some(term_freq) = postings.get_term_frequency(tx, term_id, doc_id).await? {
-					if term_freq > 0 {
-						return Ok(true);
-					}
-				}
-			}
-		}
-		Ok(false)
-	}
-
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn highlight(
 		&self,

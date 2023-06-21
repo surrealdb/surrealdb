@@ -30,7 +30,7 @@ impl PlanBuilder {
 	pub(super) fn build(mut self) -> Result<Plan, Error> {
 		// TODO select the best option if there are several (cost based)
 		if let Some((e, i)) = self.indexes.pop() {
-			Ok(Plan::new(e.clone(), i.clone()))
+			Ok(Plan::new(e, i))
 		} else {
 			Err(Error::BypassQueryPlanner)
 		}
@@ -72,12 +72,12 @@ impl Plan {
 pub(super) struct IndexOption(Arc<Inner>);
 
 #[derive(Debug, Eq, PartialEq, Hash)]
-struct Inner {
-	pub(super) ix: DefineIndexStatement,
-	pub(super) id: Idiom,
-	pub(super) v: Value,
-	pub(super) qs: Option<String>,
-	pub(super) op: Operator,
+pub(super) struct Inner {
+	ix: DefineIndexStatement,
+	id: Idiom,
+	v: Value,
+	qs: Option<String>,
+	op: Operator,
 	mr: Option<MatchRef>,
 }
 
@@ -131,41 +131,38 @@ impl IndexOption {
 		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
 		match &self.ix().index {
-			Index::Idx => match self.op() {
-				Operator::Equal => {
+			Index::Idx => {
+				if self.op() == &Operator::Equal {
 					return Ok(Box::new(NonUniqueEqualThingIterator::new(
 						opt,
 						self.ix(),
 						self.value(),
 					)?));
 				}
-				_ => {}
-			},
-			Index::Uniq => match self.op() {
-				Operator::Equal => {
+			}
+			Index::Uniq => {
+				if self.op() == &Operator::Equal {
 					return Ok(Box::new(UniqueEqualThingIterator::new(
 						opt,
 						self.ix(),
 						self.value(),
 					)?));
 				}
-				_ => {}
-			},
+			}
 			Index::Search {
 				az,
 				hl,
 				sc,
 				order,
-			} => match self.op() {
-				Operator::Matches(_) => {
+			} => {
+				if let Operator::Matches(_) = self.op() {
 					let td = exe.pre_match_terms_docs();
 					return Ok(Box::new(
 						MatchesThingIterator::new(opt, txn, self.ix(), az, *hl, sc, *order, td)
 							.await?,
 					));
 				}
-				_ => {}
-			},
+			}
 		}
 		Err(Error::BypassQueryPlanner)
 	}
@@ -312,5 +309,41 @@ impl ThingIterator for MatchesThingIterator {
 			}
 		}
 		Ok(res)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::planner::plan::IndexOption;
+	use crate::sql::statements::DefineIndexStatement;
+	use crate::sql::{Idiom, Operator, Value};
+	use std::collections::HashSet;
+
+	#[test]
+	fn test_hash_index_option() {
+		let mut set = HashSet::new();
+		let io1 = IndexOption::new(
+			DefineIndexStatement::default(),
+			Idiom::from("a.b".to_string()),
+			Operator::Equal,
+			Value::from("test"),
+			None,
+			None,
+		);
+
+		let io2 = IndexOption::new(
+			DefineIndexStatement::default(),
+			Idiom::from("a.b".to_string()),
+			Operator::Equal,
+			Value::from("test"),
+			None,
+			None,
+		);
+
+		set.insert(io1);
+		set.insert(io2.clone());
+		set.insert(io2);
+
+		assert_eq!(set.len(), 1);
 	}
 }
