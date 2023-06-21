@@ -15,7 +15,7 @@ use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
@@ -58,6 +58,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
+use std::ops::Neg;
 use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
@@ -2477,7 +2478,7 @@ impl Value {
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
-			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
+			Value::Expression(v) => v.writeable(),
 			_ => false,
 		}
 	}
@@ -2658,9 +2659,24 @@ impl TryPow for Value {
 
 // ------------------------------
 
-/// Parse any `Value` including binary expressions
+pub(crate) trait TryNeg<Rhs = Self> {
+	type Output;
+	fn try_neg(self) -> Result<Self::Output, Error>;
+}
+
+impl TryNeg for Value {
+	type Output = Self;
+	fn try_neg(self) -> Result<Self, Error> {
+		match self {
+			Self::Number(n) if !matches!(n, Number::Int(i64::MIN)) => Ok(Self::Number(n.neg())),
+			v => Err(Error::TryNeg(v.to_string())),
+		}
+	}
+}
+
+/// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(expression, Value::from), single))(i)
+	alt((map(binary, Value::from), single))(i)
 }
 
 /// Parse any `Value` excluding binary expressions
@@ -2684,8 +2700,11 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
+			map(unary, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
+		)),
+		alt((
 			map(block, Value::from),
 			map(param, Value::from),
 			map(regex, Value::from),
@@ -2702,7 +2721,8 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 pub fn select(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
-			map(expression, Value::from),
+			map(unary, Value::from),
+			map(binary, Value::from),
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::Bool(true)),

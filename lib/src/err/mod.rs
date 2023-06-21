@@ -247,6 +247,18 @@ pub enum Error {
 		value: String,
 	},
 
+	// The cluster node already exists
+	#[error("The node '{value}' already exists")]
+	ClAlreadyExists {
+		value: String,
+	},
+
+	// The cluster node does not exist
+	#[error("The node '{value}' does not exist")]
+	ClNotFound {
+		value: String,
+	},
+
 	/// The requested scope token does not exist
 	#[error("The scope token '{value}' does not exist")]
 	StNotFound {
@@ -417,6 +429,10 @@ pub enum Error {
 	/// Cannot perform power
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),
+
+	/// Cannot perform negation
+	#[error("Cannot negate the value '{0}'")]
+	TryNeg(String),
 
 	/// It's is not possible to convert between the two types
 	#[error("Cannot convert from '{0}' to '{1}'")]

@@ -23,7 +23,7 @@ check:
 	cargo check --workspace
 	cargo fmt --all --check
 	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
-	cargo clippy --no-deps -- -D warnings
+	cargo clippy --all-targets --all-features -- -D warnings
 
 .PHONY: clean
 clean:

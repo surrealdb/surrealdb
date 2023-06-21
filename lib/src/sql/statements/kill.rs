@@ -29,14 +29,14 @@ impl KillStatement {
 		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
-		// Create the live query key
-		let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+		// Fetch the live query key
+		let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 		// Fetch the live query key if it exists
 		match run.get(key).await? {
 			Some(val) => match std::str::from_utf8(&val) {
 				Ok(tb) => {
-					// Delete the live query
-					let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+					// Delete the node live query
+					let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 					run.del(key).await?;
 					// Delete the table live query
 					let key = crate::key::lv::new(opt.ns(), opt.db(), tb, &self.id);

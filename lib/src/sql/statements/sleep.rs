@@ -58,11 +58,12 @@ pub fn sleep(i: &str) -> IResult<&str, SleepStatement> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::dbs::Auth;
+	use std::sync::Arc;
 	use std::time::SystemTime;
+	use uuid::Uuid;
 
 	#[test]
 	fn test_sleep_statement_sec() {
@@ -86,7 +87,8 @@ mod tests {
 	async fn test_sleep_compute() {
 		let sql = "SLEEP 500ms";
 		let time = SystemTime::now();
-		let opt = Options::new(Auth::Kv);
+		let opt =
+			Options::new(Arc::new(Uuid::new_v4()), channel::unbounded().0, Arc::new(Auth::Kv));
 		let (ctx, _) = mock().await;
 		let (_, stm) = sleep(sql).unwrap();
 		let value = stm.compute(&ctx, &opt).await.unwrap();

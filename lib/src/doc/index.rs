@@ -187,7 +187,7 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, order, &scoring, hl).await?;
+		let mut ft = FtIndex::new(run, az, ikb, order, scoring, hl).await?;
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
 			ft.index_document(run, self.rid, n).await

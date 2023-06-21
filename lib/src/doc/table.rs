@@ -321,7 +321,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::MoreThan,
 							r: val.clone(),
@@ -341,7 +341,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::LessThan,
 							r: val.clone(),
@@ -363,13 +363,13 @@ impl<'a> Document<'a> {
 		ops.push((
 			key.clone(),
 			Operator::Equal,
-			Value::Expression(Box::new(Expression {
+			Value::Expression(Box::new(Expression::Binary {
 				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
+					Expression::Binary {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression {
+							Expression::Binary {
 								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression {
+									Box::new(Expression::Binary {
 										l: Value::Idiom(key),
 										o: Operator::Nco,
 										r: Value::Number(Number::Int(0)),
@@ -377,7 +377,7 @@ impl<'a> Document<'a> {
 								)))),
 								o: Operator::Mul,
 								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression {
+									Box::new(Expression::Binary {
 										l: Value::Idiom(key_c.clone()),
 										o: Operator::Nco,
 										r: Value::Number(Number::Int(0)),
@@ -395,9 +395,9 @@ impl<'a> Document<'a> {
 				))))),
 				o: Operator::Div,
 				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
+					Expression::Binary {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression {
+							Expression::Binary {
 								l: Value::Idiom(key_c.clone()),
 								o: Operator::Nco,
 								r: Value::Number(Number::Int(0)),

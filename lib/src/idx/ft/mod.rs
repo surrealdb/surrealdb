@@ -375,6 +375,7 @@ impl FtIndex {
 		Ok(false)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn highlight(
 		&self,
 		tx: &mut Transaction,
@@ -396,7 +397,7 @@ impl FtIndex {
 					hl.highlight(o.0);
 				}
 			}
-			return Ok(hl.try_into()?);
+			return hl.try_into();
 		}
 		Ok(Value::None)
 	}
@@ -418,7 +419,7 @@ impl FtIndex {
 					or.highlight(o.0);
 				}
 			}
-			return Ok(or.try_into()?);
+			return or.try_into();
 		}
 		Ok(Value::None)
 	}
