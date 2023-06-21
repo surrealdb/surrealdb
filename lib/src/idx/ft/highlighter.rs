@@ -19,7 +19,7 @@ impl Highlighter {
 		let prefix = prefix.to_raw_string().chars().collect();
 		let suffix = suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
-		let fields = doc.walk(&idiom);
+		let fields = doc.walk(idiom);
 		Self {
 			fields,
 			prefix,
@@ -59,8 +59,8 @@ impl TryFrom<Highlighter> for Value {
 			Highlighter::extract(f, &mut vals);
 		}
 		let mut res = Vec::with_capacity(vals.len());
-		let mut idx = 0;
-		for val in vals {
+		for (idx, val) in vals.into_iter().enumerate() {
+			let idx = idx as u32;
 			if let Some(v) = val {
 				if let Some(m) = hl.offseter.offsets.get(&idx) {
 					let mut v: Vec<char> = v.chars().collect();
@@ -79,7 +79,6 @@ impl TryFrom<Highlighter> for Value {
 					res.push(Value::from(v));
 				}
 			}
-			idx += 1;
 		}
 		Ok(match res.len() {
 			0 => Value::None,

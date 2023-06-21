@@ -92,20 +92,33 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
-		let left = self.eval_value(&e.l).await?;
-		let right = self.eval_value(&e.r).await?;
-		let mut index_option = None;
-		if let Some((id, ix)) = left.is_indexed_field() {
-			index_option = self.lookup_index_option(ix, &e.o, id, &right, e);
-		} else if let Some((id, ix)) = right.is_indexed_field() {
-			index_option = self.lookup_index_option(ix, &e.o, id, &left, e);
-		};
-		Ok(Node::Expression {
-			index_option,
-			left: Box::new(left),
-			right: Box::new(right),
-			expression: e.clone(),
-		})
+		match e {
+			Expression::Unary {
+				..
+			} => Err(Error::FeatureNotYetImplemented {
+				feature: "unary expressions in index",
+			}),
+			Expression::Binary {
+				l,
+				o,
+				r,
+			} => {
+				let left = self.eval_value(l).await?;
+				let right = self.eval_value(r).await?;
+				let mut index_option = None;
+				if let Some((id, ix)) = left.is_indexed_field() {
+					index_option = self.lookup_index_option(ix, o, id, &right, e);
+				} else if let Some((id, ix)) = right.is_indexed_field() {
+					index_option = self.lookup_index_option(ix, o, id, &left, e);
+				};
+				Ok(Node::Expression {
+					index_option,
+					left: Box::new(left),
+					right: Box::new(right),
+					expression: e.clone(),
+				})
+			}
+		}
 	}
 
 	fn lookup_index_option(

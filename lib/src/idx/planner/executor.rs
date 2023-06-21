@@ -1,6 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::{DocId, DocIds};
+§use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
