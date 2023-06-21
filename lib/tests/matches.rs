@@ -98,7 +98,7 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bar'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bar';
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bar' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -118,6 +118,22 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 					'Be Bop',
 					'Foo <em>Bar</em>'
 				]
+			},
+			{
+				explain:
+				[
+					{
+						detail: {
+							plan: {
+								index: 'blog_content',
+								operator: '@1@',
+								value: 'Hello Bar'
+							},
+							table: 'blog',
+						},
+						operation: 'Iterate Index'
+					}
+				]
 			}
 		]",
 	);
@@ -126,30 +142,50 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_arrays_and_offsets() -> Result<(), Error> {
+async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let sql = r"
-		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bar'];
+		CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bar'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		SELECT id, search::offsets(1) AS offsets FROM blog WHERE content @1@ 'Hello Bar';
+		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bar' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	for _ in 0..4 {
+		let _ = res.remove(0).result?;
+	}
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
 				id: blog:1,
-				offsets: {
+				title: {
+					0: [{s:5, e:10}],		
+				},
+				content: {
 					0: [{s:0, e:5}],
 					2: [{s:4, e:7}]
 				}
+			},
+			{
+				explain:
+				[
+					{
+						detail: {
+							plan: {
+								index: 'blog_content',
+								operator: '@1@',
+								value: 'Hello Bar'
+							},
+							table: 'blog',
+						},
+						operation: 'Iterate Index'
+					}
+				]
 			}
 		]",
 	);
