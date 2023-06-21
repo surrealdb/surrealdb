@@ -37,7 +37,7 @@ pub mod response {
 		function::{Opt, Rest},
 		ArrayBuffer, Class, Ctx, Exception, HasRefs, Persistent, Result, Value,
 	};
-	use reqwest::{header::HeaderName, Url};
+	use reqwest::Url;
 
 	#[derive(HasRefs)]
 	#[allow(dead_code)]
@@ -154,7 +154,7 @@ pub mod response {
 		// ------------------------------
 
 		// Convert the object to a string
-		pub fn toString(&self) -> String {
+		pub fn toString(&self, args: Rest<()>) -> String {
 			String::from("[object Response]")
 		}
 
@@ -189,8 +189,7 @@ pub mod response {
 			let mime = {
 				let headers = headers.borrow();
 				let headers = headers.inner.borrow();
-				let key = HeaderName::from_static("content-type");
-				let types = headers.get_all(key);
+				let types = headers.get_all(reqwest::header::CONTENT_TYPE);
 				// TODO: This is not according to spec.
 				types
 					.iter()
@@ -283,7 +282,12 @@ pub mod response {
 		}
 
 		// Creates a new response with a different URL
-		pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response> {
+		pub fn redirect(
+			ctx: Ctx<'_>,
+			url: String,
+			status: Opt<u32>,
+			args: Rest<()>,
+		) -> Result<Response> {
 			let url = url
 				.parse::<Url>()
 				.map_err(|e| Exception::throw_type(ctx, &format!("Invalid url: {e}")))?;
@@ -307,5 +311,80 @@ pub mod response {
 				was_redirected: false,
 			})
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::fnc::script::fetch::test::create_test_context;
+	use js::{promise::Promise, CatchResultExt};
+
+	#[tokio::test]
+	async fn basic_response_use() {
+		create_test_context!(ctx => {
+			ctx.eval::<Promise<()>,_>(r#"
+				(async () => {
+					let resp = new Response();
+					assert(resp.bodyUsed);
+					assert.seq(resp.status,200);
+					assert.seq(resp.ok,true);
+					assert.seq(resp.statusText,'');
+
+					// invalid status
+					assert.mustThrow(() => {
+						new Response(undefined,{ status: 9001})
+					})
+
+					// statusText not a reason phrase
+					assert.mustThrow(() => {
+						new Response(undefined,{ statusText: " \r"})
+					})
+
+					resp = Response.json({ a: 1, b: "2", c: { d: 3 }},{ headers: { "SomeHeader": "Some-Value" }});
+					assert.seq(resp.status,200);
+					assert.seq(resp.ok,true);
+					assert.seq(resp.statusText,'');
+					assert.seq(resp.headers.get("SomeHeader"),"Some-Value");
+					let obj = await resp.json();
+					assert.seq(typeof obj, "object");
+					assert.seq(obj.a, 1);
+					assert.seq(obj.b, "2");
+					assert.seq(typeof obj.c, "object");
+					assert.seq(obj.c.d, 3);
+
+					resp = Response.error();
+					assert.seq(resp.status,0);
+					assert.seq(resp.ok,false);
+					assert.seq(resp.statusText,'');
+
+					resp = Response.redirect("http://a");
+					assert.seq(resp.status,302);
+					assert.seq(resp.ok,false);
+
+					// not a redirect status
+					assert.mustThrow(() => {
+						Response.redirect("http://a",200);
+					})
+
+					// url required
+					assert.mustThrow(() => {
+						Response.redirect();
+					})
+
+					// invalid url
+					assert.mustThrow(() => {
+						Response.redirect("invalid url");
+					})
+
+					resp = new Response("some text");
+					let resp_2 = resp.clone();
+					assert.seq(await resp.text(),"some text");
+					assert.seq(await resp_2.text(),"some text");
+
+
+				})()
+			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
+		})
+		.await;
 	}
 }

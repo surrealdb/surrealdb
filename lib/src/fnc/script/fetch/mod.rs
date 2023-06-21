@@ -6,7 +6,6 @@ mod body;
 mod classes;
 mod func;
 mod stream;
-#[cfg(feature = "http")]
 mod util;
 
 use classes::{Blob, FormData, Headers, Request, Response};
@@ -79,6 +78,14 @@ mod test {
 					assert.mustThrow = (cb) => {
 						try{
 							cb()
+						}catch(e){
+							return e
+						}
+						throw new Error(`Code which should throw, didnt: \n${cb}`)
+					}
+					assert.mustThrowAsync = async (cb) => {
+						try{
+							await cb()
 						}catch(e){
 							return e
 						}

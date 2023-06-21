@@ -565,42 +565,82 @@ mod request {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::CatchResultExt;
+	use js::{promise::Promise, CatchResultExt};
 
 	#[tokio::test]
 	async fn basic_request_use() {
 		create_test_context!(ctx => {
-			ctx.eval::<(),_>(r#"
-				assert.mustThrow(() => {
-					new Request("invalid url")
-				});
-				assert.mustThrow(() => {
-					new Request("http://invalid url")
-				});
-				// no credentials
-				assert.mustThrow(() => {
-					new Request("http://username:password@some_url.com")
-				});
-				// invalid option value
-				assert.mustThrow(() => {
-					new Request("http://a",{ referrerPolicy: "invalid value"})
-				});
-				assert.mustThrow(() => {
-					new Request("http://a",{ mode: "invalid value"})
-				});
-				assert.mustThrow(() => {
-					new Request("http://a",{ redirect: "invalid value"})
-				});
-				assert.mustThrow(() => {
-					new Request("http://a",{ cache: "invalid value"})
-				});
-				assert.mustThrow(() => {
-					new Request("http://a",{ credentials: "invalid value"})
-				});
-				assert.mustThrow(() => {
-					new Request("http://a",{ duplex: "invalid value"})
-				});
-			"#).catch(ctx).unwrap();
+			ctx.eval::<Promise<()>,_>(r#"
+				(async () => {
+					assert.mustThrow(() => {
+						new Request("invalid url")
+					});
+					assert.mustThrow(() => {
+						new Request("http://invalid url")
+					});
+					// no credentials
+					assert.mustThrow(() => {
+						new Request("http://username:password@some_url.com")
+					});
+					// invalid option value
+					assert.mustThrow(() => {
+						new Request("http://a",{ referrerPolicy: "invalid value"})
+					});
+					assert.mustThrow(() => {
+						new Request("http://a",{ mode: "invalid value"})
+					});
+					assert.mustThrow(() => {
+						new Request("http://a",{ redirect: "invalid value"})
+					});
+					assert.mustThrow(() => {
+						new Request("http://a",{ cache: "invalid value"})
+					});
+					assert.mustThrow(() => {
+						new Request("http://a",{ credentials: "invalid value"})
+					});
+					assert.mustThrow(() => {
+						new Request("http://a",{ duplex: "invalid value"})
+					});
+
+					let req = new Request("http://a",{ method: "PUT", body: "some text" });
+					assert.seq(await req.text(),"some text");
+
+					req = new Request("http://a",{ method: "PUT", body: JSON.stringify({ a: 1, b: [2], c: { d: 3} })});
+					let res = await req.json();
+					assert.seq(res.a,1);
+					assert(Array.isArray(res.b));
+					assert.seq(res.b[0],2);
+					assert.seq(typeof res.c,"object");
+					assert.seq(res.c.d,3);
+
+					// some methods must be uppercased.
+					req = new Request("http://a",{ method: "gEt" });
+					assert.seq(req.method,"GET");
+
+					// get requests can't have a body.
+					assert.mustThrow(() => {
+						new Request("http://a",{ body: "a"})
+					})
+					// head requests can't have a body.
+					assert.mustThrow(() => {
+						new Request("http://a",{ method: "HEAD", body: "a"})
+					})
+
+					// use body twice
+					await assert.mustThrowAsync(async () => {
+						let req = new Request("http://a",{ method: "PUT",body: "some text" });
+						await req.text();
+						await req.text();
+					});
+
+					// clone request
+					req = new Request("http://a",{ method: "PUT", body: "some text" });
+					let req_2 = req.clone()
+					assert.seq(await req.text(),"some text");
+					assert.seq(await req_2.text(),"some text");
+
+				})()
+			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
 		})
 		.await;
 	}
