@@ -1,10 +1,21 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::TryAdd;
 use crate::sql::value::TryDiv;
 use crate::sql::value::TryMul;
+use crate::sql::value::TryNeg;
 use crate::sql::value::TryPow;
 use crate::sql::value::TrySub;
 use crate::sql::value::Value;
+use crate::sql::Expression;
+
+pub fn neg(a: Value) -> Result<Value, Error> {
+	a.try_neg()
+}
+
+pub fn not(a: Value) -> Result<Value, Error> {
+	super::not::not((a,))
+}
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(match a.is_truthy() {
@@ -152,6 +163,18 @@ pub fn outside(a: &Value, b: &Value) -> Result<Value, Error> {
 
 pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
+}
+
+pub(crate) async fn matches(ctx: &Context<'_>, e: &Expression) -> Result<Value, Error> {
+	if let Some(thg) = ctx.thing() {
+		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
+			// Clone transaction
+			let txn = ctx.try_clone_transaction()?;
+			// Check the matches
+			return exe.matches(&txn, thg, e).await;
+		}
+	}
+	Ok(Value::Bool(false))
 }
 
 #[cfg(test)]

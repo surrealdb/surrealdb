@@ -1,12 +1,10 @@
 use crate::err::Error;
 use crate::idx::bkeys::FstKeys;
 use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
-use crate::idx::ft::postings::TermFrequency;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub(crate) type TermId = u64;
 
@@ -23,7 +21,7 @@ impl Terms {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		default_btree_order: u32,
 	) -> Result<Self, Error> {
 		let keys = TermsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -61,19 +59,11 @@ impl Terms {
 		term_id
 	}
 
-	pub(super) async fn resolve_term_ids(
+	pub(super) async fn resolve_term_id(
 		&mut self,
 		tx: &mut Transaction,
-		terms_frequencies: HashMap<&str, TermFrequency>,
-	) -> Result<HashMap<TermId, TermFrequency>, Error> {
-		let mut res = HashMap::with_capacity(terms_frequencies.len());
-		for (term, freq) in terms_frequencies {
-			res.insert(self.resolve_term_id(tx, term).await?, freq);
-		}
-		Ok(res)
-	}
-
-	async fn resolve_term_id(&mut self, tx: &mut Transaction, term: &str) -> Result<TermId, Error> {
+		term: &str,
+	) -> Result<TermId, Error> {
 		let term_key = term.into();
 		if let Some(term_id) = self.btree.search::<FstKeys>(tx, &term_key).await? {
 			Ok(term_id)
@@ -144,7 +134,7 @@ struct State {
 impl SerdeState for State {}
 
 impl State {
-	fn new(default_btree_order: usize) -> Self {
+	fn new(default_btree_order: u32) -> Self {
 		Self {
 			btree: btree::State::new(default_btree_order),
 			available_ids: None,
@@ -174,7 +164,7 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 	use rand::{thread_rng, Rng};
-	use std::collections::{HashMap, HashSet};
+	use std::collections::HashSet;
 
 	fn random_term(key_length: usize) -> String {
 		thread_rng()
@@ -194,7 +184,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_terms() {
-		const BTREE_ORDER: usize = 7;
+		const BTREE_ORDER: u32 = 7;
 
 		let idx = IndexKeyBase::default();
 
@@ -208,50 +198,45 @@ mod tests {
 		// Resolve a first term
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t.resolve_term_ids(&mut tx, HashMap::from([("C", 103)])).await.unwrap();
+		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
-		assert_eq!(res, HashMap::from([(0, 103)]));
 
 		// Resolve a second term
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t.resolve_term_ids(&mut tx, HashMap::from([("D", 104)])).await.unwrap();
+		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
-		assert_eq!(res, HashMap::from([(1, 104)]));
 
 		// Resolve two existing terms with new frequencies
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res =
-			t.resolve_term_ids(&mut tx, HashMap::from([("C", 113), ("D", 114)])).await.unwrap();
+		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
+
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
-		assert_eq!(res, HashMap::from([(0, 113), (1, 114)]));
 
 		// Resolve one existing terms and two new terms
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t
-			.resolve_term_ids(&mut tx, HashMap::from([("A", 101), ("C", 123), ("E", 105)]))
-			.await
-			.unwrap();
+
+		assert_eq!(t.resolve_term_id(&mut tx, "A").await.unwrap(), 2);
+		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+		assert_eq!(t.resolve_term_id(&mut tx, "E").await.unwrap(), 3);
+
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 4);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
-		assert!(
-			res.eq(&HashMap::from([(3, 101), (0, 123), (2, 105)]))
-				|| res.eq(&HashMap::from([(2, 101), (0, 123), (3, 105)]))
-		);
 	}
 
 	#[tokio::test]
 	async fn test_deletion() {
-		const BTREE_ORDER: usize = 7;
+		const BTREE_ORDER: u32 = 7;
 
 		let idx = IndexKeyBase::default();
 
@@ -264,9 +249,9 @@ mod tests {
 		assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
 
 		// Create few terms
-		t.resolve_term_ids(&mut tx, HashMap::from([("A", 101), ("C", 123), ("E", 105)]))
-			.await
-			.unwrap();
+		t.resolve_term_id(&mut tx, "A").await.unwrap();
+		t.resolve_term_id(&mut tx, "C").await.unwrap();
+		t.resolve_term_id(&mut tx, "E").await.unwrap();
 
 		for term in ["A", "C", "E"] {
 			let term_id = t.get_term_id(&mut tx, term).await.unwrap();
@@ -279,12 +264,8 @@ mod tests {
 		}
 
 		// Check id recycling
-		let res =
-			t.resolve_term_ids(&mut tx, HashMap::from([("B", 102), ("D", 104)])).await.unwrap();
-		assert!(
-			res.eq(&HashMap::from([(0, 102), (1, 104)]))
-				|| res.eq(&HashMap::from([(0, 104), (1, 102)]))
-		);
+		assert_eq!(t.resolve_term_id(&mut tx, "B").await.unwrap(), 0);
+		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
 
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
@@ -307,9 +288,9 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100).await.unwrap();
 			let terms_string = random_term_freq_vec(50);
-			let terms_str: HashMap<&str, TermFrequency> =
-				terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
-			t.resolve_term_ids(&mut tx, terms_str).await.unwrap();
+			for (term, _) in terms_string {
+				t.resolve_term_id(&mut tx, &term).await.unwrap();
+			}
 			t.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();
 		}
@@ -323,9 +304,9 @@ mod tests {
 			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100).await.unwrap();
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
-				let terms_str: HashMap<&str, TermFrequency> =
-					terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
-				t.resolve_term_ids(&mut tx, terms_str).await.unwrap();
+				for (term, _) in terms_string {
+					t.resolve_term_id(&mut tx, &term).await.unwrap();
+				}
 			}
 			t.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();

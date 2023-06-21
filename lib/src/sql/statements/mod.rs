@@ -1,3 +1,4 @@
+pub(crate) mod analyze;
 pub(crate) mod begin;
 pub(crate) mod cancel;
 pub(crate) mod commit;

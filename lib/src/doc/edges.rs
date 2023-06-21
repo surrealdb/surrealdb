@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
@@ -14,19 +13,18 @@ use crate::sql::Dir;
 impl<'a> Document<'a> {
 	pub async fn edges(
 		&mut self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Clone transaction
+		let txn = ctx.try_clone_transaction()?;
 		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
+		if self.tb(opt, &txn).await?.drop {
 			return Ok(());
 		}
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges

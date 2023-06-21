@@ -1,35 +1,43 @@
-use crate::sql::uuid::Uuid;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Lq<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
 	_b: u8,
-	pub db: &'a str,
 	_c: u8,
+	pub nd: Uuid,
 	_d: u8,
+	pub ns: &'a str,
 	_e: u8,
+	pub db: &'a str,
+	_f: u8,
+	_g: u8,
+	_h: u8,
 	pub lq: Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, lq: &Uuid) -> Lq<'a> {
-	Lq::new(ns, db, lq.to_owned())
+pub fn new<'a>(nd: &Uuid, ns: &'a str, db: &'a str, lq: &Uuid) -> Lq<'a> {
+	Lq::new(nd.to_owned(), ns, db, lq.to_owned())
 }
 
 impl<'a> Lq<'a> {
-	pub fn new(ns: &'a str, db: &'a str, lq: Uuid) -> Self {
+	pub fn new(nd: Uuid, ns: &'a str, db: &'a str, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
+			_a: b'!',
+			_b: b'n',
+			_c: b'd',
+			nd,
+			_d: b'*',
 			ns,
-			_b: b'*',
+			_e: b'*',
 			db,
-			_c: b'!',
-			_d: b'l',
-			_e: b'v',
+			_f: b'!',
+			_g: b'l',
+			_h: b'v',
 			lq,
 		}
 	}
@@ -42,6 +50,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Lq::new(
+			Uuid::default(),
 			"test",
 			"test",
 			Uuid::default(),

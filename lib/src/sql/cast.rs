@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
@@ -13,6 +12,8 @@ use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Cast")]
@@ -35,17 +36,11 @@ impl Cast {
 impl Cast {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&'async_recursion Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Prevent long cast chains
 		let opt = &opt.dive(1)?;
 		// Compute the value to be cast and convert it
-		self.1.compute(ctx, opt, txn, doc).await?.convert_to(&self.0)
+		self.1.compute(ctx, opt).await?.convert_to(&self.0)
 	}
 }
 

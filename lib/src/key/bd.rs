@@ -28,18 +28,18 @@ impl<'a> Bd<'a> {
 		node_id: Option<NodeId>,
 	) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x62, // b
-			_f: 0x64, // d
+			_d: b'!',
+			_e: b'b',
+			_f: b'd',
 			ix,
-			_g: 0x2a, // *
+			_g: b'*',
 			node_id,
 		}
 	}

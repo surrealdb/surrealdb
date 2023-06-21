@@ -1,17 +1,20 @@
 mod bkeys;
 pub(crate) mod btree;
 pub(crate) mod ft;
+pub(crate) mod planner;
 
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::btree::NodeId;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
+use crate::key::bc::Bc;
 use crate::key::bd::Bd;
-use crate::key::bf::{Bf, BfPrefix};
+use crate::key::bf::Bf;
 use crate::key::bi::Bi;
 use crate::key::bk::Bk;
 use crate::key::bl::Bl;
+use crate::key::bo::Bo;
 use crate::key::bp::Bp;
 use crate::key::bs::Bs;
 use crate::key::bt::Bt;
@@ -20,10 +23,16 @@ use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
 use roaring::RoaringTreemap;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use std::sync::Arc;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct IndexKeyBase {
+	inner: Arc<Inner>,
+}
+
+#[derive(Debug, Default)]
+struct Inner {
 	ns: String,
 	db: String,
 	tb: String,
@@ -33,73 +42,135 @@ pub(crate) struct IndexKeyBase {
 impl IndexKeyBase {
 	pub(crate) fn new(opt: &Options, ix: &DefineIndexStatement) -> Self {
 		Self {
-			ns: opt.ns().to_string(),
-			db: opt.db().to_string(),
-			tb: ix.what.to_string(),
-			ix: ix.name.to_string(),
+			inner: Arc::new(Inner {
+				ns: opt.ns().to_string(),
+				db: opt.db().to_string(),
+				tb: ix.what.to_string(),
+				ix: ix.name.to_string(),
+			}),
 		}
 	}
 
+	fn new_bc_key(&self, term_id: TermId) -> Key {
+		Bc::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			term_id,
+		)
+		.into()
+	}
+
 	fn new_bd_key(&self, node_id: Option<NodeId>) -> Key {
-		Bd::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
-			.into()
+		Bd::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			node_id,
+		)
+		.into()
 	}
 
 	fn new_bi_key(&self, doc_id: DocId) -> Key {
-		Bi::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), doc_id)
-			.into()
+		Bi::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+		)
+		.into()
 	}
 
 	fn new_bk_key(&self, doc_id: DocId) -> Key {
-		Bk::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), doc_id)
-			.into()
+		Bk::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+		)
+		.into()
 	}
 
 	fn new_bl_key(&self, node_id: Option<NodeId>) -> Key {
-		Bl::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
-			.into()
+		Bl::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			node_id,
+		)
+		.into()
+	}
+
+	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Key {
+		Bo::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+			term_id,
+		)
+		.into()
 	}
 
 	fn new_bp_key(&self, node_id: Option<NodeId>) -> Key {
-		Bp::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
-			.into()
+		Bp::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			node_id,
+		)
+		.into()
 	}
 
 	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Key {
 		Bf::new(
-			self.ns.as_str(),
-			self.db.as_str(),
-			self.tb.as_str(),
-			self.ix.as_str(),
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
 			term_id,
 			doc_id,
 		)
 		.into()
 	}
 
-	fn new_bf_prefix_key(&self, term_id: TermId) -> Key {
-		BfPrefix::new(
-			self.ns.as_str(),
-			self.db.as_str(),
-			self.tb.as_str(),
-			self.ix.as_str(),
-			term_id,
+	fn new_bt_key(&self, node_id: Option<NodeId>) -> Key {
+		Bt::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			node_id,
 		)
 		.into()
 	}
 
-	fn new_bt_key(&self, node_id: Option<NodeId>) -> Key {
-		Bt::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
-			.into()
-	}
-
 	fn new_bs_key(&self) -> Key {
-		Bs::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str()).into()
+		Bs::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+		)
+		.into()
 	}
 
 	fn new_bu_key(&self, term_id: TermId) -> Key {
-		Bu::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), term_id)
-			.into()
+		Bu::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			term_id,
+		)
+		.into()
 	}
 }
 
