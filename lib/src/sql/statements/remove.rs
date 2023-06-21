@@ -111,7 +111,7 @@ impl RemoveNamespaceStatement {
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -163,7 +163,7 @@ impl RemoveDatabaseStatement {
 		// Allowed to run?
 		opt.check(Level::Ns)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -215,7 +215,7 @@ impl RemoveFunctionStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -270,7 +270,7 @@ impl RemoveAnalyzerStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -323,7 +323,7 @@ impl RemoveLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -338,7 +338,7 @@ impl RemoveLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -398,7 +398,7 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -413,7 +413,7 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -428,7 +428,7 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -485,7 +485,7 @@ impl RemoveScopeStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -537,7 +537,7 @@ impl RemoveParamStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -587,7 +587,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -640,7 +640,7 @@ impl RemoveEventStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -699,7 +699,7 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -759,7 +759,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition

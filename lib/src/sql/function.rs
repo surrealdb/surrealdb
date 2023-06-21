@@ -148,7 +148,7 @@ impl Function {
 				// Get the function definition
 				let val = {
 					// Clone transaction
-					let txn = ctx.clone_transaction()?;
+					let txn = ctx.try_clone_transaction()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
@@ -255,6 +255,7 @@ pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 		preceded(tag("meta::"), function_meta),
 		preceded(tag("parse::"), function_parse),
 		preceded(tag("rand::"), function_rand),
+		preceded(tag("search::"), function_search),
 		preceded(tag("session::"), function_session),
 		preceded(tag("string::"), function_string),
 		preceded(tag("time::"), function_time),
@@ -451,6 +452,10 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("uuid::v7"),
 		tag("uuid"),
 	))(i)
+}
+
+fn function_search(i: &str) -> IResult<&str, &str> {
+	alt((tag("highlight"), tag("offsets")))(i)
 }
 
 fn function_session(i: &str) -> IResult<&str, &str> {

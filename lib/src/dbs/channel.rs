@@ -23,7 +23,7 @@ impl Iterable {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			// Clone transaction
-			let txn = ctx.clone_transaction()?;
+			let txn = ctx.try_clone_transaction()?;
 			match self {
 				Iterable::Value(v) => {
 					// Pass the value through

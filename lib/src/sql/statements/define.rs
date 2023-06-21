@@ -135,7 +135,7 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::ns::new(&self.name);
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		run.set(key, self).await?;
@@ -182,7 +182,7 @@ impl DefineDatabaseStatement {
 		// Allowed to run?
 		opt.check(Level::Ns)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -234,7 +234,7 @@ impl DefineFunctionStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -312,7 +312,7 @@ impl DefineAnalyzerStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -385,7 +385,7 @@ impl DefineLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -401,7 +401,7 @@ impl DefineLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -504,7 +504,7 @@ impl DefineTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -520,7 +520,7 @@ impl DefineTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -537,7 +537,7 @@ impl DefineTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -618,7 +618,7 @@ impl DefineScopeStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -733,7 +733,7 @@ impl DefineParamStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -793,7 +793,7 @@ impl DefineTableStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -972,7 +972,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1053,7 +1053,7 @@ impl DefineFieldStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1210,7 +1210,7 @@ impl DefineIndexStatement {
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement

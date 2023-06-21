@@ -35,7 +35,7 @@ impl InfoStatement {
 				// Create the result set
 				let mut res = Object::default();
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -53,7 +53,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -85,7 +85,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -141,7 +141,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -161,7 +161,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set

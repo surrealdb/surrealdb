@@ -18,7 +18,7 @@ impl<'a> Document<'a> {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check if the table is a view
 		if self.tb(opt, &txn).await?.drop {
 			return Ok(());

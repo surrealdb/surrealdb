@@ -1,4 +1,5 @@
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
+use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 
 pub(super) struct Tokens {
@@ -35,18 +36,19 @@ impl Tokens {
 			match fr {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(Token::String(s)),
+					Term::NewTerm(s) => tks.push(tk.new_token(s)),
 				},
 				FilterResult::Terms(ts) => {
-					let mut tk = Some(tk);
+					let mut already_pushed = false;
 					for t in ts {
 						match t {
 							Term::Unchanged => {
-								if let Some(tk) = tk.take() {
-									tks.push(tk)
+								if !already_pushed {
+									tks.push(tk.clone());
+									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(Token::String(s)),
+							Term::NewTerm(s) => tks.push(tk.new_token(s)),
 						}
 					}
 				}
@@ -66,22 +68,36 @@ impl Tokens {
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
-	Ref(usize, usize),
-	String(String),
+	Ref(Position, Position),
+	String(Position, Position, String),
 }
 
 impl Token {
+	fn new_token(&self, t: String) -> Self {
+		match self {
+			Token::Ref(s, e) => Token::String(*s, *e, t),
+			Token::String(s, e, _) => Token::String(*s, *e, t),
+		}
+	}
+
+	pub(super) fn new_offset(&self, i: u32) -> Offset {
+		match self {
+			Token::Ref(s, e) => Offset::new(i, *s, *e),
+			Token::String(s, e, _) => Offset::new(i, *s, *e),
+		}
+	}
+
 	fn is_empty(&self) -> bool {
 		match self {
 			Token::Ref(start, end) => start == end,
-			Token::String(s) => s.is_empty(),
+			Token::String(_, _, s) => s.is_empty(),
 		}
 	}
 
 	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &str {
 		match self {
-			Token::Ref(s, e) => &i[*s..*e],
-			Token::String(s) => s,
+			Token::Ref(s, e) => &i[(*s as usize)..(*e as usize)],
+			Token::String(_, _, s) => s,
 		}
 	}
 }
@@ -128,10 +144,10 @@ impl Tokenizer {
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
 				if !is_valid {
-					last_pos += c.len_utf8();
+					last_pos += c.len_utf8() as Position;
 				}
 			}
-			current_pos += c.len_utf8();
+			current_pos += c.len_utf8() as Position;
 		}
 		if current_pos != last_pos {
 			t.push(Token::Ref(last_pos, current_pos));
@@ -229,11 +245,11 @@ impl Splitter {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::analyzer::tests::test_analyser;
+	use crate::idx::ft::analyzer::tests::test_analyzer;
 
 	#[test]
 	fn test_tokenize_blank_class() {
-		test_analyser(
+		test_analyzer(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
 			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
 			&[
@@ -245,7 +261,7 @@ mod tests {
 
 	#[test]
 	fn test_tokenize_source_code() {
-		test_analyser(
+		test_analyzer(
 			"DEFINE ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
 			r#"struct MyRectangle {
     // specified by corners

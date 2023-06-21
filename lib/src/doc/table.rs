@@ -56,7 +56,7 @@ impl<'a> Document<'a> {
 			Action::Update
 		};
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Loop through all foreign table statements
 		for ft in self.ft(opt, &txn).await?.iter() {
 			// Get the table definition

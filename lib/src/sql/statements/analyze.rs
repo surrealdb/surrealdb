@@ -30,7 +30,7 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Read the index
@@ -42,10 +42,11 @@ impl AnalyzeStatement {
 					Index::Search {
 						az,
 						order,
-						..
+						sc,
+						hl,
 					} => {
 						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(&mut run, az, ikb, *order).await?;
+						let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl).await?;
 						ft.statistics(&mut run).await?
 					}
 					_ => {
