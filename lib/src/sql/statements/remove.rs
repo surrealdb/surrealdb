@@ -820,19 +820,13 @@ pub struct RemoveUserStatement {
 
 impl RemoveUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self.base {
 			Base::Kv => {
 				// Only KV users can delete KV users
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = run.lock().await;
 				// Process the statement
@@ -847,7 +841,7 @@ impl RemoveUserStatement {
 				// Only KV users can delete NS users
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = run.lock().await;
 				// Delete the definition
@@ -862,7 +856,7 @@ impl RemoveUserStatement {
 				// Only NS users can delete DB users
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = run.lock().await;
 				// Delete the definition
