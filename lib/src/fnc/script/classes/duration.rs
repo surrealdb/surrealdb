@@ -7,7 +7,7 @@ pub mod duration {
 
 	use crate::sql::duration;
 	use crate::sql::value::Value;
-	use js::function::Rest;
+	use js::{class::Ref, function::Rest};
 
 	#[derive(Clone)]
 	#[quickjs(cloneable)]
@@ -30,18 +30,18 @@ pub mod duration {
 			}
 		}
 		// Compare two Duration instances
-		pub fn is(a: &Duration, b: &Duration, args: Rest<Value>) -> bool {
+		pub fn is(a: Ref<Duration>, b: Ref<Duration>, args: Rest<()>) -> bool {
 			a.value.is_some() && b.value.is_some() && a.value == b.value
 		}
 		/// Convert the object to a string
-		pub fn toString(&self, args: Rest<Value>) -> String {
+		pub fn toString(&self, args: Rest<()>) -> String {
 			match &self.value {
 				Some(v) => v.to_raw(),
 				None => String::from("Invalid Duration"),
 			}
 		}
 		/// Convert the object to JSON
-		pub fn toJSON(&self, args: Rest<Value>) -> String {
+		pub fn toJSON(&self, args: Rest<()>) -> String {
 			match &self.value {
 				Some(v) => v.to_raw(),
 				None => String::from("Invalid Duration"),
