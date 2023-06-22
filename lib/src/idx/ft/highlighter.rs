@@ -66,8 +66,8 @@ impl TryFrom<Highlighter> for Value {
 				let mut d = 0;
 
 				// We use a closure to append the prefix and the suffix
-				let mut append = |s: usize, ix: &Vec<char>| -> Result<(), Error> {
-					let p = s + d;
+				let mut append = |s: u32, ix: &Vec<char>| -> Result<(), Error> {
+					let p = (s as usize) + d;
 					if p > l {
 						return Err(Error::HighlightError(format!(
 							"position overflow: {s} - len: {l}"
@@ -81,8 +81,8 @@ impl TryFrom<Highlighter> for Value {
 				};
 
 				for (s, e) in m {
-					append(*s as usize, &hl.prefix)?;
-					append(*e as usize, &hl.suffix)?;
+					append(*s, &hl.prefix)?;
+					append(*e, &hl.suffix)?;
 				}
 
 				let s: String = v.iter().collect();
