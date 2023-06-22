@@ -11,7 +11,6 @@ use reqwest::Method;
 use crate::fnc::script::fetch::{
 	body::Body,
 	classes::{BlobClass, HeadersClass},
-	util::ascii_equal_ignore_case,
 	RequestError,
 };
 
@@ -276,31 +275,31 @@ impl RequestInit {
 
 // Normalize method string according to spec.
 fn normalize_method(ctx: Ctx<'_>, m: String) -> Result<Method> {
-	if ascii_equal_ignore_case(m.as_bytes(), b"CONNECT")
-		|| ascii_equal_ignore_case(m.as_bytes(), b"TRACE")
-		|| ascii_equal_ignore_case(m.as_bytes(), b"TRACK")
+	if m.as_bytes().eq_ignore_ascii_case(b"CONNECT")
+		|| m.as_bytes().eq_ignore_ascii_case(b"TRACE")
+		|| m.as_bytes().eq_ignore_ascii_case(b"TRACK")
 	{
 		//methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
 		return Err(Exception::throw_type(ctx, &format!("method {m} is forbidden")));
 	}
 
 	// The following methods must be uppercased to the default case insensitive equivalent.
-	if ascii_equal_ignore_case(m.as_bytes(), b"DELETE") {
+	if m.as_bytes().eq_ignore_ascii_case(b"DELETE") {
 		return Ok(Method::DELETE);
 	}
-	if ascii_equal_ignore_case(m.as_bytes(), b"GET") {
+	if m.as_bytes().eq_ignore_ascii_case(b"GET") {
 		return Ok(Method::GET);
 	}
-	if ascii_equal_ignore_case(m.as_bytes(), b"HEAD") {
+	if m.as_bytes().eq_ignore_ascii_case(b"HEAD") {
 		return Ok(Method::HEAD);
 	}
-	if ascii_equal_ignore_case(m.as_bytes(), b"OPTIONS") {
+	if m.as_bytes().eq_ignore_ascii_case(b"OPTIONS") {
 		return Ok(Method::OPTIONS);
 	}
-	if ascii_equal_ignore_case(m.as_bytes(), b"POST") {
+	if m.as_bytes().eq_ignore_ascii_case(b"POST") {
 		return Ok(Method::POST);
 	}
-	if ascii_equal_ignore_case(m.as_bytes(), b"PUT") {
+	if m.as_bytes().eq_ignore_ascii_case(b"PUT") {
 		return Ok(Method::PUT);
 	}
 
