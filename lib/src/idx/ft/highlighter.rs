@@ -32,17 +32,17 @@ impl Highlighter {
 		self.offseter.highlight(os);
 	}
 
-	fn extract(val: Value, vals: &mut Vec<Option<String>>) {
+	fn extract(val: Value, vals: &mut Vec<String>) {
 		match val {
-			Value::Strand(s) => vals.push(Some(s.0)),
-			Value::Number(n) => vals.push(Some(n.to_string())),
-			Value::Bool(b) => vals.push(Some(b.to_string())),
+			Value::Strand(s) => vals.push(s.0),
+			Value::Number(n) => vals.push(n.to_string()),
+			Value::Bool(b) => vals.push(b.to_string()),
 			Value::Array(a) => {
 				for v in a.0 {
 					Self::extract(v, vals);
 				}
 			}
-			_ => vals.push(None),
+			_ => {}
 		}
 	}
 }
@@ -60,24 +60,35 @@ impl TryFrom<Highlighter> for Value {
 		}
 		let mut res = Vec::with_capacity(vals.len());
 		for (idx, val) in vals.into_iter().enumerate() {
-			let idx = idx as u32;
-			if let Some(v) = val {
-				if let Some(m) = hl.offseter.offsets.get(&idx) {
-					let mut v: Vec<char> = v.chars().collect();
-					let mut d = 0;
-					for (s, e) in m {
-						let p = (*s as usize) + d;
-						v.splice(p..p, hl.prefix.clone());
-						d += hl.prefix.len();
-						let p = (*e as usize) + d;
-						v.splice(p..p, hl.suffix.clone());
-						d += hl.suffix.len();
+			if let Some(m) = hl.offseter.offsets.get(&(idx as u32)) {
+				let mut v: Vec<char> = val.chars().collect();
+				let mut l = v.len();
+				let mut d = 0;
+
+				// We use a closure to append the prefix and the suffix
+				let mut append = |s: usize, ix: &Vec<char>| -> Result<(), Error> {
+					let p = s + d;
+					if p > l {
+						return Err(Error::HighlightError(format!(
+							"position overflow: {s} - len: {l}"
+						)));
 					}
-					let s: String = v.iter().collect();
-					res.push(Value::from(s));
-				} else {
-					res.push(Value::from(v));
+					v.splice(p..p, ix.clone());
+					let xl = ix.len();
+					d += xl;
+					l += xl;
+					Ok(())
+				};
+
+				for (s, e) in m {
+					append(*s as usize, &hl.prefix)?;
+					append(*e as usize, &hl.suffix)?;
 				}
+
+				let s: String = v.iter().collect();
+				res.push(Value::from(s));
+			} else {
+				res.push(Value::from(val));
 			}
 		}
 		Ok(match res.len() {
