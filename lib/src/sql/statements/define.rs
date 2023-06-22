@@ -51,6 +51,7 @@ pub enum DefineStatement {
 	Function(DefineFunctionStatement),
 	Analyzer(DefineAnalyzerStatement),
 	Login(DefineLoginStatement),
+	User(DefineUserStatement),
 	Token(DefineTokenStatement),
 	Scope(DefineScopeStatement),
 	Param(DefineParamStatement),
@@ -73,7 +74,11 @@ impl DefineStatement {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			// DEFINE LOGIN has been deprecated. Use DEFINE USER instead
+			Self::Login(_) => Err(Error::Deprecated(
+				"DEFINE LOGIN is no longer supported. Use DEFINE USER instead".to_string(),
+			)),
+			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -93,6 +98,7 @@ impl Display for DefineStatement {
 			Self::Database(v) => Display::fmt(v, f),
 			Self::Function(v) => Display::fmt(v, f),
 			Self::Login(v) => Display::fmt(v, f),
+			Self::User(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
 			Self::Param(v) => Display::fmt(v, f),
@@ -111,6 +117,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(database, DefineStatement::Database),
 		map(function, DefineStatement::Function),
 		map(login, DefineStatement::Login),
+		map(user, DefineStatement::User),
 		map(token, DefineStatement::Token),
 		map(scope, DefineStatement::Scope),
 		map(param, DefineStatement::Param),
@@ -421,50 +428,6 @@ pub struct DefineLoginStatement {
 	pub code: String,
 }
 
-impl DefineLoginStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
-	) -> Result<Value, Error> {
-		match self.base {
-			Base::Ns => {
-				// Selected DB?
-				opt.needs(Level::Ns)?;
-				// Allowed to run?
-				opt.check(Level::Kv)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Process the statement
-				let key = crate::key::namespace::lg::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Ns)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Process the statement
-				let key = crate::key::database::lg::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			_ => unreachable!(),
-		}
-	}
-}
-
 impl Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, quote_str(&self.hash))
@@ -534,6 +497,138 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct DefineUserStatement {
+	pub name: Ident,
+	pub base: Base,
+	pub hash: String,
+	pub code: String,
+}
+
+impl DefineUserStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		match self.base {
+			Base::Kv => {
+				// Only KV users can create new KV users
+				opt.check(Level::Kv)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::root::us::new(&self.name);
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
+				// Only KV users can create new NS users
+				opt.check(Level::Kv)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Only NS users can create new DB users
+				opt.check(Level::Ns)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			// Other levels are not supported
+			_ => Err(Error::QueryPermissions),
+		}
+	}
+}
+
+impl Display for DefineUserStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE USER {} ON {} PASSHASH {}", self.name, self.base, quote_str(&self.hash))
+	}
+}
+
+fn user(i: &str) -> IResult<&str, DefineUserStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("USER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, base) = base(i)?;
+	let (i, opts) = user_opts(i)?;
+	Ok((
+		i,
+		DefineUserStatement {
+			name,
+			base,
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
+			hash: match opts {
+				DefineUserOption::Passhash(v) => v,
+				DefineUserOption::Password(v) => Argon2::default()
+					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
+					.unwrap()
+					.to_string(),
+			},
+		},
+	))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DefineUserOption {
+	Password(String),
+	Passhash(String),
+}
+
+fn user_opts(i: &str) -> IResult<&str, DefineUserOption> {
+	alt((user_pass, user_hash))(i)
+}
+
+fn user_pass(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PASSWORD")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = strand_raw(i)?;
+	Ok((i, DefineUserOption::Password(v)))
+}
+
+fn user_hash(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PASSHASH")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = strand_raw(i)?;
+	Ok((i, DefineUserOption::Passhash(v)))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -596,7 +691,8 @@ impl DefineTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => unreachable!(),
+			// Other levels are not supported
+			_ => Err(Error::QueryPermissions),
 		}
 	}
 }

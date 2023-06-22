@@ -1,4 +1,5 @@
 mod parse;
+
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -24,6 +25,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -51,6 +53,7 @@ async fn define_statement_database() -> Result<(), Error> {
 			databases: { test: 'DEFINE DATABASE test' },
 			logins: {},
 			tokens: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -86,6 +89,7 @@ async fn define_statement_function() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -117,6 +121,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -148,6 +153,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -183,6 +189,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -214,6 +221,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1056,7 +1064,8 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: {}
+			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1118,6 +1127,395 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_kv() -> Result<(), Error> {
+	let sql = "
+		DEFINE USER test ON KV PASSWORD 'test';
+
+		INFO FOR KV;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
+
+	assert!(define_str
+		.strip_prefix("\"")
+		.unwrap()
+		.starts_with("DEFINE USER test ON KV PASSHASH '$argon2id$"));
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_ns() -> Result<(), Error> {
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		DEFINE USER test ON NS PASSWORD 'test';
+		
+		INFO FOR USER test;
+		INFO FOR USER test ON NS;
+		INFO FOR USER test ON NAMESPACE;
+		INFO FOR USER test ON KV;
+	";
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+
+	assert!(res[1].result.is_ok());
+	assert!(res[2].result.is_ok());
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert_eq!(
+		res[5].result.as_ref().unwrap_err().to_string(),
+		"The root user 'test' does not exist"
+	); // User doesn't exist at the NS level
+
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON NS PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_db() -> Result<(), Error> {
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test ON DB PASSWORD 'test';
+		
+		INFO FOR USER test;
+		INFO FOR USER test ON DB;
+		INFO FOR USER test ON DATABASE;
+		INFO FOR USER test ON NS;
+	";
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+
+	assert!(res[2].result.is_ok());
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert!(res[5].result.is_ok());
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"The user 'test' does not exist in the namespace 'ns'"
+	); // User doesn't exist at the NS level
+
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON DB PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_check_permissions_kv() -> Result<(), Error> {
+	//
+	// Check permissions using a KV session
+	//
+
+	let sql = [
+		// Create users
+		"DEFINE USER test_kv ON KV PASSWORD 'test';
+		
+		USE NS ns;
+		DEFINE USER test_ns ON NS PASSWORD 'test';
+		
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test_db ON DB PASSWORD 'test';",
+		// Query users
+		"INFO FOR USER test_kv ON KV;
+			
+		USE NS ns;
+		INFO FOR USER test_ns;
+		INFO FOR USER test_kv ON KV;
+		
+		USE NS ns;
+		USE DB db;
+		INFO FOR USER test_db;
+		INFO FOR USER test_ns ON NS;
+		INFO FOR USER test_kv ON KV;",
+	];
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+
+	// Create users
+	let res = &mut dbs.execute(&sql[0], &ses, None).await?;
+	assert!(res[0].result.is_ok());
+	assert!(res[1].result.is_ok());
+	assert!(res[2].result.is_ok());
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert!(res[5].result.is_ok());
+
+	// Query users
+	let res = &mut dbs.execute(&sql[1], &ses, None).await?;
+
+	assert!(res[0]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+	assert!(res[6]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[7]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[8]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_kv ON KV PASSHASH '$argon2id$"));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_check_permissions_ns() -> Result<(), Error> {
+	//
+	// Check permissions using a NS session
+	//
+	let sql = [
+		// Create users
+		"DEFINE USER test_kv ON KV PASSWORD 'test';
+		
+		USE NS ns;
+		DEFINE USER test_ns ON NS PASSWORD 'test';
+		
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test_db ON DB PASSWORD 'test';",
+		// Query users
+		"INFO FOR USER test_kv ON KV;
+		INFO FOR USER test_ns;
+		INFO FOR USER test_ns ON NS;
+		
+		USE DB db;
+		INFO FOR USER test_db;
+		INFO FOR USER test_ns ON NS;
+		INFO FOR USER test_kv ON KV;",
+	];
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_ns("ns");
+
+	// Test create users with the NS sessions
+	let res = &mut dbs.execute(&sql[0], &ses, None).await?;
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't create KV users
+	assert!(res[1].result.is_ok());
+	assert_eq!(
+		res[2].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't create NS users
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert!(res[5].result.is_ok());
+
+	// Prepare datastore
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+	let _ = &mut dbs.execute(&sql[0], &ses, None).await?;
+
+	// Test query users with the NS session
+	let ses = Session::for_ns("ns");
+	let res = &mut dbs.execute(&sql[1], &ses, None).await?;
+
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't query KV users
+	assert!(res[1]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_ns ON NAMESPACE PASSHASH '$argon2id$"));
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // NS users can't query KV users
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_check_permissions_db() -> Result<(), Error> {
+	//
+	// Check permissions using a DB session
+	//
+	let sql = [
+		// Create users
+		"DEFINE USER test_kv ON KV PASSWORD 'test';
+		
+		USE NS ns;
+		DEFINE USER test_ns ON NS PASSWORD 'test';
+		
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test_db ON DB PASSWORD 'test';",
+		// Query users
+		"INFO FOR USER test_kv ON KV;
+		INFO FOR USER test_ns ON NS;
+		INFO FOR USER test_db;
+		INFO FOR USER test_db ON DB;",
+	];
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_db("ns", "db");
+
+	// Test create users with the NS sessions
+	let res = &mut dbs.execute(&sql[0], &ses, None).await?;
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create KV users
+	assert!(res[1].result.is_ok());
+	assert_eq!(
+		res[2].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create NS users
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert_eq!(
+		res[5].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't create DB users
+
+	// Prepare datastore
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv();
+	let _ = &mut dbs.execute(&sql[0], &ses, None).await?;
+
+	// Test query users with the NS session
+	let ses = Session::for_db("ns", "db");
+	let res = &mut dbs.execute(&sql[1], &ses, None).await?;
+
+	assert_eq!(
+		res[0].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't query KV users
+	assert_eq!(
+		res[1].result.as_ref().unwrap_err().to_string(),
+		"You don't have permission to perform this query type"
+	); // DB users can't query NS users
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test_db ON DATABASE PASSHASH '$argon2id$"));
 
 	Ok(())
 }

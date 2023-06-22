@@ -11,6 +11,7 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::key::root::hb::Hb;
+use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
@@ -49,6 +50,8 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
+	auth_enabled: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -245,6 +248,7 @@ impl Datastore {
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
+			auth_enabled: false,
 		})
 	}
 
@@ -264,6 +268,43 @@ impl Datastore {
 	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
 		self
+	}
+
+	/// Enabled authentication for this Datastore?
+	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
+		self.auth_enabled = enabled;
+		self
+	}
+
+	pub fn is_auth_enabled(&self) -> bool {
+		self.auth_enabled
+	}
+
+	// Setup the initial credentials
+	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+		let mut txn = self.transaction(false, false).await?;
+
+		match txn.all_kv_users().await {
+			Ok(val) if val.is_empty() => {
+				warn!(
+					"No root users found, create the initial user '{}'.", creds.username
+				);
+
+				let sql = format!(
+					"DEFINE USER {user} ON KV PASSWORD '{pass}'",
+					user = creds.username,
+					pass = creds.password
+				);
+				let sess = Session::for_kv();
+				self.execute(&sql, &sess, None).await?;
+				Ok(())
+			}
+			Ok(_) => {
+				warn!("Root users found, don't create the initial user.");
+				Ok(())
+			}
+			Err(e) => Err(e.into()),
+		}
 	}
 
 	/// Set a global transaction timeout for this Datastore

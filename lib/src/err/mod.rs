@@ -27,6 +27,10 @@ pub enum Error {
 	#[error("The database encountered unreachable logic")]
 	Unreachable,
 
+	/// Statement has been deprecated
+	#[error("{0}")]
+	Deprecated(String),
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),
@@ -167,6 +171,12 @@ pub enum Error {
 		message: String,
 	},
 
+	/// Invalid level value
+	#[error("Level '{level}' is not valid")]
+	InvalidLevel {
+		level: String,
+	},
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -301,6 +311,27 @@ pub enum Error {
 	#[error("The index '{value}' does not exist")]
 	IxNotFound {
 		value: String,
+	},
+
+	/// The requested root user does not exist
+	#[error("The root user '{value}' does not exist")]
+	UserKvNotFound {
+		value: String,
+	},
+
+	/// The requested namespace user does not exist
+	#[error("The user '{value}' does not exist in the namespace '{ns}'")]
+	UserNsNotFound {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user does not exist
+	#[error("The user '{value}' does not exist in the database '{db}'")]
+	UserDbNotFound {
+		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// Unable to perform the realtime query
@@ -453,11 +484,11 @@ pub enum Error {
 	TryFrom(String, &'static str),
 
 	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request")]
+	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
 	/// There was an error processing a value in parallel
-	#[error("There was an error processing a value in parallel")]
+	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
 	/// Represents an underlying error with Serde encoding / decoding

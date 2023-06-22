@@ -4,12 +4,12 @@ use clap::Args;
 pub(crate) struct AuthArguments {
 	#[arg(help = "Database authentication username to use when connecting")]
 	#[arg(env = "SURREAL_USER", short = 'u', long = "username", visible_alias = "user")]
-	#[arg(default_value = "root")]
-	pub(crate) username: String,
+	#[arg(default_value = None)]
+	pub(crate) username: Option<String>,
 	#[arg(help = "Database authentication password to use when connecting")]
-	#[arg(short = 'p', long = "password", visible_alias = "pass")]
-	#[arg(env = "SURREAL_PASS", default_value = "root")]
-	pub(crate) password: String,
+	#[arg(env = "SURREAL_PASS", short = 'p', long = "password", visible_alias = "pass")]
+	#[arg(default_value = None)]
+	pub(crate) password: Option<String>,
 }
 
 #[derive(Args, Debug)]

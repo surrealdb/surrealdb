@@ -85,6 +85,13 @@ pub(crate) fn router(
 ) {
 	spawn_local(async move {
 		let url = address.endpoint;
+		let configured_root = match address.auth {
+			Level::Kv => Some(Root {
+				username: &address.username,
+				password: &address.password,
+			}),
+			_ => None,
+		};
 
 		let path = match url.scheme() {
 			"mem" => "memory",
@@ -93,8 +100,16 @@ pub(crate) fn router(
 
 		let kvs = match Datastore::new(path).await {
 			Ok(kvs) => {
+				// If a root user is specified, setup the initial datastore credentials
+				if let Some(root) = configured_root {
+					if let Err(error) = kvs.setup_initial_creds(root).await {
+						let _ = conn_tx.into_send_async(Err(error.into())).await;
+						return;
+					}
+				}
+
 				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs
+				kvs.auth(configured_root.is_some())
 			}
 			Err(error) => {
 				let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -114,24 +129,18 @@ pub(crate) fn router(
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
-		let configured_root = match address.auth {
-			Level::Kv => Some(Root {
-				username: &address.username,
-				password: &address.password,
-			}),
-			_ => None,
-		};
-		let mut session = if configured_root.is_some() {
-			// If a root user is specified, lock down the database
+
+		let mut session = if kvs.is_auth_enabled() {
+			// If auth is enabled, lock down the database
 			Session::default()
 		} else {
-			// If no root user is specified, the database should be open
+			// If auth is disabled, the database should be open
+			warn!("Authentication is disabled");
 			Session::for_kv()
 		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &configured_root, &mut session, &mut vars)
-				.await
+			match super::router(route.request, &kvs, &mut session, &mut vars).await
 			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;

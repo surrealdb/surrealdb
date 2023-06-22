@@ -43,7 +43,7 @@ pub async fn sc(
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied NS Login exists
+	// Check if the supplied Scope login exists
 	match tx.get_sc(&ns, &db, &sc).await {
 		Ok(sv) => {
 			match sv.signup {
