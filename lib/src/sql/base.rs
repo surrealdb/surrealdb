@@ -1,3 +1,4 @@
+use crate::dbs::Level;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -32,12 +33,24 @@ impl fmt::Display for Base {
 	}
 }
 
+impl Base {
+	pub fn to_level(&self) -> Level {
+		match self {
+			Self::Ns => Level::Ns,
+			Self::Db => Level::Db,
+			Self::Sc(_) => Level::Sc,
+			Self::Kv => Level::Kv,
+		}
+	}
+}
+
 pub fn base(i: &str) -> IResult<&str, Base> {
 	alt((
 		map(tag_no_case("NAMESPACE"), |_| Base::Ns),
 		map(tag_no_case("DATABASE"), |_| Base::Db),
 		map(tag_no_case("NS"), |_| Base::Ns),
 		map(tag_no_case("DB"), |_| Base::Db),
+		map(tag_no_case("KV"), |_| Base::Kv),
 	))(i)
 }
 
@@ -47,6 +60,7 @@ pub fn base_or_scope(i: &str) -> IResult<&str, Base> {
 		map(tag_no_case("DATABASE"), |_| Base::Db),
 		map(tag_no_case("NS"), |_| Base::Ns),
 		map(tag_no_case("DB"), |_| Base::Db),
+		map(tag_no_case("KV"), |_| Base::Kv),
 		|i| {
 			let (i, _) = tag_no_case("SCOPE")(i)?;
 			let (i, _) = shouldbespace(i)?;

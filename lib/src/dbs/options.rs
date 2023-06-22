@@ -305,6 +305,17 @@ impl Options {
 		}
 	}
 
+	/// Level selected by the user
+	///
+	/// The selected level doesn't imply the user has been authorized to access it.
+	pub fn selected_level(&self) -> Level {
+		match (self.ns.as_ref(), self.db.as_ref()) {
+			(_, Some(_)) => Level::Db,
+			(Some(_), None) => Level::Ns,
+			(None, None) => Level::Kv,
+		}
+	}
+
 	/// Create a new Options object for a function/subquery/future/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the

@@ -51,7 +51,7 @@ async fn api() {
 		.unwrap();
 
 	// signin
-	let _: () = DB
+	let _: Jwt = DB
 		.signin(Root {
 			username: "root",
 			password: "root",

@@ -12,7 +12,7 @@ use axum::{
 use futures_util::future::BoxFuture;
 use http::{header, request::Parts, StatusCode};
 use hyper::{Request, Response};
-use surrealdb::{dbs::Session, iam::verify::token};
+use surrealdb::{dbs::Session, iam::verify::{token, basic}};
 use tower_http::{
 	auth::AsyncAuthorizeRequest,
 	request_id::RequestId,
@@ -20,7 +20,7 @@ use tower_http::{
 };
 use tracing::{field, Level, Span};
 
-use crate::{dbs::DB, err::Error, iam::verify::basic};
+use crate::{dbs::DB, err::Error};
 
 use super::{client_ip::ExtractClientIP, AppState};
 
@@ -102,9 +102,9 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
-		basic(&mut session, au.username(), au.password()).await
+		basic(kvs, &mut session, au.username(), au.password()).await.map_err(|e| e.into())
 	} else if let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
-		token(kvs, &mut session, au.token().into()).await.map_err(|e| e.into())
+		token(kvs, &mut session, au.token()).await.map_err(|e| e.into())
 	} else {
 		Err(Error::InvalidAuth)
 	}?;

@@ -35,6 +35,7 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
+	User(RemoveUserStatement),
 }
 
 impl RemoveStatement {
@@ -59,6 +60,7 @@ impl RemoveStatement {
 			Self::Field(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn).await,
+			Self::User(ref v) => v.compute(ctx, opt, txn).await,
 		}
 	}
 }
@@ -78,6 +80,7 @@ impl Display for RemoveStatement {
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
+			Self::User(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -96,6 +99,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(field, RemoveStatement::Field),
 		map(index, RemoveStatement::Index),
 		map(analyzer, RemoveStatement::Analyzer),
+		map(user, RemoveStatement::User),
 	))(i)
 }
 
@@ -823,6 +827,93 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
+pub struct RemoveUserStatement {
+	pub name: Ident,
+	pub base: Base,
+}
+
+impl RemoveUserStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Value, Error> {
+		match self.base {
+			Base::Kv => {
+				// Only KV users can delete KV users
+				opt.check(Level::Kv)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::root::us::new(&self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
+				// Only KV users can delete NS users
+				opt.check(Level::Kv)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Delete the definition
+				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Only NS users can delete DB users
+				opt.check(Level::Ns)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Delete the definition
+				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl Display for RemoveUserStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE USER {} ON {}", self.name, self.base)
+	}
+}
+
+fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("USER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, base) = base(i)?;
+	Ok((
+		i,
+		RemoveUserStatement {
+			name,
+			base,
 		},
 	))
 }

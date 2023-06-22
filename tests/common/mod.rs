@@ -91,6 +91,7 @@ pub fn tmp_file(name: &str) -> String {
 }
 
 pub async fn start_server(
+	auth: bool,
 	tls: bool,
 	wait_is_ready: bool,
 ) -> Result<(String, Child), Box<dyn Error>> {
@@ -110,6 +111,10 @@ pub async fn start_server(
 		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
 
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
+	}
+
+	if auth {
+		extra_args.push_str(format!(" --auth").as_str());
 	}
 
 	let start_args = format!("start --bind {addr} memory --no-banner --log info --user {USER} --pass {PASS} {extra_args}");

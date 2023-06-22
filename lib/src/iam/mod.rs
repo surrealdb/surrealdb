@@ -7,3 +7,4 @@ pub mod token;
 pub mod verify;
 
 pub const TOKEN: &str = "Bearer ";
+pub const BASIC: &str = "Basic ";

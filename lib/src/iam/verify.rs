@@ -1,11 +1,16 @@
 use crate::dbs::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::error;
 use crate::iam::token::Claims;
-use crate::iam::TOKEN;
 use crate::kvs::Datastore;
+use crate::sql;
+use crate::sql::statements::DefineUserStatement;
 use crate::sql::Algorithm;
 use crate::sql::Value;
+use argon2::Argon2;
+use argon2::PasswordHash;
+use argon2::PasswordVerifier;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
@@ -78,31 +83,54 @@ static DUD: Lazy<Validation> = Lazy::new(|| {
 	validation
 });
 
-pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Result<(), Error> {
+pub async fn basic(kvs: &Datastore, session: &mut Session, user: &str, pass: &str) -> Result<(), Error> {
+	// Log the authentication type
+	trace!("Attempting basic authentication");
+
+	match verify_creds(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
+		Ok((au, _)) if au.is_kv() => {
+			debug!("Authenticated as root user '{}'", user);
+			session.au = Arc::new(au);
+			Ok(())
+		}
+		Ok((au, _)) if au.is_ns() => {
+			debug!("Authenticated as namespace user '{}'", user);
+			session.au = Arc::new(au);
+			Ok(())
+		}
+		Ok((au, _)) if au.is_db() => {
+			debug!("Authenticated as database user '{}'", user);
+			session.au = Arc::new(au);
+			Ok(())
+		}
+		Ok(_) => Err(Error::InvalidAuth),
+		Err(e) => Err(e),
+	}
+}
+
+pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
-	// Retrieve just the auth data
-	let auth = auth.trim_start_matches(TOKEN).trim();
 	// Decode the token without verifying
-	let token = decode::<Claims>(auth, &KEY, &DUD)?;
+	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Parse the token and catch any errors
-	let value = super::parse::parse(auth)?;
+	let value = super::parse::parse(token)?;
 	// Check if the auth token can be used
-	if let Some(nbf) = token.claims.nbf {
+	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
 			trace!("The 'nbf' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
-	if let Some(exp) = token.claims.exp {
+	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
 			trace!("The 'exp' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check the token authentication claims
-	match token.claims {
+	match token_data.claims {
 		// Check if this is scope token authentication
 		Claims {
 			ns: Some(ns),
@@ -118,14 +146,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
 			let id = match id {
-				Some(id) => crate::sql::thing(&id)?.into(),
+				Some(id) => sql::thing(&id)?.into(),
 				None => Value::None,
 			};
 			// Get the scope token
 			let de = tx.get_st(&ns, &db, &sc, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to scope `{}` with token `{}`", sc, tk);
 			// Set the session
@@ -150,12 +178,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
-			let id = crate::sql::thing(&id)?;
+			let id = sql::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to scope `{}`", sc);
 			// Set the session
@@ -182,7 +210,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			let de = tx.get_dt(&ns, &db, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to database `{}` with token `{}`", db, tk);
 			// Set the session
@@ -200,16 +228,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!("Authenticating to database `{}` with login `{}`", db, id);
+			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
-			// Get the database login
-			let de = tx.get_dl(&ns, &db, &id).await?;
+			// Get the database user
+			let de = tx.get_db_user(&ns, &db, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to database `{}` with login `{}`", db, id);
+			debug!("Authenticated to database `{}` with user `{}`", db, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -231,7 +259,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			let de = tx.get_nt(&ns, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
 			trace!("Authenticated to namespace `{}` with token `{}`", ns, tk);
 			// Set the session
@@ -247,16 +275,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!("Authenticating to namespace `{}` with login `{}`", ns, id);
+			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
-			// Get the namespace login
-			let de = tx.get_nl(&ns, &id).await?;
+			// Get the namespace user
+			let de = tx.get_ns_user(&ns, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
-			decode::<Claims>(auth, &cf.0, &cf.1)?;
+			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
-			trace!("Authenticated to namespace `{}` with login `{}`", ns, id);
+			trace!("Authenticated to namespace `{}` with user `{}`", ns, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -265,5 +293,298 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 		}
 		// There was an auth error
 		_ => Err(Error::InvalidAuth),
+	}
+}
+
+pub async fn verify_creds(
+	ds: &Datastore,
+	ns: Option<&String>,
+	db: Option<&String>,
+	user: &str,
+	pass: &str,
+) -> Result<(Auth, DefineUserStatement), Error> {
+	if user.is_empty() || pass.is_empty() {
+		return Err(Error::InvalidAuth);
+	}
+
+	// TODO(sgirones): Keep the same behaviour as before, where it would try to authenticate as a KV first, then NS and then DB.
+	// In the future, we want the client to specify the type of user it wants to authenticate as, so we can remove this chain.
+
+	// Try to authenticate as a KV user
+	match verify_kv_creds(ds, user, pass).await {
+		Ok(u) => Ok((Auth::Kv, u)),
+		Err(_) => {
+			// Try to authenticate as a NS user
+			match ns {
+				Some(ns) => {
+					match verify_ns_creds(ds, ns, user, pass).await {
+						Ok(u) => Ok((Auth::Ns(ns.to_owned()), u)),
+						Err(_) => {
+							// Try to authenticate as a DB user
+							match db {
+								Some(db) => match verify_db_creds(ds, ns, db, user, pass).await {
+									Ok(u) => Ok((Auth::Db(ns.to_owned(), db.to_owned()), u)),
+									Err(_) => Err(Error::InvalidAuth),
+								},
+								None => Err(Error::InvalidAuth),
+							}
+						}
+					}
+				}
+				None => Err(Error::InvalidAuth),
+			}
+		}
+	}
+}
+
+async fn verify_kv_creds(
+	ds: &Datastore,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
+	let mut tx = ds.transaction(false, false).await?;
+	let user_res = tx.get_kv_user(user).await?;
+
+	verify_pass(pass, user_res.hash.as_ref())?;
+
+	Ok(user_res)
+}
+
+async fn verify_ns_creds(
+	ds: &Datastore,
+	ns: &str,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
+	let mut tx = ds.transaction(false, false).await?;
+
+	let user_res = match tx.get_ns_user(ns, user).await {
+		Ok(u) => Ok(u),
+		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
+		// If the USER resource is not found in the namespace, try to find the LOGIN resource
+		Err(error::Db::UserNsNotFound {
+			ns: _,
+			value: _,
+		}) => match tx.get_nl(ns, user).await {
+			Ok(u) => Ok(DefineUserStatement {
+				base: u.base,
+				name: u.name,
+				hash: u.hash,
+				code: u.code,
+			}),
+			Err(e) => Err(e),
+		},
+		Err(e) => Err(e),
+	}?;
+
+	verify_pass(pass, user_res.hash.as_ref())?;
+
+	Ok(user_res)
+}
+
+async fn verify_db_creds(
+	ds: &Datastore,
+	ns: &str,
+	db: &str,
+	user: &str,
+	pass: &str,
+) -> Result<DefineUserStatement, Error> {
+	let mut tx = ds.transaction(false, false).await?;
+
+	let user_res = match tx.get_db_user(ns, db, user).await {
+		Ok(u) => Ok(u),
+		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
+		// If the USER resource is not found in the database, try to find the LOGIN resource
+		Err(error::Db::UserDbNotFound {
+			ns: _,
+			db: _,
+			value: _,
+		}) => match tx.get_dl(ns, db, user).await {
+			Ok(u) => Ok(DefineUserStatement {
+				base: u.base,
+				name: u.name,
+				hash: u.hash,
+				code: u.code,
+			}),
+			Err(e) => Err(e),
+		},
+		Err(e) => Err(e),
+	}?;
+
+	verify_pass(pass, user_res.hash.as_ref())?;
+
+	Ok(user_res)
+}
+
+fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
+	// Compute the hash and verify the password
+	let hash = PasswordHash::new(hash.as_ref()).unwrap();
+	// Attempt to verify the password using Argon2
+	match Argon2::default().verify_password(pass.as_ref(), &hash) {
+		Ok(_) => Ok(()),
+		// The password did not verify
+		_ => Err(Error::InvalidAuth),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{kvs::Datastore, sql::Base};
+	use argon2::password_hash::{PasswordHasher, SaltString};
+
+	#[tokio::test]
+	async fn basic() {}
+
+	#[tokio::test]
+	async fn token() {}
+
+	#[test]
+	fn test_verify_pass() {
+		let salt = SaltString::generate(&mut rand::thread_rng());
+		let hash = Argon2::default().hash_password("test".as_bytes(), &salt).unwrap().to_string();
+
+		// Verify with the matching password
+		assert!(verify_pass("test", &hash).is_ok());
+
+		// Verify with a non matching password
+		assert!(verify_pass("nonmatching", &hash).is_err());
+	}
+
+	#[tokio::test]
+	async fn test_verify_creds_invalid() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ns = "N".to_string();
+		let db = "D".to_string();
+
+		// Reject empty username or password
+		{
+			assert!(verify_creds(&ds, None, None, "", "").await.is_err());
+			assert!(verify_creds(&ds, None, None, "test", "").await.is_err());
+			assert!(verify_creds(&ds, None, None, "", "test").await.is_err());
+		}
+
+		// Reject invalid KV credentials
+		{
+			assert!(verify_creds(&ds, None, None, "test", "test").await.is_err());
+		}
+
+		// Reject invalid NS credentials
+		{
+			assert!(verify_creds(&ds, Some(&ns), None, "test", "test").await.is_err());
+		}
+
+		// Reject invalid DB credentials
+		{
+			assert!(verify_creds(&ds, Some(&ns), Some(&db), "test", "test").await.is_err());
+		}
+	}
+
+	#[tokio::test]
+	async fn test_verify_creds_valid() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ns = "N".to_string();
+		let db = "D".to_string();
+
+		// Define users
+		{
+			let sess = Session::for_kv();
+
+			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+
+			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+
+			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+		}
+
+		// Accept KV user
+		{
+			let res = verify_creds(&ds, None, None, "kv", "kv").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Kv);
+			assert_eq!(user.base, Base::Kv);
+			assert_eq!(user.name.to_string(), "kv");
+		}
+
+		// Accept NS user
+		{
+			let res = verify_creds(&ds, Some(&ns), None, "ns", "ns").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Ns(ns.to_owned()));
+			assert_eq!(user.base, Base::Ns);
+			assert_eq!(user.name.to_string(), "ns");
+		}
+
+		// Accept DB user
+		{
+			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Db(ns.to_owned(), db.to_owned()));
+			assert_eq!(user.base, Base::Db);
+			assert_eq!(user.name.to_string(), "db");
+		}
+	}
+
+	#[tokio::test]
+	async fn test_verify_creds_chain() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ns = "N".to_string();
+		let db = "D".to_string();
+
+		// Define users
+		{
+			let sess = Session::for_kv();
+
+			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+
+			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+
+			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
+			ds.execute(&sql, &sess, None).await.unwrap();
+		}
+
+		// Accept KV user even with NS and DB defined
+		{
+			let res = verify_creds(&ds, Some(&ns), Some(&db), "kv", "kv").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Kv);
+			assert_eq!(user.base, Base::Kv);
+			assert_eq!(user.name.to_string(), "kv");
+		}
+
+		// Accept NS user even with DB defined
+		{
+			let res = verify_creds(&ds, Some(&ns), Some(&db), "ns", "ns").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Ns(ns.to_owned()));
+			assert_eq!(user.base, Base::Ns);
+			assert_eq!(user.name.to_string(), "ns");
+		}
+
+		// Accept DB user
+		{
+			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
+			assert!(res.is_ok());
+
+			let (auth, user) = res.unwrap();
+			assert_eq!(auth, Auth::Db(ns.to_owned(), db.to_owned()));
+			assert_eq!(user.base, Base::Db);
+			assert_eq!(user.name.to_string(), "db");
+		}
 	}
 }

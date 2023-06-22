@@ -24,8 +24,6 @@ mod dbs;
 mod env;
 mod err;
 #[cfg(feature = "has-storage")]
-mod iam;
-#[cfg(feature = "has-storage")]
 mod net;
 #[cfg(feature = "has-storage")]
 mod rpc;

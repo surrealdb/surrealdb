@@ -20,7 +20,7 @@ cargo deb
 ## Testing
 
 ```shell
-sudo dpkg -i target/debian/surreal_1.0.0~beta.5_amd64.deb
+sudo dpkg -i target/debian/surreal_1.0.0~beta.9_amd64.deb
 ```
 
 ## Installing
@@ -66,7 +66,7 @@ Below is an example response
       Tasks: 5 (limit: 4605)
      Memory: 3.2M
      CGroup: /system.slice/surreal.service
-             └─23177 /usr/share/surreal/surreal start --log trace --user root --pass root
+             └─23177 /usr/share/surreal/surreal start --log trace
 ```
 
 #### View service logs

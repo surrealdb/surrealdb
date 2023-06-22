@@ -12,7 +12,7 @@ use crate::common::{PASS, USER};
 #[tokio::test]
 #[serial]
 async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/sql");
 
 	// Prepare HTTP client
@@ -58,7 +58,7 @@ async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/sql");
 
 	// Prepare HTTP client
@@ -145,7 +145,7 @@ async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn export_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/export");
 
 	// Prepare HTTP client
@@ -189,7 +189,7 @@ async fn export_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/health");
 
 	let res = Client::default().get(url).send().await?;
@@ -201,7 +201,7 @@ async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/import");
 
 	// Prepare HTTP client
@@ -274,7 +274,7 @@ async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/rpc");
 
 	// Prepare HTTP client
@@ -308,7 +308,7 @@ async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/signin");
 
 	// Prepare HTTP client
@@ -377,7 +377,7 @@ async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/signup");
 
 	// Prepare HTTP client
@@ -436,7 +436,7 @@ async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/sql");
 
 	// Prepare HTTP client
@@ -552,7 +552,7 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/sync");
 
 	// Prepare HTTP client
@@ -586,7 +586,7 @@ async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn version_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/version");
 
 	let res = Client::default().get(url).send().await?;
@@ -628,7 +628,7 @@ async fn seed_table(
 #[tokio::test]
 #[serial]
 async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let num_records = 50;
 	let url = &format!("http://{addr}/key/{table_name}");
@@ -705,7 +705,7 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 
 	// Prepare HTTP client
 	let mut headers = reqwest::header::HeaderMap::new();
@@ -768,7 +768,7 @@ async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let num_records = 10;
 	let url = &format!("http://{addr}/key/{table_name}");
@@ -838,7 +838,7 @@ async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let num_records = 10;
 	let url = &format!("http://{addr}/key/{table_name}");
@@ -908,7 +908,7 @@ async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let num_records = 10;
 	let url = &format!("http://{addr}/key/{table_name}");
@@ -962,7 +962,7 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let url = &format!("http://{addr}/key/{table_name}/1");
 
@@ -1003,7 +1003,7 @@ async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 
 	// Prepare HTTP client
@@ -1100,7 +1100,7 @@ async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let url = &format!("http://{addr}/key/{table_name}/1");
 
@@ -1173,7 +1173,7 @@ async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let url = &format!("http://{addr}/key/{table_name}/1");
 
@@ -1251,7 +1251,7 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let table_name = "table";
 	let base_url = &format!("http://{addr}/key/{table_name}");
 

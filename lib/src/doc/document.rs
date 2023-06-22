@@ -125,16 +125,15 @@ impl<'a> Document<'a> {
 			// The table doesn't exist
 			Err(Error::TbNotFound {
 				value: _,
-			}) => match opt.auth.check(Level::Db) {
+			}) => {
+				opt.check(Level::Db)?;
+
 				// We can create the table automatically
-				true => {
-					run.add_and_cache_ns(opt.ns(), opt.strict).await?;
-					run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
-					run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
-				}
-				// We can't create the table so error
-				false => Err(Error::QueryPermissions),
-			},
+				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
+				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+			}
+
 			// There was an error
 			Err(err) => Err(err),
 			// The table exists

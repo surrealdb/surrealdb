@@ -125,6 +125,7 @@
 "UPDATE"
 "UPPERCASE"
 "USE"
+"USER"
 "VALUE"
 "VALUES"
 "VERSION"
@@ -372,4 +373,3 @@
 "vector::similarity::pearson("
 "vector::similarity::spearman("
 # TODO: Add Javascript keywords
-

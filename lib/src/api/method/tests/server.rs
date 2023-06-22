@@ -1,16 +1,13 @@
-use super::types::Root;
 use super::types::User;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::conn::Route;
-use crate::api::opt::from_value;
 use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::StreamExt;
-use std::mem;
 
 pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 	tokio::spawn(async move {
@@ -48,12 +45,7 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					_ => unreachable!(),
 				},
 				Method::Signup | Method::Signin => match &mut params[..] {
-					[credentials] => match from_value(mem::take(credentials)) {
-						Ok(Root {
-							..
-						}) => Ok(DbResponse::Other(Value::None)),
-						_ => Ok(DbResponse::Other("jwt".to_owned().into())),
-					},
+					[_] => Ok(DbResponse::Other("jwt".to_owned().into())),
 					_ => unreachable!(),
 				},
 				Method::Set => match &params[..] {
