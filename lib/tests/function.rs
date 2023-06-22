@@ -12,7 +12,13 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			assert_eq!(v, Value::parse(*desired_response))
+			let desired_value = Value::parse(*desired_response);
+			assert_eq!(v, desired_value, "Recieved responce did not match \
+	expected.
+	Query responce #{},
+	Desired responce: {desired_value},
+	Actual response: {v}",
+			i + 1);
 		} else {
 			panic!("Response index {i} out of bounds of desired responses.");
 		}
@@ -579,6 +585,39 @@ async fn function_array_len() -> Result<(), Error> {
 	let val = Value::from(6);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_and([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_and([0, 1], []);"#,
+		&["[true, false, false, false]", r#"[1, 0, "false", 0]"#, "[0, null]"]
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_or([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_or([0, 1], []);"#,
+		&["[true, true, true, false]", r#"[1, "true", 1, 0]"#, "[0, 1]"]
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_xor([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_xor([0, 1], []);"#,
+		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"]
+	).await?;
 	Ok(())
 }
 
