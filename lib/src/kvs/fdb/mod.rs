@@ -139,7 +139,7 @@ impl Transaction {
 		match r {
 			Ok(_r) => {}
 			Err(e) => {
-				return Err(Error::Tx(format!("Transaction commit error: {}", e).to_string()));
+				return Err(Error::Tx(format!("Transaction commit error: {}", e)));
 			}
 		}
 		// Continue
@@ -167,7 +167,7 @@ impl Transaction {
 		tx.get(key, self.snapshot())
 			.await
 			.map(|v| v.is_some())
-			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)))
+			.map_err(|e| Error::Tx(format!("Unable to get kv from FoundationDB: {}", e)))
 	}
 	/// Fetch a key from the database
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
@@ -188,12 +188,10 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		let res = tx
-			.get(key, self.snapshot())
+		tx.get(key, self.snapshot())
 			.await
-			.map(|v| v.as_ref().map(|v| Val::from(v.to_vec())))
-			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
-		res
+			.map(|v| v.as_ref().map(|v| v.to_vec()))
+			.map_err(|e| Error::Tx(format!("Unable to get kv from FoundationDB: {}", e)))
 	}
 	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
@@ -288,9 +286,9 @@ impl Transaction {
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
 		let res = tx.get(key, false).await;
-		let res = res.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
+		let res = res.map_err(|e| Error::Tx(format!("Unable to get kv from FoundationDB: {}", e)));
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if Val::from(v.as_ref()) == w => tx.set(key, val),
+			(Ok(Some(v)), Some(w)) if *v.as_ref() == w => tx.set(key, val),
 			(Ok(None), None) => tx.set(key, val),
 			(Err(e), _) => return Err(e),
 			_ => return Err(Error::TxConditionNotMet),
@@ -341,9 +339,12 @@ impl Transaction {
 		// Delete the key
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
-		let res = tx.get(key, false).await.map_err(|e| Error::Tx(format!("FDB tx failure: {}", e)));
+		let res = tx
+			.get(key, false)
+			.await
+			.map_err(|e| Error::Tx(format!("FoundationDB tx failure: {}", e)));
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if Val::from(v.as_ref()) == w => tx.clear(key),
+			(Ok(Some(v)), Some(w)) if *v.as_ref() == w => tx.clear(key),
 			(Ok(None), None) => tx.clear(key),
 			_ => return Err(Error::TxConditionNotMet),
 		};
@@ -365,8 +366,8 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let begin: Vec<u8> = rng.start.into();
-		let end: Vec<u8> = rng.end.into();
+		let begin: Vec<u8> = rng.start;
+		let end: Vec<u8> = rng.end;
 		let opt = foundationdb::RangeOption {
 			limit: Some(limit.try_into().unwrap()),
 			..foundationdb::RangeOption::from((begin.as_slice(), end.as_slice()))
@@ -388,33 +389,9 @@ impl Transaction {
 					res.push(x)
 				}
 				Ok(None) => break,
-				Err(e) => return Err(Error::Tx(format!("GetRanges failed: {}", e).to_string())),
+				Err(e) => return Err(Error::Tx(format!("GetRanges failed: {}", e))),
 			}
 		}
-		return Ok(res);
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::kvs::tests::transaction::verify_transaction_isolation;
-	use std::env;
-	use test_log::test;
-
-	/// This environment variable can be used to set the location of `fdb.cluster` file.
-	/// Eg. for MacOS: `/usr/local/etc/foundationdb/fdb.cluster`
-	const ENV_FDB_PATH: &str = "TEST_FDB_PATH";
-
-	/// The default FDB_PATH is the usual path for Linux.
-	/// https://apple.github.io/foundationdb/administration.html
-	const DEFAULT_FDB_PATH: &str = "/etc/foundationdb/fdb.cluster";
-
-	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
-	async fn fdb_transaction() {
-		verify_transaction_isolation(&format!(
-			"fdb:{}",
-			env::var(ENV_FDB_PATH).unwrap_or_else(|_| DEFAULT_FDB_PATH.to_string())
-		))
-		.await;
+		Ok(res)
 	}
 }

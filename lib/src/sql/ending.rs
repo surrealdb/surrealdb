@@ -1,7 +1,7 @@
 use crate::sql::comment::comment;
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
-use crate::sql::operator::{assigner, operator};
+use crate::sql::operator::{assigner, binary};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
@@ -15,7 +15,7 @@ use nom::sequence::preceded;
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		map(multispace1, |_| ()),
-		map(operator, |_| ()),
+		map(binary, |_| ()),
 		map(assigner, |_| ()),
 		map(comment, |_| ()),
 		map(char(')'), |_| ()),
@@ -33,7 +33,7 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 pub fn ident(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		map(multispace1, |_| ()),
-		map(operator, |_| ()),
+		map(binary, |_| ()),
 		map(assigner, |_| ()),
 		map(comment, |_| ()),
 		map(char(')'), |_| ()),
@@ -51,7 +51,7 @@ pub fn ident(i: &str) -> IResult<&str, ()> {
 pub fn duration(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		map(multispace1, |_| ()),
-		map(operator, |_| ()),
+		map(binary, |_| ()),
 		map(assigner, |_| ()),
 		map(comment, |_| ()),
 		map(char(')'), |_| ()),

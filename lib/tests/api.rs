@@ -240,7 +240,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<FDb>(("/tmp/fdb.cluster", root)).await.unwrap();
+			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", root)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}

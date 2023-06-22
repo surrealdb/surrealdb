@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
@@ -34,6 +33,12 @@ pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, V
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
 		Self(v)
+	}
+}
+
+impl From<HashMap<&str, Value>> for Object {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
@@ -119,16 +124,10 @@ impl Object {
 
 impl Object {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(ctx, opt, txn, doc).await {
+			match v.compute(ctx, opt).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};

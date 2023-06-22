@@ -24,8 +24,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
+
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
 
   check:
     name: Check workspace
@@ -81,7 +84,7 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo clippy
-        run: cargo clippy --no-deps -- -W warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   cli:
     name: Test command line
@@ -137,10 +140,15 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
@@ -159,10 +167,15 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -257,6 +270,27 @@ jobs:
           cargo test --locked --package surrealdb --no-default-features --features kv-tikv --lib kvs
           cargo test --locked --package surrealdb --no-default-features --features kv-tikv --test api api_integration::tikv
 
+  fdb-engine:
+    name: FoundationDB engine
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
+      - name: Run cargo test
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --test api api_integration::fdb
+
   any-engine:
     name: Any engine
     runs-on: ubuntu-20.04
@@ -273,8 +307,13 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any

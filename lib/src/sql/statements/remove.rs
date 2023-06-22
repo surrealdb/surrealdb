@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
@@ -41,27 +40,21 @@ pub enum RemoveStatement {
 
 impl RemoveStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt).await,
+			Self::Database(ref v) => v.compute(ctx, opt).await,
+			Self::Function(ref v) => v.compute(ctx, opt).await,
+			Self::Login(ref v) => v.compute(ctx, opt).await,
+			Self::Token(ref v) => v.compute(ctx, opt).await,
+			Self::Scope(ref v) => v.compute(ctx, opt).await,
+			Self::Param(ref v) => v.compute(ctx, opt).await,
+			Self::Table(ref v) => v.compute(ctx, opt).await,
+			Self::Event(ref v) => v.compute(ctx, opt).await,
+			Self::Field(ref v) => v.compute(ctx, opt).await,
+			Self::Index(ref v) => v.compute(ctx, opt).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
+			Self::User(ref v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -116,21 +109,15 @@ pub struct RemoveNamespaceStatement {
 
 impl RemoveNamespaceStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ns::new(&self.name);
 		run.del(key).await?;
@@ -174,21 +161,15 @@ pub struct RemoveDatabaseStatement {
 
 impl RemoveDatabaseStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected NS?
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::db::new(opt.ns(), &self.name);
 		run.del(key).await?;
@@ -232,21 +213,15 @@ pub struct RemoveFunctionStatement {
 
 impl RemoveFunctionStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -293,21 +268,15 @@ pub struct RemoveAnalyzerStatement {
 }
 
 impl RemoveAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -350,13 +319,7 @@ pub struct RemoveLoginStatement {
 
 impl RemoveLoginStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
 				// Selected NS?
@@ -364,9 +327,9 @@ impl RemoveLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::nl::new(opt.ns(), &self.name);
 				run.del(key).await?;
@@ -379,9 +342,9 @@ impl RemoveLoginStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::du::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
@@ -431,13 +394,7 @@ pub struct RemoveTokenStatement {
 
 impl RemoveTokenStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match &self.base {
 			Base::Ns => {
 				// Selected NS?
@@ -445,9 +402,9 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::nt::new(opt.ns(), &self.name);
 				run.del(key).await?;
@@ -460,9 +417,9 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
@@ -475,9 +432,9 @@ impl RemoveTokenStatement {
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
-				let run = txn.clone();
+				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
 				run.del(key).await?;
@@ -526,21 +483,15 @@ pub struct RemoveScopeStatement {
 
 impl RemoveScopeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -584,21 +535,15 @@ pub struct RemoveParamStatement {
 
 impl RemoveParamStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -640,21 +585,15 @@ pub struct RemoveTableStatement {
 
 impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -699,21 +638,15 @@ pub struct RemoveEventStatement {
 
 impl RemoveEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
@@ -764,21 +697,15 @@ pub struct RemoveFieldStatement {
 
 impl RemoveFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let fd = self.name.to_string();
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
@@ -830,21 +757,15 @@ pub struct RemoveIndexStatement {
 
 impl RemoveIndexStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;

@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -10,8 +9,8 @@ use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
-use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
+use crate::sql::Uuid;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -24,6 +23,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
+	pub node: Uuid,
 	pub expr: Fields,
 	pub what: Value,
 	pub cond: Option<Cond>,
@@ -32,13 +32,7 @@ pub struct LiveStatement {
 
 impl LiveStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.realtime()?;
 		// Selected DB?
@@ -46,18 +40,22 @@ impl LiveStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Clone transaction
-		let run = txn.clone();
+		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the live query table
-		match self.what.compute(ctx, opt, txn, doc).await? {
+		match self.what.compute(ctx, opt).await? {
 			Value::Table(tb) => {
-				// Insert the live query
-				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+				// Clone the current statement
+				let mut stm = self.clone();
+				// Store the current Node ID
+				stm.node = Uuid(*opt.id);
+				// Insert the node live query
+				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
 				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, &self.id);
-				run.putc(key, self.clone(), None).await?;
+				run.putc(key, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {
@@ -66,7 +64,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.clone().into())
+		Ok(Value::Uuid(self.id.clone()))
 	}
 }
 
@@ -96,7 +94,8 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	Ok((
 		i,
 		LiveStatement {
-			id: Uuid::new(),
+			id: Uuid::new_v4(),
+			node: Uuid::default(),
 			expr,
 			what,
 			cond,

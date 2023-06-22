@@ -2,6 +2,8 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
+use crate::dbs::cl::ClusterMembership;
+use crate::dbs::cl::Timestamp;
 use crate::err::Error;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
@@ -12,7 +14,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::thing::Thing;
-use crate::sql::Value;
+use crate::sql::{Uuid, Value};
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -32,6 +34,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -56,7 +59,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Transaction),
+	FoundationDB(super::fdb::Transaction),
 }
 
 impl fmt::Display for Transaction {
@@ -74,7 +77,7 @@ impl fmt::Display for Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
+			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -123,7 +126,7 @@ impl Transaction {
 			} => v.closed(),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.closed(),
 			#[allow(unreachable_patterns)]
@@ -165,7 +168,7 @@ impl Transaction {
 			} => v.cancel().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
@@ -207,7 +210,7 @@ impl Transaction {
 			} => v.commit().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -251,7 +254,7 @@ impl Transaction {
 			} => v.del(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
@@ -295,7 +298,7 @@ impl Transaction {
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.exi(key).await,
 			#[allow(unreachable_patterns)]
@@ -339,7 +342,7 @@ impl Transaction {
 			} => v.get(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -384,7 +387,7 @@ impl Transaction {
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -429,7 +432,7 @@ impl Transaction {
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.put(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -475,7 +478,7 @@ impl Transaction {
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
@@ -520,7 +523,7 @@ impl Transaction {
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
@@ -565,7 +568,7 @@ impl Transaction {
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]
@@ -787,6 +790,60 @@ impl Transaction {
 	{
 		let key: Key = key.into();
 		self.cache.del(&key);
+		Ok(())
+	}
+
+	// Register cluster membership
+	// NOTE: Setting cluster membership sets the heartbeat
+	// Remember to set the heartbeat as well
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(id.0);
+		match self.get_cl(id.clone()).await? {
+			Some(_) => Err(Error::ClAlreadyExists {
+				value: id.0.to_string(),
+			}),
+			None => {
+				let value = ClusterMembership {
+					name: id.0.to_string(),
+					heartbeat: self.clock(),
+				};
+				self.put(key, value).await?;
+				Ok(())
+			}
+		}
+	}
+
+	// Retrieve cluster information
+	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
+		let key = crate::key::cl::Cl::new(id.0);
+		let val = self.get(key).await?;
+		match val {
+			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
+			None => Ok(None),
+		}
+	}
+
+	fn clock(&self) -> Timestamp {
+		// Use a timestamp oracle if available
+		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+		Timestamp {
+			value: now as u64,
+		}
+	}
+
+	// Set heartbeat
+	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
+		let now = self.clock();
+		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+		// We do not need to do a read, we always want to overwrite
+		self.put(
+			key,
+			ClusterMembership {
+				name: id.0.to_string(),
+				heartbeat: now,
+			},
+		)
+		.await?;
 		Ok(())
 	}
 
@@ -1346,6 +1403,20 @@ impl Transaction {
 		let key = crate::key::az::new(ns, db, az);
 		let val = self.get(key).await?.ok_or(Error::AzNotFound {
 			value: az.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific analyzer definition.
+	pub async fn get_ix(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineIndexStatement, Error> {
+		let key = crate::key::ix::new(ns, db, tb, ix);
+		let val = self.get(key).await?.ok_or(Error::IxNotFound {
+			value: ix.to_owned(),
 		})?;
 		Ok(val.into())
 	}

@@ -10,7 +10,6 @@ use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
 use crate::sql::Block;
 use crate::sql::Bytes;
-use crate::sql::Datetime;
 use crate::sql::Duration;
 use crate::sql::Future;
 use crate::sql::Ident;
@@ -21,6 +20,7 @@ use crate::sql::Table;
 use crate::sql::Uuid;
 use map::SerializeValueMap;
 use rust_decimal::Decimal;
+use ser::cast::SerializeCast;
 use ser::edges::SerializeEdges;
 use ser::expression::SerializeExpression;
 use ser::function::SerializeFunction;
@@ -61,7 +61,7 @@ impl ser::Serializer for Serializer {
 
 	type SerializeSeq = SerializeArray;
 	type SerializeTuple = SerializeArray;
-	type SerializeTupleStruct = SerializeArray;
+	type SerializeTupleStruct = SerializeTupleStruct;
 	type SerializeTupleVariant = SerializeTupleVariant;
 	type SerializeMap = SerializeMap;
 	type SerializeStruct = SerializeStruct;
@@ -227,7 +227,7 @@ impl ser::Serializer for Serializer {
 				Ok(Value::Uuid(Uuid(value.serialize(ser::uuid::Serializer.wrap())?)))
 			}
 			sql::datetime::TOKEN => {
-				Ok(Value::Datetime(Datetime(value.serialize(ser::datetime::Serializer.wrap())?)))
+				Ok(Value::Datetime(value.serialize(ser::datetime::Serializer.wrap())?))
 			}
 			_ => value.serialize(self.wrap()),
 		}
@@ -300,10 +300,13 @@ impl ser::Serializer for Serializer {
 
 	fn serialize_tuple_struct(
 		self,
-		_name: &'static str,
-		len: usize,
+		name: &'static str,
+		_len: usize,
 	) -> Result<Self::SerializeTupleStruct, Error> {
-		self.serialize_seq(Some(len))
+		match name {
+			sql::cast::TOKEN => Ok(SerializeTupleStruct::Cast(Default::default())),
+			_ => Ok(SerializeTupleStruct::Array(Default::default())),
+		}
 	}
 
 	fn serialize_tuple_variant(
@@ -348,7 +351,6 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::SerializeStruct, Error> {
 		Ok(match name {
 			sql::thing::TOKEN => SerializeStruct::Thing(Default::default()),
-			sql::expression::TOKEN => SerializeStruct::Expression(Default::default()),
 			sql::edges::TOKEN => SerializeStruct::Edges(Default::default()),
 			sql::range::TOKEN => SerializeStruct::Range(Default::default()),
 			_ => SerializeStruct::Unknown(Default::default()),
@@ -357,18 +359,27 @@ impl ser::Serializer for Serializer {
 
 	fn serialize_struct_variant(
 		self,
-		_name: &'static str,
+		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Error> {
-		Ok(SerializeStructVariant {
-			name: String::from(variant),
-			map: Object::default(),
+		Ok(if name == sql::expression::TOKEN {
+			SerializeStructVariant::Expression(match variant {
+				"Unary" => SerializeExpression::Unary(Default::default()),
+				"Binary" => SerializeExpression::Binary(Default::default()),
+				_ => return Err(Error::custom(format!("unexpected `Expression::{name}`"))),
+			})
+		} else {
+			SerializeStructVariant::Object {
+				name: String::from(variant),
+				map: Object::default(),
+			}
 		})
 	}
 }
 
+#[derive(Default)]
 pub(super) struct SerializeArray(vec::SerializeValueVec);
 
 impl serde::ser::SerializeSeq for SerializeArray {
@@ -453,6 +464,33 @@ pub(super) enum SerializeTupleVariant {
 	},
 }
 
+pub(super) enum SerializeTupleStruct {
+	Cast(SerializeCast),
+	Array(SerializeArray),
+}
+
+impl serde::ser::SerializeTupleStruct for SerializeTupleStruct {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		match self {
+			Self::Cast(cast) => cast.serialize_field(value),
+			Self::Array(array) => array.serialize_field(value),
+		}
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		match self {
+			Self::Cast(cast) => Ok(Value::Cast(Box::new(cast.end()?))),
+			Self::Array(array) => Ok(serde::ser::SerializeTupleStruct::end(array)?),
+		}
+	}
+}
+
 impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 	type Ok = Value;
 	type Error = Error;
@@ -462,9 +500,9 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			SerializeTupleVariant::Model(model) => model.serialize_field(value),
-			SerializeTupleVariant::Function(function) => function.serialize_field(value),
-			SerializeTupleVariant::Unknown {
+			Self::Model(model) => model.serialize_field(value),
+			Self::Function(function) => function.serialize_field(value),
+			Self::Unknown {
 				ref mut fields,
 				..
 			} => fields.serialize_element(value),
@@ -473,11 +511,9 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			SerializeTupleVariant::Model(model) => Ok(Value::Model(model.end()?)),
-			SerializeTupleVariant::Function(function) => {
-				Ok(Value::Function(Box::new(function.end()?)))
-			}
-			SerializeTupleVariant::Unknown {
+			Self::Model(model) => Ok(Value::Model(model.end()?)),
+			Self::Function(function) => Ok(Value::Function(Box::new(function.end()?))),
+			Self::Unknown {
 				variant,
 				fields,
 			} => Ok(map! {
@@ -490,7 +526,6 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 pub(super) enum SerializeStruct {
 	Thing(SerializeThing),
-	Expression(SerializeExpression),
 	Edges(SerializeEdges),
 	Range(SerializeRange),
 	Unknown(SerializeValueMap),
@@ -505,28 +540,29 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			SerializeStruct::Thing(thing) => thing.serialize_field(key, value),
-			SerializeStruct::Expression(expr) => expr.serialize_field(key, value),
-			SerializeStruct::Edges(edges) => edges.serialize_field(key, value),
-			SerializeStruct::Range(range) => range.serialize_field(key, value),
-			SerializeStruct::Unknown(map) => map.serialize_entry(key, value),
+			Self::Thing(thing) => thing.serialize_field(key, value),
+			Self::Edges(edges) => edges.serialize_field(key, value),
+			Self::Range(range) => range.serialize_field(key, value),
+			Self::Unknown(map) => map.serialize_entry(key, value),
 		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			SerializeStruct::Thing(thing) => Ok(Value::Thing(thing.end()?)),
-			SerializeStruct::Expression(expr) => Ok(Value::Expression(Box::new(expr.end()?))),
-			SerializeStruct::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
-			SerializeStruct::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
-			SerializeStruct::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
+			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
+			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
+			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
+			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
 		}
 	}
 }
 
-pub(super) struct SerializeStructVariant {
-	name: String,
-	map: Object,
+pub(super) enum SerializeStructVariant {
+	Expression(SerializeExpression),
+	Object {
+		name: String,
+		map: Object,
+	},
 }
 
 impl serde::ser::SerializeStructVariant for SerializeStructVariant {
@@ -537,16 +573,32 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 	where
 		T: ?Sized + Serialize,
 	{
-		self.map.0.insert(String::from(key), value.serialize(Serializer.wrap())?);
-		Ok(())
+		match self {
+			Self::Expression(expression) => expression.serialize_field(key, value),
+			Self::Object {
+				map,
+				..
+			} => {
+				map.0.insert(String::from(key), value.serialize(Serializer.wrap())?);
+				Ok(())
+			}
+		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
-		let mut object = Object::default();
+		match self {
+			Self::Expression(expression) => Ok(Value::from(expression.end()?)),
+			Self::Object {
+				name,
+				map,
+			} => {
+				let mut object = Object::default();
 
-		object.insert(self.name, Value::Object(self.map));
+				object.insert(name, Value::Object(map));
 
-		Ok(Value::Object(object))
+				Ok(Value::Object(object))
+			}
+		}
 	}
 }
 
@@ -564,7 +616,7 @@ mod tests {
 	#[test]
 	fn none() {
 		let expected = Value::None;
-		assert_eq!(expected, to_value(&None::<u32>).unwrap());
+		assert_eq!(expected, to_value(None::<u32>).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
@@ -577,14 +629,14 @@ mod tests {
 	#[test]
 	fn r#false() {
 		let expected = Value::Bool(false);
-		assert_eq!(expected, to_value(&false).unwrap());
+		assert_eq!(expected, to_value(false).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
 	#[test]
 	fn r#true() {
 		let expected = Value::Bool(true);
-		assert_eq!(expected, to_value(&true).unwrap());
+		assert_eq!(expected, to_value(true).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
@@ -624,7 +676,7 @@ mod tests {
 		assert_eq!(expected, to_value(&expected).unwrap());
 
 		let strand = "foobar";
-		let value = to_value(&strand).unwrap();
+		let value = to_value(strand).unwrap();
 		let expected = Value::Strand(Strand(strand.to_owned()));
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());
@@ -749,7 +801,7 @@ mod tests {
 
 	#[test]
 	fn block() {
-		let block = Box::new(Block::default());
+		let block = Box::default();
 		let value = to_value(&block).unwrap();
 		let expected = Value::Block(block);
 		assert_eq!(value, expected);
@@ -826,7 +878,7 @@ mod tests {
 
 	#[test]
 	fn expression() {
-		let expression = Box::new(Expression {
+		let expression = Box::new(Expression::Binary {
 			l: "foo".into(),
 			o: Operator::Equal,
 			r: "Bar".into(),
@@ -851,7 +903,7 @@ mod tests {
 			bar,
 			foo: foo.to_owned(),
 		};
-		let value = to_value(&foo_bar).unwrap();
+		let value = to_value(foo_bar).unwrap();
 		let expected = Value::Object(
 			map! {
 				"foo".to_owned() => foo.into(),

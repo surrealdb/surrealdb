@@ -2,13 +2,12 @@ use crate::err::Error;
 use crate::idx::bkeys::BKeys;
 use crate::idx::SerdeState;
 use crate::kvs::{Key, Transaction};
+use crate::sql::{Object, Value};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 pub(crate) type NodeId = u64;
 pub(super) type Payload = u64;
@@ -41,13 +40,13 @@ where
 {
 	keys: K,
 	state: State,
-	full_size: usize,
+	full_size: u32,
 	updated: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct State {
-	minimum_degree: usize,
+	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
@@ -55,7 +54,7 @@ pub(super) struct State {
 impl SerdeState for State {}
 
 impl State {
-	pub(super) fn new(minimum_degree: usize) -> Self {
+	pub(super) fn new(minimum_degree: u32) -> Self {
 		assert!(minimum_degree >= 2, "Minimum degree should be >= 2");
 		Self {
 			minimum_degree,
@@ -67,10 +66,21 @@ impl State {
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Statistics {
-	pub(super) keys_count: usize,
-	pub(super) max_depth: usize,
-	pub(super) nodes_count: usize,
-	pub(super) total_size: usize,
+	pub(super) keys_count: u64,
+	pub(super) max_depth: u32,
+	pub(super) nodes_count: u32,
+	pub(super) total_size: u64,
+}
+
+impl From<Statistics> for Value {
+	fn from(stats: Statistics) -> Self {
+		let mut res = Object::default();
+		res.insert("keys_count".to_owned(), Value::from(stats.keys_count));
+		res.insert("max_depth".to_owned(), Value::from(stats.max_depth));
+		res.insert("nodes_count".to_owned(), Value::from(stats.nodes_count));
+		res.insert("total_size".to_owned(), Value::from(stats.total_size));
+		Value::from(res)
+	}
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,21 +96,21 @@ impl<'a, BK> Node<BK>
 where
 	BK: BKeys + Serialize + DeserializeOwned + 'a,
 {
-	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, usize), Error> {
+	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, u32), Error> {
 		if let Some(val) = tx.get(key).await? {
-			let size = val.len();
+			let size = val.len() as u32;
 			Ok((Node::try_from_val(val)?, size))
 		} else {
 			Err(Error::CorruptedIndex)
 		}
 	}
 
-	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<usize, Error> {
+	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<u32, Error> {
 		self.keys_mut().compile();
 		let val = self.try_to_val()?;
 		let size = val.len();
 		tx.set(key, val).await?;
-		Ok(size)
+		Ok(size as u32)
 	}
 
 	fn keys(&self) -> &BK {
@@ -138,20 +148,6 @@ where
 					Err(Error::CorruptedIndex)
 				}
 			}
-		}
-	}
-
-	fn debug<F>(&self, to_string: F) -> Result<(), Error>
-	where
-		F: Fn(Key) -> Result<String, Error>,
-	{
-		match self {
-			Node::Internal(keys, children) => {
-				keys.debug(to_string)?;
-				debug!("Children{:?}", children);
-				Ok(())
-			}
-			Node::Leaf(keys) => keys.debug(to_string),
 		}
 	}
 }
@@ -201,10 +197,6 @@ where
 			}
 		}
 		Ok(None)
-	}
-
-	pub(super) fn search_by_prefix(&self, prefix_key: Key) -> BTreeIterator<K> {
-		BTreeIterator::new(self.keys.clone(), prefix_key, self.state.root)
 	}
 
 	pub(super) async fn insert<BK>(
@@ -623,6 +615,7 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes<BK>(
 		tx: &mut Transaction,
 		keys: &mut BK,
@@ -653,35 +646,6 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
-	/// This is for debugging
-	async fn inspect_nodes<BK, F>(
-		&self,
-		tx: &mut Transaction,
-		inspect_func: F,
-	) -> Result<usize, Error>
-	where
-		F: Fn(usize, usize, NodeId, StoredNode<BK>),
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.state.root {
-			node_queue.push_front((node_id, 1));
-		}
-		let mut count = 0;
-		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored_node = self.keys.load_node::<BK>(tx, node_id).await?;
-			if let Node::Internal(_, children) = &stored_node.node {
-				let depth = depth + 1;
-				for child_id in children {
-					node_queue.push_back((*child_id, depth));
-				}
-			}
-			inspect_func(count, depth, node_id, stored_node);
-			count += 1;
-		}
-		Ok(count)
-	}
-
 	pub(super) async fn statistics<BK>(&self, tx: &mut Transaction) -> Result<Statistics, Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
@@ -693,12 +657,12 @@ where
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
 			let stored = self.keys.load_node::<BK>(tx, node_id).await?;
-			stats.keys_count += stored.node.keys().len();
+			stats.keys_count += stored.node.keys().len() as u64;
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
 			}
 			stats.nodes_count += 1;
-			stats.total_size += stored.size;
+			stats.total_size += stored.size as u64;
 			if let Node::Internal(_, children) = stored.node {
 				let depth = depth + 1;
 				for child_id in &children {
@@ -730,94 +694,6 @@ where
 	}
 }
 
-struct CurrentNode {
-	keys: VecDeque<(Key, Payload)>,
-	matches_found: bool,
-	level_matches_found: Arc<AtomicBool>,
-}
-
-pub(super) struct BTreeIterator<K>
-where
-	K: KeyProvider,
-{
-	key_provider: K,
-	prefix_key: Key,
-	node_queue: VecDeque<(NodeId, Arc<AtomicBool>)>,
-	current_node: Option<CurrentNode>,
-}
-
-impl<K> BTreeIterator<K>
-where
-	K: KeyProvider + Sync,
-{
-	fn new(key_provider: K, prefix_key: Key, start_node: Option<NodeId>) -> Self {
-		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = start_node {
-			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))))
-		}
-		Self {
-			key_provider,
-			prefix_key,
-			node_queue,
-			current_node: None,
-		}
-	}
-
-	fn set_current_node<BK>(&mut self, node: Node<BK>, level_matches_found: Arc<AtomicBool>)
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		if let Node::Internal(keys, children) = &node {
-			let same_level_matches_found = Arc::new(AtomicBool::new(false));
-			let child_idx = keys.get_child_idx(&self.prefix_key);
-			for i in child_idx..children.len() {
-				self.node_queue.push_front((children[i], same_level_matches_found.clone()));
-			}
-		}
-		let keys = node.keys().collect_with_prefix(&self.prefix_key);
-		let matches_found = !keys.is_empty();
-		if matches_found {
-			level_matches_found.fetch_and(true, Ordering::Relaxed);
-		}
-		self.current_node = Some(CurrentNode {
-			keys,
-			matches_found,
-			level_matches_found,
-		});
-	}
-
-	pub(super) async fn next<BK>(
-		&mut self,
-		tx: &mut Transaction,
-	) -> Result<Option<(Key, Payload)>, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		loop {
-			if let Some(current) = &mut self.current_node {
-				if let Some((key, payload)) = current.keys.pop_front() {
-					return Ok(Some((key, payload)));
-				} else {
-					if !current.matches_found && current.level_matches_found.load(Ordering::Relaxed)
-					{
-						// If we have found matches in previous (lower) nodes,
-						// but we don't find matches anymore, there is no chance we can find new matches
-						// in upper child nodes, therefore we can stop the traversal.
-						break;
-					}
-					self.current_node = None;
-				}
-			} else if let Some((node_id, level_matches_found)) = self.node_queue.pop_front() {
-				let st = self.key_provider.load_node::<BK>(tx, node_id).await?;
-				self.set_current_node(st.node, level_matches_found);
-			} else {
-				break;
-			}
-		}
-		Ok(None)
-	}
-}
-
 pub(super) struct StoredNode<BK>
 where
 	BK: BKeys,
@@ -825,7 +701,7 @@ where
 	node: Node<BK>,
 	id: NodeId,
 	key: Key,
-	size: usize,
+	size: u32,
 }
 
 impl<BK> StoredNode<BK>
@@ -840,17 +716,18 @@ where
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::btree::{
-		BTree, BTreeIterator, KeyProvider, Node, NodeId, Payload, State, Statistics,
+		BTree, KeyProvider, Node, NodeId, Payload, State, Statistics, StoredNode,
 	};
 	use crate::idx::SerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
-	use rand::prelude::{SliceRandom, ThreadRng};
+	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
 	use serde::Serialize;
-	use std::collections::HashMap;
+	use std::collections::{HashMap, VecDeque};
 	use test_log::test;
 
 	#[derive(Clone)]
@@ -1025,7 +902,7 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: usize) -> Statistics
+	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> Statistics
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
@@ -1095,159 +972,6 @@ mod tests {
 				total_size: 232,
 			}
 		);
-	}
-
-	async fn test_btree_search_by_prefix(
-		ds: &Datastore,
-		minimum_degree: usize,
-		shuffle: bool,
-		mut samples: Vec<(&str, Payload)>,
-	) -> (BTree<TestKeyProvider>, Statistics) {
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(TestKeyProvider {}, State::new(minimum_degree));
-		let samples_len = samples.len();
-		if shuffle {
-			samples.shuffle(&mut ThreadRng::default());
-		}
-		for (key, payload) in samples {
-			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
-		}
-		tx.commit().await.unwrap();
-		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
-		assert_eq!(s.keys_count, samples_len);
-		(t, s)
-	}
-
-	async fn check_results(
-		mut i: BTreeIterator<TestKeyProvider>,
-		tx: &mut Transaction,
-		e: Vec<(Key, Payload)>,
-	) {
-		let mut map = HashMap::new();
-		while let Some((k, p)) = i.next::<TrieKeys>(tx).await.unwrap() {
-			map.insert(k, p);
-		}
-		assert_eq!(map.len(), e.len());
-		for (k, p) in e {
-			assert_eq!(map.get(&k), Some(&p));
-		}
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_search_by_prefix() {
-		for _ in 0..50 {
-			let samples = vec![
-				("aaaa", 0),
-				("bb1", 21),
-				("bb2", 22),
-				("bb3", 23),
-				("bb4", 24),
-				("dddd", 0),
-				("eeee", 0),
-				("ffff", 0),
-				("gggg", 0),
-				("hhhh", 0),
-			];
-			let ds = Datastore::new("memory").await.unwrap();
-			let (t, s) = test_btree_search_by_prefix(&ds, 3, true, samples).await;
-
-			// For this test to be relevant, we expect the BTree to match the following properties:
-			assert_eq!(s.max_depth, 2, "Tree depth should be 2");
-			assert!(
-				s.nodes_count > 2 && s.nodes_count < 5,
-				"The number of node should be between 3 and 4 inclusive"
-			);
-
-			let mut tx = ds.transaction(false, false).await.unwrap();
-
-			// We should find all the keys prefixed with "bb"
-			let i = t.search_by_prefix("bb".into());
-			check_results(
-				i,
-				&mut tx,
-				vec![
-					("bb1".into(), 21),
-					("bb2".into(), 22),
-					("bb3".into(), 23),
-					("bb4".into(), 24),
-				],
-			)
-			.await;
-		}
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_search_by_prefix() {
-		// We do multiples tests to run the test over many different possible forms of Tree.
-		// The samples are shuffled, therefore the insertion order is different on each test,
-		// ending up in slightly different variants of the BTrees.
-		for _ in 0..50 {
-			// This samples simulate postings. Pair of terms and document ids.
-			let samples = vec![
-				("the-1", 0),
-				("quick-1", 0),
-				("brown-1", 0),
-				("fox-1", 0),
-				("jumped-1", 0),
-				("over-1", 0),
-				("lazy-1", 0),
-				("dog-1", 0),
-				("the-2", 0),
-				("fast-2", 0),
-				("fox-2", 0),
-				("jumped-2", 0),
-				("over-2", 0),
-				("lazy-2", 0),
-				("dog-2", 0),
-				("the-3", 0),
-				("dog-3", 0),
-				("sat-3", 0),
-				("there-3", 0),
-				("and-3", 0),
-				("did-3", 0),
-				("nothing-3", 0),
-				("the-4", 0),
-				("other-4", 0),
-				("animals-4", 0),
-				("sat-4", 0),
-				("there-4", 0),
-				("watching-4", 0),
-			];
-
-			let ds = Datastore::new("memory").await.unwrap();
-			let (t, s) = test_btree_search_by_prefix(&ds, 7, true, samples).await;
-
-			// For this test to be relevant, we expect the BTree to match the following properties:
-			assert_eq!(s.max_depth, 2, "Tree depth should be 2");
-			assert!(
-				s.nodes_count > 2 && s.nodes_count < 5,
-				"The number of node should be > 2 and < 5"
-			);
-
-			let mut tx = ds.transaction(false, false).await.unwrap();
-
-			for (prefix, count) in vec![
-				("the", 6),
-				("there", 2),
-				("dog", 3),
-				("jumped", 2),
-				("lazy", 2),
-				("fox", 2),
-				("over", 2),
-				("sat", 2),
-				("other", 1),
-				("nothing", 1),
-				("animals", 1),
-				("watching", 1),
-			] {
-				let mut i = t.search_by_prefix(prefix.into());
-				for _ in 0..count {
-					assert!(i.next::<TrieKeys>(&mut tx).await.unwrap().is_some());
-				}
-				assert_eq!(i.next::<TrieKeys>(&mut tx).await.unwrap(), None);
-			}
-		}
 	}
 
 	// This is the examples from the chapter B-Trees in CLRS:
@@ -1554,7 +1278,7 @@ mod tests {
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		assert_eq!(keys.len(), expected_keys.len(), "The number of keys does not match");
+		assert_eq!(keys.len() as usize, expected_keys.len(), "The number of keys does not match");
 		for (key, payload) in expected_keys {
 			assert_eq!(
 				keys.get(&key.into()),
@@ -1562,6 +1286,59 @@ mod tests {
 				"The key {} does not match",
 				key
 			);
+		}
+	}
+
+	impl<K> BTree<K>
+	where
+		K: KeyProvider + Clone + Sync,
+	{
+		/// This is for debugging
+		async fn inspect_nodes<BK, F>(
+			&self,
+			tx: &mut Transaction,
+			inspect_func: F,
+		) -> Result<usize, Error>
+		where
+			F: Fn(usize, usize, NodeId, StoredNode<BK>),
+			BK: BKeys + Serialize + DeserializeOwned,
+		{
+			let mut node_queue = VecDeque::new();
+			if let Some(node_id) = self.state.root {
+				node_queue.push_front((node_id, 1));
+			}
+			let mut count = 0;
+			while let Some((node_id, depth)) = node_queue.pop_front() {
+				let stored_node = self.keys.load_node::<BK>(tx, node_id).await?;
+				if let Node::Internal(_, children) = &stored_node.node {
+					let depth = depth + 1;
+					for child_id in children {
+						node_queue.push_back((*child_id, depth));
+					}
+				}
+				inspect_func(count, depth, node_id, stored_node);
+				count += 1;
+			}
+			Ok(count)
+		}
+	}
+
+	impl<BK> Node<BK>
+	where
+		BK: BKeys,
+	{
+		fn debug<F>(&self, to_string: F) -> Result<(), Error>
+		where
+			F: Fn(Key) -> Result<String, Error>,
+		{
+			match self {
+				Node::Internal(keys, children) => {
+					keys.debug(to_string)?;
+					debug!("Children{:?}", children);
+					Ok(())
+				}
+				Node::Leaf(keys) => keys.debug(to_string),
+			}
 		}
 	}
 }

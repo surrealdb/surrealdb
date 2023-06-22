@@ -1,10 +1,9 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, BTreeIterator, KeyProvider, NodeId, Payload, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
-use crate::key::bf::Bf;
 use crate::kvs::{Key, Transaction};
 
 pub(super) type TermFrequency = u64;
@@ -19,7 +18,7 @@ impl Postings {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		order: u32,
 	) -> Result<Self, Error> {
 		let keys = PostingsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -28,7 +27,7 @@ impl Postings {
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
 			btree::State::try_from_val(val)?
 		} else {
-			btree::State::new(default_btree_order)
+			btree::State::new(order)
 		};
 		Ok(Self {
 			state_key,
@@ -48,6 +47,16 @@ impl Postings {
 		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
 	}
 
+	pub(super) async fn get_term_frequency(
+		&self,
+		tx: &mut Transaction,
+		term_id: TermId,
+		doc_id: DocId,
+	) -> Result<Option<TermFrequency>, Error> {
+		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		self.btree.search::<TrieKeys>(tx, &key).await
+	}
+
 	pub(super) async fn remove_posting(
 		&mut self,
 		tx: &mut Transaction,
@@ -56,25 +65,6 @@ impl Postings {
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		self.btree.delete::<TrieKeys>(tx, key).await
-	}
-
-	pub(super) fn new_postings_iterator(&self, term_id: TermId) -> PostingsIterator {
-		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
-		let i = self.btree.search_by_prefix(prefix_key);
-		PostingsIterator::new(i)
-	}
-
-	pub(super) async fn get_doc_count(
-		&self,
-		tx: &mut Transaction,
-		term_id: TermId,
-	) -> Result<usize, Error> {
-		let mut count = 0;
-		let mut it = self.new_postings_iterator(term_id);
-		while let Some((_, _)) = it.next(tx).await? {
-			count += 1;
-		}
-		Ok(count)
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -103,56 +93,16 @@ impl KeyProvider for PostingsKeyProvider {
 	}
 }
 
-pub(super) struct PostingsIterator {
-	btree_iterator: BTreeIterator<PostingsKeyProvider>,
-}
-
-impl PostingsIterator {
-	fn new(btree_iterator: BTreeIterator<PostingsKeyProvider>) -> Self {
-		Self {
-			btree_iterator,
-		}
-	}
-
-	pub(super) async fn next(
-		&mut self,
-		tx: &mut Transaction,
-	) -> Result<Option<(DocId, Payload)>, Error> {
-		Ok(self.btree_iterator.next::<TrieKeys>(tx).await?.map(|(k, p)| {
-			let posting_key: Bf = (&k).into();
-			(posting_key.doc_id, p)
-		}))
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::Payload;
-	use crate::idx::ft::docids::DocId;
-	use crate::idx::ft::postings::{Postings, PostingsIterator};
+	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Transaction};
-	use std::collections::HashMap;
+	use crate::kvs::Datastore;
 	use test_log::test;
-
-	async fn check_postings(
-		mut i: PostingsIterator,
-		tx: &mut Transaction,
-		e: Vec<(DocId, Payload)>,
-	) {
-		let mut map = HashMap::new();
-		while let Some((d, p)) = i.next(tx).await.unwrap() {
-			map.insert(d, p);
-		}
-		assert_eq!(map.len(), e.len());
-		for (k, p) in e {
-			assert_eq!(map.get(&k), Some(&p));
-		}
-	}
 
 	#[test(tokio::test)]
 	async fn test_postings() {
-		const DEFAULT_BTREE_ORDER: usize = 5;
+		const DEFAULT_BTREE_ORDER: u32 = 5;
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -174,8 +124,8 @@ mod tests {
 			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
-		let i = p.new_postings_iterator(1);
-		check_postings(i, &mut tx, vec![(2, 3), (4, 5)]).await;
+		assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));
+		assert_eq!(p.get_term_frequency(&mut tx, 1, 4).await.unwrap(), Some(5));
 
 		// Check removal of doc 2
 		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));

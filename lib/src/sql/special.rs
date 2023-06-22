@@ -64,7 +64,7 @@ pub fn check_order_by_fields<'a>(
 	if let Some(orders) = orders {
 		// Loop over each of the expressions in the ORDER BY clause
 		for order in orders.iter() {
-			if !contains_idiom(fields, &*order) {
+			if !contains_idiom(fields, order) {
 				// If the expression isn't specified in the SELECT clause, then error
 				return Err(Failure(Error::Order(i, order.to_string())));
 			}
@@ -95,31 +95,28 @@ pub fn check_group_by_fields<'a>(
 				// Loop over each of the expressions in the GROUP BY clause
 				for group in groups.iter() {
 					// Check to see whether the expression is in the GROUP BY clause or is an aggregate
-					match field {
-						Field::Single {
-							expr,
-							alias,
-						} => {
-							if alias.as_ref().map(|i| i.as_ref() == group.as_ref()).unwrap_or(false)
-							{
-								// This field is aliased, and the alias name matched
-								continue 'outer;
-							} else {
-								match expr {
-									// If the expression in the SELECT clause is a field, check to see if it exists in the GROUP BY
-									Value::Idiom(i) if i == &group.0 => continue 'outer,
-									// If the expression in the SELECT clause is a function, check to see if it is an aggregate function
-									Value::Function(f) if f.is_aggregate() => continue 'outer,
-									// Otherwise check if the expression itself exists in the GROUP BY clause
-									v if v.to_idiom() == group.0 => continue 'outer,
-									// Check if this is a static value which can be used in the GROUP BY clause
-									v if v.is_static() => continue 'outer,
-									// If not, then this query should fail
-									_ => (),
-								}
+					if let Field::Single {
+						expr,
+						alias,
+					} = field
+					{
+						if alias.as_ref().map(|i| i.as_ref() == group.as_ref()).unwrap_or(false) {
+							// This field is aliased, and the alias name matched
+							continue 'outer;
+						} else {
+							match expr {
+								// If the expression in the SELECT clause is a field, check to see if it exists in the GROUP BY
+								Value::Idiom(i) if i == &group.0 => continue 'outer,
+								// If the expression in the SELECT clause is a function, check to see if it is an aggregate function
+								Value::Function(f) if f.is_aggregate() => continue 'outer,
+								// Otherwise check if the expression itself exists in the GROUP BY clause
+								v if v.to_idiom() == group.0 => continue 'outer,
+								// Check if this is a static value which can be used in the GROUP BY clause
+								v if v.is_static() => continue 'outer,
+								// If not, then this query should fail
+								_ => (),
 							}
 						}
-						_ => (),
 					}
 				}
 				// If the expression isn't an aggregate function and isn't specified in the GROUP BY clause, then error

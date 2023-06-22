@@ -54,11 +54,14 @@ jobs:
       - name: Run cargo check
         run: cargo check --workspace
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
 
-      - name: Run cargo clippy
-        run: cargo clippy -- -W warnings
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+
+      - name: Check linting with clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run WebAssembly check
         run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb

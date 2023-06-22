@@ -2,6 +2,7 @@ use super::tx::Transaction;
 use crate::ctx::Context;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
+use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -12,17 +13,22 @@ use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
+use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::instrument;
+use uuid::Uuid;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
+	pub(super) id: Arc<Uuid>,
 	pub(super) inner: Inner,
+	pub(super) send: Sender<Notification>,
+	pub(super) recv: Receiver<Notification>,
 	query_timeout: Option<Duration>,
 	auth_enabled: bool,
 }
@@ -40,7 +46,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Datastore),
+	FoundationDB(super::fdb::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -58,7 +64,7 @@ impl fmt::Display for Datastore {
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
+			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -193,7 +199,7 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).await.map(Inner::FDB);
+					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
@@ -206,8 +212,13 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		};
+		// Create a live query notification channel
+		let (send, recv) = channel::bounded(100);
 		inner.map(|inner| Self {
+			id: Arc::new(Uuid::new_v4()),
 			inner,
+			send,
+			recv,
 			query_timeout: None,
 			auth_enabled: false,
 		})
@@ -257,6 +268,24 @@ impl Datastore {
 		}
 	}
 
+	// Adds entries to the KV store indicating membership information
+	pub async fn register_membership(&self) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		tx.set_cl(sql::Uuid::from(*self.id.as_ref())).await?;
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	// Creates a heartbeat entry for the member indicating to the cluster
+	// that the node is alive
+	pub async fn heartbeat(&self) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
@@ -300,9 +329,9 @@ impl Datastore {
 				super::tx::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(v) => {
+			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::FDB(tx)
+				super::tx::Inner::FoundationDB(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
@@ -339,33 +368,10 @@ impl Datastore {
 		vars: Variables,
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
-		// Create a new query options
-		let mut opt = Options::default();
-		// Create a new query executor
-		let mut exe = Executor::new(self);
-		// Create a default context
-		let mut ctx = Context::default();
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
-		}
-		// Start an execution context
-		let ctx = sess.context(ctx);
-		// Store the query variables
-		let ctx = vars.attach(ctx)?;
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
-		// Setup the auth options
-		opt.auth = sess.au.clone();
-		// Setup the live options
-		opt.live = sess.rt;
-		// Set current NS and DB
-		opt.ns = sess.ns();
-		opt.db = sess.db();
-		// Set strict config
-		opt.strict = strict;
-		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		// Process the AST
+		self.process(ast, sess, vars, strict).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -407,6 +413,8 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Setup the notification channel
+		opt.sender = self.send.clone();
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
@@ -454,6 +462,8 @@ impl Datastore {
 		let mut opt = Options::default();
 		// Create a default context
 		let mut ctx = Context::default();
+		// Add the transaction
+		ctx.add_transaction(Some(&txn));
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
@@ -462,6 +472,8 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Setup the notification channel
+		opt.sender = self.send.clone();
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Set current NS and DB
@@ -470,7 +482,7 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		let res = val.compute(&ctx, &opt).await?;
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,
@@ -478,6 +490,28 @@ impl Datastore {
 		};
 		// Return result
 		Ok(res)
+	}
+
+	/// Subscribe to live notifications
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::for_kv();
+	///     while let Ok(v) = ds.notifications().recv().await {
+	///         println!("Received notification: {v}");
+	///     }
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(skip_all)]
+	pub fn notifications(&self) -> Receiver<Notification> {
+		self.recv.clone()
 	}
 
 	/// Performs a full database export as SQL

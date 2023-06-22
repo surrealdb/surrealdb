@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -25,21 +24,15 @@ impl OutputStatement {
 		self.what.writeable()
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Process the output value
-		let mut val = self.what.compute(ctx, opt, txn, doc).await?;
+		let mut val = self.what.compute(ctx, opt).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {
-				val.fetch(ctx, opt, txn, fetch).await?;
+				val.fetch(ctx, opt, fetch).await?;
 			}
 		}
 		//

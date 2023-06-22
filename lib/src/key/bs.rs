@@ -19,16 +19,16 @@ pub struct Bs<'a> {
 impl<'a> Bs<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Bs {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x62, // b
-			_f: 0x73, // s,
+			_d: b'!',
+			_e: b'b',
+			_f: b's',
 			ix,
 		}
 	}

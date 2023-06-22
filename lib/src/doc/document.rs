@@ -15,7 +15,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub(crate) struct Document<'a> {
-	pub(super) id: Option<Thing>,
+	pub(super) id: Option<&'a Thing>,
 	pub(super) extras: Workable,
 	pub(super) current: Cow<'a, Value>,
 	pub(super) initial: Cow<'a, Value>,
@@ -34,7 +34,7 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 }
 
 impl<'a> Document<'a> {
-	pub fn new(id: Option<Thing>, val: &'a Value, ext: Workable) -> Self {
+	pub fn new(id: Option<&'a Thing>, val: &'a Value, ext: Workable) -> Self {
 		Document {
 			id,
 			extras: ext,

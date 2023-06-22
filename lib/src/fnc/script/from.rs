@@ -55,7 +55,8 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is a record
 				if (v).instance_of::<classes::record::record::Record>() {
 					let v = v.into_instance::<classes::record::record::Record>().unwrap();
-					let v: &classes::record::record::Record = v.as_ref();
+					let borrow = v.borrow();
+					let v: &classes::record::record::Record = &borrow;
 					check_nul(&v.value.tb)?;
 					if let Id::String(s) = &v.value.id {
 						check_nul(s)?;
@@ -65,7 +66,8 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is a duration
 				if (v).instance_of::<classes::duration::duration::Duration>() {
 					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
-					let v: &classes::duration::duration::Duration = v.as_ref();
+					let borrow = v.borrow();
+					let v: &classes::duration::duration::Duration = &borrow;
 					return match &v.value {
 						Some(v) => Ok(v.clone().into()),
 						None => Ok(Value::None),
@@ -74,7 +76,8 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is a uuid
 				if (v).instance_of::<classes::uuid::uuid::Uuid>() {
 					let v = v.into_instance::<classes::uuid::uuid::Uuid>().unwrap();
-					let v: &classes::uuid::uuid::Uuid = v.as_ref();
+					let borrow = v.borrow();
+					let v: &classes::uuid::uuid::Uuid = &borrow;
 					return match &v.value {
 						Some(v) => Ok(v.clone().into()),
 						None => Ok(Value::None),

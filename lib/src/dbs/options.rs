@@ -1,8 +1,11 @@
 use crate::cnf;
 use crate::dbs::Auth;
 use crate::dbs::Level;
+use crate::dbs::Notification;
 use crate::err::Error;
+use channel::Sender;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
@@ -11,8 +14,10 @@ use std::sync::Arc;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Options {
+	/// Current Node ID
+	pub id: Arc<Uuid>,
 	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
 	/// Currently selected DB
@@ -39,18 +44,21 @@ pub struct Options {
 	pub indexes: bool,
 	/// Should we process function futures?
 	pub futures: bool,
+	///
+	pub sender: Sender<Notification>,
 }
 
 impl Default for Options {
 	fn default() -> Self {
-		Options::new(Auth::No)
+		Options::new(Arc::new(Uuid::new_v4()), channel::unbounded().0, Arc::new(Auth::No))
 	}
 }
 
 impl Options {
 	/// Create a new Options object
-	pub fn new(auth: Auth) -> Options {
+	pub fn new(id: Arc<Uuid>, send: Sender<Notification>, auth: Arc<Auth>) -> Options {
 		Options {
+			id,
 			ns: None,
 			db: None,
 			dive: 0,
@@ -63,8 +71,14 @@ impl Options {
 			tables: true,
 			indexes: true,
 			futures: false,
-			auth: Arc::new(auth),
+			sender: send,
+			auth,
 		}
+	}
+
+	/// Get current Node ID
+	pub fn id(&self) -> &Uuid {
+		self.id.as_ref()
 	}
 
 	/// Get currently selected NS
@@ -96,7 +110,9 @@ impl Options {
 		let dive = self.dive.saturating_add(cost);
 		if dive <= *cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
+				sender: self.sender.clone(),
 				auth: self.auth.clone(),
+				id: self.id.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
 				dive,
@@ -110,7 +126,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn force(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: v,
@@ -121,7 +139,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn perms(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			perms: v,
@@ -132,7 +152,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn fields(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			fields: v,
@@ -143,7 +165,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn events(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			events: v,
@@ -154,7 +178,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn tables(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			tables: v,
@@ -165,7 +191,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn indexes(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			indexes: v,
@@ -176,7 +204,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn import(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			fields: !v,
@@ -189,7 +219,9 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn strict(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			strict: v,
@@ -200,10 +232,24 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn futures(&self, v: bool) -> Options {
 		Options {
+			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			id: self.id.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			futures: v,
+			..*self
+		}
+	}
+
+	/// Create a new Options object for a subquery
+	pub fn sender(&self, v: Sender<Notification>) -> Options {
+		Options {
+			auth: self.auth.clone(),
+			id: self.id.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			sender: v,
 			..*self
 		}
 	}

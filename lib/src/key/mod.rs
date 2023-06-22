@@ -1,5 +1,12 @@
+//! How the keys are structured in the key value store
 ///
 /// KV              /
+///
+/// ND              /!nd{nd}
+/// LQ              /!nd{nd}*{ns}*{db}!lq{lq}
+///
+/// HB              /!hb{ts}/{nd}
+///
 /// NS              /!ns{ns}
 ///
 /// Namespace       /*{ns}
@@ -14,7 +21,6 @@
 /// PA              /*{ns}*{db}!pa{pa}
 /// SC              /*{ns}*{db}!sc{sc}
 /// TB              /*{ns}*{db}!tb{tb}
-/// LQ              /*{ns}*{db}!lq{lq}
 ///
 /// Scope           /*{ns}*{db}±{sc}
 /// ST              /*{ns}*{db}±{sc}!st{tk}
@@ -34,20 +40,29 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
-/// BD              /*{ns}*{db}*{tb}¤{ix}{bd}{id}
-/// BL              /*{ns}*{db}*{tb}¤{ix}{bl}{id}
-/// BP              /*{ns}*{db}*{tb}¤{ix}{bp}{id}
-/// BT              /*{ns}*{db}*{tb}¤{ix}{bt}{id}
+/// BC              /*{ns}*{db}*{tb}!bc{ix}*{id}
+/// BD              /*{ns}*{db}*{tb}!bd{ix}*{id}
+/// BF              /*{ns}*{db}*{tb}!bf{ix}*{id}
+/// BI              /*{ns}*{db}*{tb}!bi{ix}*{id}
+/// BK              /*{ns}*{db}*{tb}!bk{ix}*{id}
+/// BL              /*{ns}*{db}*{tb}!bl{ix}*{id}
+/// BP              /*{ns}*{db}*{tb}!bp{ix}*{id}
+/// BS              /*{ns}*{db}*{tb}!bs{ix}
+/// BT              /*{ns}*{db}*{tb}!bt{ix}*{id}
+/// BU              /*{ns}*{db}*{tb}!bu{ix}*{id}
 pub mod az; // Stores a DEFINE ANALYZER config definition
+pub mod bc; // Stores Doc list for each term
 pub mod bd; // Stores BTree nodes for doc ids
 pub mod bf; // Stores Term/Doc frequency
 pub mod bi; // Stores doc keys for doc_ids
 pub mod bk; // Stores the term list for doc_ids
 pub mod bl; // Stores BTree nodes for doc lengths
+pub mod bo; // Stores the offsets
 pub mod bp; // Stores BTree nodes for postings
 pub mod bs; // Stores FullText index states
 pub mod bt; // Stores BTree nodes for terms
 pub mod bu; // Stores terms for term_ids
+pub mod cl; // Stores cluster membership information
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition (DEPRECATED)
@@ -58,6 +73,7 @@ pub mod fc; // Stores a DEFINE FUNCTION config definition
 pub mod fd; // Stores a DEFINE FIELD config definition
 pub mod ft; // Stores a DEFINE TABLE AS config definition
 pub mod graph; // Stores a graph edge pointer
+pub mod hb; // Stores a heartbeat per registered cluster node
 pub mod index; // Stores an index entry
 pub mod ix; // Stores a DEFINE INDEX config definition
 pub mod ku; // Stores a DEFINE USER ON KV config definition
