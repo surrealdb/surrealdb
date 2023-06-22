@@ -132,23 +132,8 @@ mod tests {
 
 	#[test]
 	fn test_offset_records() {
-		let o = OffsetRecords(vec![
-			Offset {
-				index: 0,
-				start: 1,
-				end: 2,
-			},
-			Offset {
-				index: 0,
-				start: 11,
-				end: 22,
-			},
-			Offset {
-				index: 1,
-				start: 3,
-				end: 4,
-			},
-		]);
+		let o =
+			OffsetRecords(vec![Offset::new(0, 1, 2), Offset::new(0, 11, 22), Offset::new(1, 3, 4)]);
 		let v: Val = o.clone().try_into().unwrap();
 		let o2 = v.try_into().unwrap();
 		assert_eq!(o, o2)
