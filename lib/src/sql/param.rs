@@ -60,7 +60,7 @@ impl Param {
 				// The param has not been set locally
 				None => {
 					// Clone transaction
-					let txn = ctx.clone_transaction()?;
+					let txn = ctx.try_clone_transaction()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the param definition

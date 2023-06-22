@@ -57,6 +57,7 @@ pub mod bf; // Stores Term/Doc frequency
 pub mod bi; // Stores doc keys for doc_ids
 pub mod bk; // Stores the term list for doc_ids
 pub mod bl; // Stores BTree nodes for doc lengths
+pub mod bo; // Stores the offsets
 pub mod bp; // Stores BTree nodes for postings
 pub mod bs; // Stores FullText index states
 pub mod bt; // Stores BTree nodes for terms

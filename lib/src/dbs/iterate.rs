@@ -64,7 +64,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -92,7 +92,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -123,7 +123,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -152,7 +152,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
 		// Prepare the start and end keys
@@ -220,7 +220,7 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Prepare the range start key
@@ -387,13 +387,13 @@ impl Iterable {
 					None => {
 						let min = beg.clone();
 						let max = end.clone();
-						ctx.clone_transaction()?.lock().await.scan(min..max, 1000).await?
+						ctx.try_clone_transaction()?.lock().await.scan(min..max, 1000).await?
 					}
 					Some(ref mut beg) => {
 						beg.push(0x00);
 						let min = beg.clone();
 						let max = end.clone();
-						ctx.clone_transaction()?.lock().await.scan(min..max, 1000).await?
+						ctx.try_clone_transaction()?.lock().await.scan(min..max, 1000).await?
 					}
 				};
 				// If there are key-value entries then fetch them
@@ -418,7 +418,7 @@ impl Iterable {
 						let gra: crate::key::graph::Graph = (&k).into();
 						// Fetch the data from the store
 						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
-						let val = ctx.clone_transaction()?.lock().await.get(key).await?;
+						let val = ctx.try_clone_transaction()?.lock().await.get(key).await?;
 						let rid = Thing::from((gra.ft, gra.fk));
 						let mut ctx = Context::new(ctx);
 						ctx.add_thing(&rid);
@@ -446,7 +446,7 @@ impl Iterable {
 		plan: Plan,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		let mut iterator = plan.new_iterator(opt, &txn).await?;

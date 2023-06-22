@@ -82,7 +82,7 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.perms && opt.auth.perms() {
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Loop through all field statements
 				for fd in self.fd(opt, &txn).await?.iter() {
 					// Loop over each field in document

@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Loop through all index statements

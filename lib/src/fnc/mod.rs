@@ -20,6 +20,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod script;
+pub mod search;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -30,6 +31,7 @@ pub mod util;
 /// Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	if name.eq("sleep")
+		|| name.starts_with("search")
 		|| name.starts_with("http")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
@@ -299,6 +301,9 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+		//
+		"search::highlight" => search::highlight(ctx).await,
+		"search::offsets" => search::offsets(ctx).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)

@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 		// Get the user applied input
 		let inp = self.initial.changed(self.current.as_ref());
 		// Clone transaction
-		let txn = ctx.clone_transaction()?;
+		let txn = ctx.try_clone_transaction()?;
 		// Loop through all field statements
 		for fd in self.fd(opt, &txn).await?.iter() {
 			// Loop over each field in document

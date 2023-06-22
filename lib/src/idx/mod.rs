@@ -14,6 +14,7 @@ use crate::key::bf::Bf;
 use crate::key::bi::Bi;
 use crate::key::bk::Bk;
 use crate::key::bl::Bl;
+use crate::key::bo::Bo;
 use crate::key::bp::Bp;
 use crate::key::bs::Bs;
 use crate::key::bt::Bt;
@@ -101,6 +102,18 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			node_id,
+		)
+		.into()
+	}
+
+	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Key {
+		Bo::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+			term_id,
 		)
 		.into()
 	}

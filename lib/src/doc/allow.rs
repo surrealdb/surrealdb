@@ -17,7 +17,7 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.perms && opt.auth.perms() {
 				// Clone transaction
-				let txn = ctx.clone_transaction()?;
+				let txn = ctx.try_clone_transaction()?;
 				// Get the table
 				let tb = self.tb(opt, &txn).await?;
 				// Get the permission clause
