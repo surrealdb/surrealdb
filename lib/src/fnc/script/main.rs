@@ -1,4 +1,5 @@
 use super::classes;
+use super::fetch;
 use super::globals;
 use super::modules;
 use super::modules::loader;
@@ -48,8 +49,8 @@ pub async fn run(
 
 	// Attempt to execute the script
 	async_with!(ctx => |ctx|{
-
 		let res = async move {
+			// register all classes to the runtime.
 			// Get the context global object
 			let global = ctx.globals();
 			// Register the surrealdb module as a global object
@@ -58,14 +59,11 @@ pub async fn run(
 				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx, "surrealdb")?
 					.get::<_, js::Value>("default")?,
 			)?;
-			// Register the fetch function to the globals
-			global.init_def::<globals::fetch::Fetch>()?;
+			fetch::register(ctx)?;
 			// Register the console function to the globals
 			global.init_def::<globals::console::Console>()?;
 			// Register the special SurrealDB types as classes
-			global.init_def::<classes::duration::Duration>()?;
-			global.init_def::<classes::record::Record>()?;
-			global.init_def::<classes::uuid::Uuid>()?;
+			classes::init(ctx)?;
 			// Attempt to compile the script
 			let res = ctx.compile("script", src)?;
 			// Attempt to fetch the main export

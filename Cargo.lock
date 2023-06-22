@@ -655,29 +655,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.60.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
-dependencies = [
- "bitflags",
- "cexpr 0.6.0",
- "clang-sys",
- "clap 3.2.25",
- "env_logger 0.9.3",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex 1.1.0",
- "which",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
@@ -1032,12 +1009,9 @@ version = "3.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ea181bf566f71cb9a5d17a59e1871af638180a18fb0035c92ae62b705207123"
 dependencies = [
- "atty",
  "bitflags",
  "clap_lex 0.2.4",
  "indexmap",
- "strsim",
- "termcolor",
  "textwrap",
 ]
 
@@ -1466,19 +1440,6 @@ name = "endian-type"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
-
-[[package]]
-name = "env_logger"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
-dependencies = [
- "atty",
- "humantime",
- "log",
- "regex",
- "termcolor",
-]
 
 [[package]]
 name = "env_logger"
@@ -3737,6 +3698,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "once_cell",
  "percent-encoding",
@@ -3885,9 +3847,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cdb753a1a1fe3cdb2b58bbbf3e037e86875260dca323ca03a273ead03a2f11e"
+checksum = "9a9b746ee3a4f6dc8b8f9b369d13c043a2f21fb645253aeac3f1404b12cff7d9"
 dependencies = [
  "rquickjs-core",
  "rquickjs-macro",
@@ -3895,9 +3857,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-core"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "604c3fa56fa95f1fedc5e4ce2f1e8754eac3944a7d741a407e1e27f0cb5bd727"
+checksum = "9f4f48d37b8e455a76544505915dcd7a82b7a3a1898cf2b4a0aba2d7bd66dcc4"
 dependencies = [
  "async-lock",
  "relative-path",
@@ -3906,9 +3868,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-macro"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f1fc43fa9c9afc738b8cabf53772b897f1a371ab7dbe896d2f71095780cfc0"
+checksum = "6ecbbe8ec4319fe42d3ec165dc7fa473580c2fa09747a39aa93f81ab422792a8"
 dependencies = [
  "darling",
  "fnv",
@@ -3924,11 +3886,11 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-sys"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cebb235d91be0b8c58bd07bb0dfc6864d47b29c7a8bc68910bae7c9a9d3ce28b"
+checksum = "3f65ccee59bf4eb61361e7d516fea4a77273b96fe17811fc7da2558369914f55"
 dependencies = [
- "bindgen 0.60.1",
+ "bindgen 0.65.1",
  "cc",
 ]
 
@@ -4545,12 +4507,13 @@ dependencies = [
  "bcrypt",
  "bincode",
  "bung",
+ "bytes",
  "chrono",
  "criterion",
  "deunicode",
  "dmp",
  "echodb",
- "env_logger 0.10.0",
+ "env_logger",
  "flume",
  "foundationdb",
  "fst",
