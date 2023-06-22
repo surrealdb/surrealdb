@@ -37,7 +37,7 @@ mod tests {
 			"testdb",
 		);
 		let enc = Database::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb");
+		assert_eq!(enc, b"/*testns\0*testdb\0");
 
 		let dec = Database::decode(&enc).unwrap();
 		assert_eq!(val, dec);

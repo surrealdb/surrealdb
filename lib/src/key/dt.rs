@@ -67,12 +67,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testns", "testdb");
-		assert_eq!(val, b"/*testns\x00*testdb\x00!dt\x00");
+		assert_eq!(val, b"/*testns\0*testdb\0!dt\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testns", "testdb");
-		assert_eq!(val, b"/*testns\x00*testdb\x00!dt\xff");
+		assert_eq!(val, b"/*testns\0*testdb\0!dt\xff");
 	}
 }

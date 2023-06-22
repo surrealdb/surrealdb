@@ -54,10 +54,7 @@ mod tests {
 			7
 		);
 		let enc = Bc::encode(&val).unwrap();
-		assert_eq!(
-			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!bctestix\x00*\x00\x00\x00\x00\x00\x00\x00\x07"
-		);
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!bctestix\0*\0\0\0\0\0\0\0\x07");
 
 		let dec = Bc::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -61,9 +61,9 @@ mod tests {
 		let enc = Bd::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!bdtestix\x00*\
+			b"/*testns\0*testdb\0*testtb\0!bdtestix\0*\
 			\x01\
-			\x00\x00\x00\x00\x00\x00\x00\x07"
+			\0\0\0\0\0\0\0\x07"
 		);
 		let dec = Bd::decode(&enc).unwrap();
 		assert_eq!(val, dec);

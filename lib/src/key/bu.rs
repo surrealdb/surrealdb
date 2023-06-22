@@ -53,10 +53,7 @@ mod tests {
 			7
 		);
 		let enc = Bu::encode(&val).unwrap();
-		assert_eq!(
-			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!butestix\x00*\x00\x00\x00\x00\x00\x00\x00\x07"
-		);
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!butestix\0*\0\0\0\0\0\0\0\x07");
 
 		let dec = Bu::decode(&enc).unwrap();
 		assert_eq!(val, dec);

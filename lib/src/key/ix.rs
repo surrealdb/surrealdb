@@ -57,12 +57,14 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ix::new(
-			"test",
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
 		);
 		let enc = Ix::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!ixtestix\0");
+
 		let dec = Ix::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

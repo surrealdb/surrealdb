@@ -53,7 +53,7 @@ mod tests {
 			"testdb",
 		);
 		let enc = Db::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00!dbtestdb\x00");
+		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
 
 		let dec = Db::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -62,12 +62,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testns");
-		assert_eq!(val, b"/*testns\x00!db\x00")
+		assert_eq!(val, b"/*testns\0!db\0")
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testns");
-		assert_eq!(val, b"/*testns\x00!db\xff")
+		assert_eq!(val, b"/*testns\0!db\xff")
 	}
 }

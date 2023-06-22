@@ -47,7 +47,7 @@ mod tests {
 			"testix",
 		);
 		let enc = Bs::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!bstestix\x00");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!bstestix\0");
 
 		let dec = Bs::decode(&enc).unwrap();
 		assert_eq!(val, dec);

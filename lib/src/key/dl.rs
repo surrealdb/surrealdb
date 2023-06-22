@@ -58,7 +58,7 @@ mod tests {
 			"testdl",
 		);
 		let enc = Dl::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!dltestdl\x00");
+		assert_eq!(enc, b"/*testns\0*testdb\0!dltestdl\0");
 
 		let dec = Dl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
