@@ -1,3 +1,4 @@
+use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use base64_lib::DecodeError as Base64Error;
@@ -497,6 +498,12 @@ pub enum Error {
 	#[doc(hidden)]
 	#[error("Bypass the query planner")]
 	BypassQueryPlanner,
+
+	/// Duplicated match references are not allowed
+	#[error("Duplicated Match reference: {mr}")]
+	DuplicatedMatchRef {
+		mr: MatchRef,
+	},
 }
 
 impl From<Error> for String {
