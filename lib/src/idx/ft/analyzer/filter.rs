@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
@@ -60,13 +61,13 @@ impl Filter {
 		}
 	}
 
-	pub(super) fn apply_filters(mut t: Tokens, f: &Option<Vec<Filter>>) -> Tokens {
+	pub(super) fn apply_filters(mut t: Tokens, f: &Option<Vec<Filter>>) -> Result<Tokens, Error> {
 		if let Some(f) = f {
 			for f in f {
-				t = t.filter(f);
+				t = t.filter(f)?;
 			}
 		}
-		t
+		Ok(t)
 	}
 
 	pub(super) fn apply_filter(&self, c: &str) -> FilterResult {

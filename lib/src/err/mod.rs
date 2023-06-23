@@ -469,8 +469,12 @@ pub enum Error {
 	},
 
 	/// Represents an error when analyzing a value
-	#[error("A string can't be analyzed: {0}")]
+	#[error("A value can't be analyzed: {0}")]
 	AnalyzerError(String),
+
+	/// Represents an error when trying to highlight a value
+	#[error("A value can't be highlighted: {0}")]
+	HighlightError(String),
 
 	/// Represents an underlying error with Bincode serializing / deserializing
 	#[error("Bincode error: {0}")]
