@@ -30,7 +30,7 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run cargo test
+      - name: Run cargo test (+coverage)
         run: |
           (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
           cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
