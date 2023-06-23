@@ -21,6 +21,9 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -37,6 +40,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -59,6 +65,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -74,6 +83,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -94,6 +106,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -113,6 +128,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -131,6 +149,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -159,6 +180,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -186,6 +210,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -201,6 +228,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -218,6 +248,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -234,6 +267,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -249,6 +285,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -278,6 +317,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -298,6 +340,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Checkout sources
         uses: actions/checkout@v3
