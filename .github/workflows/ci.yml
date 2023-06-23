@@ -139,8 +139,11 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run cargo test (+coverage)
+        run: cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
 
   ws-engine:
     name: WebSocket engine
