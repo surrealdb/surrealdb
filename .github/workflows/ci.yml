@@ -21,11 +21,11 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Check format of code
         run: cargo fmt --all --check
@@ -41,11 +41,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -65,11 +65,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
         run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http --target wasm32-unknown-unknown
@@ -84,11 +84,11 @@ jobs:
         with:
           components: clippy
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -106,11 +106,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -128,11 +128,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -150,11 +150,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -180,11 +180,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -210,11 +210,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
         run: |
@@ -229,11 +229,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
         run: |
@@ -248,11 +248,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
         run: |
@@ -267,11 +267,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
         run: |
@@ -286,11 +286,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -317,11 +317,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
@@ -341,11 +341,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
