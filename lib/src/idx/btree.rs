@@ -34,7 +34,6 @@ pub(super) trait KeyProvider {
 	}
 }
 
-#[derive(Clone)]
 pub(super) struct BTree<K>
 where
 	K: KeyProvider + Clone,
