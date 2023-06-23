@@ -35,6 +35,13 @@ jobs:
           (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
           cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
 
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 30
+
   lint:
     name: Lint
     runs-on: ubuntu-20.04-16-cores
