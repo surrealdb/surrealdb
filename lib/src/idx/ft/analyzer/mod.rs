@@ -42,7 +42,7 @@ impl Analyzer {
 		tx: &mut Transaction,
 		query_string: String,
 	) -> Result<(Vec<TermId>, bool), Error> {
-		let tokens = self.analyze(query_string);
+		let tokens = self.analyze(query_string)?;
 		// We first collect every unique terms
 		// as it can contains duplicates
 		let mut terms = HashSet::new();
@@ -53,7 +53,7 @@ impl Analyzer {
 		// Now we can extract the term ids
 		let mut res = Vec::with_capacity(terms.len());
 		for term in terms {
-			if let Some(term_id) = t.get_term_id(tx, tokens.get_token_string(term)).await? {
+			if let Some(term_id) = t.get_term_id(tx, tokens.get_token_string(term)?).await? {
 				res.push(term_id);
 			} else {
 				missing = false;
@@ -80,7 +80,7 @@ impl Analyzer {
 		for tks in &inputs {
 			for tk in tks.list() {
 				dl += 1;
-				let s = tks.get_token_string(tk);
+				let s = tks.get_token_string(tk)?;
 				match tf.entry(s) {
 					Entry::Vacant(e) => {
 						e.insert(1);
@@ -117,7 +117,7 @@ impl Analyzer {
 		for (i, tks) in inputs.iter().enumerate() {
 			for tk in tks.list() {
 				dl += 1;
-				let s = tks.get_token_string(tk);
+				let s = tks.get_token_string(tk)?;
 				let o = tk.new_offset(i as u32);
 				match tfos.entry(s) {
 					Entry::Vacant(e) => {
@@ -141,33 +141,34 @@ impl Analyzer {
 
 	fn analyze_content(&self, field_content: &Array, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		for v in &field_content.0 {
-			self.analyze_value(v, tks);
+			self.analyze_value(v, tks)?;
 		}
 		Ok(())
 	}
 
-	fn analyze_value(&self, val: &Value, tks: &mut Vec<Tokens>) {
+	fn analyze_value(&self, val: &Value, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		match val {
-			Value::Strand(s) => tks.push(self.analyze(s.0.clone())),
-			Value::Number(n) => tks.push(self.analyze(n.to_string())),
-			Value::Bool(b) => tks.push(self.analyze(b.to_string())),
+			Value::Strand(s) => tks.push(self.analyze(s.0.clone())?),
+			Value::Number(n) => tks.push(self.analyze(n.to_string())?),
+			Value::Bool(b) => tks.push(self.analyze(b.to_string())?),
 			Value::Array(a) => {
 				for v in &a.0 {
-					self.analyze_value(v, tks);
+					self.analyze_value(v, tks)?;
 				}
 			}
 			_ => {}
-		}
+		};
+		Ok(())
 	}
 
-	fn analyze(&self, input: String) -> Tokens {
+	fn analyze(&self, input: String) -> Result<Tokens, Error> {
 		if let Some(t) = &self.t {
 			if !input.is_empty() {
 				let t = Tokenizer::tokenize(t, input);
 				return Filter::apply_filters(t, &self.f);
 			}
 		}
-		Tokens::new(input)
+		Ok(Tokens::new(input))
 	}
 }
 
@@ -180,10 +181,10 @@ mod tests {
 		let (_, az) = analyzer(def).unwrap();
 		let a: Analyzer = az.into();
 
-		let tokens = a.analyze(input.to_string());
+		let tokens = a.analyze(input.to_string()).unwrap();
 		let mut res = vec![];
 		for t in tokens.list() {
-			res.push(tokens.get_token_string(t));
+			res.push(tokens.get_token_string(t).unwrap());
 		}
 		assert_eq!(&res, expected);
 	}
