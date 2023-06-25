@@ -165,6 +165,78 @@ pub fn len((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.len().into())
 }
 
+pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
+	let mut iters = (lh.into_iter(), rh.into_iter());
+	for (lhv, rhv) in std::iter::from_fn(|| {
+		let r = (iters.0.next(), iters.1.next());
+		if r.0 == None && r.1 == None {
+			None
+		} else {
+			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+		}
+	}) {
+		let truth = lhv.is_truthy() && rhv.is_truthy();
+		let r = if lhv.is_truthy() == truth {
+			lhv
+		} else if rhv.is_truthy() == truth {
+			rhv
+		} else {
+			truth.into()
+		};
+		result_arr.push(r);
+	}
+	Ok(result_arr.into())
+}
+
+pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
+	let mut iters = (lh.into_iter(), rh.into_iter());
+	for (lhv, rhv) in std::iter::from_fn(|| {
+		let r = (iters.0.next(), iters.1.next());
+		if r.0 == None && r.1 == None {
+			None
+		} else {
+			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+		}
+	}) {
+		let truth = lhv.is_truthy() || rhv.is_truthy();
+		let r = if lhv.is_truthy() == truth {
+			lhv
+		} else if rhv.is_truthy() == truth {
+			rhv
+		} else {
+			truth.into()
+		};
+		result_arr.push(r);
+	}
+	Ok(result_arr.into())
+}
+
+pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
+	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
+	let mut iters = (lh.into_iter(), rh.into_iter());
+	for (lhv, rhv) in std::iter::from_fn(|| {
+		let r = (iters.0.next(), iters.1.next());
+		if r.0 == None && r.1 == None {
+			None
+		} else {
+			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+		}
+	}) {
+		let truth = lhv.is_truthy() ^ rhv.is_truthy();
+		let r = if lhv.is_truthy() == truth {
+			lhv
+		} else if rhv.is_truthy() == truth {
+			rhv
+		} else {
+			truth.into()
+		};
+		result_arr.push(r);
+	}
+	Ok(result_arr.into())
+}
+
 pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.matches(compare_val).into())
 }
