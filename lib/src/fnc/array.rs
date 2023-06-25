@@ -170,7 +170,7 @@ pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
 		let r = (iters.0.next(), iters.1.next());
-		if r.0 == None && r.1 == None {
+		if r.0.is_none() && r.1.is_none() {
 			None
 		} else {
 			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
@@ -194,7 +194,7 @@ pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
 		let r = (iters.0.next(), iters.1.next());
-		if r.0 == None && r.1 == None {
+		if r.0.is_none() && r.1.is_none() {
 			None
 		} else {
 			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
@@ -218,7 +218,7 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
 		let r = (iters.0.next(), iters.1.next());
-		if r.0 == None && r.1 == None {
+		if r.0.is_none() && r.1.is_none() {
 			None
 		} else {
 			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
