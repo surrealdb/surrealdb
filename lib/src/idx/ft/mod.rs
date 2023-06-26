@@ -299,22 +299,29 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		query_string: String,
-	) -> Result<Vec<TermId>, Error> {
+	) -> Result<Vec<Option<TermId>>, Error> {
 		let t = self.terms(tx).await?;
-		let (terms, _) = self.analyzer.extract_terms(&t, tx, query_string).await?;
+		let terms = self.analyzer.extract_terms(&t, tx, query_string).await?;
 		Ok(terms)
 	}
 
 	pub(super) async fn get_terms_docs(
 		&self,
 		tx: &mut Transaction,
-		terms: &Vec<TermId>,
-	) -> Result<Vec<(TermId, RoaringTreemap)>, Error> {
+		terms: &Vec<Option<TermId>>,
+	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		let td = self.term_docs();
-		for term_id in terms {
-			if let Some(term_docs) = td.get_docs(tx, *term_id).await? {
-				terms_docs.push((*term_id, term_docs));
+		for opt_term_id in terms {
+			if let Some(term_id) = opt_term_id {
+				let docs = td.get_docs(tx, *term_id).await?;
+				if let Some(docs) = docs {
+					terms_docs.push(Some((*term_id, docs)));
+				} else {
+					terms_docs.push(Some((*term_id, RoaringTreemap::new())));
+				}
+			} else {
+				terms_docs.push(None);
 			}
 		}
 		Ok(terms_docs)
@@ -323,14 +330,18 @@ impl FtIndex {
 	pub(super) async fn new_hits_iterator(
 		&self,
 		tx: &mut Transaction,
-		terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	) -> Result<Option<HitsIterator>, Error> {
 		let mut hits: Option<RoaringTreemap> = None;
-		for (_, term_docs) in terms_docs.iter() {
-			if let Some(h) = hits {
-				hits = Some(h.bitand(term_docs));
+		for opt_term_docs in terms_docs.iter() {
+			if let Some((_, term_docs)) = opt_term_docs {
+				if let Some(h) = hits {
+					hits = Some(h.bitand(term_docs));
+				} else {
+					hits = Some(term_docs.clone());
+				}
 			} else {
-				hits = Some(term_docs.clone());
+				return Ok(None);
 			}
 		}
 		if let Some(hits) = hits {
@@ -345,7 +356,7 @@ impl FtIndex {
 	pub(super) async fn new_scorer(
 		&self,
 		tx: &mut Transaction,
-		terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	) -> Result<Option<BM25Scorer>, Error> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
@@ -365,7 +376,7 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		thg: &Thing,
-		terms: &Vec<TermId>,
+		terms: &Vec<Option<TermId>>,
 		prefix: Value,
 		suffix: Value,
 		idiom: &Idiom,
@@ -376,10 +387,12 @@ impl FtIndex {
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let o = self.offsets();
 			let mut hl = Highlighter::new(prefix, suffix, idiom, doc);
-			for term_id in terms {
-				let o = o.get_offsets(tx, doc_id, *term_id).await?;
-				if let Some(o) = o {
-					hl.highlight(o.0);
+			for opt_term_id in terms {
+				if let Some(term_id) = opt_term_id {
+					let o = o.get_offsets(tx, doc_id, *term_id).await?;
+					if let Some(o) = o {
+						hl.highlight(o.0);
+					}
 				}
 			}
 			return hl.try_into();
@@ -391,17 +404,19 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		thg: &Thing,
-		terms: &Vec<TermId>,
+		terms: &Vec<Option<TermId>>,
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let o = self.offsets();
 			let mut or = Offseter::default();
-			for term_id in terms {
-				let o = o.get_offsets(tx, doc_id, *term_id).await?;
-				if let Some(o) = o {
-					or.highlight(o.0);
+			for opt_term_id in terms {
+				if let Some(term_id) = opt_term_id {
+					let o = o.get_offsets(tx, doc_id, *term_id).await?;
+					if let Some(o) = o {
+						or.highlight(o.0);
+					}
 				}
 			}
 			return or.try_into();

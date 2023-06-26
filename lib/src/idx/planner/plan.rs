@@ -260,7 +260,7 @@ impl MatchesThingIterator {
 		hl: bool,
 		sc: &Scoring,
 		order: u32,
-		terms_docs: Option<Arc<Vec<(TermId, RoaringTreemap)>>>,
+		terms_docs: Option<Arc<Vec<Option<(TermId, RoaringTreemap)>>>>,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
 		if let Scoring::Bm {
