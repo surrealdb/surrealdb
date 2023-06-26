@@ -341,14 +341,14 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Number(Number::Float(n)) => n.into(),
 		Value::Number(Number::Decimal(n)) => json!(n),
 		Value::Strand(strand) => match simplify {
-			true => strand.0.into(),
+			true => strand.to_raw().into(),
 			false => json!(strand),
 		},
 		Value::Duration(d) => match simplify {
 			true => d.to_string().into(),
 			false => json!(d),
 		},
-		Value::Datetime(d) => json!(d),
+		Value::Datetime(d) => d.to_raw().into(),
 		Value::Uuid(uuid) => json!(uuid),
 		Value::Array(arr) => JsonValue::Array(Array::from((arr, simplify)).0),
 		Value::Object(obj) => JsonValue::Object(Object::from((obj, simplify)).0),
