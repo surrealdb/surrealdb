@@ -55,14 +55,12 @@ impl BM25Scorer {
 		doc_id: DocId,
 	) -> Result<Option<Score>, Error> {
 		let mut sc = 0.0;
-		for opt_term_doc in self.terms_docs.iter() {
-			if let Some((term_id, docs)) = opt_term_doc {
-				if docs.contains(doc_id) {
-					if let Some(term_freq) =
-						self.postings.get_term_frequency(tx, *term_id, doc_id).await?
-					{
-						sc += self.term_score(tx, doc_id, docs.len(), term_freq).await?;
-					}
+		for (term_id, docs) in self.terms_docs.iter().flatten() {
+			if docs.contains(doc_id) {
+				if let Some(term_freq) =
+					self.postings.get_term_frequency(tx, *term_id, doc_id).await?
+				{
+					sc += self.term_score(tx, doc_id, docs.len(), term_freq).await?;
 				}
 			}
 		}

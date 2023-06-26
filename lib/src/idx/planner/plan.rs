@@ -1,7 +1,7 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::{DocId, NO_DOC_ID};
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::IndexKeyBase;
@@ -12,7 +12,6 @@ use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Ident, Idiom, Object, Operator, Thing, Value};
 use async_trait::async_trait;
-use roaring::RoaringTreemap;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -260,7 +259,7 @@ impl MatchesThingIterator {
 		hl: bool,
 		sc: &Scoring,
 		order: u32,
-		terms_docs: Option<Arc<Vec<Option<(TermId, RoaringTreemap)>>>>,
+		terms_docs: Option<TermsDocs>,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
 		if let Scoring::Bm {

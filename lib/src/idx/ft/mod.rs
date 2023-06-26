@@ -5,7 +5,7 @@ mod highlighter;
 mod offsets;
 mod postings;
 pub(super) mod scorer;
-mod termdocs;
+pub(super) mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
@@ -376,7 +376,7 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		thg: &Thing,
-		terms: &Vec<Option<TermId>>,
+		terms: &[Option<TermId>],
 		prefix: Value,
 		suffix: Value,
 		idiom: &Idiom,
@@ -387,12 +387,10 @@ impl FtIndex {
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let o = self.offsets();
 			let mut hl = Highlighter::new(prefix, suffix, idiom, doc);
-			for opt_term_id in terms {
-				if let Some(term_id) = opt_term_id {
-					let o = o.get_offsets(tx, doc_id, *term_id).await?;
-					if let Some(o) = o {
-						hl.highlight(o.0);
-					}
+			for term_id in terms.iter().flatten() {
+				let o = o.get_offsets(tx, doc_id, *term_id).await?;
+				if let Some(o) = o {
+					hl.highlight(o.0);
 				}
 			}
 			return hl.try_into();
@@ -404,19 +402,17 @@ impl FtIndex {
 		&self,
 		tx: &mut Transaction,
 		thg: &Thing,
-		terms: &Vec<Option<TermId>>,
+		terms: &[Option<TermId>],
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
 		let doc_ids = self.doc_ids(tx).await?;
 		if let Some(doc_id) = doc_ids.get_doc_id(tx, doc_key).await? {
 			let o = self.offsets();
 			let mut or = Offseter::default();
-			for opt_term_id in terms {
-				if let Some(term_id) = opt_term_id {
-					let o = o.get_offsets(tx, doc_id, *term_id).await?;
-					if let Some(o) = o {
-						or.highlight(o.0);
-					}
+			for term_id in terms.iter().flatten() {
+				let o = o.get_offsets(tx, doc_id, *term_id).await?;
+				if let Some(o) = o {
+					or.highlight(o.0);
 				}
 			}
 			return or.try_into();

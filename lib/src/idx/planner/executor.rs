@@ -2,6 +2,7 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
+use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::plan::IndexOption;
@@ -92,9 +93,7 @@ impl QueryExecutor {
 		})
 	}
 
-	pub(super) fn pre_match_terms_docs(
-		&self,
-	) -> Option<Arc<Vec<Option<(TermId, RoaringTreemap)>>>> {
+	pub(super) fn pre_match_terms_docs(&self) -> Option<TermsDocs> {
 		if let Some(entry) = &self.pre_match_entry {
 			return Some(entry.0.terms_docs.clone());
 		}
