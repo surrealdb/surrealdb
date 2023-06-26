@@ -221,7 +221,12 @@ pub mod response {
 		pub async fn text<'js>(&self, ctx: Ctx<'js>, args: Rest<()>) -> Result<String> {
 			let data = self.take_buffer(ctx).await?;
 
-			Ok(String::from_utf8(data.to_vec())?)
+			// Skip UTF-BOM
+			if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
+				Ok(String::from_utf8_lossy(&data[3..]).into_owned())
+			} else {
+				Ok(String::from_utf8_lossy(&data).into_owned())
+			}
 		}
 
 		// Returns a promise with the response body as text
