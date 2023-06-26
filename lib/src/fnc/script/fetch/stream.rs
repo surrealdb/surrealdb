@@ -34,8 +34,11 @@ impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 	pub fn tee(&mut self) -> (ReadableStream<R>, impl Future<Output = ()>) {
 		// replace the stream with a channel driven by as task.
 		// TODO: figure out how backpressure works in the stream API.
-		let (send_a, recv_a) = channel::bounded::<R>(16);
-		let (send_b, recv_b) = channel::bounded::<R>(16);
+
+		// Unbounded, otherwise when one channel gets awaited it might block forever because the
+		// other channel fills up.
+		let (send_a, recv_a) = channel::unbounded::<R>();
+		let (send_b, recv_b) = channel::unbounded::<R>();
 		let new_stream = Box::pin(ChannelStream(recv_a));
 		let mut old_stream = std::mem::replace(&mut self.0, new_stream);
 		let drive = async move {
