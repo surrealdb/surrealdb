@@ -2,6 +2,7 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
+use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::plan::IndexOption;
@@ -92,7 +93,7 @@ impl QueryExecutor {
 		})
 	}
 
-	pub(super) fn pre_match_terms_docs(&self) -> Option<Arc<Vec<(TermId, RoaringTreemap)>>> {
+	pub(super) fn pre_match_terms_docs(&self) -> Option<TermsDocs> {
 		if let Some(entry) = &self.pre_match_entry {
 			return Some(entry.0.terms_docs.clone());
 		}
@@ -130,8 +131,18 @@ impl QueryExecutor {
 				let mut run = txn.lock().await;
 				let doc_key: Key = thg.into();
 				if let Some(doc_id) = ft.0.doc_ids.get_doc_id(&mut run, doc_key).await? {
-					for (_, docs) in ft.0.terms_docs.iter() {
-						if !docs.contains(doc_id) {
+					let term_goals = ft.0.terms_docs.len();
+					// If there is no terms, it can't be a match
+					if term_goals == 0 {
+						return Ok(Value::Bool(false));
+					}
+					for opt_td in ft.0.terms_docs.iter() {
+						if let Some((_, docs)) = opt_td {
+							if !docs.contains(doc_id) {
+								return Ok(Value::Bool(false));
+							}
+						} else {
+							// If one of the term is missing, it can't be a match
 							return Ok(Value::Bool(false));
 						}
 					}
@@ -227,8 +238,8 @@ struct FtEntry(Arc<Inner>);
 struct Inner {
 	index_option: IndexOption,
 	doc_ids: DocIds,
-	terms: Vec<TermId>,
-	terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+	terms: Vec<Option<TermId>>,
+	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	scorer: Option<BM25Scorer>,
 }
 

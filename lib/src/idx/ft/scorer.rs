@@ -12,7 +12,7 @@ pub(super) type Score = f32;
 
 pub(crate) struct BM25Scorer {
 	postings: Postings,
-	terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	doc_lengths: DocLengths,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -22,7 +22,7 @@ pub(crate) struct BM25Scorer {
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Postings,
-		terms_docs: Arc<Vec<(TermId, RoaringTreemap)>>,
+		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 		doc_lengths: DocLengths,
 		total_docs_length: u128,
 		doc_count: u64,
@@ -55,7 +55,7 @@ impl BM25Scorer {
 		doc_id: DocId,
 	) -> Result<Option<Score>, Error> {
 		let mut sc = 0.0;
-		for (term_id, docs) in self.terms_docs.iter() {
+		for (term_id, docs) in self.terms_docs.iter().flatten() {
 			if docs.contains(doc_id) {
 				if let Some(term_freq) =
 					self.postings.get_term_frequency(tx, *term_id, doc_id).await?
