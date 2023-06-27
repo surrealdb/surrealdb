@@ -1,4 +1,5 @@
 use crate::sql::comment::shouldbespace;
+use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ impl ChangeFeed {
 
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "CHANGEFEED {}", crate::sql::duration::Duration(self.expiry))?;
+		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
 		Ok(())
 	}
 }
@@ -29,7 +30,7 @@ impl Display for ChangeFeed {
 pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, _) = tag_no_case("CHANGEFEED")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = crate::sql::duration::duration(i)?;
+	let (i, v) = duration(i)?;
 	Ok((
 		i,
 		ChangeFeed {
@@ -64,6 +65,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CHANGEFEED 1h", format!("{}", out));
-		assert_eq!(out, ChangeFeed::enabled(time::Duration::from_secs(3600)));
+		assert_eq!(out, ChangeFeed{expiry: time::Duration::from_secs(3600)});
 	}
 }
