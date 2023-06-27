@@ -12,13 +12,6 @@ pub struct ChangeFeed {
 	pub expiry: time::Duration,
 }
 
-impl ChangeFeed {
-	pub fn enabled(d: time::Duration) -> Self {
-		ChangeFeed {
-			expiry: d,
-		}
-	}
-}
 
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
