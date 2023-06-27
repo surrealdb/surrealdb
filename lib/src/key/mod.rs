@@ -16,6 +16,7 @@
 ///
 /// Database        /*{ns}*{db}
 /// AZ              /*{ns}*{db}!az{az}
+/// CF /*{ns}*{db}!cf{ts}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// PA              /*{ns}*{db}!pa{pa}
@@ -62,11 +63,13 @@ pub mod bp; // Stores BTree nodes for postings
 pub mod bs; // Stores FullText index states
 pub mod bt; // Stores BTree nodes for terms
 pub mod bu; // Stores terms for term_ids
+pub mod cf; // Stores change feeds
 pub mod cl; // Stores cluster membership information
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
 pub mod dt; // Stores a DEFINE LOGIN ON DATABASE config definition
+pub mod dv; // Stores database versionstamps
 pub mod ev; // Stores a DEFINE EVENT config definition
 pub mod fc; // Stores a DEFINE FUNCTION config definition
 pub mod fd; // Stores a DEFINE FIELD config definition
