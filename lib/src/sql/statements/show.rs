@@ -53,7 +53,7 @@ impl fmt::Display for ShowStatement {
 
 pub fn table_or_database(i: &str) -> IResult<&str, Option<Table>> {
 	let (i, v) = alt((
-		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), |v: Table| Some(v)),
+		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), Some),
 		map(tag_no_case("database"), |_| None),
 	))(i)?;
 	Ok((i, v))
