@@ -2,13 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::{take_u32, take_u64};
+use crate::sql::common::take_u64;
 use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::u32;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
@@ -89,7 +90,7 @@ pub fn limit(i: &str) -> IResult<&str, u32> {
 	let (i, _) = tag_no_case("LIMIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
-	take_u32(i)
+	u32(i)
 }
 
 #[allow(unused)]
