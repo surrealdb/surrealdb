@@ -12,7 +12,6 @@ pub struct ChangeFeed {
 	pub expiry: time::Duration,
 }
 
-
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
@@ -58,6 +57,11 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CHANGEFEED 1h", format!("{}", out));
-		assert_eq!(out, ChangeFeed{expiry: time::Duration::from_secs(3600)});
+		assert_eq!(
+			out,
+			ChangeFeed {
+				expiry: time::Duration::from_secs(3600)
+			}
+		);
 	}
 }
