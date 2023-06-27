@@ -27,7 +27,7 @@ impl<'a> Document<'a> {
 			// Create a new statement
 			let lq = Statement::from(lv);
 			// Check LIVE SELECT where condition
-			if self.check(ctx, opt, stm).await.is_err() {
+			if self.check(ctx, opt, &lq).await.is_err() {
 				continue;
 			}
 			// Check what type of data change this is
