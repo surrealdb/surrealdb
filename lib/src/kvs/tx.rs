@@ -1429,6 +1429,7 @@ impl Transaction {
 					let key = crate::key::db::new(ns, db);
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						changefeed: None,
 					};
 					self.put(key, &val).await?;
 					Ok(val)
@@ -1614,6 +1615,7 @@ impl Transaction {
 					let key = crate::key::db::new(ns, db);
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						changefeed: None,
 					};
 					self.put(key, &val).await?;
 					Ok(Arc::new(val))

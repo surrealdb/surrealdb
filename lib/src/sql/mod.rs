@@ -6,6 +6,7 @@ pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytes;
 pub(crate) mod cast;
+pub(crate) mod changefeed;
 pub(crate) mod comment;
 pub(crate) mod common;
 pub(crate) mod cond;
