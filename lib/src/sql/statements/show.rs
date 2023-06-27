@@ -20,7 +20,7 @@ use std::fmt;
 // the SHOW CHANGES statement.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct ShowStatement {
-	pub table: Option<String>,
+	pub table: Option<Table>,
 	pub since: Option<u64>,
 	pub limit: Option<u32>,
 }
@@ -51,9 +51,9 @@ impl fmt::Display for ShowStatement {
 	}
 }
 
-pub fn table_or_database(i: &str) -> IResult<&str, Option<String>> {
+pub fn table_or_database(i: &str) -> IResult<&str, Option<Table>> {
 	let (i, v) = alt((
-		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), |v: Table| Some(v.0)),
+		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), |v: Table| Some(v)),
 		map(tag_no_case("database"), |_| None),
 	))(i)?;
 	Ok((i, v))
