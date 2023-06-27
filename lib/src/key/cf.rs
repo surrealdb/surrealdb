@@ -7,12 +7,12 @@ use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Cf {
+pub struct Cf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_d: u8,
 	_e: u8,
 	_f: u8,
@@ -20,12 +20,12 @@ pub struct Cf {
 	// Use the to_u64_be function to convert it to a u128.
 	pub vs: [u8; 10],
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 }
 
 #[allow(unused)]
-pub fn new(ns: &str, db: &str, ts: u64, tb: &str) -> Cf {
-	Cf::new(ns.to_string(), db.to_string(), vs::u64_to_versionstamp(ts), tb.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
+	Cf::new(ns, db, vs::u64_to_versionstamp(ts), tb)
 }
 
 #[allow(unused)]
@@ -71,8 +71,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl Cf {
-	pub fn new(ns: String, db: String, vs: [u8; 10], tb: String) -> Cf {
+impl<'a> Cf<'a> {
+	pub fn new(ns: &'a str, db: &'a str, vs: [u8; 10], tb: &'a str) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -99,10 +99,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Cf::new(
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
 			u128_to_versionstamp(12345),
-			"test".to_string(),
+			"test",
 		);
 		let enc = Cf::encode(&val).unwrap();
 		println!("enc={}", show(&enc));
