@@ -1,3 +1,5 @@
+use std::fmt;
+
 // u64_to_versionstamp converts a u64 to a 10-byte versionstamp
 // assuming big-endian and the the last two bytes are zero.
 pub fn u64_to_versionstamp(v: u64) -> [u8; 10] {
@@ -52,7 +54,11 @@ pub fn u16_u64_to_versionstamp(v: u16, v2: u64) -> [u8; 10] {
 // u128_to_versionstamp converts a u128 to a 10-byte versionstamp
 // assuming big-endian.
 #[allow(unused)]
-pub fn u128_to_versionstamp(v: u128) -> [u8; 10] {
+pub fn try_u128_to_versionstamp(v: u128) -> Result<[u8; 10], Error> {
+	if v >> 80 > 0 {
+		return Err(Error::InvalidVersionstamp);
+	}
+
 	let mut buf = [0; 10];
 	buf[0] = (v >> 72) as u8;
 	buf[1] = (v >> 64) as u8;
@@ -64,7 +70,7 @@ pub fn u128_to_versionstamp(v: u128) -> [u8; 10] {
 	buf[7] = (v >> 16) as u8;
 	buf[8] = (v >> 8) as u8;
 	buf[9] = v as u8;
-	buf
+	Ok(buf)
 }
 
 // to_u128_be converts a 10-byte versionstamp to a u128 assuming big-endian.
@@ -80,17 +86,33 @@ pub fn to_u128_be(vs: [u8; 10]) -> u128 {
 	u128::from_be_bytes(buf)
 }
 
+pub enum Error {
+	// InvalidVersionstamp is returned when a versionstamp has an unexpected length.
+	InvalidVersionstamp,
+}
+
+impl fmt::Debug for Error {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Error::InvalidVersionstamp => write!(f, "invalid versionstamp"),
+		}
+	}
+}
+
 // to_u64_be converts a 10-byte versionstamp to a u64 assuming big-endian.
 // Only the first 8 bytes are used.
 #[allow(unused)]
-pub fn to_u64_be(vs: [u8; 10]) -> u64 {
+pub fn try_to_u64_be(vs: [u8; 10]) -> Result<u64, Error> {
 	let mut buf = [0; 8];
 	let mut i = 0;
 	while i < 8 {
 		buf[i] = vs[i];
 		i += 1;
 	}
-	u64::from_be_bytes(buf)
+	if vs[8] != 0 || vs[9] != 0 {
+		return Err(Error::InvalidVersionstamp);
+	}
+	Ok(u64::from_be_bytes(buf))
 }
 
 // to_u128_le converts a 10-byte versionstamp to a u128 assuming little-endian.
@@ -104,4 +126,32 @@ pub fn to_u128_le(vs: [u8; 10]) -> u128 {
 		i += 1;
 	}
 	u128::from_be_bytes(buf)
+}
+
+mod tests {
+	#[test]
+	fn try_to_u64_be() {
+		use super::*;
+		// Overflow
+		let v = [255, 255, 255, 255, 255, 255, 255, 255, 0, 1];
+		let res = try_to_u64_be(v);
+		assert!(res.is_err());
+		// No overflow
+		let v = [255, 255, 255, 255, 255, 255, 255, 255, 0, 0];
+		let res = try_to_u64_be(v).unwrap();
+		assert_eq!(res, u64::MAX);
+	}
+
+	#[test]
+	fn try_u128_to_versionstamp() {
+		use super::*;
+		// Overflow
+		let v = u128::MAX;
+		let res = try_u128_to_versionstamp(v);
+		assert!(res.is_err());
+		// No overflow
+		let v = u128::MAX >> 48;
+		let res = try_u128_to_versionstamp(v).unwrap();
+		assert_eq!(res, [255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+	}
 }

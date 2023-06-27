@@ -101,7 +101,7 @@ mod tests {
 		let val = Cf::new(
 			"test",
 			"test",
-			u128_to_versionstamp(12345),
+			try_u128_to_versionstamp(12345).unwrap(),
 			"test",
 		);
 		let enc = Cf::encode(&val).unwrap();
@@ -113,10 +113,10 @@ mod tests {
 	#[test]
 	fn versionstamp_conversions() {
 		let a = u64_to_versionstamp(12345);
-		let b = to_u64_be(a);
+		let b = try_to_u64_be(a).unwrap();
 		assert_eq!(12345, b);
 
-		let a = u128_to_versionstamp(12345);
+		let a = try_u128_to_versionstamp(12345).unwrap();
 		let b = to_u128_be(a);
 		assert_eq!(12345, b);
 	}
