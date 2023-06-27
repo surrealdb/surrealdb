@@ -12,7 +12,6 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::u32;
 use nom::combinator::map;
 use nom::combinator::opt;
-use nom::combinator::recognize;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -28,7 +27,6 @@ pub struct ShowStatement {
 
 impl ShowStatement {
 	/// Process this type returning a computed simple Value
-	#[allow(unused)]
 	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
 			feature: "change feed",
@@ -53,7 +51,6 @@ impl fmt::Display for ShowStatement {
 	}
 }
 
-#[allow(unused)]
 pub fn table_or_database(i: &str) -> IResult<&str, Option<String>> {
 	let (i, v) = alt((
 		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), |v: Table| Some(v.0)),
@@ -62,38 +59,20 @@ pub fn table_or_database(i: &str) -> IResult<&str, Option<String>> {
 	Ok((i, v))
 }
 
-#[allow(unused)]
-pub fn int_str(i: &str) -> IResult<&str, &str> {
-	use nom::{
-		character::complete::{char, one_of},
-		multi::{many0, many1},
-		sequence::terminated,
-	};
-
-	recognize(many1(terminated(one_of("0123456789"), many0(char('_')))))(i)
-}
-
-#[allow(unused)]
 pub fn since(i: &str) -> IResult<&str, u64> {
-	use std::num::ParseIntError;
-
 	let (i, _) = tag_no_case("SINCE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
 	take_u64(i)
 }
 
-#[allow(unused)]
 pub fn limit(i: &str) -> IResult<&str, u32> {
-	use std::num::ParseIntError;
-
 	let (i, _) = tag_no_case("LIMIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
 	u32(i)
 }
 
-#[allow(unused)]
 pub fn show(i: &str) -> IResult<&str, ShowStatement> {
 	let (i, _) = tag_no_case("SHOW CHANGES")(i)?;
 	let (i, _) = shouldbespace(i)?;
