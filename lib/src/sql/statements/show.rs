@@ -131,6 +131,15 @@ mod tests {
 	}
 
 	#[test]
+	fn show_table_changes_limit() {
+		let sql = "SHOW CHANGES FOR TABLE person LIMIT 10";
+		let res = show(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
 	fn show_table_changes_since_limit() {
 		let sql = "SHOW CHANGES FOR TABLE person SINCE 0 LIMIT 10";
 		let res = show(sql);
@@ -151,6 +160,15 @@ mod tests {
 	#[test]
 	fn show_database_changes_since() {
 		let sql = "SHOW CHANGES FOR DATABASE SINCE 0";
+		let res = show(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
+	fn show_database_changes_limit() {
+		let sql = "SHOW CHANGES FOR DATABASE LIMIT 10";
 		let res = show(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
