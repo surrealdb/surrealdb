@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(warnings))]
+
 //! The full type definitions for the SurrealQL query language
 
 pub(crate) mod algorithm;
@@ -35,6 +37,7 @@ pub(crate) mod idiom;
 pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
+pub(crate) mod latlng;
 pub(crate) mod limit;
 pub(crate) mod model;
 pub(crate) mod number;
