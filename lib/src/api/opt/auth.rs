@@ -85,7 +85,7 @@ impl<T, P> Credentials<T, Jwt> for Scope<'_, P> where P: Serialize {}
 
 /// A JSON Web Token for authenticating with the server
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Jwt(pub(crate) String);
+pub struct Jwt(pub String);
 
 impl From<String> for Jwt {
 	fn from(jwt: String) -> Self {
