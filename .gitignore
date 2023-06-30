@@ -36,6 +36,7 @@ Temporary Items
 /target/
 /lib/target/
 .idea/
+.vscode/
 /result
 /bin/
 /docker/
