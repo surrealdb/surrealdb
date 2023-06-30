@@ -8,5 +8,6 @@ impl_module_def!(
 	Package,
 	"search",
 	"highlight" => fut Async,
-	"offsets" => fut Async
+	"offsets" => fut Async,
+	"score" => fut Async
 );

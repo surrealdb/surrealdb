@@ -1,13 +1,18 @@
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::TermFrequency;
+use crate::idx::ft::postings::{Postings, TermFrequency};
+use crate::idx::ft::terms::TermId;
 use crate::idx::ft::Bm25Params;
 use crate::kvs::Transaction;
+use roaring::RoaringTreemap;
+use std::sync::Arc;
 
 pub(super) type Score = f32;
 
-pub(super) struct BM25Scorer {
+pub(crate) struct BM25Scorer {
+	postings: Postings,
+	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	doc_lengths: DocLengths,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -16,12 +21,16 @@ pub(super) struct BM25Scorer {
 
 impl BM25Scorer {
 	pub(super) fn new(
+		postings: Postings,
+		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 		doc_lengths: DocLengths,
 		total_docs_length: u128,
 		doc_count: u64,
 		bm25: Bm25Params,
 	) -> Self {
 		Self {
+			postings,
+			terms_docs,
 			doc_lengths,
 			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
 			doc_count: doc_count as f32,
@@ -29,7 +38,7 @@ impl BM25Scorer {
 		}
 	}
 
-	pub(super) async fn score(
+	async fn term_score(
 		&self,
 		tx: &mut Transaction,
 		doc_id: DocId,
@@ -38,6 +47,24 @@ impl BM25Scorer {
 	) -> Result<Score, Error> {
 		let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
+	}
+
+	pub(crate) async fn score(
+		&self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+	) -> Result<Option<Score>, Error> {
+		let mut sc = 0.0;
+		for (term_id, docs) in self.terms_docs.iter().flatten() {
+			if docs.contains(doc_id) {
+				if let Some(term_freq) =
+					self.postings.get_term_frequency(tx, *term_id, doc_id).await?
+				{
+					sc += self.term_score(tx, doc_id, docs.len(), term_freq).await?;
+				}
+			}
+		}
+		Ok(Some(sc))
 	}
 
 	// https://en.wikipedia.org/wiki/Okapi_BM25

@@ -91,7 +91,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
+		Display::fmt(&quote_str(&self.to_raw()), f)
 	}
 }
 

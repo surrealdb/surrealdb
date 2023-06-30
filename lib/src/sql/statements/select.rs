@@ -89,7 +89,7 @@ impl SelectStatement {
 			let v = w.compute(ctx, opt).await?;
 			match v {
 				Value::Table(t) => {
-					i.ingest(planner.get_iterable(ctx, opt, t).await?);
+					i.ingest(planner.get_iterable(ctx, t).await?);
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),

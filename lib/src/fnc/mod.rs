@@ -315,6 +315,7 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
+		"search::score" => search::score(ctx).await,
 		"search::highlight" => search::highlight(ctx).await,
 		"search::offsets" => search::offsets(ctx).await,
 		//

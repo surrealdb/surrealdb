@@ -30,18 +30,17 @@ impl<'a> QueryPlanner<'a> {
 	pub(crate) async fn get_iterable(
 		&mut self,
 		ctx: &Context<'_>,
-		opt: &Options,
 		t: Table,
 	) -> Result<Iterable, Error> {
 		let txn = ctx.try_clone_transaction()?;
-		let res = Tree::build(self.opt, &txn, &t, self.cond).await?;
+		let res = Tree::build(ctx, self.opt, &txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				let e = plan.i.new_query_executor(opt, &txn, &t, im).await?;
+				let e = QueryExecutor::new(self.opt, &txn, &t, im, Some(plan.e.clone())).await?;
 				self.executors.insert(t.0.clone(), e);
 				return Ok(Iterable::Index(t, plan));
 			}
-			let e = QueryExecutor::new(opt, &txn, &t, im, None).await?;
+			let e = QueryExecutor::new(self.opt, &txn, &t, im, None).await?;
 			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))
@@ -81,15 +80,15 @@ impl AllAndStrategy {
 	fn eval_node(&mut self, node: &Node) -> Result<(), Error> {
 		match node {
 			Node::Expression {
-				index_option,
+				io: index_option,
 				left,
 				right,
-				operator,
+				exp: expression,
 			} => {
 				if let Some(io) = index_option {
-					self.b.add(io.clone());
+					self.b.add_index_option(expression.clone(), io.clone());
 				}
-				self.eval_expression(left, right, operator)
+				self.eval_expression(left, right, expression.operator())
 			}
 			Node::Unsupported => Err(Error::BypassQueryPlanner),
 			_ => Ok(()),

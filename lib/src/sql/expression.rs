@@ -86,6 +86,20 @@ impl Expression {
 		}
 	}
 
+	/// Returns the operator
+	pub(crate) fn operator(&self) -> &Operator {
+		match self {
+			Expression::Unary {
+				o,
+				..
+			} => o,
+			Expression::Binary {
+				o,
+				..
+			} => o,
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let (l, o, r) = match self {

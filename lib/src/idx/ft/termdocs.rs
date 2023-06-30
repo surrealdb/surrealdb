@@ -5,6 +5,9 @@ use crate::idx::ft::terms::TermId;
 use crate::idx::{IndexKeyBase, SerdeState};
 use crate::kvs::Transaction;
 use roaring::RoaringTreemap;
+use std::sync::Arc;
+
+pub(in crate::idx) type TermsDocs = Arc<Vec<Option<(TermId, RoaringTreemap)>>>;
 
 pub(super) struct TermDocs {
 	index_key_base: IndexKeyBase,

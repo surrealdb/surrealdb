@@ -470,7 +470,7 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 }
 
 fn function_search(i: &str) -> IResult<&str, &str> {
-	alt((tag("highlight"), tag("offsets")))(i)
+	alt((tag("score"), tag("highlight"), tag("offsets")))(i)
 }
 
 fn function_session(i: &str) -> IResult<&str, &str> {

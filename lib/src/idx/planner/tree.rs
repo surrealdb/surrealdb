@@ -1,37 +1,28 @@
+use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::MatchRef;
 use crate::idx::planner::plan::IndexOption;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
-
-#[derive(Default)]
-pub(super) struct IndexMap {
-	pub(super) index: HashMap<Expression, HashSet<IndexOption>>,
-	pub(super) terms: HashMap<MatchRef, IndexFieldValue>,
-}
-
-pub(super) struct IndexFieldValue {
-	pub(super) ix: String,
-	pub(super) id: Idiom,
-	pub(super) val: String,
-}
 
 pub(super) struct Tree {}
 
 impl Tree {
+	/// Traverse the all the conditions and extract every expression
+	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
+		ctx: &'a Context<'_>,
 		opt: &'a Options,
 		txn: &'a Transaction,
 		table: &'a Table,
 		cond: &Option<Cond>,
 	) -> Result<Option<(Node, IndexMap)>, Error> {
 		let mut b = TreeBuilder {
+			ctx,
 			opt,
 			txn,
 			table,
@@ -47,6 +38,7 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
+	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	txn: &'a Transaction,
 	table: &'a Table,
@@ -86,6 +78,10 @@ impl<'a> TreeBuilder<'a> {
 			Value::Number(_) => Node::Scalar(v.to_owned()),
 			Value::Bool(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
+			Value::Param(p) => {
+				let v = p.compute(self.ctx, self.opt).await?;
+				self.eval_value(&v).await?
+			}
 			_ => Node::Unsupported,
 		})
 	}
@@ -112,17 +108,25 @@ impl<'a> TreeBuilder<'a> {
 			} => {
 				let left = self.eval_value(l).await?;
 				let right = self.eval_value(r).await?;
-				let mut index_option = None;
+				if let Some(io) = self.index_map.0.get(e) {
+					return Ok(Node::Expression {
+						io: Some(io.clone()),
+						left: Box::new(left),
+						right: Box::new(right),
+						exp: e.clone(),
+					});
+				}
+				let mut io = None;
 				if let Some((id, ix)) = left.is_indexed_field() {
-					index_option = self.lookup_index_option(ix, o, id, &right, e);
+					io = self.lookup_index_option(ix, o, id, &right, e);
 				} else if let Some((id, ix)) = right.is_indexed_field() {
-					index_option = self.lookup_index_option(ix, o, id, &left, e);
+					io = self.lookup_index_option(ix, o, id, &left, e);
 				};
 				Ok(Node::Expression {
-					index_option,
+					io,
 					left: Box::new(left),
 					right: Box::new(right),
-					operator: o.to_owned(),
+					exp: e.clone(),
 				})
 			}
 		}
@@ -134,49 +138,29 @@ impl<'a> TreeBuilder<'a> {
 		op: &Operator,
 		id: &Idiom,
 		v: &Node,
-		ep: &Expression,
+		e: &Expression,
 	) -> Option<IndexOption> {
 		if let Some(v) = v.is_scalar() {
-			if match &ix.index {
-				Index::Idx => Operator::Equal.eq(op),
-				Index::Uniq => Operator::Equal.eq(op),
+			let (found, mr, qs) = match &ix.index {
+				Index::Idx => (Operator::Equal.eq(op), None, None),
+				Index::Uniq => (Operator::Equal.eq(op), None, None),
 				Index::Search {
 					..
 				} => {
 					if let Operator::Matches(mr) = op {
-						if let Some(mr) = mr {
-							self.index_map.terms.insert(
-								*mr,
-								IndexFieldValue {
-									ix: ix.name.0.to_owned(),
-									id: id.to_owned(),
-									val: v.to_raw_string(),
-								},
-							);
-						}
-						true
+						(true, *mr, Some(v.clone().to_raw_string()))
 					} else {
-						false
+						(false, None, None)
 					}
 				}
-			} {
-				let io = IndexOption::new(ix.clone(), op.to_owned(), v.clone(), ep.clone());
-				self.add_index(ep, io.clone());
+			};
+			if found {
+				let io = IndexOption::new(ix.clone(), id.clone(), op.to_owned(), v.clone(), qs, mr);
+				self.index_map.0.insert(e.clone(), io.clone());
 				return Some(io);
 			}
 		}
 		None
-	}
-
-	fn add_index(&mut self, e: &Expression, io: IndexOption) {
-		match self.index_map.index.entry(e.clone()) {
-			Entry::Occupied(mut e) => {
-				e.get_mut().insert(io);
-			}
-			Entry::Vacant(e) => {
-				e.insert(HashSet::from([io]));
-			}
-		}
 	}
 
 	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
@@ -187,13 +171,23 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
+/// For each expression the a possible index option
+#[derive(Default)]
+pub(super) struct IndexMap(HashMap<Expression, IndexOption>);
+
+impl IndexMap {
+	pub(super) fn consume(self) -> HashMap<Expression, IndexOption> {
+		self.0
+	}
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) enum Node {
 	Expression {
-		index_option: Option<IndexOption>,
+		io: Option<IndexOption>,
 		left: Box<Node>,
 		right: Box<Node>,
-		operator: Operator,
+		exp: Expression,
 	},
 	IndexedField(Idiom, DefineIndexStatement),
 	NonIndexedField,

@@ -1,3 +1,4 @@
+use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use base64_lib::DecodeError as Base64Error;
@@ -469,8 +470,12 @@ pub enum Error {
 	},
 
 	/// Represents an error when analyzing a value
-	#[error("A string can't be analyzed: {0}")]
+	#[error("A value can't be analyzed: {0}")]
 	AnalyzerError(String),
+
+	/// Represents an error when trying to highlight a value
+	#[error("A value can't be highlighted: {0}")]
+	HighlightError(String),
 
 	/// Represents an underlying error with Bincode serializing / deserializing
 	#[error("Bincode error: {0}")]
@@ -493,6 +498,12 @@ pub enum Error {
 	#[doc(hidden)]
 	#[error("Bypass the query planner")]
 	BypassQueryPlanner,
+
+	/// Duplicated match references are not allowed
+	#[error("Duplicated Match reference: {mr}")]
+	DuplicatedMatchRef {
+		mr: MatchRef,
+	},
 }
 
 impl From<Error> for String {

@@ -21,6 +21,10 @@ mod api_integration {
 	use surrealdb::sql::Value;
 	use surrealdb::Error;
 	use surrealdb::Surreal;
+	use tracing_subscriber::filter::EnvFilter;
+	use tracing_subscriber::fmt;
+	use tracing_subscriber::layer::SubscriberExt;
+	use tracing_subscriber::util::SubscriberInitExt;
 	use ulid::Ulid;
 
 	const NS: &str = "test-ns";
@@ -54,6 +58,13 @@ mod api_integration {
 		pass: &'a str,
 	}
 
+	fn init_logger() {
+		let test_writer = fmt::layer().with_test_writer();
+		let builder = fmt::Subscriber::builder().with_env_filter(EnvFilter::from_default_env());
+		let subscriber = builder.finish();
+		let _ = subscriber.with(test_writer).try_init();
+	}
+
 	#[cfg(feature = "protocol-ws")]
 	mod ws {
 		use super::*;
@@ -61,6 +72,7 @@ mod api_integration {
 		use surrealdb::engine::remote::ws::Ws;
 
 		async fn new_db() -> Surreal<Client> {
+			init_logger();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -81,6 +93,7 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Http;
 
 		async fn new_db() -> Surreal<Client> {
+			init_logger();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -103,6 +116,7 @@ mod api_integration {
 		use surrealdb::engine::local::Mem;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -114,11 +128,13 @@ mod api_integration {
 
 		#[tokio::test]
 		async fn memory_allowed_as_address() {
+			init_logger();
 			any::connect("memory").await.unwrap();
 		}
 
 		#[tokio::test]
 		async fn signin_first_not_necessary() {
+			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
@@ -129,6 +145,7 @@ mod api_integration {
 
 		#[tokio::test]
 		async fn cant_sign_into_default_root_account() {
+			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			let Error::Db(DbError::InvalidAuth) = db.signin(Root {
 				username: ROOT_USER,
@@ -142,6 +159,7 @@ mod api_integration {
 
 		#[tokio::test]
 		async fn credentials_activate_authentication() {
+			init_logger();
 			let db = Surreal::new::<Mem>(Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -165,6 +183,7 @@ mod api_integration {
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -186,6 +205,7 @@ mod api_integration {
 		use surrealdb::engine::local::RocksDb;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			Surreal::new::<RocksDb>(path.as_str()).await.unwrap()
 		}
@@ -201,6 +221,7 @@ mod api_integration {
 		use surrealdb::engine::local::SpeeDb;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			Surreal::new::<SpeeDb>(path.as_str()).await.unwrap()
 		}
@@ -216,6 +237,7 @@ mod api_integration {
 		use surrealdb::engine::local::TiKv;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -236,6 +258,7 @@ mod api_integration {
 		use surrealdb::engine::local::FDb;
 
 		async fn new_db() -> Surreal<Db> {
+			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -255,6 +278,7 @@ mod api_integration {
 		use surrealdb::engine::any::Any;
 
 		async fn new_db() -> Surreal<Any> {
+			init_logger();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,

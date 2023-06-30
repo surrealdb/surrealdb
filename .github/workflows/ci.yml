@@ -24,6 +24,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Check format of code
         run: cargo fmt --all --check
 
@@ -40,6 +43,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -62,6 +68,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo check
         run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http --target wasm32-unknown-unknown
 
@@ -77,6 +86,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -97,6 +109,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
@@ -116,13 +131,26 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run cargo test (+coverage)
+        run: cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+            name: code-coverage-report
+            path: target/llvm-cov/html/
+            retention-days: 5
 
   ws-engine:
     name: WebSocket engine
@@ -134,6 +162,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -162,6 +193,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
@@ -189,6 +223,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo test
         run: |
           cargo test --locked --package surrealdb --no-default-features --features kv-mem --lib kvs
@@ -204,6 +241,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
         run: |
@@ -221,6 +261,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo test
         run: |
           cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
@@ -237,6 +280,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo test
         run: |
           cargo test --locked --package surrealdb --no-default-features --features kv-speedb --lib kvs
@@ -252,6 +298,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -281,6 +330,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
         with:
@@ -301,6 +353,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |

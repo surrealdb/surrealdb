@@ -1,33 +1,35 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::docids::{DocId, NO_DOC_ID};
+use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
 use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Ident, Object, Operator, Table, Thing, Value};
+use crate::sql::{Array, Expression, Ident, Idiom, Object, Operator, Thing, Value};
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct PlanBuilder {
-	indexes: Vec<IndexOption>,
+	indexes: Vec<(Expression, IndexOption)>,
 }
 
 impl PlanBuilder {
-	pub(super) fn add(&mut self, i: IndexOption) {
-		self.indexes.push(i);
+	pub(super) fn add_index_option(&mut self, e: Expression, i: IndexOption) {
+		self.indexes.push((e, i));
 	}
 
 	pub(super) fn build(mut self) -> Result<Plan, Error> {
 		// TODO select the best option if there are several (cost based)
-		if let Some(index) = self.indexes.pop() {
-			Ok(index.into())
+		if let Some((e, i)) = self.indexes.pop() {
+			Ok(Plan::new(e, i))
 		} else {
 			Err(Error::BypassQueryPlanner)
 		}
@@ -35,108 +37,144 @@ impl PlanBuilder {
 }
 
 pub(crate) struct Plan {
+	pub(super) e: Expression,
 	pub(super) i: IndexOption,
 }
 
 impl Plan {
+	pub(super) fn new(e: Expression, i: IndexOption) -> Self {
+		Self {
+			e,
+			i,
+		}
+	}
+
 	pub(crate) async fn new_iterator(
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
-		self.i.new_iterator(opt, txn).await
+		self.i.new_iterator(opt, txn, exe).await
 	}
 
 	pub(crate) fn explain(&self) -> Value {
-		let IndexOption {
-			ix,
-			v,
-			op,
-			..
-		} = &self.i;
-
 		Value::Object(Object::from(HashMap::from([
-			("index", Value::from(ix.name.0.to_owned())),
-			("operator", Value::from(op.to_string())),
-			("value", v.clone()),
+			("index", Value::from(self.i.ix().name.0.to_owned())),
+			("operator", Value::from(self.i.op().to_string())),
+			("value", self.i.value().clone()),
 		])))
 	}
 }
 
-impl From<IndexOption> for Plan {
-	fn from(i: IndexOption) -> Self {
-		Self {
-			i,
-		}
-	}
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub(super) struct IndexOption {
-	pub(super) ix: DefineIndexStatement,
-	pub(super) v: Value,
-	pub(super) op: Operator,
-	ep: Expression,
+pub(super) struct IndexOption(Arc<Inner>);
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub(super) struct Inner {
+	ix: DefineIndexStatement,
+	id: Idiom,
+	v: Value,
+	qs: Option<String>,
+	op: Operator,
+	mr: Option<MatchRef>,
 }
 
 impl IndexOption {
-	pub(super) fn new(ix: DefineIndexStatement, op: Operator, v: Value, ep: Expression) -> Self {
-		Self {
+	pub(super) fn new(
+		ix: DefineIndexStatement,
+		id: Idiom,
+		op: Operator,
+		v: Value,
+		qs: Option<String>,
+		mr: Option<MatchRef>,
+	) -> Self {
+		Self(Arc::new(Inner {
 			ix,
+			id,
 			op,
 			v,
-			ep,
-		}
+			qs,
+			mr,
+		}))
 	}
 
-	pub(super) async fn new_query_executor(
-		&self,
-		opt: &Options,
-		txn: &Transaction,
-		t: &Table,
-		i: IndexMap,
-	) -> Result<QueryExecutor, Error> {
-		QueryExecutor::new(opt, txn, t, i, Some(self.ep.clone())).await
+	pub(super) fn ix(&self) -> &DefineIndexStatement {
+		&self.0.ix
+	}
+
+	pub(super) fn op(&self) -> &Operator {
+		&self.0.op
+	}
+
+	pub(super) fn value(&self) -> &Value {
+		&self.0.v
+	}
+
+	pub(super) fn qs(&self) -> Option<&String> {
+		self.0.qs.as_ref()
+	}
+
+	pub(super) fn id(&self) -> &Idiom {
+		&self.0.id
+	}
+
+	pub(super) fn match_ref(&self) -> Option<&MatchRef> {
+		self.0.mr.as_ref()
 	}
 
 	async fn new_iterator(
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		exe: &QueryExecutor,
 	) -> Result<Box<dyn ThingIterator>, Error> {
-		match &self.ix.index {
-			Index::Idx => match self.op {
-				Operator::Equal => {
-					Ok(Box::new(NonUniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
+		match &self.ix().index {
+			Index::Idx => {
+				if self.op() == &Operator::Equal {
+					return Ok(Box::new(NonUniqueEqualThingIterator::new(
+						opt,
+						self.ix(),
+						self.value(),
+					)?));
 				}
-				_ => Err(Error::BypassQueryPlanner),
-			},
-			Index::Uniq => match self.op {
-				Operator::Equal => {
-					Ok(Box::new(UniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
+			}
+			Index::Uniq => {
+				if self.op() == &Operator::Equal {
+					return Ok(Box::new(UniqueEqualThingIterator::new(
+						opt,
+						self.ix(),
+						self.value(),
+					)?));
 				}
-				_ => Err(Error::BypassQueryPlanner),
-			},
+			}
 			Index::Search {
 				az,
 				hl,
 				sc,
 				order,
-			} => match self.op {
-				Operator::Matches(mr) => Ok(Box::new(
-					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, mr, &self.v)
-						.await?,
-				)),
-				_ => Err(Error::BypassQueryPlanner),
-			},
+			} => {
+				if let Operator::Matches(_) = self.op() {
+					let td = exe.pre_match_terms_docs();
+					return Ok(Box::new(
+						MatchesThingIterator::new(opt, txn, self.ix(), az, *hl, sc, *order, td)
+							.await?,
+					));
+				}
+			}
 		}
+		Err(Error::BypassQueryPlanner)
 	}
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub(crate) trait ThingIterator: Send {
-	async fn next_batch(&mut self, tx: &Transaction, size: u32) -> Result<Vec<Thing>, Error>;
+	async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		size: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error>;
 }
 
 struct NonUniqueEqualThingIterator {
@@ -159,7 +197,11 @@ impl NonUniqueEqualThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for NonUniqueEqualThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = self.beg.clone();
 		let max = self.end.clone();
 		let res = txn.lock().await.scan(min..max, limit).await?;
@@ -167,7 +209,7 @@ impl ThingIterator for NonUniqueEqualThingIterator {
 			self.beg = key.clone();
 			self.beg.push(0x00);
 		}
-		let res = res.iter().map(|(_, val)| val.into()).collect();
+		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
 		Ok(res)
 	}
 }
@@ -189,10 +231,14 @@ impl UniqueEqualThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for UniqueEqualThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
-				return Ok(vec![val.into()]);
+				return Ok(vec![(val.into(), NO_DOC_ID)]);
 			}
 		}
 		Ok(vec![])
@@ -200,7 +246,6 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
-	_terms: Option<(MatchRef, Vec<TermId>)>,
 	hits: Option<HitsIterator>,
 }
 
@@ -214,23 +259,26 @@ impl MatchesThingIterator {
 		hl: bool,
 		sc: &Scoring,
 		order: u32,
-		mr: Option<MatchRef>,
-		v: &Value,
+		terms_docs: Option<TermsDocs>,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
-		let mut run = txn.lock().await;
 		if let Scoring::Bm {
 			..
 		} = sc
 		{
-			let query_string = v.clone().convert_to_string()?;
+			let mut run = txn.lock().await;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
 			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
-			let (terms, hits) = fti.search(&mut run, query_string).await?;
-			Ok(Self {
-				hits,
-				_terms: mr.map(|mr| (mr, terms)),
-			})
+			if let Some(terms_docs) = terms_docs {
+				let hits = fti.new_hits_iterator(&mut run, terms_docs).await?;
+				Ok(Self {
+					hits,
+				})
+			} else {
+				Ok(Self {
+					hits: None,
+				})
+			}
 		} else {
 			Err(Error::FeatureNotYetImplemented {
 				feature: "Vector Search",
@@ -242,12 +290,16 @@ impl MatchesThingIterator {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for MatchesThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, mut limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		mut limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let mut res = vec![];
 		if let Some(hits) = &mut self.hits {
 			let mut run = txn.lock().await;
 			while limit > 0 {
-				if let Some((hit, _)) = hits.next(&mut run).await? {
+				if let Some(hit) = hits.next(&mut run).await? {
 					res.push(hit);
 				} else {
 					break;
@@ -256,5 +308,41 @@ impl ThingIterator for MatchesThingIterator {
 			}
 		}
 		Ok(res)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::planner::plan::IndexOption;
+	use crate::sql::statements::DefineIndexStatement;
+	use crate::sql::{Idiom, Operator, Value};
+	use std::collections::HashSet;
+
+	#[test]
+	fn test_hash_index_option() {
+		let mut set = HashSet::new();
+		let io1 = IndexOption::new(
+			DefineIndexStatement::default(),
+			Idiom::from("a.b".to_string()),
+			Operator::Equal,
+			Value::from("test"),
+			None,
+			None,
+		);
+
+		let io2 = IndexOption::new(
+			DefineIndexStatement::default(),
+			Idiom::from("a.b".to_string()),
+			Operator::Equal,
+			Value::from("test"),
+			None,
+			None,
+		);
+
+		set.insert(io1);
+		set.insert(io2.clone());
+		set.insert(io2);
+
+		assert_eq!(set.len(), 1);
 	}
 }

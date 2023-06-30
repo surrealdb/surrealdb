@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::block::{block, Block};
+use crate::sql::changefeed::{changefeed, ChangeFeed};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::duration::{duration, Duration};
@@ -172,6 +173,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 #[format(Named)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
+	pub changefeed: Option<ChangeFeed>,
 }
 
 impl DefineDatabaseStatement {
@@ -196,7 +198,11 @@ impl DefineDatabaseStatement {
 
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE {}", self.name)
+		write!(f, "DEFINE DATABASE {}", self.name)?;
+		if let Some(ref cf) = self.changefeed {
+			write!(f, " CHANGEFEED {}", crate::sql::duration::Duration(cf.expiry))?;
+		}
+		Ok(())
 	}
 }
 
@@ -206,12 +212,34 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = ident(i)?;
+	let (i, opts) = many0(database_opts)(i)?;
 	Ok((
 		i,
 		DefineDatabaseStatement {
 			name,
+			changefeed: opts
+				.iter()
+				.map(|x| match x {
+					DefineDatabaseOption::ChangeFeed(ref v) => v.to_owned(),
+				})
+				.next(),
 		},
 	))
+}
+
+fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = changefeed(i)?;
+	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum DefineDatabaseOption {
+	ChangeFeed(ChangeFeed),
+}
+
+fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
+	database_changefeed(i)
 }
 
 // --------------------------------------------------
@@ -784,6 +812,7 @@ pub struct DefineTableStatement {
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
+	pub changefeed: Option<ChangeFeed>,
 }
 
 impl DefineTableStatement {
@@ -863,6 +892,9 @@ impl Display for DefineTableStatement {
 			};
 			write!(f, "{}", self.permissions)?;
 		}
+		if let Some(ref cf) = self.changefeed {
+			write!(f, " CHANGEFEED {}", crate::sql::duration::Duration(cf.expiry))?;
+		}
 		Ok(())
 	}
 }
@@ -904,6 +936,10 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					_ => None,
 				})
 				.unwrap_or_default(),
+			changefeed: opts.iter().find_map(|x| match x {
+				DefineTableOption::ChangeFeed(ref v) => Some(v.to_owned()),
+				_ => None,
+			}),
 		},
 	))
 }
@@ -915,16 +951,30 @@ pub enum DefineTableOption {
 	Schemaless,
 	Schemafull,
 	Permissions(Permissions),
+	ChangeFeed(ChangeFeed),
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((table_drop, table_view, table_schemaless, table_schemafull, table_permissions))(i)
+	alt((
+		table_drop,
+		table_view,
+		table_schemaless,
+		table_schemafull,
+		table_permissions,
+		table_changefeed,
+	))(i)
 }
 
 fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("DROP")(i)?;
 	Ok((i, DefineTableOption::Drop))
+}
+
+fn table_changefeed(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = changefeed(i)?;
+	Ok((i, DefineTableOption::ChangeFeed(v)))
 }
 
 fn table_view(i: &str) -> IResult<&str, DefineTableOption> {
@@ -1378,5 +1428,31 @@ mod tests {
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
 		);
+	}
+
+	#[test]
+	fn define_database_with_changefeed() {
+		let sql = "DEFINE DATABASE mydatabase CHANGEFEED 1h";
+		let res = database(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+
+		let serialized = out.to_vec();
+		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserializled);
+	}
+
+	#[test]
+	fn define_table_with_changefeed() {
+		let sql = "DEFINE TABLE mytable SCHEMALESS CHANGEFEED 1h";
+		let res = table(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+
+		let serialized = out.to_vec();
+		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserializled);
 	}
 }

@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
@@ -17,18 +18,18 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> &str {
+	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
 		t.get_str(&self.i)
 	}
 
-	pub(super) fn filter(self, f: &Filter) -> Tokens {
+	pub(super) fn filter(self, f: &Filter) -> Result<Tokens, Error> {
 		let mut tks = Vec::new();
 		let mut res = vec![];
 		for t in self.t {
 			if t.is_empty() {
 				continue;
 			}
-			let c = t.get_str(&self.i);
+			let c = t.get_str(&self.i)?;
 			let r = f.apply_filter(c);
 			res.push((t, r));
 		}
@@ -55,10 +56,10 @@ impl Tokens {
 				FilterResult::Ignore => {}
 			};
 		}
-		Tokens {
+		Ok(Tokens {
 			i: self.i,
 			t: tks,
-		}
+		})
 	}
 
 	pub(super) fn list(&self) -> &Vec<Token> {
@@ -68,36 +69,86 @@ impl Tokens {
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
-	Ref(Position, Position),
-	String(Position, Position, String),
+	Ref {
+		chars: (Position, Position),
+		bytes: (Position, Position),
+	},
+	String {
+		chars: (Position, Position),
+		bytes: (Position, Position),
+		term: String,
+	},
 }
 
 impl Token {
-	fn new_token(&self, t: String) -> Self {
+	fn new_token(&self, term: String) -> Self {
 		match self {
-			Token::Ref(s, e) => Token::String(*s, *e, t),
-			Token::String(s, e, _) => Token::String(*s, *e, t),
+			Token::Ref {
+				chars,
+				bytes,
+			} => Token::String {
+				chars: *chars,
+				bytes: *bytes,
+				term,
+			},
+			Token::String {
+				chars,
+				bytes,
+				..
+			} => Token::String {
+				chars: *chars,
+				bytes: *bytes,
+				term,
+			},
 		}
 	}
 
 	pub(super) fn new_offset(&self, i: u32) -> Offset {
 		match self {
-			Token::Ref(s, e) => Offset::new(i, *s, *e),
-			Token::String(s, e, _) => Offset::new(i, *s, *e),
+			Token::Ref {
+				chars,
+				..
+			} => Offset::new(i, chars.0, chars.1),
+			Token::String {
+				chars,
+				..
+			} => Offset::new(i, chars.0, chars.1),
 		}
 	}
 
 	fn is_empty(&self) -> bool {
 		match self {
-			Token::Ref(start, end) => start == end,
-			Token::String(_, _, s) => s.is_empty(),
+			Token::Ref {
+				chars,
+				..
+			} => chars.0 == chars.1,
+			Token::String {
+				term,
+				..
+			} => term.is_empty(),
 		}
 	}
 
-	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &str {
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
 		match self {
-			Token::Ref(s, e) => &i[(*s as usize)..(*e as usize)],
-			Token::String(_, _, s) => s,
+			Token::Ref {
+				bytes,
+				..
+			} => {
+				let s = bytes.0 as usize;
+				let e = bytes.1 as usize;
+				let l = i.len();
+				if s >= l || e > l {
+					return Err(Error::AnalyzerError(format!(
+						"Unable to extract the token. The offset position ({s},{e}) is out of range ({l})."
+					)));
+				}
+				Ok(&i[(bytes.0 as usize)..(bytes.1 as usize)])
+			}
+			Token::String {
+				term,
+				..
+			} => Ok(term),
 		}
 	}
 }
@@ -129,28 +180,40 @@ impl Tokenizer {
 
 	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
 		let mut w = Tokenizer::new(t);
-		let mut last_pos = 0;
-		let mut current_pos = 0;
+		let mut last_char_pos = 0;
+		let mut last_byte_pos = 0;
+		let mut current_char_pos = 0;
+		let mut current_byte_pos = 0;
 		let mut t = Vec::new();
 		for c in i.chars() {
+			let char_len = c.len_utf8() as Position;
 			let is_valid = Self::is_valid(c);
 			let should_split = w.should_split(c);
 			if should_split || !is_valid {
 				// The last pos may be more advanced due to the is_valid process
-				if last_pos < current_pos {
-					t.push(Token::Ref(last_pos, current_pos));
+				if last_char_pos < current_char_pos {
+					t.push(Token::Ref {
+						chars: (last_char_pos, current_char_pos),
+						bytes: (last_byte_pos, current_byte_pos),
+					});
 				}
-				last_pos = current_pos;
+				last_char_pos = current_char_pos;
+				last_byte_pos = current_byte_pos;
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
 				if !is_valid {
-					last_pos += c.len_utf8() as Position;
+					last_char_pos += 1;
+					last_byte_pos += char_len;
 				}
 			}
-			current_pos += c.len_utf8() as Position;
+			current_char_pos += 1;
+			current_byte_pos += char_len;
 		}
-		if current_pos != last_pos {
-			t.push(Token::Ref(last_pos, current_pos));
+		if current_char_pos != last_char_pos {
+			t.push(Token::Ref {
+				chars: (last_char_pos, current_char_pos),
+				bytes: (last_byte_pos, current_byte_pos),
+			});
 		}
 		Tokens {
 			i,

@@ -2,6 +2,7 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
 use crate::sql::Thing;
@@ -39,6 +40,8 @@ pub struct Context<'a> {
 	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
 	// An optional record id
 	thing: Option<&'a Thing>,
+	// An optional doc id
+	doc_id: Option<DocId>,
 	// An optional cursor document
 	cursor_doc: Option<&'a Value>,
 }
@@ -73,6 +76,7 @@ impl<'a> Context<'a> {
 			transaction: None,
 			query_executors: None,
 			thing: None,
+			doc_id: None,
 			cursor_doc: None,
 		}
 	}
@@ -87,6 +91,7 @@ impl<'a> Context<'a> {
 			transaction: parent.transaction.clone(),
 			query_executors: parent.query_executors.clone(),
 			thing: parent.thing,
+			doc_id: parent.doc_id,
 			cursor_doc: parent.cursor_doc,
 		}
 	}
@@ -121,6 +126,10 @@ impl<'a> Context<'a> {
 
 	pub fn add_thing(&mut self, thing: &'a Thing) {
 		self.thing = Some(thing);
+	}
+
+	pub fn add_doc_id(&mut self, doc_id: DocId) {
+		self.doc_id = Some(doc_id);
 	}
 
 	/// Add a cursor document to this context.
@@ -163,6 +172,10 @@ impl<'a> Context<'a> {
 
 	pub fn thing(&self) -> Option<&Thing> {
 		self.thing
+	}
+
+	pub fn doc_id(&self) -> Option<DocId> {
+		self.doc_id
 	}
 
 	pub fn doc(&self) -> Option<&Value> {
