@@ -234,15 +234,16 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 		CREATE blog:4 SET title = 'the dog sat there and did nothing';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
- 		SELECT id,search::score(1) AS score FROM blog WHERE (title @1@ 'animals' AND id>0) OR (title @1@ 'animals' AND id<99);
+		LET $keywords = 'animals';
+ 		SELECT id,search::score(1) AS score FROM blog WHERE (title @1@ $keywords AND id>0) OR (title @1@ $keywords AND id<99);
 		SELECT id,search::score(1) + search::score(2) AS score FROM blog WHERE title @1@ 'dummy1' OR title @2@ 'dummy2';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 9);
 	//
-	for _ in 0..6 {
+	for _ in 0..7 {
 		let _ = res.remove(0).result?;
 	}
 
