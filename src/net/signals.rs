@@ -1,4 +1,19 @@
+use std::time::Duration;
+
+use axum_server::Handle;
+
 use crate::err::Error;
+
+/// Start a graceful shutdown on the Axum Handle when a shutdown signal is received.
+pub fn graceful_shutdown(handle: Handle, dur: Option<Duration>) {
+
+	tokio::spawn(async move {
+		let result = listen().await.expect("Failed to listen to shutdown signal");
+		info!(target: super::LOG, "{} received. Start graceful shutdown...", result);
+
+		handle.graceful_shutdown(dur)
+	});
+}
 
 #[cfg(unix)]
 pub async fn listen() -> Result<String, Error> {
@@ -11,7 +26,7 @@ pub async fn listen() -> Result<String, Error> {
 	let mut sigterm = signal(SignalKind::terminate())?;
 	// Listen and wait for the system signals
 	tokio::select! {
-		// Wait for a SIGQUIT signal
+		// Wait for a SIGHUP signal
 		_ = sighup.recv() => {
 			Ok(String::from("SIGHUP"))
 		}

@@ -1,21 +1,26 @@
 use crate::dbs::DB;
-use crate::err::Error;
-use crate::net::session;
+use axum::Router;
+use axum::routing::get;
+use axum::{Extension, response::Response};
+use axum::response::IntoResponse;
 use bytes::Bytes;
+use http::{StatusCode};
+use http_body::Body as HttpBody;
 use hyper::body::Body;
 use surrealdb::dbs::Session;
-use warp::Filter;
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	warp::path("export")
-		.and(warp::path::end())
-		.and(warp::get())
-		.and(session::build())
-		.and_then(handler)
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+    B: HttpBody + Send + 'static,
+    S: Clone + Send + Sync + 'static,
+{
+	Router::new()
+		.route("/export", get(handler))
 }
 
-async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler(
+	Extension(session): Extension<Session>,
+) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Check the permissions
 	match session.au.is_db() {
 		true => {
@@ -24,12 +29,12 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 			// Extract the NS header value
 			let nsv = match session.ns {
 				Some(ns) => ns,
-				None => return Err(warp::reject::custom(Error::NoNsHeader)),
+				None => return Err((StatusCode::BAD_REQUEST, "No namespace provided")),
 			};
 			// Extract the DB header value
 			let dbv = match session.db {
 				Some(db) => db,
-				None => return Err(warp::reject::custom(Error::NoDbHeader)),
+				None => return Err((StatusCode::BAD_REQUEST, "No database provided")),
 			};
 			// Create a chunked response
 			let (mut chn, bdy) = Body::channel();
@@ -44,9 +49,12 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 				}
 			});
 			// Return the chunked body
-			Ok(warp::reply::Response::new(bdy))
+			return Ok(Response::builder()
+				.status(StatusCode::OK)
+				.body(bdy)
+				.unwrap())
 		}
-		// There was an error with permissions
-		_ => Err(warp::reject::custom(Error::InvalidAuth)),
+		// The user does not have the correct permissions
+		_ => return Err((StatusCode::FORBIDDEN, "Invalid permissions")),
 	}
 }

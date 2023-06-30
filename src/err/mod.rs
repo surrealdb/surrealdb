@@ -1,4 +1,7 @@
+use axum::Json;
+use axum::response::{IntoResponse, Response};
 use base64::DecodeError as Base64Error;
+use http::StatusCode;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use serde_cbor::error::Error as CborError;
@@ -51,8 +54,6 @@ pub enum Error {
 	Remote(#[from] ReqwestError),
 }
 
-impl warp::reject::Reject for Error {}
-
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
@@ -83,5 +84,58 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+#[derive(Serialize)]
+pub(super) struct Message {
+	code: u16,
+	details: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	description: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	information: Option<String>,
+}
+
+impl IntoResponse for Error {
+	fn into_response(self) -> Response {
+		match self {
+			Error::InvalidAuth => (
+				StatusCode::FORBIDDEN,
+				Json(Message {
+					code: 403,
+					details: Some("Authentication failed".to_string()),
+					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					information: Some(self.to_string()),
+				})
+			),
+			Error::InvalidType => (
+				StatusCode::UNSUPPORTED_MEDIA_TYPE,
+				Json(Message {
+					code: 415,
+					details: Some("Unsupported media type".to_string()),
+					description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
+					information: None,
+				}),
+			),
+			Error::InvalidStorage => (
+				StatusCode::INTERNAL_SERVER_ERROR,
+				Json(Message {
+					code: 500,
+					details: Some("Health check failed".to_string()),
+					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
+					information: Some(self.to_string()),
+				}),
+			),
+			_ => (
+				StatusCode::BAD_REQUEST,
+				Json(Message {
+					code: 400,
+					details: Some("Request problems detected".to_string()),
+					description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+					information: Some(self.to_string()),
+				}),
+			),
+		}.into_response()
 	}
 }

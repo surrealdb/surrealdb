@@ -37,7 +37,7 @@ pub async fn init(
 	}: BackupCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::o11y::builder().with_log_level("error").init();
+	crate::telemetry::builder().with_log_level("error").init();
 
 	// Process the source->destination response
 	let into_local = into.ends_with(".db");

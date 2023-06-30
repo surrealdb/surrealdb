@@ -1,13 +1,42 @@
-mod logger;
-mod tracers;
+mod logs;
+mod traces;
+pub mod metrics;
+
+use std::time::Duration;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use once_cell::sync::Lazy;
+use opentelemetry::KeyValue;
+use opentelemetry::sdk::Resource;
+use opentelemetry::sdk::resource::{SdkProvidedResourceDetector, EnvResourceDetector, TelemetryResourceDetector};
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 #[cfg(feature = "has-storage")]
 use tracing_subscriber::EnvFilter;
+
+pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
+	let res = Resource::from_detectors(
+		Duration::from_secs(5),
+		vec![
+			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES > option_env! CARGO_BIN_NAME > unknown_service
+			Box::new(SdkProvidedResourceDetector),
+			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like key1=value1,key2=value2,...)
+			Box::new(EnvResourceDetector::new()),
+			// set telemetry.sdk.{name, language, version}
+			Box::new(TelemetryResourceDetector),
+		],
+	);
+
+	// If no external service.name is set, set it to surrealdb
+	if res.get("service.name".into()).unwrap_or("".into()).as_str().is_empty() {
+		debug!("No service.name set, setting to surrealdb");
+		res.merge(&Resource::new([KeyValue::new("service.name", "surrealdb")]))
+	} else {
+		res
+	}
+});
 
 #[derive(Default, Debug, Clone)]
 pub struct Builder {
@@ -32,7 +61,8 @@ impl Builder {
 		self.filter = Some(CustomEnvFilter(filter));
 		self
 	}
-	/// Build a dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
+
+	/// Build a tracing dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
 	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
 		let registry = tracing_subscriber::registry();
 		let registry = registry.with(self.filter.map(|filter| {
@@ -44,11 +74,12 @@ impl Builder {
 				.with_filter(filter.0)
 				.boxed()
 		}));
-		let registry = registry.with(self.log_level.map(logger::new));
-		let registry = registry.with(tracers::new());
+		let registry = registry.with(self.log_level.map(logs::new));
+		let registry = registry.with(traces::new());
 		Box::new(registry)
 	}
-	/// Build a dispatcher and set it as global
+
+	/// tracing pipeline
 	pub fn init(self) {
 		self.build().init()
 	}
@@ -60,10 +91,12 @@ mod tests {
 	use tracing::{span, Level};
 	use tracing_subscriber::util::SubscriberInitExt;
 
+	use crate::telemetry;
+
 	#[tokio::test(flavor = "multi_thread")]
 	async fn test_otlp_tracer() {
 		println!("Starting mock otlp server...");
-		let (addr, mut req_rx) = super::tracers::tests::mock_otlp_server().await;
+		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
 		{
 			let otlp_endpoint = format!("http://{}", addr);
@@ -73,7 +106,7 @@ mod tests {
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = super::builder().build().set_default();
+					let _enter = telemetry::builder().build().set_default();
 
 					println!("Sending span...");
 
@@ -94,7 +127,7 @@ mod tests {
 			.resource_spans
 			.first()
 			.unwrap()
-			.instrumentation_library_spans
+			.scope_spans
 			.first()
 			.unwrap()
 			.spans
@@ -108,7 +141,7 @@ mod tests {
 	#[tokio::test(flavor = "multi_thread")]
 	async fn test_tracing_filter() {
 		println!("Starting mock otlp server...");
-		let (addr, mut req_rx) = super::tracers::tests::mock_otlp_server().await;
+		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
 		{
 			let otlp_endpoint = format!("http://{}", addr);
@@ -119,7 +152,7 @@ mod tests {
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = super::builder().build().set_default();
+					let _enter = telemetry::builder().build().set_default();
 
 					println!("Sending spans...");
 
@@ -148,7 +181,7 @@ mod tests {
 			.resource_spans
 			.first()
 			.unwrap()
-			.instrumentation_library_spans
+			.scope_spans
 			.first()
 			.unwrap()
 			.spans;

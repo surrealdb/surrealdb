@@ -27,7 +27,7 @@ mod err;
 mod iam;
 #[cfg(feature = "has-storage")]
 mod net;
-mod o11y;
+mod telemetry;
 #[cfg(feature = "has-storage")]
 mod rpc;
 

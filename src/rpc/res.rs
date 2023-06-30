@@ -1,3 +1,4 @@
+use axum::extract::ws::Message;
 use serde::Serialize;
 use serde_json::{json, Value as Json};
 use std::borrow::Cow;
@@ -7,7 +8,6 @@ use surrealdb::dbs::Notification;
 use surrealdb::sql;
 use surrealdb::sql::Value;
 use tracing::instrument;
-use warp::ws::Message;
 
 #[derive(Clone)]
 pub enum Output {
@@ -87,19 +87,19 @@ impl Response {
 		let message = match out {
 			Output::Json => {
 				let res = serde_json::to_string(&self.simplify()).unwrap();
-				Message::text(res)
+				Message::Text(res)
 			}
 			Output::Cbor => {
 				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
-				Message::binary(res)
+				Message::Binary(res)
 			}
 			Output::Pack => {
 				let res = serde_pack::to_vec(&self.simplify()).unwrap();
-				Message::binary(res)
+				Message::Binary(res)
 			}
 			Output::Full => {
 				let res = surrealdb::sql::serde::serialize(&self).unwrap();
-				Message::binary(res)
+				Message::Binary(res)
 			}
 		};
 		let _ = chn.send(message).await;

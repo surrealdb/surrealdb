@@ -1,9 +1,10 @@
-use opentelemetry::sdk::{trace::Tracer, Resource};
+use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceError;
-use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::{EnvFilter, Layer};
+
+use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 
 const TRACING_FILTER_VAR: &str = "SURREAL_TRACING_FILTER";
 
@@ -15,12 +16,11 @@ where
 }
 
 fn tracer() -> Result<Tracer, TraceError> {
-	let resource = Resource::new(vec![KeyValue::new("service.name", "surrealdb")]);
 
 	opentelemetry_otlp::new_pipeline()
 		.tracing()
 		.with_exporter(opentelemetry_otlp::new_exporter().tonic().with_env())
-		.with_trace_config(opentelemetry::sdk::trace::config().with_resource(resource))
+		.with_trace_config(opentelemetry::sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()))
 		.install_batch(opentelemetry::runtime::Tokio)
 }
 
