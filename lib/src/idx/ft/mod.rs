@@ -522,7 +522,7 @@ mod tests {
 				az.clone(),
 				IndexKeyBase::default(),
 				default_btree_order,
-				&Scoring::default(),
+				&Scoring::bm25(),
 				false,
 			)
 			.await
@@ -541,7 +541,7 @@ mod tests {
 				az.clone(),
 				IndexKeyBase::default(),
 				default_btree_order,
-				&Scoring::default(),
+				&Scoring::bm25(),
 				false,
 			)
 			.await
@@ -558,7 +558,7 @@ mod tests {
 				az.clone(),
 				IndexKeyBase::default(),
 				default_btree_order,
-				&Scoring::default(),
+				&Scoring::bm25(),
 				false,
 			)
 			.await
@@ -599,7 +599,7 @@ mod tests {
 				az.clone(),
 				IndexKeyBase::default(),
 				default_btree_order,
-				&Scoring::default(),
+				&Scoring::bm25(),
 				false,
 			)
 			.await
@@ -629,7 +629,7 @@ mod tests {
 				az.clone(),
 				IndexKeyBase::default(),
 				default_btree_order,
-				&Scoring::default(),
+				&Scoring::bm25(),
 				false,
 			)
 			.await
@@ -670,7 +670,7 @@ mod tests {
 					az.clone(),
 					IndexKeyBase::default(),
 					default_btree_order,
-					&Scoring::default(),
+					&Scoring::bm25(),
 					hl,
 				)
 				.await
@@ -713,7 +713,7 @@ mod tests {
 					az.clone(),
 					IndexKeyBase::default(),
 					default_btree_order,
-					&Scoring::default(),
+					&Scoring::bm25(),
 					hl,
 				)
 				.await
