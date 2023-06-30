@@ -30,18 +30,17 @@ impl<'a> QueryPlanner<'a> {
 	pub(crate) async fn get_iterable(
 		&mut self,
 		ctx: &Context<'_>,
-		opt: &Options,
 		t: Table,
 	) -> Result<Iterable, Error> {
 		let txn = ctx.try_clone_transaction()?;
-		let res = Tree::build(self.opt, &txn, &t, self.cond).await?;
+		let res = Tree::build(ctx, self.opt, &txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				let e = QueryExecutor::new(opt, &txn, &t, im, Some(plan.e.clone())).await?;
+				let e = QueryExecutor::new(self.opt, &txn, &t, im, Some(plan.e.clone())).await?;
 				self.executors.insert(t.0.clone(), e);
 				return Ok(Iterable::Index(t, plan));
 			}
-			let e = QueryExecutor::new(opt, &txn, &t, im, None).await?;
+			let e = QueryExecutor::new(self.opt, &txn, &t, im, None).await?;
 			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))

@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::plan::IndexOption;
@@ -14,12 +15,14 @@ impl Tree {
 	/// Traverse the all the conditions and extract every expression
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
+		ctx: &'a Context<'_>,
 		opt: &'a Options,
 		txn: &'a Transaction,
 		table: &'a Table,
 		cond: &Option<Cond>,
 	) -> Result<Option<(Node, IndexMap)>, Error> {
 		let mut b = TreeBuilder {
+			ctx,
 			opt,
 			txn,
 			table,
@@ -35,6 +38,7 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
+	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	txn: &'a Transaction,
 	table: &'a Table,
@@ -74,6 +78,10 @@ impl<'a> TreeBuilder<'a> {
 			Value::Number(_) => Node::Scalar(v.to_owned()),
 			Value::Bool(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
+			Value::Param(p) => {
+				let v = p.compute(self.ctx, self.opt).await?;
+				self.eval_value(&v).await?
+			}
 			_ => Node::Unsupported,
 		})
 	}
