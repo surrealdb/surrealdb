@@ -10,7 +10,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE title @1@ 'Hello' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
@@ -97,7 +97,7 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
@@ -147,7 +147,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 		CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
@@ -233,7 +233,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 		CREATE blog:3 SET title = 'the other animals sat there watching';
 		CREATE blog:4 SET title = 'the dog sat there and did nothing';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
  		SELECT id,search::score(1) AS score FROM blog WHERE (title @1@ 'animals' AND id>0) OR (title @1@ 'animals' AND id<99);
 		SELECT id,search::score(1) + search::score(2) AS score FROM blog WHERE title @1@ 'dummy1' OR title @2@ 'dummy2';
 	";

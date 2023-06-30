@@ -55,8 +55,8 @@ impl Hash for Scoring {
 	}
 }
 
-impl Default for Scoring {
-	fn default() -> Self {
+impl Scoring {
+	pub(crate) fn bm25() -> Self {
 		Self::Bm {
 			k1: 1.2,
 			b: 0.75,
@@ -77,23 +77,27 @@ impl fmt::Display for Scoring {
 }
 
 pub fn scoring(i: &str) -> IResult<&str, Scoring> {
-	alt((map(tag_no_case("VS"), |_| Scoring::Vs), |i| {
-		let (i, _) = tag_no_case("BM25")(i)?;
-		let (i, _) = openparentheses(i)?;
-		let (i, k1) = recognize_float(i)?;
-		let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-		let (i, _) = commas(i)?;
-		let (i, b) = recognize_float(i)?;
-		let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-		let (i, _) = closeparentheses(i)?;
-		Ok((
-			i,
-			Scoring::Bm {
-				k1,
-				b,
-			},
-		))
-	}))(i)
+	alt((
+		map(tag_no_case("VS"), |_| Scoring::Vs),
+		|i| {
+			let (i, _) = tag_no_case("BM25")(i)?;
+			let (i, _) = openparentheses(i)?;
+			let (i, k1) = recognize_float(i)?;
+			let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+			let (i, _) = commas(i)?;
+			let (i, b) = recognize_float(i)?;
+			let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+			let (i, _) = closeparentheses(i)?;
+			Ok((
+				i,
+				Scoring::Bm {
+					k1,
+					b,
+				},
+			))
+		},
+		map(tag_no_case("BM25"), |_| Scoring::bm25()),
+	))(i)
 }
 
 #[cfg(test)]
@@ -101,12 +105,21 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn scoring_bm_25() {
+	fn scoring_bm_25_with_parameters() {
 		let sql = "BM25(1.0,0.6)";
 		let res = scoring(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BM25(1,0.6)", format!("{}", out))
+	}
+
+	#[test]
+	fn scoring_bm_25_without_parameters() {
+		let sql = "BM25";
+		let res = scoring(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("BM25(1.2,0.75)", format!("{}", out))
 	}
 
 	#[test]
