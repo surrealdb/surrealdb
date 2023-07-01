@@ -34,11 +34,11 @@ impl Value {
 					}
 					// If this is the 'coordinates' field then continue
 					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
-						Value::from(v.as_coordinates()).get(ctx, opt, path.next()).await
+						v.as_coordinates().get(ctx, opt, path.next()).await
 					}
 					// If this is the 'geometries' field then continue
 					Part::Field(f) if f.is_geometries() && v.is_collection() => {
-						Value::from(v.as_coordinates()).get(ctx, opt, path.next()).await
+						v.as_coordinates().get(ctx, opt, path.next()).await
 					}
 					// otherwise return none
 					_ => Ok(Value::None),

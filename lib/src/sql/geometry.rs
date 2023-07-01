@@ -78,15 +78,15 @@ impl Geometry {
 		matches!(self, Self::Collection(_))
 	}
 	/// Get the type of this eometry as a String
-	pub fn as_type(&self) -> String {
+	pub fn as_type(&self) -> &'static str {
 		match self {
-			Self::Point(_) => String::from("Point"),
-			Self::Line(_) => String::from("LineString"),
-			Self::Polygon(_) => String::from("Polygon"),
-			Self::MultiPoint(_) => String::from("MultiPoint"),
-			Self::MultiLine(_) => String::from("MultiLineString"),
-			Self::MultiPolygon(_) => String::from("MultiPolygon"),
-			Self::Collection(_) => String::from("GeometryCollection"),
+			Self::Point(_) => "Point",
+			Self::Line(_) => "LineString",
+			Self::Polygon(_) => "Polygon",
+			Self::MultiPoint(_) => "MultiPoint",
+			Self::MultiLine(_) => "MultiLineString",
+			Self::MultiPolygon(_) => "MultiPolygon",
+			Self::Collection(_) => "GeometryCollection",
 		}
 	}
 	/// Get the raw coordinates of this Geometry as an Array
@@ -100,22 +100,22 @@ impl Geometry {
 		}
 
 		fn polygon(v: &Polygon) -> Value {
-			once(v.exterior()).chain(v.interiors()).map(|v| line(&v)).collect::<Vec<Value>>().into()
+			once(v.exterior()).chain(v.interiors()).map(line).collect::<Vec<Value>>().into()
 		}
 
 		fn multipoint(v: &MultiPoint) -> Value {
-			v.iter().map(|v| point(&v)).collect::<Vec<Value>>().into()
+			v.iter().map(point).collect::<Vec<Value>>().into()
 		}
 
 		fn multiline(v: &MultiLineString) -> Value {
-			v.iter().map(|v| line(&v)).collect::<Vec<Value>>().into()
+			v.iter().map(line).collect::<Vec<Value>>().into()
 		}
 
 		fn multipolygon(v: &MultiPolygon) -> Value {
-			v.iter().map(|v| polygon(&v)).collect::<Vec<Value>>().into()
+			v.iter().map(polygon).collect::<Vec<Value>>().into()
 		}
 
-		fn collection(v: &Vec<Geometry>) -> Value {
+		fn collection(v: &[Geometry]) -> Value {
 			v.iter().map(Geometry::as_coordinates).collect::<Vec<Value>>().into()
 		}
 
