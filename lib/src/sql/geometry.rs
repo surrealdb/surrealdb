@@ -77,7 +77,7 @@ impl Geometry {
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
 	}
-	/// Get the type of this eometry as a String
+	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
 		match self {
 			Self::Point(_) => "Point",
