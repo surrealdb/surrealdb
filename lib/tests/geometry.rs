@@ -309,3 +309,163 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn geometry_inner_access() -> Result<(), Error> {
+	let sql = "
+		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM type::point([-0.118092, 51.509865]);
+		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM (-0.118092, 51.509865);
+		SELECT coordinates FROM {
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386],
+				]
+			],
+		};
+		SELECT coordinates FROM {
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386],
+				],
+				[
+					[-0.38314819, 51.37692386], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386],
+				],
+				[
+					[110.38314819, 110.37692386], [110.38314819, 110.61460570],
+					[110.38314819, 110.37692386],
+				]
+			],
+		};
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				lat: 51.509865,
+				lng: -0.118092,
+				type: 'Point'
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				lat: 51.509865,
+				lng: -0.118092,
+				type: 'Point'
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				coordinates: [
+					[
+						[
+							-0.38314819,
+							51.37692386
+						],
+						[
+							0.1785278,
+							51.37692386
+						],
+						[
+							0.1785278,
+							51.6146057
+						],
+						[
+							-0.38314819,
+							51.6146057
+						],
+						[
+							-0.38314819,
+							51.37692386
+						]
+					]
+				]
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				coordinates: [
+					[
+						[
+							-0.38314819,
+							51.37692386
+						],
+						[
+							0.1785278,
+							51.37692386
+						],
+						[
+							0.1785278,
+							51.6146057
+						],
+						[
+							-0.38314819,
+							51.6146057
+						],
+						[
+							-0.38314819,
+							51.37692386
+						]
+					],
+					[
+						[
+							-0.38314819,
+							51.37692386
+						],
+						[
+							-0.38314819,
+							51.6146057
+						],
+						[
+							-0.38314819,
+							51.37692386
+						]
+					],
+					[
+						[
+							110.38314819,
+							110.37692386
+						],
+						[
+							110.38314819,
+							110.6146057
+						],
+						[
+							110.38314819,
+							110.37692386
+						]
+					]
+				]
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
