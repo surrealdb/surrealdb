@@ -12,7 +12,6 @@ use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
-use crate::api::engine::remote::Status;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
@@ -22,7 +21,9 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Status;
 use crate::opt::IntoEndpoint;
+use crate::sql::serde::deserialize;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -104,7 +105,7 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/bung"));
+	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
 	headers
 }
 
@@ -138,14 +139,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum HttpValue {
-	Value(Value),
-	String(String),
-}
-
-type HttpQueryResponse = (String, Status, HttpValue);
+type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Root {
@@ -158,7 +152,6 @@ struct Root {
 struct AuthResponse {
 	code: u16,
 	details: String,
-	#[serde(default)]
 	token: Option<String>,
 }
 
@@ -166,7 +159,7 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let response: AuthResponse =
-		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+		deserialize(&bytes).map_err(|error| Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,
 		})?;
@@ -177,7 +170,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	info!(target: LOG, "{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
-	let responses = bung::from_slice::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
+	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
 		Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,
@@ -187,10 +180,6 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
 		match status {
 			Status::Ok => {
-				let value = match value {
-					HttpValue::Value(value) => value,
-					HttpValue::String(value) => value.into(),
-				};
 				match value {
 					Value::Array(Array(array)) => map.insert(index, Ok(array)),
 					Value::None | Value::Null => map.insert(index, Ok(vec![])),
@@ -198,11 +187,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 				};
 			}
 			Status::Err => {
-				let error = match value {
-					HttpValue::String(message) => message,
-					HttpValue::Value(value) => value.to_string(),
-				};
-				map.insert(index, Err(Error::Query(error).into()));
+				map.insert(index, Err(Error::Query(value.as_raw_string()).into()));
 			}
 		}
 	}

@@ -15,6 +15,7 @@ use crate::api::opt::Endpoint;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
+use crate::sql::serde::deserialize;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -27,6 +28,7 @@ use once_cell::sync::OnceCell;
 use pharos::Channel;
 use pharos::Observable;
 use pharos::ObserveConfig;
+use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -78,9 +80,7 @@ impl Connection for Client {
 
 			router(address, capacity, conn_tx, route_rx);
 
-			if let Err(error) = conn_rx.into_recv_async().await? {
-				return Err(error);
-			}
+			conn_rx.into_recv_async().await??;
 
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {
@@ -257,24 +257,45 @@ pub(crate) fn router(
 					}
 					Either::Response(message) => {
 						last_activity = Instant::now();
-						match Response::try_from(message) {
+						match Response::try_from(&message) {
 							Ok(option) => {
 								if let Some(response) = option {
 									trace!(target: LOG, "{response:?}");
 									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
-										if let Some((method, sender)) = routes.remove(&id) {
-											let _ = sender
-												.into_send_async(DbResponse::from((
-													method,
-													response.content,
-												)))
+										if let Some((_method, sender)) = routes.remove(&id) {
+											let _res = sender
+												.into_send_async(DbResponse::from(response.result))
 												.await;
 										}
 									}
 								}
 							}
-							Err(_error) => {
-								trace!(target: LOG, "Failed to deserialise message");
+							Err(error) => {
+								#[derive(Deserialize)]
+								struct Response {
+									id: Option<Value>,
+								}
+
+								// Let's try to find out the ID of the response that failed to deserialise
+								if let Message::Binary(binary) = message {
+									if let Ok(Response {
+										id,
+									}) = deserialize(&binary)
+									{
+										// Return an error if an ID was returned
+										if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+											if let Some((_method, sender)) = routes.remove(&id) {
+												let _res = sender.into_send_async(Err(error)).await;
+											}
+										}
+									} else {
+										// Unfortunately, we don't know which response failed to deserialize
+										warn!(
+											target: LOG,
+											"Failed to deserialise message; {error:?}"
+										);
+									}
+								}
 							}
 						}
 					}
@@ -363,15 +384,15 @@ pub(crate) fn router(
 }
 
 impl Response {
-	fn try_from(message: Message) -> Result<Option<Self>> {
+	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
 				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => bung::from_slice(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
-					binary,
+					binary: binary.clone(),
 					error,
 				}
 				.into()

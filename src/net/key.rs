@@ -176,7 +176,7 @@ async fn select_all(
 			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
-			"application/bung" => Ok(output::full(&res)),
+			"application/surrealdb" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -217,7 +217,7 @@ async fn create_all(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -261,7 +261,7 @@ async fn update_all(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -305,7 +305,7 @@ async fn modify_all(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -342,7 +342,7 @@ async fn delete_all(
 			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
-			"application/bung" => Ok(output::full(&res)),
+			"application/surrealdb" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -385,7 +385,7 @@ async fn select_one(
 			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
-			"application/bung" => Ok(output::full(&res)),
+			"application/surrealdb" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -433,7 +433,7 @@ async fn create_one(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -484,7 +484,7 @@ async fn update_one(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -535,7 +535,7 @@ async fn modify_one(
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -579,7 +579,7 @@ async fn delete_one(
 			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
-			"application/bung" => Ok(output::full(&res)),
+			"application/surrealdb" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
