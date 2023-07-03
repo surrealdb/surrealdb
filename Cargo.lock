@@ -1101,17 +1101,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "colored"
-version = "1.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ffc801dacf156c5854b9df4f425a626539c3a6ef7893cc0c5084a23f0b6c59"
-dependencies = [
- "atty",
- "lazy_static",
- "winapi",
-]
-
-[[package]]
 name = "concurrent-queue"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1541,16 +1530,6 @@ dependencies = [
  "cfg-if",
  "rustix 0.38.2",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "fern"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9f0c14694cbd524c8720dd69b0e3179344f04ebb5f90f2e4a440c6ea3b2f1ee"
-dependencies = [
- "colored",
- "log",
 ]
 
 [[package]]
@@ -4499,15 +4478,11 @@ dependencies = [
  "argon2",
  "base64 0.21.2",
  "bytes",
- "chrono",
  "clap 4.3.10",
- "fern",
  "futures 0.3.28",
  "http",
  "hyper",
  "ipnet",
- "jsonwebtoken",
- "log",
  "nix",
  "once_cell",
  "opentelemetry",
@@ -4531,7 +4506,6 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
- "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "urlencoding",
@@ -4572,7 +4546,6 @@ dependencies = [
  "indxdb",
  "jsonwebtoken",
  "lexicmp",
- "log",
  "md-5",
  "nanoid",
  "native-tls",

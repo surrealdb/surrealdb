@@ -33,15 +33,11 @@ strip = false
 argon2 = "0.5.0"
 base64 = "0.21.2"
 bytes = "1.4.0"
-chrono = { version = "0.4.26", features = ["serde"] }
 clap = { version = "4.3.10", features = ["env", "derive", "wrap_help", "unicode"] }
-fern = { version = "0.6.2", features = ["colored"] }
 futures = "0.3.28"
 http = "0.2.9"
 hyper = "0.14.27"
 ipnet = "2.8.0"
-jsonwebtoken = "8.3.0"
-log = "0.4.19"
 once_cell = "1.18.0"
 opentelemetry = { version = "0.18", features = ["rt-tokio"] }
 opentelemetry-otlp = "0.11.0"
@@ -59,7 +55,6 @@ tokio = { version = "1.29.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
 uuid = { version = "1.4.0", features = ["serde", "js", "v4", "v7"] }
 tracing = "0.1"
-tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.2"

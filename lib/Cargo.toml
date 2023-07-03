@@ -79,7 +79,6 @@ indxdb = { version = "0.3.0", optional = true }
 js = { version = "0.3.1" , package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = "8.3.0"
 lexicmp = "0.1.0"
-log = "0.4.19"
 md-5 = "0.10.5"
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
