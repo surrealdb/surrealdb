@@ -36,5 +36,3 @@ pub mod cl;
 
 #[cfg(test)]
 pub(crate) mod test;
-
-pub(crate) const LOG: &str = "surrealdb::dbs";

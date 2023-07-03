@@ -71,9 +71,6 @@ use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
-#[cfg(not(target_arch = "wasm32"))]
-const LOG: &str = "surrealdb::api::engine::local";
-
 /// In-memory database
 ///
 /// # Examples
@@ -528,7 +525,7 @@ async fn router(
 				chn: channel::Sender<Vec<u8>>,
 			) -> std::result::Result<(), crate::Error> {
 				kvs.export(ns, db, chn).await.map_err(|error| {
-					error!(target: LOG, "{error}");
+					error!("{error}");
 					crate::Error::Db(error)
 				})
 			}
