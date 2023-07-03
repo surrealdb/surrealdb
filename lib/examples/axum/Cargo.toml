@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 axum = "0.6.18"
-serde = { version = "1.0.163", features = ["derive"] }
+serde = { version = "1.0.164", features = ["derive"] }
 surrealdb = { path = "../.." }
 thiserror = "1.0.40"
-tokio = { version = "1.28.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.29.1", features = ["macros", "rt-multi-thread"] }
