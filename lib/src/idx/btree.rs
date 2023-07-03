@@ -38,7 +38,7 @@ impl KeyProvider {
 			KeyProvider::DocIds(ikb) => ikb.new_bd_key(None),
 			KeyProvider::DocLengths(ikb) => ikb.new_bl_key(None),
 			KeyProvider::Postings(ikb) => ikb.new_bp_key(None),
-			KeyProvider::Terms(ikb) => ikb.new_bp_key(None),
+			KeyProvider::Terms(ikb) => ikb.new_bt_key(None),
 			#[cfg(test)]
 			KeyProvider::Debug => "".into(),
 		}
