@@ -35,6 +35,9 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(debug_assertions)]
+const LOG: &str = "surrealdb::txn";
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -93,7 +96,7 @@ impl Transaction {
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
-		trace!("Closed");
+		trace!(target: LOG, "Closed");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -135,7 +138,7 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!("Cancel");
+		trace!(target: LOG, "Cancel");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -177,7 +180,7 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!("Commit");
+		trace!(target: LOG, "Commit");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -221,7 +224,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", key);
+		trace!(target: LOG, "Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -265,7 +268,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Exi {:?}", key);
+		trace!(target: LOG, "Exi {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -309,7 +312,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Get {:?}", key);
+		trace!(target: LOG, "Get {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -354,7 +357,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Set {:?} => {:?}", key, val);
+		trace!(target: LOG, "Set {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -399,7 +402,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Put {:?} => {:?}", key, val);
+		trace!(target: LOG, "Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -445,7 +448,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -490,7 +493,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
+		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -535,7 +538,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Delc {:?} if {:?}", key, chk);
+		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {

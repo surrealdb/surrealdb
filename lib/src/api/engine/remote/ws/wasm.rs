@@ -1,3 +1,4 @@
+use super::LOG;
 use super::PATH;
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
@@ -215,7 +216,7 @@ pub(crate) fn router(
 								request.insert("params".to_owned(), params.into());
 							}
 							let payload = Value::from(request);
-							trace!("Request {payload}");
+							trace!(target: LOG, "Request {payload}");
 							Message::Binary(payload.into())
 						};
 						if let Method::Authenticate
@@ -240,7 +241,7 @@ pub(crate) fn router(
 											.await
 											.is_err()
 										{
-											trace!("Receiver dropped");
+											trace!(target: LOG, "Receiver dropped");
 										}
 									}
 								}
@@ -248,7 +249,7 @@ pub(crate) fn router(
 							Err(error) => {
 								let error = Error::Ws(error.to_string());
 								if response.into_send_async(Err(error.into())).await.is_err() {
-									trace!("Receiver dropped");
+									trace!(target: LOG, "Receiver dropped");
 								}
 								break;
 							}
@@ -259,7 +260,7 @@ pub(crate) fn router(
 						match Response::try_from(&message) {
 							Ok(option) => {
 								if let Some(response) = option {
-									trace!("{response:?}");
+									trace!(target: LOG, "{response:?}");
 									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
 										if let Some((_method, sender)) = routes.remove(&id) {
 											let _res = sender
@@ -289,7 +290,10 @@ pub(crate) fn router(
 										}
 									} else {
 										// Unfortunately, we don't know which response failed to deserialize
-										warn!("Failed to deserialise message; {error:?}");
+										warn!(
+											target: LOG,
+											"Failed to deserialise message; {error:?}"
+										);
 									}
 								}
 							}
@@ -297,14 +301,14 @@ pub(crate) fn router(
 					}
 					Either::Event(event) => match event {
 						WsEvent::Error => {
-							trace!("connection errored");
+							trace!(target: LOG, "connection errored");
 							break;
 						}
 						WsEvent::WsErr(error) => {
-							trace!("{error}");
+							trace!(target: LOG, "{error}");
 						}
 						WsEvent::Closed(..) => {
-							trace!("connection closed");
+							trace!(target: LOG, "connection closed");
 							break;
 						}
 						_ => {}
@@ -312,9 +316,9 @@ pub(crate) fn router(
 					Either::Ping => {
 						// only ping if we haven't talked to the server recently
 						if last_activity.elapsed() >= PING_INTERVAL {
-							trace!("Pinging the server");
+							trace!(target: LOG, "Pinging the server");
 							if let Err(error) = socket_sink.send(ping.clone()).await {
-								trace!("failed to ping the server; {error:?}");
+								trace!(target: LOG, "failed to ping the server; {error:?}");
 								break;
 							}
 						}
@@ -326,7 +330,7 @@ pub(crate) fn router(
 			}
 
 			'reconnect: loop {
-				trace!("Reconnecting...");
+				trace!(target: LOG, "Reconnecting...");
 				match WsMeta::connect(&address.endpoint, None).await {
 					Ok((mut meta, stream)) => {
 						socket = stream;
@@ -338,7 +342,7 @@ pub(crate) fn router(
 							match result {
 								Ok(events) => events,
 								Err(error) => {
-									trace!("{error}");
+									trace!(target: LOG, "{error}");
 									time::sleep(Duration::from_secs(1)).await;
 									continue 'reconnect;
 								}
@@ -346,7 +350,7 @@ pub(crate) fn router(
 						};
 						for (_, message) in &replay {
 							if let Err(error) = socket.send(message.clone()).await {
-								trace!("{error}");
+								trace!(target: LOG, "{error}");
 								time::sleep(Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
@@ -359,18 +363,18 @@ pub(crate) fn router(
 								vec![key.as_str().into(), value.clone()].into(),
 							);
 							let payload = Value::from(request);
-							trace!("Request {payload}");
+							trace!(target: LOG, "Request {payload}");
 							if let Err(error) = socket.send(Message::Binary(payload.into())).await {
-								trace!("{error}");
+								trace!(target: LOG, "{error}");
 								time::sleep(Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
 						}
-						trace!("Reconnected successfully");
+						trace!(target: LOG, "Reconnected successfully");
 						break;
 					}
 					Err(error) => {
-						trace!("Failed to reconnect; {error}");
+						trace!(target: LOG, "Failed to reconnect; {error}");
 						time::sleep(Duration::from_secs(1)).await;
 					}
 				}
@@ -383,7 +387,7 @@ impl Response {
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
-				trace!("Received an unexpected text message; {text}");
+				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
 			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {

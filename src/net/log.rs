@@ -13,9 +13,12 @@ impl<T: fmt::Display> fmt::Display for OptFmt<T> {
 	}
 }
 
+const NAME: &str = "surrealdb::net";
+
 pub fn write() -> warp::filters::log::Log<impl Fn(warp::filters::log::Info) + Copy> {
 	warp::log::custom(|info| {
 		event!(
+			target: NAME,
 			Level::INFO,
 			"{} {} {} {:?} {} \"{}\" {:?}",
 			OptFmt(info.remote_addr()),

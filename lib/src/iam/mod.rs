@@ -6,4 +6,5 @@ pub mod signup;
 pub mod token;
 pub mod verify;
 
+pub const LOG: &str = "surrealdb::iam";
 pub const TOKEN: &str = "Bearer ";

@@ -5,6 +5,7 @@ use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
+use crate::dbs::LOG;
 use crate::dbs::{Auth, QueryType};
 use crate::err::Error;
 use crate::kvs::Datastore;
@@ -170,7 +171,7 @@ impl<'a> Executor<'a> {
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
-			debug!("Executing: {}", stm);
+			debug!(target: LOG, "Executing: {}", stm);
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = false;

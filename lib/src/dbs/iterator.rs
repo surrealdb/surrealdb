@@ -2,6 +2,7 @@ use crate::ctx::Canceller;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::LOG;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::plan::Plan;
@@ -77,7 +78,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!("Iterating: {}", stm);
+		trace!(target: LOG, "Iterating: {}", stm);
 		// Enable context override
 		let mut run = Context::new(ctx);
 		self.run = run.add_cancel();

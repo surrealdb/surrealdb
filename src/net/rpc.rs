@@ -6,6 +6,7 @@ use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::session;
+use crate::net::LOG;
 use crate::rpc::args::Take;
 use crate::rpc::paths::{ID, METHOD, PARAMS};
 use crate::rpc::res;
@@ -113,7 +114,7 @@ impl Rpc {
 				// Send the message to the client
 				if let Err(err) = wtx.send(res).await {
 					// Output the WebSocket error to the logs
-					trace!("WebSocket error: {:?}", err);
+					trace!(target: LOG, "WebSocket error: {:?}", err);
 					// It's already failed, so ignore error
 					let _ = wtx.close().await;
 					// Exit out of the loop
@@ -126,7 +127,7 @@ impl Rpc {
 		tokio::task::spawn(async move {
 			let rpc = moved_rpc;
 			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
-				trace!("Received notification: {:?}", v);
+				trace!(target: LOG, "Received notification: {:?}", v);
 				// Find which websocket the notification belongs to
 				match LIVE_QUERIES.read().await.get(&v.id) {
 					Some(ws_id) => {
@@ -136,8 +137,8 @@ impl Rpc {
 						match ws_write.get(ws_id) {
 							None => {
 								error!(
-									"Tracked WebSocket {:?} not found for lq: {:?}",
-									ws_id, &v.id
+									target: LOG,
+									"Tracked WebSocket {:?} not found for lq: {:?}", ws_id, &v.id
 								);
 							}
 							Some(ws_sender) => {
@@ -145,6 +146,7 @@ impl Rpc {
 									.send(rpc.read().await.format.clone(), ws_sender.clone())
 									.await;
 								trace!(
+									target: LOG,
 									"Sent notification to WebSocket {:?} for lq: {:?}",
 									ws_id,
 									&v.id
@@ -153,7 +155,7 @@ impl Rpc {
 						}
 					}
 					None => {
-						error!("Unknown websocket for live query: {:?}", v.id);
+						error!(target: LOG, "Unknown websocket for live query: {:?}", v.id);
 					}
 				}
 			}
@@ -185,7 +187,7 @@ impl Rpc {
 				// There was an error receiving the message
 				Err(err) => {
 					// Output the WebSocket error to the logs
-					trace!("WebSocket error: {:?}", err);
+					trace!(target: LOG, "WebSocket error: {:?}", err);
 					// Exit out of the loop
 					break;
 				}
@@ -199,7 +201,7 @@ impl Rpc {
 		// Fetch the unique id of the WebSocket
 		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has connected
-		trace!("WebSocket {} connected", id);
+		trace!(target: LOG, "WebSocket {} connected", id);
 		// Store this WebSocket in the list of WebSockets
 		WEBSOCKETS.write().await.insert(id, chn);
 	}
@@ -208,7 +210,7 @@ impl Rpc {
 		// Fetch the unique id of the WebSocket
 		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has disconnected
-		trace!("WebSocket {} disconnected", id);
+		trace!(target: LOG, "WebSocket {} disconnected", id);
 		// Remove this WebSocket from the list of WebSockets
 		WEBSOCKETS.write().await.remove(&id);
 		// Remove all live queries
@@ -216,7 +218,7 @@ impl Rpc {
 		let mut live_query_to_gc: Vec<Uuid> = vec![];
 		for (key, value) in locked_lq_map.iter() {
 			if value == &id {
-				trace!("Removing live query: {}", key);
+				trace!(target: LOG, "Removing live query: {}", key);
 				live_query_to_gc.push(*key);
 			}
 		}
@@ -256,7 +258,7 @@ impl Rpc {
 			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
 		};
 		// Log the received request
-		trace!("RPC Received: {}", req);
+		trace!(target: LOG, "RPC Received: {}", req);
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
 			v if v.is_none() => None,
@@ -740,14 +742,24 @@ impl Rpc {
 				if let Ok(Value::Uuid(lqid)) = &res.result {
 					// Match on Uuid type
 					LIVE_QUERIES.write().await.insert(lqid.0, self.uuid);
-					trace!("Registered live query {} on websocket {}", lqid, self.uuid);
+					trace!(
+						target: LOG,
+						"Registered live query {} on websocket {}",
+						lqid,
+						self.uuid
+					);
 				}
 			}
 			QueryType::Kill => {
 				if let Ok(Value::Uuid(lqid)) = &res.result {
 					let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
 					if let Some(ws_id) = ws_id {
-						trace!("Unregistered live query {} on websocket {}", lqid, ws_id);
+						trace!(
+							target: LOG,
+							"Unregistered live query {} on websocket {}",
+							lqid,
+							ws_id
+						);
 					}
 				}
 			}

@@ -24,6 +24,8 @@ use crate::cli::CF;
 use crate::err::Error;
 use warp::Filter;
 
+const LOG: &str = "surrealdb::net";
+
 pub async fn init() -> Result<(), Error> {
 	// Setup web routes
 	let net = index::config()
@@ -67,7 +69,7 @@ pub async fn init() -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
-	info!("Starting web server on {}", &opt.bind);
+	info!(target: LOG, "Starting web server on {}", &opt.bind);
 
 	if let (Some(c), Some(k)) = (&opt.crt, &opt.key) {
 		// Bind the server to the desired port
@@ -78,27 +80,27 @@ pub async fn init() -> Result<(), Error> {
 			.bind_with_graceful_shutdown(opt.bind, async move {
 				// Capture the shutdown signals and log that the graceful shutdown has started
 				let result = signals::listen().await.expect("Failed to listen to shutdown signal");
-				info!("{} received. Start graceful shutdown...", result);
+				info!(target: LOG, "{} received. Start graceful shutdown...", result);
 			});
 		// Log the server startup status
-		info!("Started web server on {}", &adr);
+		info!(target: LOG, "Started web server on {}", &adr);
 		// Run the server forever
 		srv.await;
 		// Log the server shutdown event
-		info!("Shutdown complete. Bye!")
+		info!(target: LOG, "Shutdown complete. Bye!")
 	} else {
 		// Bind the server to the desired port
 		let (adr, srv) = warp::serve(net).bind_with_graceful_shutdown(opt.bind, async move {
 			// Capture the shutdown signals and log that the graceful shutdown has started
 			let result = signals::listen().await.expect("Failed to listen to shutdown signal");
-			info!("{} received. Start graceful shutdown...", result);
+			info!(target: LOG, "{} received. Start graceful shutdown...", result);
 		});
 		// Log the server startup status
-		info!("Started web server on {}", &adr);
+		info!(target: LOG, "Started web server on {}", &adr);
 		// Run the server forever
 		srv.await;
 		// Log the server shutdown event
-		info!("Shutdown complete. Bye!")
+		info!(target: LOG, "Shutdown complete. Bye!")
 	};
 
 	Ok(())

@@ -36,6 +36,7 @@ use wasmtimer::tokio::Interval;
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const PING_METHOD: &str = "ping";
+const LOG: &str = "surrealdb::engine::remote::ws";
 
 /// The WS scheme used to connect to `ws://` endpoints
 #[derive(Debug)]
