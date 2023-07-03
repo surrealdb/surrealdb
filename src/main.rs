@@ -13,17 +13,52 @@
 #[macro_use]
 extern crate log;
 
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 mod dbs;
 mod env;
 mod err;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 mod iam;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 mod net;
 mod o11y;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 mod rpc;
 
 use std::future::Future;

@@ -4,7 +4,16 @@ mod tracers;
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::util::SubscriberInitExt;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
+use tracing_subscriber::EnvFilter;
 
 #[derive(Default, Debug, Clone)]
 pub struct Builder {
@@ -24,6 +33,13 @@ impl Builder {
 	}
 
 	/// Set the filter on the builder
+	#[cfg(any(
+		feature = "storage-mem",
+		feature = "storage-tikv",
+		feature = "storage-rocksdb",
+		feature = "storage-speedb",
+		feature = "storage-fdb",
+	))]
 	pub fn with_filter(mut self, filter: EnvFilter) -> Self {
 		self.filter = Some(CustomEnvFilter(filter));
 		self
