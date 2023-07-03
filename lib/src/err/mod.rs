@@ -22,6 +22,10 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// The database encountered unreachable logic
+	#[error("The database encountered unreachable logic")]
+	Unreachable,
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),

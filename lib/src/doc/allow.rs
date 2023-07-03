@@ -36,7 +36,7 @@ impl<'a> Document<'a> {
 					Permission::Full => return Ok(()),
 					Permission::Specific(e) => {
 						// Disable permissions
-						let opt = &opt.perms(false);
+						let opt = &opt.new_with_perms(false);
 						let mut ctx = Context::new(ctx);
 						ctx.add_cursor_doc(&self.current);
 						// Process the PERMISSION clause

@@ -3,7 +3,6 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
-use crate::net::CF;
 use bytes::Bytes;
 use serde::Serialize;
 use surrealdb::dbs::Session;
@@ -54,17 +53,13 @@ async fn handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
-	// Get the config options
-	let opts = CF.get().unwrap();
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signup::signup(kvs, opts.strict, &mut session, vars)
-				.await
-				.map_err(Error::from)
+			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
 				Ok(v) => match output.as_deref() {

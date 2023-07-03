@@ -67,7 +67,7 @@ async fn handler(
 				username: &opts.user,
 				password: pass,
 			});
-			match surrealdb::iam::signin::signin(kvs, &root, opts.strict, &mut session, vars)
+			match surrealdb::iam::signin::signin(kvs, &root, &mut session, vars)
 				.await
 				.map_err(Error::from)
 			{

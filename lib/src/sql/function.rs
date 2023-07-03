@@ -135,7 +135,7 @@ impl Function {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		// Process the function type
 		match self {
 			Self::Normal(s, x) => {

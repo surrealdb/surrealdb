@@ -343,7 +343,7 @@ mod tests {
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
 				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
 				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
-				let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
+				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == Value::from("object") {
 					// Assume this function is superseded by a module of the same name.

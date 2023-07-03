@@ -78,7 +78,7 @@ impl Fields {
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		//
 		let doc = ctx.doc().unwrap_or(&Value::None);
 		let mut ctx = Context::new(ctx);

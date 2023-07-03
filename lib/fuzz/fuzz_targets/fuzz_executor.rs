@@ -21,7 +21,7 @@ fuzz_target!(|commands: &str| {
 					return;
 				}
 			}
-			let _ignore_the_result = dbs.execute(command, &ses, None, false).await;
+			let _ignore_the_result = dbs.execute(command, &ses, None).await;
 
 			// TODO: Add some async timeout and `tokio::select!` between it and the query
 			// Alternatively, wrap future in `tokio::time::Timeout`.

@@ -13,7 +13,7 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::{Uuid, Value};
+use crate::sql::value::Value;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -34,6 +34,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -793,14 +794,14 @@ impl Transaction {
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
 	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::cl::Cl::new(id.0);
-		match self.get_cl(id.clone()).await? {
+		let key = crate::key::cl::Cl::new(id);
+		match self.get_cl(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
-				value: id.0.to_string(),
+				value: id.to_string(),
 			}),
 			None => {
 				let value = ClusterMembership {
-					name: id.0.to_string(),
+					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
 				self.put(key, value).await?;
@@ -811,7 +812,7 @@ impl Transaction {
 
 	// Retrieve cluster information
 	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
-		let key = crate::key::cl::Cl::new(id.0);
+		let key = crate::key::cl::Cl::new(id);
 		let val = self.get(key).await?;
 		match val {
 			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
@@ -830,12 +831,12 @@ impl Transaction {
 	// Set heartbeat
 	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
 		let now = self.clock();
-		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+		let key = crate::key::hb::Hb::new(now.clone(), id);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
 			ClusterMembership {
-				name: id.0.to_string(),
+				name: id.to_string(),
 				heartbeat: now,
 			},
 		)

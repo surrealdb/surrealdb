@@ -53,7 +53,7 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Parse the expression
 		match &self.data {
 			// Check if this is a traditional statement

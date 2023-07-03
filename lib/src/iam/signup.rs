@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 pub async fn signup(
 	kvs: &Datastore,
-	strict: bool,
 	session: &mut Session,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
@@ -28,7 +27,7 @@ pub async fn signup(
 			let db = db.to_raw_string();
 			let sc = sc.to_raw_string();
 			// Attempt to signin to specified scope
-			super::signup::sc(kvs, strict, session, ns, db, sc, vars).await
+			super::signup::sc(kvs, session, ns, db, sc, vars).await
 		}
 		_ => Err(Error::InvalidAuth),
 	}
@@ -36,7 +35,6 @@ pub async fn signup(
 
 pub async fn sc(
 	kvs: &Datastore,
-	strict: bool,
 	session: &mut Session,
 	ns: String,
 	db: String,
@@ -56,7 +54,7 @@ pub async fn sc(
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars, strict).await {
+					match kvs.compute(val, &sess, vars).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
