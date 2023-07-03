@@ -1,30 +1,12 @@
 use crate::cnf::PKG_VERSION;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 use crate::err::Error;
 use surrealdb::env::{arch, os};
 
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 const LOG: &str = "surrealdb::env";
 
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 pub async fn init() -> Result<(), Error> {
 	// Log version
 	info!(target: LOG, "Running {}", release());
