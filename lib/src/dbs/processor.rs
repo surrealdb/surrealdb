@@ -80,6 +80,7 @@ struct ChannelProcessor {
 	chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Processor for ChannelProcessor {
 	async fn process(
