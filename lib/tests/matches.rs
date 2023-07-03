@@ -92,14 +92,20 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
-	let sql = r"
+async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(), Error> {
+	let sql = format!(
+		r"
 		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
-		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' EXPLAIN;
-	";
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {} EXPLAIN;
+	",
+		if parallel {
+			"PARALLEL"
+		} else {
+			""
+		}
+	);
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
@@ -139,6 +145,16 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_arrays_non_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_arrays(false).await
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_arrays(true).await
 }
 
 #[tokio::test]
