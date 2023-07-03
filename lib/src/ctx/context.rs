@@ -33,11 +33,11 @@ pub struct Context<'a> {
 	// Whether or not this context is cancelled.
 	cancelled: Option<Arc<AtomicBool>>,
 	// A collection of read only values stored in this context.
-	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
+	values: Option<HashMap<Cow<'static, str>, Cow<'a, Value>>>,
 	// An optional transaction
 	transaction: Option<Transaction>,
 	// An optional query executor
-	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
+	query_executors: Option<HashMap<String, QueryExecutor>>,
 	// An optional record id
 	thing: Option<&'a Thing>,
 	// An optional doc id
@@ -69,7 +69,7 @@ impl<'a> Context<'a> {
 	/// Create an empty background context.
 	pub fn background() -> Self {
 		Context {
-			values: HashMap::default(),
+			values: None,
 			parent: None,
 			deadline: None,
 			cancelled: None,
@@ -84,12 +84,12 @@ impl<'a> Context<'a> {
 	/// Create a new child from a frozen context.
 	pub fn new(parent: &'a Context) -> Self {
 		Context {
-			values: HashMap::default(),
+			values: None,
 			parent: Some(parent),
 			deadline: parent.deadline,
-			cancelled: parent.cancelled.clone(),
-			transaction: parent.transaction.clone(),
-			query_executors: parent.query_executors.clone(),
+			cancelled: None,
+			transaction: None,
+			query_executors: None,
 			thing: parent.thing,
 			doc_id: parent.doc_id,
 			cursor_doc: parent.cursor_doc,
@@ -147,7 +147,7 @@ impl<'a> Context<'a> {
 
 	/// Set the query executors
 	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
-		self.query_executors = Some(Arc::new(executors));
+		self.query_executors = Some(executors);
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -157,7 +157,13 @@ impl<'a> Context<'a> {
 		K: Into<Cow<'static, str>>,
 		V: Into<Cow<'a, Value>>,
 	{
-		self.values.insert(key.into(), value.into());
+		let key = key.into();
+		let val = value.into();
+		if let Some(v) = &mut self.values {
+			v.insert(key, val);
+		} else {
+			self.values = Some(HashMap::from([(key, val)]));
+		}
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -169,10 +175,13 @@ impl<'a> Context<'a> {
 	/// Returns a transaction if any.
 	/// Otherwise it fails by returning a Error::NoTx error.
 	pub fn try_clone_transaction(&self) -> Result<Transaction, Error> {
-		match &self.transaction {
-			None => Err(Error::NoTx),
-			Some(txn) => Ok(txn.clone()),
+		if let Some(tx) = &self.transaction {
+			return Ok(tx.clone());
 		}
+		if let Some(p) = self.parent {
+			return p.try_clone_transaction();
+		}
+		Err(Error::NoTx)
 	}
 
 	pub fn thing(&self) -> Option<&Thing> {
@@ -189,10 +198,12 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
 		if let Some(qe) = &self.query_executors {
-			qe.get(tb)
-		} else {
-			None
+			return qe.get(tb);
 		}
+		if let Some(p) = self.parent {
+			return p.get_query_executor(tb);
+		}
+		None
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
@@ -236,15 +247,17 @@ impl<'a> Context<'a> {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub fn value(&self, key: &str) -> Option<&Value> {
-		match self.values.get(key) {
-			Some(v) => match v {
-				Cow::Borrowed(v) => Some(*v),
-				Cow::Owned(v) => Some(v),
-			},
-			None => match self.parent {
-				Some(p) => p.value(key),
-				_ => None,
-			},
+		if let Some(values) = &self.values {
+			if let Some(v) = values.get(key) {
+				return match v {
+					Cow::Borrowed(v) => Some(*v),
+					Cow::Owned(v) => Some(v),
+				};
+			}
+		}
+		match self.parent {
+			Some(p) => p.value(key),
+			_ => None,
 		}
 	}
 
