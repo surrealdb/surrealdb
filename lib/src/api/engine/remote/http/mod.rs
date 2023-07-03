@@ -55,7 +55,6 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
 const SQL_PATH: &str = "sql";
-const LOG: &str = "surrealdb::engine::remote::http";
 
 /// The HTTP scheme used to connect to `http://` endpoints
 #[derive(Debug)]
@@ -167,7 +166,7 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 }
 
 async fn query(request: RequestBuilder) -> Result<QueryResponse> {
-	info!(target: LOG, "{request:?}");
+	info!("{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {

@@ -1,5 +1,4 @@
 use super::Client;
-use super::LOG;
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -68,7 +67,7 @@ impl Connection for Client {
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
 		Box::pin(async move {
 			let (sender, receiver) = flume::bounded(1);
-			trace!(target: LOG, "{param:?}");
+			trace!("{param:?}");
 			let route = Route {
 				request: (0, self.method, param),
 				response: sender,

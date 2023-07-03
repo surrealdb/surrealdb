@@ -2,11 +2,9 @@ use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use surrealdb::env::{arch, os};
 
-const LOG: &str = "surrealdb::env";
-
 pub async fn init() -> Result<(), Error> {
 	// Log version
-	info!(target: LOG, "Running {}", release());
+	info!("Running {}", release());
 	// All ok
 	Ok(())
 }

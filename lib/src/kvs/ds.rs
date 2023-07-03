@@ -8,7 +8,6 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -112,9 +111,9 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					info!(target: LOG, "Starting kvs store in {}", path);
+					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
-					info!(target: LOG, "Started kvs store in {}", path);
+					info!("Started kvs store in {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-mem"))]
@@ -124,11 +123,11 @@ impl Datastore {
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!(target: LOG, "Starting kvs store at {}", path);
+					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					info!(target: LOG, "Started kvs store at {}", path);
+					info!("Started kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -138,11 +137,11 @@ impl Datastore {
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!(target: LOG, "Starting kvs store at {}", path);
+					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					info!(target: LOG, "Started kvs store at {}", path);
+					info!("Started kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -152,11 +151,11 @@ impl Datastore {
 			s if s.starts_with("speedb:") => {
 				#[cfg(feature = "kv-speedb")]
 				{
-					info!(target: LOG, "Starting kvs store at {}", path);
+					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("speedb://");
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
-					info!(target: LOG, "Started kvs store at {}", path);
+					info!("Started kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-speedb"))]
@@ -166,11 +165,11 @@ impl Datastore {
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
 				{
-					info!(target: LOG, "Starting kvs store at {}", path);
+					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
-					info!(target: LOG, "Started kvs store at {}", path);
+					info!("Started kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -180,11 +179,11 @@ impl Datastore {
 			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					info!(target: LOG, "Connecting to kvs store at {}", path);
+					info!("Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
-					info!(target: LOG, "Connected to kvs store at {}", path);
+					info!("Connected to kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -194,11 +193,11 @@ impl Datastore {
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
-					info!(target: LOG, "Connecting to kvs store at {}", path);
+					info!("Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
-					info!(target: LOG, "Connected to kvs store at {}", path);
+					info!("Connected to kvs store at {}", path);
 					v
 				}
 				#[cfg(not(feature = "kv-fdb"))]
@@ -206,7 +205,7 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				info!(target: LOG, "Unable to load the specified datastore {}", path);
+				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		};

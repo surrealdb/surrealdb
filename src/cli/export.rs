@@ -1,7 +1,6 @@
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
-use crate::cli::LOG;
 use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::connect;
@@ -53,7 +52,7 @@ pub async fn init(
 	client.use_ns(ns).use_db(db).await?;
 	// Export the data from the database
 	client.export(file).await?;
-	info!(target: LOG, "The SQL file was exported successfully");
+	info!("The SQL file was exported successfully");
 	// Everything OK
 	Ok(())
 }
