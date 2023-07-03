@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::idx::btree::Payload;
 use crate::kvs::Key;
-use async_trait::async_trait;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
@@ -361,7 +360,6 @@ impl Display for TrieKeys {
 	}
 }
 
-#[async_trait]
 impl BKeys for TrieKeys {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
 		let mut trie_keys = Self {

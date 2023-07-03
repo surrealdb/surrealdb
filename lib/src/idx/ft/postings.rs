@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
@@ -11,7 +11,7 @@ pub(super) type TermFrequency = u64;
 pub(super) struct Postings {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree<PostingsKeyProvider>,
+	btree: BTree,
 }
 
 impl Postings {
@@ -20,9 +20,7 @@ impl Postings {
 		index_key_base: IndexKeyBase,
 		order: u32,
 	) -> Result<Self, Error> {
-		let keys = PostingsKeyProvider {
-			index_key_base: index_key_base.clone(),
-		};
+		let keys = KeyProvider::Postings(index_key_base.clone());
 		let state_key: Key = keys.get_state_key();
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
 			btree::State::try_from_val(val)?
@@ -76,20 +74,6 @@ impl Postings {
 			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
 		}
 		Ok(())
-	}
-}
-
-#[derive(Clone)]
-pub(super) struct PostingsKeyProvider {
-	index_key_base: IndexKeyBase,
-}
-
-impl KeyProvider for PostingsKeyProvider {
-	fn get_node_key(&self, node_id: NodeId) -> Key {
-		self.index_key_base.new_bp_key(Some(node_id))
-	}
-	fn get_state_key(&self) -> Key {
-		self.index_key_base.new_bp_key(None)
 	}
 }
 

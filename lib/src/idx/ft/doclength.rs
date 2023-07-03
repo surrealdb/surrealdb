@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Payload, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
@@ -9,7 +9,7 @@ pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	state_key: Key,
-	btree: BTree<DocLengthsKeyProvider>,
+	btree: BTree,
 }
 
 impl DocLengths {
@@ -18,9 +18,7 @@ impl DocLengths {
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 	) -> Result<Self, Error> {
-		let keys = DocLengthsKeyProvider {
-			index_key_base,
-		};
+		let keys = KeyProvider::DocLengths(index_key_base);
 		let state_key: Key = keys.get_state_key();
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
 			btree::State::try_from_val(val)?
@@ -67,21 +65,6 @@ impl DocLengths {
 			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
 		}
 		Ok(())
-	}
-}
-
-#[derive(Clone)]
-struct DocLengthsKeyProvider {
-	index_key_base: IndexKeyBase,
-}
-
-impl KeyProvider for DocLengthsKeyProvider {
-	fn get_node_key(&self, node_id: NodeId) -> Key {
-		self.index_key_base.new_bl_key(Some(node_id))
-	}
-
-	fn get_state_key(&self) -> Key {
-		self.index_key_base.new_bl_key(None)
 	}
 }
 
