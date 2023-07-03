@@ -5,6 +5,7 @@ use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use channel::Sender;
@@ -17,11 +18,15 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
+		doc_id: Option<DocId>,
 		val: Operable,
 	) -> Result<(), Error> {
 		let mut ctx = Context::new(ctx);
 		if let Some(t) = &thg {
 			ctx.add_thing(t);
+		}
+		if let Some(d) = doc_id {
+			ctx.add_doc_id(d);
 		}
 		// Setup a new workable
 		let ins = match val {

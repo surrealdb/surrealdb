@@ -1,17 +1,14 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::dbs::Iterator;
-use crate::dbs::Operable;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Iterable, Iterator, Operable, Options, Statement};
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::Plan;
-use crate::key::graph;
-use crate::key::thing;
+use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Edges, Range, Table};
+use crate::sql::{Edges, Range, Table, Thing, Value};
+use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
+use channel::Sender;
 use std::ops::Bound;
 
 impl Iterable {
@@ -22,44 +19,139 @@ impl Iterable {
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
+		IterateProcessor {
+			ite,
+		}
+		.process_iterable(ctx, opt, stm, self)
+		.await
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) async fn channel(
+		self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
+	) -> Result<(), Error> {
+		ChannelProcessor {
+			chn,
+		}
+		.process_iterable(ctx, opt, stm, self)
+		.await
+	}
+}
+
+struct IterateProcessor<'a> {
+	ite: &'a mut Iterator,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+impl<'a> Processor for IterateProcessor<'a> {
+	async fn process(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		rid: Option<Thing>,
+		doc_id: Option<DocId>,
+		val: Operable,
+	) -> Result<(), Error> {
+		if rid.is_some() || doc_id.is_some() {
+			// Create a new child context
+			let mut child_ctx = Context::new(ctx);
+			if let Some(rid) = &rid {
+				child_ctx.add_thing(rid);
+			}
+			if let Some(doc_id) = doc_id {
+				child_ctx.add_doc_id(doc_id);
+			}
+			self.ite.process(&child_ctx, opt, stm, val).await;
+		} else {
+			self.ite.process(ctx, opt, stm, val).await;
+		}
+		Ok(())
+	}
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ChannelProcessor {
+	chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl Processor for ChannelProcessor {
+	async fn process(
+		&mut self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_stm: &Statement<'_>,
+		rid: Option<Thing>,
+		doc_id: Option<DocId>,
+		val: Operable,
+	) -> Result<(), Error> {
+		self.chn.send((rid, doc_id, val)).await?;
+		Ok(())
+	}
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+pub(super) trait Processor {
+	async fn process(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		rid: Option<Thing>,
+		doc_id: Option<DocId>,
+		val: Operable,
+	) -> Result<(), Error>;
+
+	async fn process_iterable(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		iterable: Iterable,
+	) -> Result<(), Error> {
 		if ctx.is_ok() {
-			match self {
-				Iterable::Value(v) => Self::iterate_value(ctx, opt, stm, v, ite).await,
-				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, stm, v, ite).await?,
-				Iterable::Table(v) => Self::iterate_table(ctx, opt, stm, v, ite).await?,
-				Iterable::Range(v) => Self::iterate_range(ctx, opt, stm, v, ite).await?,
-				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, stm, e, ite).await?,
-				Iterable::Index(t, p) => Self::iterate_index(ctx, opt, stm, t, p, ite).await?,
-				Iterable::Mergeable(v, o) => {
-					Self::iterate_mergeable(ctx, opt, stm, v, o, ite).await?
-				}
+			match iterable {
+				Iterable::Value(v) => self.process_value(ctx, opt, stm, v).await?,
+				Iterable::Thing(v) => self.process_thing(ctx, opt, stm, v).await?,
+				Iterable::Table(v) => self.process_table(ctx, opt, stm, v).await?,
+				Iterable::Range(v) => self.process_range(ctx, opt, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(ctx, opt, stm, e).await?,
+				Iterable::Index(t, p) => self.process_index(ctx, opt, stm, t, p).await?,
+				Iterable::Mergeable(v, o) => self.process_mergeable(ctx, opt, stm, v, o).await?,
 				Iterable::Relatable(f, v, w) => {
-					Self::iterate_relatable(ctx, opt, stm, f, v, w, ite).await?
+					self.process_relatable(ctx, opt, stm, f, v, w).await?
 				}
 			}
 		}
 		Ok(())
 	}
 
-	async fn iterate_value(
+	async fn process_value(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Value,
-		ite: &mut Iterator,
-	) {
+	) -> Result<(), Error> {
 		// Pass the value through
 		let val = Operable::Value(v);
 		// Process the document record
-		ite.process(ctx, opt, stm, val).await;
+		self.process(ctx, opt, stm, None, None, val).await
 	}
 
-	async fn iterate_thing(
+	async fn process_thing(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Thing,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -73,22 +165,19 @@ impl Iterable {
 			Some(v) => Value::from(v),
 			None => Value::None,
 		});
-		// Get the optional query executor
-		let mut child_ctx = Context::new(ctx);
-		child_ctx.add_thing(&v);
 		// Process the document record
-		ite.process(&child_ctx, opt, stm, val).await;
+		self.process(ctx, opt, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	async fn iterate_mergeable(
+	async fn process_mergeable(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Thing,
 		o: Value,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -104,23 +193,20 @@ impl Iterable {
 		};
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
-		// Create a new context to process the operable
-		let mut child_ctx = Context::new(ctx);
-		child_ctx.add_thing(&v);
 		// Process the document record
-		ite.process(&child_ctx, opt, stm, val).await;
+		self.process(ctx, opt, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	async fn iterate_relatable(
+	async fn process_relatable(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -136,21 +222,18 @@ impl Iterable {
 		};
 		// Create a new operable value
 		let val = Operable::Relatable(f, x, w);
-		// Create the child context
-		let mut child_ctx = Context::new(ctx);
-		child_ctx.add_thing(&v);
 		// Process the document record
-		ite.process(&child_ctx, opt, stm, val).await;
+		self.process(ctx, opt, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	async fn iterate_table(
+	async fn process_table(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Table,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -201,10 +284,8 @@ impl Iterable {
 					let rid = Thing::from((key.tb, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
-					let mut child_ctx = Context::new(ctx);
-					child_ctx.add_thing(&rid);
 					// Process the record
-					ite.process(&child_ctx, opt, stm, val).await;
+					self.process(ctx, opt, stm, Some(rid), None, val).await?;
 				}
 				continue;
 			}
@@ -214,12 +295,12 @@ impl Iterable {
 		Ok(())
 	}
 
-	async fn iterate_range(
+	async fn process_range(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Range,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -285,12 +366,10 @@ impl Iterable {
 					let key: crate::key::thing::Thing = (&k).into();
 					let val: crate::sql::value::Value = (&v).into();
 					let rid = Thing::from((key.tb, key.id));
-					let mut ctx = Context::new(ctx);
-					ctx.add_thing(&rid);
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(&ctx, opt, stm, val).await;
+					self.process(ctx, opt, stm, Some(rid), None, val).await?;
 				}
 				continue;
 			}
@@ -300,12 +379,12 @@ impl Iterable {
 		Ok(())
 	}
 
-	async fn iterate_edge(
+	async fn process_edge(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		e: Edges,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Pull out options
 		let ns = opt.ns();
@@ -423,15 +502,13 @@ impl Iterable {
 						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
 						let val = ctx.try_clone_transaction()?.lock().await.get(key).await?;
 						let rid = Thing::from((gra.ft, gra.fk));
-						let mut ctx = Context::new(ctx);
-						ctx.add_thing(&rid);
 						// Parse the data from the store
 						let val = Operable::Value(match val {
 							Some(v) => Value::from(v),
 							None => Value::None,
 						});
 						// Process the record
-						ite.process(&ctx, opt, stm, val).await;
+						self.process(ctx, opt, stm, Some(rid), None, val).await?;
 					}
 					continue;
 				}
@@ -442,13 +519,13 @@ impl Iterable {
 		Ok(())
 	}
 
-	async fn iterate_index(
+	async fn process_index(
+		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		table: Table,
 		plan: Plan,
-		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
@@ -479,16 +556,13 @@ impl Iterable {
 					let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
 					let val = txn.lock().await.get(key.clone()).await?;
 					let rid = Thing::from((key.tb, key.id));
-					let mut ctx = Context::new(ctx);
-					ctx.add_thing(&rid);
-					ctx.add_doc_id(doc_id);
 					// Parse the data from the store
 					let val = Operable::Value(match val {
 						Some(v) => Value::from(v),
 						None => Value::None,
 					});
 					// Process the document record
-					ite.process(&ctx, opt, stm, val).await;
+					self.process(ctx, opt, stm, Some(rid), Some(doc_id), val).await?;
 				}
 
 				// Collect the next batch of ids

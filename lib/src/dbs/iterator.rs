@@ -465,8 +465,8 @@ impl Iterator {
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
-					while let Ok((k, v)) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, stm, chn.clone(), k, v))
+					while let Ok((k, d, v)) = docs.recv().await {
+						e.spawn(Document::compute(ctx, opt, stm, chn.clone(), k, d, v))
 							// Ensure we detach the spawned task
 							.detach();
 					}
