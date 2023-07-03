@@ -11,7 +11,7 @@
 #![forbid(unsafe_code)]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 #[macro_use]
 mod mac;
