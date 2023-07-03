@@ -6,7 +6,6 @@ use crate::idx::planner::plan::Plan;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
-use async_trait::async_trait;
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use std::ops::Bound;
@@ -19,11 +18,7 @@ impl Iterable {
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
-		IterateProcessor {
-			ite,
-		}
-		.process_iterable(ctx, opt, stm, self)
-		.await
+		Processor::Iterator(ite).process_iterable(ctx, opt, stm, self).await
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -34,21 +29,17 @@ impl Iterable {
 		stm: &Statement<'_>,
 		chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
 	) -> Result<(), Error> {
-		ChannelProcessor {
-			chn,
-		}
-		.process_iterable(ctx, opt, stm, self)
-		.await
+		Processor::Channel(chn).process_iterable(ctx, opt, stm, self).await
 	}
 }
 
-struct IterateProcessor<'a> {
-	ite: &'a mut Iterator,
+enum Processor<'a> {
+	Iterator(&'a mut Iterator),
+	#[cfg(not(target_arch = "wasm32"))]
+	Channel(Sender<(Option<Thing>, Option<DocId>, Operable)>),
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl<'a> Processor for IterateProcessor<'a> {
+impl<'a> Processor<'a> {
 	async fn process(
 		&mut self,
 		ctx: &Context<'_>,
@@ -58,57 +49,29 @@ impl<'a> Processor for IterateProcessor<'a> {
 		doc_id: Option<DocId>,
 		val: Operable,
 	) -> Result<(), Error> {
-		if rid.is_some() || doc_id.is_some() {
-			// Create a new child context
-			let mut child_ctx = Context::new(ctx);
-			if let Some(rid) = &rid {
-				child_ctx.add_thing(rid);
+		match self {
+			Processor::Iterator(ite) => {
+				if rid.is_some() || doc_id.is_some() {
+					// Create a new child context
+					let mut child_ctx = Context::new(ctx);
+					if let Some(rid) = &rid {
+						child_ctx.add_thing(rid);
+					}
+					if let Some(doc_id) = doc_id {
+						child_ctx.add_doc_id(doc_id);
+					}
+					ite.process(&child_ctx, opt, stm, val).await;
+				} else {
+					ite.process(ctx, opt, stm, val).await;
+				}
 			}
-			if let Some(doc_id) = doc_id {
-				child_ctx.add_doc_id(doc_id);
+			#[cfg(not(target_arch = "wasm32"))]
+			Processor::Channel(chn) => {
+				chn.send((rid, doc_id, val)).await?;
 			}
-			self.ite.process(&child_ctx, opt, stm, val).await;
-		} else {
-			self.ite.process(ctx, opt, stm, val).await;
-		}
+		};
 		Ok(())
 	}
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct ChannelProcessor {
-	chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl Processor for ChannelProcessor {
-	async fn process(
-		&mut self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_stm: &Statement<'_>,
-		rid: Option<Thing>,
-		doc_id: Option<DocId>,
-		val: Operable,
-	) -> Result<(), Error> {
-		self.chn.send((rid, doc_id, val)).await?;
-		Ok(())
-	}
-}
-
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-pub(super) trait Processor {
-	async fn process(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		stm: &Statement<'_>,
-		rid: Option<Thing>,
-		doc_id: Option<DocId>,
-		val: Operable,
-	) -> Result<(), Error>;
 
 	async fn process_iterable(
 		&mut self,
