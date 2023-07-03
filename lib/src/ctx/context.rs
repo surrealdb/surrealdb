@@ -31,7 +31,7 @@ pub struct Context<'a> {
 	// An optional deadline.
 	deadline: Option<Instant>,
 	// Whether or not this context is cancelled.
-	cancelled: Arc<AtomicBool>,
+	cancelled: Option<Arc<AtomicBool>>,
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 	// An optional transaction
@@ -72,7 +72,7 @@ impl<'a> Context<'a> {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
-			cancelled: Arc::new(AtomicBool::new(false)),
+			cancelled: None,
 			transaction: None,
 			query_executors: None,
 			thing: None,
@@ -87,7 +87,7 @@ impl<'a> Context<'a> {
 			values: HashMap::default(),
 			parent: Some(parent),
 			deadline: parent.deadline,
-			cancelled: Arc::new(AtomicBool::new(false)),
+			cancelled: parent.cancelled.clone(),
 			transaction: parent.transaction.clone(),
 			query_executors: parent.query_executors.clone(),
 			thing: parent.thing,
@@ -99,8 +99,13 @@ impl<'a> Context<'a> {
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
 	pub fn add_cancel(&mut self) -> Canceller {
-		let cancelled = self.cancelled.clone();
-		Canceller::new(cancelled)
+		if let Some(c) = &self.cancelled {
+			Canceller::new(c.clone())
+		} else {
+			let c = Arc::new(AtomicBool::new(false));
+			self.cancelled = Some(c.clone());
+			Canceller::new(c)
+		}
 	}
 
 	/// Add a deadline to the context. If the current deadline is sooner than
@@ -193,14 +198,24 @@ impl<'a> Context<'a> {
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	pub fn done(&self) -> Option<Reason> {
-		match self.deadline {
-			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
-			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
-			_ => match self.parent {
-				Some(ctx) => ctx.done(),
-				_ => None,
-			},
+		// Did we reach the time out?
+		if let Some(dl) = &self.deadline {
+			if Instant::now().ge(dl) {
+				return Some(Reason::Timedout);
+			}
 		}
+		// Did we cancel this context?
+		if let Some(c) = &self.cancelled {
+			if c.load(Ordering::Relaxed) {
+				return Some(Reason::Canceled);
+			}
+		}
+		// Is the parent context done?
+		if let Some(p) = self.parent {
+			return p.done();
+		}
+		// Otherwise we're not done
+		None
 	}
 
 	/// Check if the context is ok to continue.

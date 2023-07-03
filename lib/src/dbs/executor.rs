@@ -335,14 +335,15 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
+								// Create an statement level cancellable context
+								let mut ctx = Context::new(&ctx);
+								ctx.add_transaction(self.txn.as_ref());
 								// Process the statement
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
 										// Set statement timeout
-										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
-										ctx.add_transaction(self.txn.as_ref());
 										// Process the statement
 										let res = stm.compute(&ctx, &opt).await;
 										// Catch statement timeout
@@ -352,10 +353,7 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => {
-										ctx.add_transaction(self.txn.as_ref());
-										stm.compute(&ctx, &opt).await
-									}
+									None => stm.compute(&ctx, &opt).await,
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
