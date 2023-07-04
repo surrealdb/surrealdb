@@ -46,21 +46,9 @@ pub async fn init(
 		password: &password,
 	};
 	// Connect to the database engine
-	#[cfg(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	))]
+	#[cfg(feature = "has-storage")]
 	let address = (endpoint, root);
-	#[cfg(not(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	)))]
+	#[cfg(not(feature = "has-storage"))]
 	let address = endpoint;
 	let client = connect(address).await?;
 	// Sign in to the server

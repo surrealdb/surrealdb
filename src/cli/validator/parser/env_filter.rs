@@ -16,13 +16,7 @@ impl Clone for CustomEnvFilter {
 pub struct CustomEnvFilterParser;
 
 impl CustomEnvFilterParser {
-	#[cfg(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	))]
+	#[cfg(feature = "has-storage")]
 	pub fn new() -> CustomEnvFilterParser {
 		Self
 	}

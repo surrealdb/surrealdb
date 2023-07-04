@@ -6,13 +6,7 @@ use tracing::Subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 use tracing_subscriber::EnvFilter;
 
 #[derive(Default, Debug, Clone)]
@@ -33,13 +27,7 @@ impl Builder {
 	}
 
 	/// Set the filter on the builder
-	#[cfg(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	))]
+	#[cfg(feature = "has-storage")]
 	pub fn with_filter(mut self, filter: EnvFilter) -> Self {
 		self.filter = Some(CustomEnvFilter(filter));
 		self
