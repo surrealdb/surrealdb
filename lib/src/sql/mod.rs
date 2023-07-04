@@ -37,6 +37,7 @@ pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
 pub(crate) mod model;
+pub(crate) mod mutations;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod operation;
