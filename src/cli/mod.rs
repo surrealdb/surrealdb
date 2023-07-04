@@ -5,6 +5,13 @@ mod export;
 mod import;
 mod isready;
 mod sql;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 mod start;
 mod upgrade;
 pub(crate) mod validator;
@@ -14,11 +21,25 @@ use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use sql::SqlCommandArguments;
+#[cfg(any(
+	feature = "storage-mem",
+	feature = "storage-tikv",
+	feature = "storage-rocksdb",
+	feature = "storage-speedb",
+	feature = "storage-fdb",
+))]
 use start::StartCommandArguments;
 use std::process::ExitCode;
 
@@ -49,6 +70,13 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
+	#[cfg(any(
+		feature = "storage-mem",
+		feature = "storage-tikv",
+		feature = "storage-rocksdb",
+		feature = "storage-speedb",
+		feature = "storage-fdb",
+	))]
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
 	#[command(about = "Backup data to or from an existing database")]
@@ -73,6 +101,13 @@ enum Commands {
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
 	let output = match args.command {
+		#[cfg(any(
+			feature = "storage-mem",
+			feature = "storage-tikv",
+			feature = "storage-rocksdb",
+			feature = "storage-speedb",
+			feature = "storage-fdb",
+		))]
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,

@@ -1,5 +1,5 @@
-use log::Level;
 use std::fmt;
+use tracing::Level;
 
 struct OptFmt<T>(Option<T>);
 
@@ -17,9 +17,9 @@ const NAME: &str = "surrealdb::net";
 
 pub fn write() -> warp::filters::log::Log<impl Fn(warp::filters::log::Info) + Copy> {
 	warp::log::custom(|info| {
-		log!(
+		event!(
 			target: NAME,
-			Level::Info,
+			Level::INFO,
 			"{} {} {} {:?} {} \"{}\" {:?}",
 			OptFmt(info.remote_addr()),
 			info.method(),
