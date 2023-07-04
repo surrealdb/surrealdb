@@ -267,7 +267,7 @@ impl<'a> Context<'a> {
 		crate::ctx::cancellation::Cancellation::new(
 			self.deadline,
 			std::iter::successors(Some(self), |ctx| ctx.parent)
-				.map(|ctx| ctx.cancelled.clone())
+				.filter_map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)
 	}

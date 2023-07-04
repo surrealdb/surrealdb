@@ -8,14 +8,11 @@ use trice::Instant;
 #[derive(Clone, Debug, Default)]
 pub struct Cancellation {
 	deadline: Option<Instant>,
-	cancellations: Vec<Option<Arc<AtomicBool>>>,
+	cancellations: Vec<Arc<AtomicBool>>,
 }
 
 impl Cancellation {
-	pub fn new(
-		deadline: Option<Instant>,
-		cancellations: Vec<Option<Arc<AtomicBool>>>,
-	) -> Cancellation {
+	pub fn new(deadline: Option<Instant>, cancellations: Vec<Arc<AtomicBool>>) -> Cancellation {
 		Self {
 			deadline,
 			cancellations,
@@ -24,9 +21,6 @@ impl Cancellation {
 
 	pub fn is_done(&self) -> bool {
 		self.deadline.map(|d| d <= Instant::now()).unwrap_or(false)
-			|| self
-				.cancellations
-				.iter()
-				.any(|c| c.as_ref().map_or(false, |c| c.load(Ordering::Relaxed)))
+			|| self.cancellations.iter().any(|c| c.load(Ordering::Relaxed))
 	}
 }
