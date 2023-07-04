@@ -56,7 +56,23 @@ pub async fn init(
 		password: &password,
 	};
 	// Connect to the database engine
-	let client = connect((endpoint, root)).await?;
+	#[cfg(any(
+		feature = "storage-mem",
+		feature = "storage-tikv",
+		feature = "storage-rocksdb",
+		feature = "storage-speedb",
+		feature = "storage-fdb",
+	))]
+	let address = (endpoint, root);
+	#[cfg(not(any(
+		feature = "storage-mem",
+		feature = "storage-tikv",
+		feature = "storage-rocksdb",
+		feature = "storage-speedb",
+		feature = "storage-fdb",
+	)))]
+	let address = endpoint;
+	let client = connect(address).await?;
 	// Sign in to the server
 	client.signin(root).await?;
 	// Create a new terminal REPL
