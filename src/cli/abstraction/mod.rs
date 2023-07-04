@@ -41,7 +41,7 @@ pub struct DatabaseSelectionOptionalArguments {
 pub struct DatabaseConnectionArguments {
 	#[arg(help = "Remote database server url to connect to")]
 	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
-	#[arg(default_value = "https://cloud.surrealdb.com")]
+	#[arg(default_value = "https://localhost:8000")]
 	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) endpoint: String,
 }
