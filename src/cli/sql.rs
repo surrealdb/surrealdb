@@ -71,44 +71,28 @@ pub async fn init(
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
-	// Keep track of current namespace/database.
-	let (mut ns, mut db) = if let Some(DatabaseSelectionOptionalArguments {
+	// Configure the prompt
+	let mut prompt = "> ".to_owned();
+	// Use namespace / database if specified
+	if let Some(DatabaseSelectionOptionalArguments {
 		namespace,
 		database,
 	}) = sel
 	{
-		(namespace, database)
-	} else {
-		(None, None)
-	};
-	// Configure the prompt
-	let mut prompt = "> ".to_owned();
+		match (&namespace, &database) {
+			(Some(namespace), Some(database)) => {
+				client.use_ns(namespace).use_db(database).await?;
+				prompt = format!("{namespace}/{database}> ");
+			}
+			(Some(namespace), None) => {
+				client.use_ns(namespace).await?;
+				prompt = format!("{namespace}> ");
+			}
+			_ => {}
+		}
+	}
 	// Loop over each command-line input
 	loop {
-		// Use namespace / database if specified
-		match (&ns, &db) {
-			(Some(namespace), Some(database)) => {
-				match client.use_ns(namespace).use_db(database).await {
-					Ok(()) => {
-						prompt = format!("{namespace}/{database}> ");
-					}
-					Err(error) => eprintln!("{error}"),
-				}
-			}
-			(Some(namespace), None) => match client.use_ns(namespace).await {
-				Ok(()) => {
-					prompt = format!("{namespace}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, Some(database)) => match client.use_db(database).await {
-				Ok(()) => {
-					prompt = format!("/{database}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, None) => {}
-		}
 		// Prompt the user to input SQL and check the input.
 		let line = match rl.readline(&prompt) {
 			// The user typed a query
@@ -134,23 +118,53 @@ pub async fn init(
 		// Complete the request
 		match sql::parse(&line) {
 			Ok(query) => {
+				let mut has_errored = false;
 				for statement in query.iter() {
 					match statement {
 						Statement::Use(stmt) => {
-							if let Some(namespace) = &stmt.ns {
-								ns = Some(namespace.clone());
+							// Extract the namespace and database from the current prompt
+							let (ns, db) = split_prompt(&prompt);
+							// Use the namespace provided in the query if any, otherwise use the one in the prompt
+							let namespace = stmt.ns.as_deref().unwrap_or(ns.trim());
+							// The namespace should be set before the database can be set
+							if namespace.is_empty() {
+								eprintln!("There was a problem with the database: Specify a namespace to use\n");
+								has_errored = true;
+								break;
 							}
-							if let Some(database) = &stmt.db {
-								db = Some(database.clone());
+							// Use the database provided in the query if any, otherwise use the one in the prompt
+							let database = stmt.db.as_deref().unwrap_or(db.trim());
+							// If the database is empty we should only use the namespace
+							if database.is_empty() {
+								if let Err(e) = client.use_ns(namespace).await {
+									eprintln!("{e}\n");
+									has_errored = true;
+									break;
+								}
+								prompt = format!("{namespace}> ");
+								continue;
 							}
+							// Otherwise we should use both the namespace and database
+							if let Err(e) = client.use_ns(namespace).use_db(database).await {
+								eprintln!("{e}\n");
+								has_errored = true;
+								break;
+							}
+							prompt = format!("{namespace}/{database}> ");
 						}
 						Statement::Set(stmt) => {
 							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
 								eprintln!("{e}\n");
+								has_errored = true;
+								break;
 							}
 						}
 						_ => {}
 					}
+				}
+				// Don't run the query if we encountered some errors
+				if has_errored {
+					continue;
 				}
 				let res = client.query(query).await;
 				// Get the request response
@@ -246,4 +260,9 @@ impl Validator for InputValidator {
 
 fn filter_line_continuations(line: &str) -> String {
 	line.replace("\\\n", "").replace("\\\r\n", "")
+}
+
+fn split_prompt(prompt: &str) -> (&str, &str) {
+	let selection = prompt.split_once('>').unwrap().0;
+	selection.split_once('/').unwrap_or((selection, ""))
 }
