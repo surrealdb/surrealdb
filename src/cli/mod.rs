@@ -25,8 +25,6 @@ use sql::SqlCommandArguments;
 use start::StartCommandArguments;
 use std::process::ExitCode;
 
-pub const LOG: &str = "surrealdb::cli";
-
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
 on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
@@ -88,7 +86,7 @@ pub async fn init() -> ExitCode {
 		Commands::IsReady(args) => isready::init(args).await,
 	};
 	if let Err(e) = output {
-		error!(target: LOG, "{}", e);
+		error!("{}", e);
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
