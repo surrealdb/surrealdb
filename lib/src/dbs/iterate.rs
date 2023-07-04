@@ -26,17 +26,15 @@ impl Iterable {
 			match self {
 				Iterable::Value(v) => Self::iterate_value(ctx, opt, stm, v, ite).await,
 				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, stm, v, ite).await?,
-				Iterable::Mergeable(v, o) => {
-					Self::iterate_mergeable(ctx, opt, stm, v, o, ite).await?;
-				}
-				Iterable::Relatable(f, v, w) => {
-					Self::iterate_relatable(ctx, opt, stm, f, v, w, ite).await?
-				}
 				Iterable::Table(v) => Self::iterate_table(ctx, opt, stm, v, ite).await?,
 				Iterable::Range(v) => Self::iterate_range(ctx, opt, stm, v, ite).await?,
 				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, stm, e, ite).await?,
-				Iterable::Index(t, p) => {
-					Self::iterate_index(ctx, opt, stm, t, p, ite).await?;
+				Iterable::Index(t, p) => Self::iterate_index(ctx, opt, stm, t, p, ite).await?,
+				Iterable::Mergeable(v, o) => {
+					Self::iterate_mergeable(ctx, opt, stm, v, o, ite).await?
+				}
+				Iterable::Relatable(f, v, w) => {
+					Self::iterate_relatable(ctx, opt, stm, f, v, w, ite).await?
 				}
 			}
 		}
@@ -80,6 +78,7 @@ impl Iterable {
 		child_ctx.add_thing(&v);
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
+		// Everything ok
 		Ok(())
 	}
 
@@ -110,6 +109,7 @@ impl Iterable {
 		child_ctx.add_thing(&v);
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
+		// Everything ok
 		Ok(())
 	}
 
@@ -141,6 +141,7 @@ impl Iterable {
 		child_ctx.add_thing(&v);
 		// Process the document record
 		ite.process(&child_ctx, opt, stm, val).await;
+		// Everything ok
 		Ok(())
 	}
 
@@ -209,6 +210,7 @@ impl Iterable {
 			}
 			break;
 		}
+		// Everything ok
 		Ok(())
 	}
 
@@ -294,6 +296,7 @@ impl Iterable {
 			}
 			break;
 		}
+		// Everything ok
 		Ok(())
 	}
 
@@ -435,6 +438,7 @@ impl Iterable {
 				break;
 			}
 		}
+		// Everything ok
 		Ok(())
 	}
 
@@ -446,6 +450,7 @@ impl Iterable {
 		plan: Plan,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
+		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
@@ -489,6 +494,7 @@ impl Iterable {
 				// Collect the next batch of ids
 				things = iterator.next_batch(&txn, 1000).await?;
 			}
+			// Everything ok
 			Ok(())
 		} else {
 			Err(Error::QueryNotExecutedDetail {
