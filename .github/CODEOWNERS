@@ -21,6 +21,10 @@
 # Code and tests for scripting
 /lib/src/fnc/script/ @surrealdb/scripting
 
+# Code and tests for the server
+/src/net/ @surrealdb/api
+/src/rpc/ @surrealdb/api
+
 # Code and tests for the command-line
 /src/cli/ @surrealdb/cli
 /tests/cli.rs @surrealdb/cli
