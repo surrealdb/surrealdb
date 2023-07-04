@@ -1,4 +1,5 @@
 use std::fmt;
+use thiserror::Error;
 
 // u64_to_versionstamp converts a u64 to a 10-byte versionstamp
 // assuming big-endian and the the last two bytes are zero.
@@ -86,7 +87,9 @@ pub fn to_u128_be(vs: [u8; 10]) -> u128 {
 	u128::from_be_bytes(buf)
 }
 
+#[derive(Error)]
 pub enum Error {
+	#[error("invalid versionstamp")]
 	// InvalidVersionstamp is returned when a versionstamp has an unexpected length.
 	InvalidVersionstamp,
 }
