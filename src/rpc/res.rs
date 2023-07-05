@@ -9,8 +9,6 @@ use surrealdb::sql::Value;
 use tracing::instrument;
 use warp::ws::Message;
 
-const LOG: &str = "surrealdb::rpc::res";
-
 #[derive(Clone)]
 pub enum Output {
 	Json, // JSON
@@ -105,7 +103,7 @@ impl Response {
 			}
 		};
 		let _ = chn.send(message).await;
-		trace!(target: LOG, "Response sent");
+		trace!("Response sent");
 	}
 }
 

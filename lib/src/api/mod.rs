@@ -31,7 +31,6 @@ use wasm_bindgen_futures::spawn_local as spawn;
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0-beta.9, <2.0.0", "20230701.55918b7c");
-const LOG: &str = "surrealdb::api";
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -153,13 +152,13 @@ where
 				Ok(version) => {
 					let server_build = &version.build;
 					if !req.matches(&version) {
-						warn!(target: LOG, "server version `{version}` does not match the range supported by the client `{versions}`");
+						warn!("server version `{version}` does not match the range supported by the client `{versions}`");
 					} else if !server_build.is_empty() && server_build < &build_meta {
-						warn!(target: LOG, "server build `{server_build}` is older than the minimum supported build `{build_meta}`");
+						warn!("server build `{server_build}` is older than the minimum supported build `{build_meta}`");
 					}
 				}
 				Err(error) => {
-					trace!(target: LOG, "failed to lookup the server version; {error:?}");
+					trace!("failed to lookup the server version; {error:?}");
 				}
 			}
 		});
