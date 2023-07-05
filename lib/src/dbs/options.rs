@@ -334,26 +334,16 @@ impl Options {
 	}
 
 	/// Get currently selected NS
-	// #[deprecated]
 	pub fn ns(&self) -> &str {
 		self.ns.as_ref().map(AsRef::as_ref).unwrap()
+		// self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
 	}
 
-	/// Get currently selected NS
-	// pub fn ns(&self) -> Result<&str, Error> {
-	// 	self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
-	// }
-
 	/// Get currently selected DB
-	// #[deprecated]
 	pub fn db(&self) -> &str {
 		self.db.as_ref().map(AsRef::as_ref).unwrap()
+		// self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
 	}
-
-	/// Get currently selected DB
-	// pub fn db(&self) -> Result<&str, Error> {
-	// 	self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
-	// }
 
 	/// Check whether this request supports realtime queries
 	pub fn realtime(&self) -> Result<(), Error> {

@@ -137,13 +137,13 @@ impl<'a> Context<'a> {
 	/// Add the current transaction to the context, so that it can be fetched
 	/// where necessary, including inside the query planner.
 	pub fn add_transaction(&mut self, txn: Option<&Transaction>) {
-		self.transaction = txn.map(Clone::clone);
+		self.transaction = txn.cloned()
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
 	pub fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
-		self.notifications = chn.map(Clone::clone)
+		self.notifications = chn.cloned()
 	}
 
 	/// Add a cursor document to this context.
@@ -176,10 +176,7 @@ impl<'a> Context<'a> {
 	/// Returns a transaction if any.
 	/// Otherwise it fails by returning a Error::NoTx error.
 	pub fn try_clone_transaction(&self) -> Result<Transaction, Error> {
-		match &self.transaction {
-			None => Err(Error::NoTx),
-			Some(txn) => Ok(txn.clone()),
-		}
+		self.transaction.clone().ok_or(Error::Unreachable)
 	}
 
 	pub fn notifications(&self) -> Option<Sender<Notification>> {
