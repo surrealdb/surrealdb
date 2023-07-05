@@ -69,11 +69,11 @@ SurrealDB is an end-to-end cloud native database for web, mobile, serverless, ja
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), the product [roadmap](https://surrealdb.com/roadmap), and [documentation](https://surrealdb.com/docs).
 
-<h2><img height="20" src="./img/documentation.svg">&nbsp;&nbsp;Documentation</h2>
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
 
 For guidance on installation, development, deployment, and administration, see our [documentation](https://surrealdb.com/docs).
 
-<h2><img height="20" src="./img/gettingstarted.svg">&nbsp;&nbsp;Run using Docker</h2>
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Run using Docker</h2>
 
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
@@ -93,7 +93,7 @@ Access to the surrealdb CLI with:
 docker exec -it <container_name> /surreal sql -c http://localhost:8000 -u root -p root --ns test --db test --pretty
 ```
 
-<h2><img height="20" src="./img/gettingstarted.svg">&nbsp;&nbsp;Run using Docker Compose</h2>
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Run using Docker Compose</h2>
 
 
 The Docker image can be used with the docker-compose tool.
