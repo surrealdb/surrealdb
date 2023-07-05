@@ -79,16 +79,16 @@ impl Iterator {
 		// Log the statement
 		trace!("Iterating: {}", stm);
 		// Enable context override
-		let mut run = Context::new(ctx);
-		self.run = run.add_cancel();
+		let mut cancel_ctx = Context::new(ctx);
+		self.run = cancel_ctx.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(ctx, opt, stm).await?;
+		self.setup_limit(&cancel_ctx, opt, stm).await?;
 		// Process the query START clause
-		self.setup_start(ctx, opt, stm).await?;
+		self.setup_start(&cancel_ctx, opt, stm).await?;
 		// Process any EXPLAIN clause
-		let explanation = self.output_explain(ctx, opt, stm)?;
+		let explanation = self.output_explain(&cancel_ctx, opt, stm)?;
 		// Process prepared values
-		self.iterate(ctx, opt, stm).await?;
+		self.iterate(&cancel_ctx, opt, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
