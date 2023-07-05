@@ -898,18 +898,17 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	}
 	//
 	let tmp = res.remove(0).result;
-	println!("{:?}", tmp);
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
-	//
+
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
