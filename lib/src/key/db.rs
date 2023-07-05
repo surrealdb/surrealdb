@@ -2,41 +2,41 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Db {
+pub struct Db<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub db: String,
+	pub db: &'a str,
 }
 
-pub fn new(ns: &str, db: &str) -> Db {
-	Db::new(ns.to_string(), db.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
+	Db::new(ns, db)
 }
 
 pub fn prefix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0x00]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0xff]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0xff]);
 	k
 }
 
-impl Db {
-	pub fn new(ns: String, db: String) -> Db {
-		Db {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+impl<'a> Db<'a> {
+	pub fn new(ns: &'a str, db: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x21, // !
-			_c: 0x64, // d
-			_d: 0x62, // b
+			_b: b'!',
+			_c: b'd',
+			_d: b'b',
 			db,
 		}
 	}
@@ -49,8 +49,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
 		);
 		let enc = Db::encode(&val).unwrap();
 		let dec = Db::decode(&enc).unwrap();

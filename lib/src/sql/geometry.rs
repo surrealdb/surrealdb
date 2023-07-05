@@ -1,32 +1,38 @@
-#![allow(clippy::derive_hash_xor_eq)]
+#![allow(clippy::derived_hash_with_manual_eq)]
 
+use crate::sql::array::Array;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
+use crate::sql::common::{
+	closebraces, closebracket, closeparentheses, commas, openbraces, openbracket, openparentheses,
+};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::serde::is_internal_serialization;
+use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo::{LineString, Point, Polygon};
+use geo::{Coord, LineString, Point, Polygon};
 use geo::{MultiLineString, MultiPoint, MultiPolygon};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
+use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::iter::FromIterator;
+use std::iter::{once, FromIterator};
 use std::{fmt, hash};
+
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Geometry")]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
@@ -35,12 +41,186 @@ pub enum Geometry {
 	MultiLine(MultiLineString<f64>),
 	MultiPolygon(MultiPolygon<f64>),
 	Collection(Vec<Geometry>),
+	// Add new variants here
+}
+
+impl Geometry {
+	/// Check if this is a Point
+	pub fn is_point(&self) -> bool {
+		matches!(self, Self::Point(_))
+	}
+	/// Check if this is a Line
+	pub fn is_line(&self) -> bool {
+		matches!(self, Self::Line(_))
+	}
+	/// Check if this is a Polygon
+	pub fn is_polygon(&self) -> bool {
+		matches!(self, Self::Polygon(_))
+	}
+	/// Check if this is a MultiPoint
+	pub fn is_multipoint(&self) -> bool {
+		matches!(self, Self::MultiPoint(_))
+	}
+	/// Check if this is a MultiLine
+	pub fn is_multiline(&self) -> bool {
+		matches!(self, Self::MultiLine(_))
+	}
+	/// Check if this is a MultiPolygon
+	pub fn is_multipolygon(&self) -> bool {
+		matches!(self, Self::MultiPolygon(_))
+	}
+	/// Check if this is not a Collection
+	pub fn is_geometry(&self) -> bool {
+		!matches!(self, Self::Collection(_))
+	}
+	/// Check if this is a Collection
+	pub fn is_collection(&self) -> bool {
+		matches!(self, Self::Collection(_))
+	}
+	/// Get the type of this Geometry as text
+	pub fn as_type(&self) -> &'static str {
+		match self {
+			Self::Point(_) => "Point",
+			Self::Line(_) => "LineString",
+			Self::Polygon(_) => "Polygon",
+			Self::MultiPoint(_) => "MultiPoint",
+			Self::MultiLine(_) => "MultiLineString",
+			Self::MultiPolygon(_) => "MultiPolygon",
+			Self::Collection(_) => "GeometryCollection",
+		}
+	}
+	/// Get the raw coordinates of this Geometry as an Array
+	pub fn as_coordinates(&self) -> Value {
+		fn point(v: &Point) -> Value {
+			Array::from(vec![v.x(), v.y()]).into()
+		}
+
+		fn line(v: &LineString) -> Value {
+			v.points().map(|v| point(&v)).collect::<Vec<Value>>().into()
+		}
+
+		fn polygon(v: &Polygon) -> Value {
+			once(v.exterior()).chain(v.interiors()).map(line).collect::<Vec<Value>>().into()
+		}
+
+		fn multipoint(v: &MultiPoint) -> Value {
+			v.iter().map(point).collect::<Vec<Value>>().into()
+		}
+
+		fn multiline(v: &MultiLineString) -> Value {
+			v.iter().map(line).collect::<Vec<Value>>().into()
+		}
+
+		fn multipolygon(v: &MultiPolygon) -> Value {
+			v.iter().map(polygon).collect::<Vec<Value>>().into()
+		}
+
+		fn collection(v: &[Geometry]) -> Value {
+			v.iter().map(Geometry::as_coordinates).collect::<Vec<Value>>().into()
+		}
+
+		match self {
+			Self::Point(v) => point(v),
+			Self::Line(v) => line(v),
+			Self::Polygon(v) => polygon(v),
+			Self::MultiPoint(v) => multipoint(v),
+			Self::MultiLine(v) => multiline(v),
+			Self::MultiPolygon(v) => multipolygon(v),
+			Self::Collection(v) => collection(v),
+		}
+	}
 }
 
 impl PartialOrd for Geometry {
-	#[inline]
-	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		None
+	#[rustfmt::skip]
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn coord(v: &Coord) -> (f64, f64) {
+			v.x_y()
+		}
+
+		fn point(v: &Point) -> (f64, f64) {
+			coord(&v.0)
+		}
+
+		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.into_iter().map(coord)
+		}
+
+		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.interiors().iter().chain(once(v.exterior())).flat_map(line)
+		}
+
+		fn multipoint(v: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().map(point)
+		}
+
+		fn multiline(v: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(line)
+		}
+
+		fn multipolygon(v: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(polygon)
+		}
+
+		match (self, other) {
+			//
+			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
+			//
+			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
+			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
+			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
+			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
+			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
+			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
+			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
+		}
 	}
 }
 
@@ -377,145 +557,6 @@ impl fmt::Display for Geometry {
 	}
 }
 
-impl Serialize for Geometry {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
-				Self::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
-				Self::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
-				Self::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "MultiPoint", v),
-				Self::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "MultiLine", v),
-				Self::MultiPolygon(v) => {
-					s.serialize_newtype_variant("Geometry", 5, "MultiPolygon", v)
-				}
-				Self::Collection(v) => s.serialize_newtype_variant("Geometry", 6, "Collection", v),
-			}
-		} else {
-			match self {
-				Self::Point(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("Point")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(vec![v.x(), v.y()].as_slice())?;
-					map.end()
-				}
-				Self::Line(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("LineString")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.points()
-							.map(|p| vec![p.x(), p.y()])
-							.collect::<Vec<Vec<f64>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::Polygon(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("Polygon")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						vec![v
-							.exterior()
-							.points()
-							.map(|p| vec![p.x(), p.y()])
-							.collect::<Vec<Vec<f64>>>()]
-						.into_iter()
-						.chain(
-							v.interiors()
-								.iter()
-								.map(|i| {
-									i.points()
-										.map(|p| vec![p.x(), p.y()])
-										.collect::<Vec<Vec<f64>>>()
-								})
-								.collect::<Vec<Vec<Vec<f64>>>>(),
-						)
-						.collect::<Vec<Vec<Vec<f64>>>>()
-						.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiPoint(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiPoint")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| vec![v.x(), v.y()])
-							.collect::<Vec<Vec<f64>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiLine(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiLineString")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| {
-								v.points().map(|v| vec![v.x(), v.y()]).collect::<Vec<Vec<f64>>>()
-							})
-							.collect::<Vec<Vec<Vec<f64>>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiPolygon(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiPolygon")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| {
-								vec![v
-									.exterior()
-									.points()
-									.map(|p| vec![p.x(), p.y()])
-									.collect::<Vec<Vec<f64>>>()]
-								.into_iter()
-								.chain(
-									v.interiors()
-										.iter()
-										.map(|i| {
-											i.points()
-												.map(|p| vec![p.x(), p.y()])
-												.collect::<Vec<Vec<f64>>>()
-										})
-										.collect::<Vec<Vec<Vec<f64>>>>(),
-								)
-								.collect::<Vec<Vec<Vec<f64>>>>()
-							})
-							.collect::<Vec<Vec<Vec<Vec<f64>>>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::Collection(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("GeometryCollection")?;
-					map.serialize_key("geometries")?;
-					map.serialize_value(v)?;
-					map.end()
-				}
-			}
-		}
-	}
-}
-
 impl hash::Hash for Geometry {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		match self {
@@ -584,173 +625,150 @@ impl hash::Hash for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
-	alt((simple, point, line, polygon, multipoint, multiline, multipolygon, collection))(i)
+	alt((simple, normal))(i)
 }
 
 fn simple(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, x) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(',')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = commas(i)?;
 	let (i, y) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Geometry::Point((x, y).into())))
 }
 
-fn point(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
+fn normal(i: &str) -> IResult<&str, Geometry> {
+	let (i, _) = openbraces(i)?;
+	let (i, v) = alt((point, line, polygon, multipoint, multiline, multipolygon, collection))(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebraces(i)?;
+	Ok((i, v))
+}
+
+fn point(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, point_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, point_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn line(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, line_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, line_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn polygon(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multipoint(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multiline(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multipolygon(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn collection(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, collection_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, collection_type)(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
@@ -764,64 +782,60 @@ fn point_vals(i: &str) -> IResult<&str, Point<f64>> {
 }
 
 fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, coordinate)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v.into()))
 }
 
 fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, e) = line_vals(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
-	let (i, v) = separated_list0(commas, |i| {
-		let (i, _) = char('[')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = line_vals(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(']')(i)?;
-		Ok((i, v))
-	})(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, v) = separated_list0(commas, line_vals)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Polygon::new(e, v)))
 }
 
 fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, point_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, line_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, polygon_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, geometry)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
@@ -830,15 +844,13 @@ fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
 //
 
 fn coordinate(i: &str) -> IResult<&str, (f64, f64)> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, x) = double(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(',')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, y) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, (x, y)))
 }
 
@@ -949,10 +961,63 @@ mod tests {
 
 	#[test]
 	fn simple() {
-		let sql = "(51.509865, -0.118092)";
+		let sql = "(-0.118092, 51.509865)";
 		let res = geometry(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("(51.509865, -0.118092)", format!("{}", out));
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn point() {
+		let sql = r#"{
+			type: 'Point',
+			coordinates: [-0.118092, 51.509865]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_exterior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_interior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				],
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]]] }", format!("{}", out));
 	}
 }

@@ -3,6 +3,7 @@ use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
+use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
@@ -31,7 +32,11 @@ impl IntoIterator for Groups {
 
 impl Display for Groups {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
+		if self.0.is_empty() {
+			write!(f, "GROUP ALL")
+		} else {
+			write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
+		}
 	}
 }
 
@@ -52,6 +57,17 @@ impl Display for Group {
 }
 
 pub fn group(i: &str) -> IResult<&str, Groups> {
+	alt((group_all, group_any))(i)
+}
+
+fn group_all(i: &str) -> IResult<&str, Groups> {
+	let (i, _) = tag_no_case("GROUP")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ALL")(i)?;
+	Ok((i, Groups(vec![])))
+}
+
+fn group_any(i: &str) -> IResult<&str, Groups> {
 	let (i, _) = tag_no_case("GROUP")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -101,5 +117,13 @@ mod tests {
 			Groups(vec![Group(Idiom::parse("field")), Group(Idiom::parse("other.field"))])
 		);
 		assert_eq!("GROUP BY field, other.field", format!("{}", out));
+	}
+
+	#[test]
+	fn group_statement_all() {
+		let sql = "GROUP ALL";
+		let out = group(sql).unwrap().1;
+		assert_eq!(out, Groups(Vec::new()));
+		assert_eq!(sql, out.to_string());
 	}
 }

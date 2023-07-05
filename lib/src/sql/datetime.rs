@@ -1,31 +1,34 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
-use crate::sql::serde::is_internal_serialization;
-use chrono::{DateTime, FixedOffset, SecondsFormat, TimeZone, Utc};
+use crate::sql::escape::quote_str;
+use crate::sql::strand::Strand;
+use chrono::{
+	DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, SecondsFormat, TimeZone,
+	Utc,
+};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
+use nom::error::ErrorKind;
 use nom::sequence::delimited;
+use nom::{error_position, Err};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::str;
+use std::str::FromStr;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
-pub struct Datetime(pub DateTime<Utc>);
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Datetime")]
+pub struct Datetime(#[serde(with = "ts_binary")] pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
 		Self(Utc::now())
-	}
-}
-
-impl From<i64> for Datetime {
-	fn from(v: i64) -> Self {
-		Self(Utc.timestamp(v, 0))
 	}
 }
 
@@ -35,11 +38,39 @@ impl From<DateTime<Utc>> for Datetime {
 	}
 }
 
-impl From<&str> for Datetime {
-	fn from(s: &str) -> Self {
-		match datetime_all_raw(s) {
-			Ok((_, v)) => v,
-			Err(_) => Self::default(),
+impl From<Datetime> for DateTime<Utc> {
+	fn from(x: Datetime) -> Self {
+		x.0
+	}
+}
+
+impl FromStr for Datetime {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Datetime {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Datetime {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Datetime {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match datetime_all_raw(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
 		}
 	}
 }
@@ -48,12 +79,6 @@ impl Deref for Datetime {
 	type Target = DateTime<Utc>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl From<Datetime> for DateTime<Utc> {
-	fn from(x: Datetime) -> Self {
-		x.0
 	}
 }
 
@@ -66,20 +91,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
-	}
-}
-
-impl Serialize for Datetime {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Datetime", &self.0)
-		} else {
-			serializer.serialize_some(&self.0)
-		}
+		Display::fmt(&quote_str(&self.to_raw()), f)
 	}
 }
 
@@ -119,9 +131,7 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, mon) = month(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-
-	let d = Utc.ymd(year, mon, day).and_hms(0, 0, 0);
-	Ok((i, Datetime(d)))
+	convert(i, (year, mon, day), (0, 0, 0, 0), Utc.fix())
 }
 
 fn time(i: &str) -> IResult<&str, Datetime> {
@@ -137,20 +147,7 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, zone) = zone(i)?;
-
-	let v = match zone {
-		Some(z) => {
-			let d = z.ymd(year, mon, day).and_hms(hour, min, sec);
-			let d = d.with_timezone(&Utc);
-			Datetime(d)
-		}
-		None => {
-			let d = Utc.ymd(year, mon, day).and_hms(hour, min, sec);
-			Datetime(d)
-		}
-	};
-
-	Ok((i, v))
+	convert(i, (year, mon, day), (hour, min, sec, 0), zone)
 }
 
 fn nano(i: &str) -> IResult<&str, Datetime> {
@@ -167,20 +164,31 @@ fn nano(i: &str) -> IResult<&str, Datetime> {
 	let (i, sec) = second(i)?;
 	let (i, nano) = nanosecond(i)?;
 	let (i, zone) = zone(i)?;
+	convert(i, (year, mon, day), (hour, min, sec, nano), zone)
+}
 
-	let v = match zone {
-		Some(z) => {
-			let d = z.ymd(year, mon, day).and_hms_nano(hour, min, sec, nano);
-			let d = d.with_timezone(&Utc);
-			Datetime(d)
-		}
-		None => {
-			let d = Utc.ymd(year, mon, day).and_hms_nano(hour, min, sec, nano);
-			Datetime(d)
-		}
-	};
-
-	Ok((i, v))
+fn convert(
+	i: &str,
+	(year, mon, day): (i32, u32, u32),
+	(hour, min, sec, nano): (u32, u32, u32, u32),
+	zone: FixedOffset,
+) -> IResult<&str, Datetime> {
+	// Attempt to create date
+	let d = NaiveDate::from_ymd_opt(year, mon, day)
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
+	// Attempt to create time
+	let t = NaiveTime::from_hms_nano_opt(hour, min, sec, nano)
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
+	//
+	let v = NaiveDateTime::new(d, t);
+	// Attempt to create time
+	let d = zone
+		.from_local_datetime(&v)
+		.earliest()
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?
+		.with_timezone(&Utc);
+	// This is a valid datetime
+	Ok((i, Datetime(d)))
 }
 
 fn year(i: &str) -> IResult<&str, i32> {
@@ -207,7 +215,7 @@ fn minute(i: &str) -> IResult<&str, u32> {
 }
 
 fn second(i: &str) -> IResult<&str, u32> {
-	take_digits_range(i, 2, 0..=59)
+	take_digits_range(i, 2, 0..=60)
 }
 
 fn nanosecond(i: &str) -> IResult<&str, u32> {
@@ -226,28 +234,34 @@ fn nanosecond(i: &str) -> IResult<&str, u32> {
 	Ok((i, v))
 }
 
-fn zone(i: &str) -> IResult<&str, Option<FixedOffset>> {
+fn zone(i: &str) -> IResult<&str, FixedOffset> {
 	alt((zone_utc, zone_all))(i)
 }
 
-fn zone_utc(i: &str) -> IResult<&str, Option<FixedOffset>> {
+fn zone_utc(i: &str) -> IResult<&str, FixedOffset> {
 	let (i, _) = char('Z')(i)?;
-	Ok((i, None))
+	Ok((i, Utc.fix()))
 }
 
-fn zone_all(i: &str) -> IResult<&str, Option<FixedOffset>> {
+fn zone_all(i: &str) -> IResult<&str, FixedOffset> {
 	let (i, s) = sign(i)?;
 	let (i, h) = hour(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, m) = minute(i)?;
 	if h == 0 && m == 0 {
-		Ok((i, None))
+		Ok((i, Utc.fix()))
 	} else if s < 0 {
-		Ok((i, { Some(FixedOffset::west((h * 3600 + m * 60) as i32)) }))
+		match FixedOffset::west_opt((h * 3600 + m * 60) as i32) {
+			Some(v) => Ok((i, v)),
+			None => Err(Err::Error(error_position!(i, ErrorKind::Verify))),
+		}
 	} else if s > 0 {
-		Ok((i, { Some(FixedOffset::east((h * 3600 + m * 60) as i32)) }))
+		match FixedOffset::east_opt((h * 3600 + m * 60) as i32) {
+			Some(v) => Ok((i, v)),
+			None => Err(Err::Error(error_position!(i, ErrorKind::Verify))),
+		}
 	} else {
-		Ok((i, None))
+		Ok((i, Utc.fix()))
 	}
 }
 
@@ -258,10 +272,73 @@ fn sign(i: &str) -> IResult<&str, i32> {
 	})(i)
 }
 
+/// Lexicographic, relatively size efficient binary serialization
+pub mod ts_binary {
+	use chrono::{offset::TimeZone, DateTime, Utc};
+	use core::fmt;
+	use serde::{
+		de::{self, SeqAccess},
+		ser::{self, SerializeTuple},
+	};
+
+	/// Serialize a UTC datetime into an integer number of nanoseconds since the epoch
+	pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		let mut tuple = serializer.serialize_tuple(2)?;
+		tuple.serialize_element(&dt.timestamp())?;
+		tuple.serialize_element(&dt.timestamp_subsec_nanos())?;
+		tuple.end()
+	}
+
+	/// Deserialize a [`DateTime`] from a nanosecond timestamp
+	pub fn deserialize<'de, D>(d: D) -> Result<DateTime<Utc>, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		d.deserialize_tuple(2, TimestampVisitor)
+	}
+
+	struct TimestampVisitor;
+
+	impl<'de> de::Visitor<'de> for TimestampVisitor {
+		type Value = DateTime<Utc>;
+
+		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			formatter.write_str("a unix timestamp tuple")
+		}
+
+		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+		where
+			A: SeqAccess<'de>,
+		{
+			let secs = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			let nanos =
+				seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			Utc.timestamp_opt(secs, nanos)
+				.single()
+				.ok_or_else(|| de::Error::custom("invalid timestamp"))
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 
+	// use chrono::Date;
+
 	use super::*;
+
+	#[test]
+	fn date_zone() {
+		let sql = "2020-01-01T00:00:00Z";
+		let res = datetime_all_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2020-01-01T00:00:00Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2020-01-01T00:00:00Z").unwrap());
+	}
 
 	#[test]
 	fn date_time() {
@@ -270,6 +347,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43Z").unwrap());
 	}
 
 	#[test]
@@ -279,6 +357,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.563100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.563100Z").unwrap());
 	}
 
 	#[test]
@@ -288,6 +367,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 	}
 
 	#[test]
@@ -297,6 +377,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:25:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-24T02:25:43.511Z").unwrap());
 	}
 
 	#[test]
@@ -306,5 +387,34 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:55:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-24T02:55:43.511Z").unwrap());
+	}
+
+	#[test]
+	fn date_time_timezone_utc_nanoseconds() {
+		let sql = "2012-04-23T18:25:43.5110000Z";
+		let res = datetime_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.511Z").unwrap());
+	}
+
+	#[test]
+	fn date_time_timezone_utc_sub_nanoseconds() {
+		let sql = "2012-04-23T18:25:43.0000511Z";
+		let res = datetime_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
+	}
+
+	#[test]
+	fn date_time_illegal_date() {
+		// Hey! There's not a 31st of November!
+		let sql = "2022-11-31T12:00:00.000Z";
+		let res = datetime_raw(sql);
+		assert!(res.is_err());
 	}
 }

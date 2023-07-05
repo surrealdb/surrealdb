@@ -6,7 +6,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11-small";
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     crane = {
-      url = "github:ipetkov/crane/v0.10.0";
+      url = "github:ipetkov/crane/v0.12.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     fenix = {
@@ -29,7 +29,7 @@
     # are used to express the output but not themselves paths in the output.
     let
 
-      nativeSystems = [ aarch64-linux x86_64-darwin x86_64-linux ];
+      nativeSystems = [ aarch64-darwin aarch64-linux x86_64-darwin x86_64-linux ];
 
       # Build the output set for each default system and map system sets into
       # attributes, resulting in paths such as:
@@ -47,13 +47,13 @@
           flake = self;
         };
 
-        mkRustToolchain = target:
+        mkRustToolchain = {target, extraComponents ? []}:
           with fenix.packages.${system};
-          combine [
+          combine ([
             stable.rustc
             stable.cargo
             targets.${target}.stable.rust-std
-          ];
+          ] ++ extraComponents);
 
         buildPlatform = pkgs.stdenv.buildPlatform.config;
 
@@ -87,7 +87,7 @@
               import ./pkg/nix/spec/${target}.nix { inherit pkgs target util; };
           in import ./pkg/nix/drv/binary.nix {
             inherit pkgs util spec crane;
-            rustToolchain = mkRustToolchain target;
+            rustToolchain = mkRustToolchain { inherit target; };
           }) util.platforms);
 
         devShells = {
@@ -108,13 +108,14 @@
             spec = (import ./pkg/nix/spec/${target}.nix) {
               inherit pkgs target util;
             };
-            rustToolchain = mkRustToolchain target;
+            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src rust-analyzer targets.${target}.stable.rustfmt ];
+            rustToolchain = mkRustToolchain { inherit target extraComponents; };
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {
             hardeningDisable = [ "fortify" ];
 
             depsBuildBuild = buildSpec.depsBuildBuild or [ ]
-              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack ]);
+              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack pre-commit]);
 
             inherit (util) SURREAL_BUILD_METADATA;
           })) util.platforms);

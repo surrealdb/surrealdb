@@ -4,7 +4,6 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
@@ -12,9 +11,9 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
-use crate::sql::param::plain as param;
+use crate::sql::param::param;
 use crate::sql::subquery::subquery;
-use crate::sql::table::{table, Table};
+use crate::sql::table::table;
 use crate::sql::thing::thing;
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::Value;
@@ -30,7 +29,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RelateStatement {
-	pub kind: Table,
+	pub kind: Value,
 	pub from: Value,
 	pub with: Value,
 	pub uniq: bool,
@@ -41,17 +40,22 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Check if this statement is for a single record
+	pub(crate) fn single(&self) -> bool {
+		match (&self.from, &self.with) {
+			(v, w) if v.is_object() && w.is_object() => true,
+			(v, w) if v.is_object() && w.is_thing() => true,
+			(v, w) if v.is_thing() && w.is_object() => true,
+			(v, w) if v.is_thing() && w.is_thing() => true,
+			_ => false,
+		}
+	}
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -63,7 +67,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(ctx, opt, txn, doc).await? {
+			match self.from.compute(ctx, opt).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -105,7 +109,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(ctx, opt, txn, doc).await? {
+			match self.with.compute(ctx, opt).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -148,23 +152,30 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.data {
-					// There is a data clause so check for a record id
-					Some(data) => match data.rid(ctx, opt, txn, &self.kind).await {
-						// There was a problem creating the record id
-						Err(e) => return Err(e),
-						// There is an id field so use the record id
-						Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+				match &self.kind {
+					// The relation has a specific record id
+					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
+					// The relation does not have a specific record id
+					Value::Table(tb) => match &self.data {
+						// There is a data clause so check for a record id
+						Some(data) => match data.rid(ctx, opt, tb).await {
+							// There was a problem creating the record id
+							Err(e) => return Err(e),
+							// There is an id field so use the record id
+							Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+						},
+						// There is no data clause so create a record id
+						None => i.ingest(Iterable::Relatable(f, tb.generate(), w)),
 					},
-					// There is no data clause so create a record id
-					None => i.ingest(Iterable::Relatable(f, self.kind.generate(), w)),
+					// The relation can not be any other type
+					_ => unreachable!(),
 				};
 			}
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		i.output(ctx, opt, &stm).await
 	}
 }
 
@@ -175,13 +186,13 @@ impl fmt::Display for RelateStatement {
 			f.write_str(" UNIQUE")?
 		}
 		if let Some(ref v) = self.data {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -214,7 +225,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	))
 }
 
-fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
+fn relate_o(i: &str) -> IResult<&str, (Value, Value, Value)> {
 	let (i, from) = alt((
 		map(subquery, Value::from),
 		map(array, Value::from),
@@ -225,7 +236,7 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = table(i)?;
+	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
@@ -239,7 +250,7 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	Ok((i, (kind, from, with)))
 }
 
-fn relate_i(i: &str) -> IResult<&str, (Table, Value, Value)> {
+fn relate_i(i: &str) -> IResult<&str, (Value, Value, Value)> {
 	let (i, with) = alt((
 		map(subquery, Value::from),
 		map(array, Value::from),
@@ -250,7 +261,7 @@ fn relate_i(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = table(i)?;
+	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;

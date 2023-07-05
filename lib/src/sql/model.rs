@@ -9,6 +9,8 @@ use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
+
 pub struct IntoIter {
 	model: Model,
 	index: u64,
@@ -45,9 +47,11 @@ impl Iterator for IntoIter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Model")]
 pub enum Model {
 	Count(String, u64),
 	Range(String, u64, u64),
+	// Add new variants here
 }
 
 impl IntoIterator for Model {

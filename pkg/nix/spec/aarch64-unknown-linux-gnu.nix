@@ -3,7 +3,7 @@
 {
   inherit target;
 
-  features = with util.features; [ http ];
+  features = with util.features; [ storage-mem http ];
 
   buildSpec = with pkgs; {
     depsBuildBuild = [ clang protobuf perl ];
@@ -15,6 +15,9 @@
     CARGO_BUILD_TARGET = target;
 
     LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+
+    PROTOC = "${protobuf}/bin/protoc";
+    PROTOC_INCLUDE = "${protobuf}/include";
 
     OPENSSL_NO_VENDOR = "true";
   };

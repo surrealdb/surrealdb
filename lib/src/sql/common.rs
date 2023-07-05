@@ -1,6 +1,6 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
-use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::take_while;
@@ -25,8 +25,63 @@ pub fn commas(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
+pub fn verbar(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('|')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
 pub fn commasorspace(i: &str) -> IResult<&str, ()> {
 	alt((commas, shouldbespace))(i)
+}
+
+pub fn openparentheses(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closeparentheses(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openbraces(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('{')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closebraces(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openbracket(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('[')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closebracket(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(']')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openchevron(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('<')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closechevron(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, ()))
 }
 
 #[inline]
@@ -53,7 +108,7 @@ pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	let (i, v) = take_while(is_digit)(i)?;
 	match v.parse::<u64>() {
 		Ok(v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
+		_ => Err(Error(Parser(i))),
 	}
 }
 
@@ -61,7 +116,7 @@ pub fn take_u32_len(i: &str) -> IResult<&str, (u32, usize)> {
 	let (i, v) = take_while(is_digit)(i)?;
 	match v.parse::<u32>() {
 		Ok(n) => Ok((i, (n, v.len()))),
-		_ => Err(Error(ParserError(i))),
+		_ => Err(Error(Parser(i))),
 	}
 }
 
@@ -69,7 +124,7 @@ pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
 	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
 	match v.parse::<u32>() {
 		Ok(v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
+		_ => Err(Error(Parser(i))),
 	}
 }
 
@@ -77,6 +132,6 @@ pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IRe
 	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
 	match v.parse::<u32>() {
 		Ok(v) if range.contains(&v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
+		_ => Err(Error(Parser(i))),
 	}
 }

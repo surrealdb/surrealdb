@@ -1,6 +1,8 @@
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
+use serde_json::Value as Json;
+use surrealdb::sql;
 
 pub enum Output {
 	None,
@@ -9,6 +11,7 @@ pub enum Output {
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
 	Pack(Vec<u8>), // MessagePack
+	Full(Vec<u8>), // Full type serialization
 }
 
 pub fn none() -> Output {
@@ -49,6 +52,21 @@ where
 	}
 }
 
+pub fn full<T>(val: &T) -> Output
+where
+	T: Serialize,
+{
+	match surrealdb::sql::serde::serialize(val) {
+		Ok(v) => Output::Full(v),
+		Err(_) => Output::Fail,
+	}
+}
+
+/// Convert and simplify the value into JSON
+pub fn simplify<T: Serialize>(v: T) -> Json {
+	sql::to_value(v).unwrap().into()
+}
+
 impl warp::Reply for Output {
 	fn into_response(self) -> warp::reply::Response {
 		match self {
@@ -72,7 +90,13 @@ impl warp::Reply for Output {
 			}
 			Output::Pack(v) => {
 				let mut res = warp::reply::Response::new(v.into());
-				let con = HeaderValue::from_static("application/msgpack");
+				let con = HeaderValue::from_static("application/pack");
+				res.headers_mut().insert(CONTENT_TYPE, con);
+				res
+			}
+			Output::Full(v) => {
+				let mut res = warp::reply::Response::new(v.into());
+				let con = HeaderValue::from_static("application/surrealdb");
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}

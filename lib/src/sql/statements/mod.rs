@@ -1,3 +1,4 @@
+pub(crate) mod analyze;
 pub(crate) mod begin;
 pub(crate) mod cancel;
 pub(crate) mod commit;
@@ -15,6 +16,8 @@ pub(crate) mod relate;
 pub(crate) mod remove;
 pub(crate) mod select;
 pub(crate) mod set;
+pub(crate) mod show;
+pub(crate) mod sleep;
 pub(crate) mod update;
 pub(crate) mod yuse;
 
@@ -36,27 +39,28 @@ pub use self::set::SetStatement;
 pub use self::update::UpdateStatement;
 pub use self::yuse::UseStatement;
 
+pub use self::define::DefineAnalyzerStatement;
 pub use self::define::DefineDatabaseStatement;
 pub use self::define::DefineEventStatement;
-pub use self::define::DefineFieldOption;
 pub use self::define::DefineFieldStatement;
+pub use self::define::DefineFunctionStatement;
 pub use self::define::DefineIndexStatement;
-pub use self::define::DefineLoginOption;
 pub use self::define::DefineLoginStatement;
 pub use self::define::DefineNamespaceStatement;
-pub use self::define::DefineScopeOption;
+pub use self::define::DefineParamStatement;
 pub use self::define::DefineScopeStatement;
 pub use self::define::DefineStatement;
-pub use self::define::DefineTableOption;
 pub use self::define::DefineTableStatement;
 pub use self::define::DefineTokenStatement;
 
 pub use self::remove::RemoveDatabaseStatement;
 pub use self::remove::RemoveEventStatement;
 pub use self::remove::RemoveFieldStatement;
+pub use self::remove::RemoveFunctionStatement;
 pub use self::remove::RemoveIndexStatement;
 pub use self::remove::RemoveLoginStatement;
 pub use self::remove::RemoveNamespaceStatement;
+pub use self::remove::RemoveParamStatement;
 pub use self::remove::RemoveScopeStatement;
 pub use self::remove::RemoveStatement;
 pub use self::remove::RemoveTableStatement;

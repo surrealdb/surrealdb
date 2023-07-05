@@ -1,16 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct IfelseStatement {
@@ -19,6 +19,7 @@ pub struct IfelseStatement {
 }
 
 impl IfelseStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		for (cond, then) in self.exprs.iter() {
 			if cond.writeable() || then.writeable() {
@@ -27,42 +28,63 @@ impl IfelseStatement {
 		}
 		self.close.as_ref().map_or(false, |v| v.writeable())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(ctx, opt, txn, doc).await?;
+			let v = cond.compute(ctx, opt).await?;
 			if v.is_truthy() {
-				return then.compute(ctx, opt, txn, doc).await;
+				return then.compute(ctx, opt).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Some(ref v) => v.compute(ctx, opt).await,
 			None => Ok(Value::None),
 		}
 	}
 }
 
-impl fmt::Display for IfelseStatement {
+impl Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
 		write!(
 			f,
 			"{}",
-			self.exprs
-				.iter()
-				.map(|(ref cond, ref then)| format!("IF {} THEN {}", cond, then))
-				.collect::<Vec<_>>()
-				.join(" ELSE ")
+			&Fmt::new(
+				self.exprs.iter().map(|args| {
+					Fmt::new(args, |(cond, then), f| {
+						if is_pretty() {
+							write!(f, "IF {cond} THEN")?;
+							let indent = pretty_indent();
+							write!(f, "{then}")?;
+							drop(indent);
+						} else {
+							write!(f, "IF {cond} THEN {then}")?;
+						}
+						Ok(())
+					})
+				}),
+				if is_pretty() {
+					fmt_separated_by("ELSE")
+				} else {
+					fmt_separated_by(" ELSE ")
+				},
+			),
 		)?;
 		if let Some(ref v) = self.close {
-			write!(f, " ELSE {}", v)?
+			if is_pretty() {
+				write!(f, "ELSE")?;
+				let indent = pretty_indent();
+				write!(f, "{v}")?;
+				drop(indent);
+			} else {
+				write!(f, " ELSE {v}")?;
+			}
 		}
-		write!(f, " END")?;
+		if is_pretty() {
+			f.write_str("END")?;
+		} else {
+			f.write_str(" END")?;
+		}
 		Ok(())
 	}
 }

@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
@@ -12,29 +12,53 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 
 impl Value {
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
-	pub async fn get(
+	/// Asynchronous method for getting a local or remote field from a `Value`
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	pub(crate) async fn get(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
-				// Current path part is an object
+				// Current path part is a geometry
+				Value::Geometry(v) => match p {
+					// If this is the 'type' field then continue
+					Part::Field(f) if f.is_type() => {
+						Value::from(v.as_type()).get(ctx, opt, path.next()).await
+					}
+					// If this is the 'coordinates' field then continue
+					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
+						v.as_coordinates().get(ctx, opt, path.next()).await
+					}
+					// If this is the 'geometries' field then continue
+					Part::Field(f) if f.is_geometries() && v.is_collection() => {
+						v.as_coordinates().get(ctx, opt, path.next()).await
+					}
+					// otherwise return none
+					_ => Ok(Value::None),
+				},
+
+				// Current path part is a future
 				Value::Future(v) => {
 					// Check how many path parts are remaining
 					match path.len() {
 						// No further embedded fields, so just return this
 						0 => Ok(Value::Future(v.clone())),
-						//
-						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
+						// Process the future and fetch the embedded field
+						_ => {
+							// Ensure the future is processed
+							let fut = &opt.futures(true);
+							// Get the future return value
+							let val = v.compute(ctx, fut).await?;
+							// Fetch the embedded field
+							val.get(ctx, opt, path).await
+						}
 					}
 				}
 				// Current path part is an object
@@ -44,59 +68,80 @@ impl Value {
 						Some(Value::Thing(Thing {
 							id: Id::Object(v),
 							..
-						})) => Value::Object(v.clone()).get(ctx, opt, txn, path.next()).await,
+						})) => Value::Object(v.clone()).get(ctx, opt, path.next()).await,
 						Some(Value::Thing(Thing {
 							id: Id::Array(v),
 							..
-						})) => Value::Array(v.clone()).get(ctx, opt, txn, path.next()).await,
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						})) => Value::Array(v.clone()).get(ctx, opt, path.next()).await,
+						Some(v) => v.get(ctx, opt, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).get(ctx, opt, txn, path).await,
+						Some(v) => Value::Thing(v).get(ctx, opt, path).await,
 						None => Ok(Value::None),
 					},
 					Part::Field(f) => match v.get(f as &str) {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, path.next()).await,
 						None => Ok(Value::None),
 					},
-					Part::All => self.get(ctx, opt, txn, path.next()).await,
+					Part::All => self.get(ctx, opt, path.next()).await,
 					_ => Ok(Value::None),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
+						let futs = v.iter().map(|v| v.get(ctx, opt, path));
+						try_join_all_buffered(futs).await.map(Into::into)
 					}
 					Part::First => match v.first() {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.last() {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in v.iter() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-								a.push(v.get(ctx, opt, txn, path).await?)
+							let mut child_ctx = Context::new(ctx);
+							child_ctx.add_cursor_doc(v);
+							if w.compute(&child_ctx, opt).await?.is_truthy() {
+								a.push(v.get(&child_ctx, opt, path).await?)
 							}
 						}
 						Ok(a.into())
 					}
 					_ => {
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
+						let futs = v.iter().map(|v| v.get(ctx, opt, path));
+						try_join_all_buffered(futs).await.map(Into::into)
 					}
 				},
+				// Current path part is an edges
+				Value::Edges(v) => {
+					// Clone the thing
+					let val = v.clone();
+					// Check how many path parts are remaining
+					match path.len() {
+						// No remote embedded fields, so just return this
+						0 => Ok(Value::Edges(val)),
+						// Remote embedded field, so fetch the thing
+						_ => {
+							let stm = SelectStatement {
+								expr: Fields(vec![Field::All], false),
+								what: Values(vec![Value::from(val)]),
+								..SelectStatement::default()
+							};
+							stm.compute(ctx, opt).await?.first().get(ctx, opt, path).await
+						}
+					}
+				}
 				// Current path part is a thing
 				Value::Thing(v) => {
 					// Clone the thing
@@ -110,7 +155,7 @@ impl Value {
 							// This is a graph traversal expression
 							Part::Graph(g) => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
@@ -121,18 +166,18 @@ impl Value {
 								};
 								match path.len() {
 									1 => stm
-										.compute(ctx, opt, txn, None)
+										.compute(ctx, opt)
 										.await?
 										.all()
-										.get(ctx, opt, txn, ID.as_ref())
+										.get(ctx, opt, ID.as_ref())
 										.await?
 										.flatten()
 										.ok(),
 									_ => stm
-										.compute(ctx, opt, txn, None)
+										.compute(ctx, opt)
 										.await?
 										.all()
-										.get(ctx, opt, txn, path.next())
+										.get(ctx, opt, path.next())
 										.await?
 										.flatten()
 										.ok(),
@@ -141,15 +186,11 @@ impl Value {
 							// This is a remote field expression
 							_ => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								stm.compute(ctx, opt, txn, None)
-									.await?
-									.first()
-									.get(ctx, opt, txn, path)
-									.await
+								stm.compute(ctx, opt).await?.first().get(ctx, opt, path).await
 							}
 						},
 					}
@@ -175,28 +216,28 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_none() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn get_basic() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[tokio::test]
 	async fn get_thing() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -208,19 +249,19 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
 	#[tokio::test]
 	async fn get_array_thing() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -232,46 +273,76 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields_flat() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
+		assert_eq!(
+			res,
+			Value::from(vec![Value::from(map! {
+				"age".to_string() => Value::from(36),
+			})])
+		);
+	}
+
+	#[tokio::test]
+	async fn get_future_embedded_field() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.something[WHERE age > 35]");
+		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
+		assert_eq!(
+			res,
+			Value::from(vec![Value::from(map! {
+				"age".to_string() => Value::from(36),
+			})])
+		);
+	}
+
+	#[tokio::test]
+	async fn get_future_embedded_field_with_reference() {
+		let (mut ctx, opt) = mock().await;
+		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
+		let idi = Idiom::parse("test.something[WHERE age > 35]");
+		let val = Value::parse("{ test: <future> { { something: something } } }");
+		ctx.add_cursor_doc(&doc);
+		let res = val.get(&ctx, &opt, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

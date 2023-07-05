@@ -4,7 +4,6 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -31,17 +30,20 @@ pub struct UpdateStatement {
 }
 
 impl UpdateStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Check if this statement is for a single record
+	pub(crate) fn single(&self) -> bool {
+		match self.what.len() {
+			1 if self.what[0].is_object() => true,
+			1 if self.what[0].is_thing() => true,
+			_ => false,
+		}
+	}
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -52,7 +54,7 @@ impl UpdateStatement {
 		let opt = &opt.futures(false);
 		// Loop over the update targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(ctx, opt).await?;
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
@@ -108,7 +110,7 @@ impl UpdateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		i.output(ctx, opt, &stm).await
 	}
 }
 
@@ -116,16 +118,16 @@ impl fmt::Display for UpdateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "UPDATE {}", self.what)?;
 		if let Some(ref v) = self.data {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

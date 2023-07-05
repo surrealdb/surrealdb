@@ -24,7 +24,7 @@
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/built_with-Rust-dca282.svg?style=flat-square"></a>
     &nbsp;
-	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/workflow/status/surrealdb/surrealdb/Continuous%20integration?style=flat-square"></a>
+	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/actions/status/surrealdb/surrealdb/ci.yml?style=flat-square&branch=main"></a>
     &nbsp;
     <a href="https://status.surrealdb.com"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
     &nbsp;
@@ -77,14 +77,14 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
 ```bash
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
-Update the image to the latest version:
+For just getting started with a development server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging.
 
 ```bash
-docker pull surrealdb/surrealdb:latest
-```
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+``` 
 
 Access to the surrealdb CLI with:
 

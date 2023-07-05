@@ -1,12 +1,21 @@
+use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
-use msgpack::encode::Error as SerdeError;
+use crate::sql::value::Value;
+use base64_lib::DecodeError as Base64Error;
+use bincode::Error as BincodeError;
+use bung::encode::Error as SerdeError;
+use fst::Error as FstError;
+use jsonwebtoken::errors::Error as JWTError;
 use serde::Serialize;
+use std::borrow::Cow;
+use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
-/// An error originating from the SurrealDB client library.
+/// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	/// This error is used for ignoring a document when processing a query
 	#[doc(hidden)]
@@ -41,9 +50,21 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
-	/// It's is not possible to convert between the two types
-	#[error("Cannot convert from '{0}' to '{1}'")]
-	TryFromError(String, &'static str),
+	/// The key exceeds a limit set by the KV store
+	#[error("Record id or key is too large")]
+	TxKeyTooLarge,
+
+	/// The value exceeds a limit set by the KV store
+	#[error("Record or value is too large")]
+	TxValueTooLarge,
+
+	/// The transaction writes too much data for the KV store
+	#[error("Transaction is too large")]
+	TxTooLarge,
+
+	/// The context does have any transaction
+	#[error("No transaction")]
+	NoTx,
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -60,6 +81,10 @@ pub enum Error {
 	/// There was an error with the SQL query
 	#[error("The SQL query was not parsed fully")]
 	QueryRemaining,
+
+	/// There was an error with authentication
+	#[error("There was a problem with authentication")]
+	InvalidAuth,
 
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
@@ -83,6 +108,30 @@ pub enum Error {
 	#[error("Found '{name}' but it is not possible to set a variable with this name")]
 	InvalidParam {
 		name: String,
+	},
+
+	#[error("Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression")]
+	InvalidField {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
+	InvalidSplit {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidOrder {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidGroup {
+		line: usize,
+		field: String,
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
@@ -129,6 +178,12 @@ pub enum Error {
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
 
+	/// The query did not execute, because the transaction has failed (with a message)
+	#[error("The query was not executed due to a failed transaction. {message}")]
+	QueryNotExecutedDetail {
+		message: String,
+	},
+
 	/// The permissions do not allow for performing the specified query
 	#[error("You don't have permission to perform this query type")]
 	QueryPermissions,
@@ -146,40 +201,94 @@ pub enum Error {
 	},
 
 	/// The requested namespace does not exist
-	#[error("The namespace does not exist")]
-	NsNotFound,
+	#[error("The namespace '{value}' does not exist")]
+	NsNotFound {
+		value: String,
+	},
 
 	/// The requested namespace token does not exist
-	#[error("The namespace token does not exist")]
-	NtNotFound,
+	#[error("The namespace token '{value}' does not exist")]
+	NtNotFound {
+		value: String,
+	},
 
 	/// The requested namespace login does not exist
-	#[error("The namespace login does not exist")]
-	NlNotFound,
+	#[error("The namespace login '{value}' does not exist")]
+	NlNotFound {
+		value: String,
+	},
 
 	/// The requested database does not exist
-	#[error("The database does not exist")]
-	DbNotFound,
+	#[error("The database '{value}' does not exist")]
+	DbNotFound {
+		value: String,
+	},
 
 	/// The requested database token does not exist
-	#[error("The database token does not exist")]
-	DtNotFound,
+	#[error("The database token '{value}' does not exist")]
+	DtNotFound {
+		value: String,
+	},
 
 	/// The requested database login does not exist
-	#[error("The database login does not exist")]
-	DlNotFound,
+	#[error("The database login '{value}' does not exist")]
+	DlNotFound {
+		value: String,
+	},
+
+	/// The requested function does not exist
+	#[error("The function 'fn::{value}' does not exist")]
+	FcNotFound {
+		value: String,
+	},
 
 	/// The requested scope does not exist
-	#[error("The scope does not exist")]
-	ScNotFound,
+	#[error("The scope '{value}' does not exist")]
+	ScNotFound {
+		value: String,
+	},
+
+	// The cluster node already exists
+	#[error("The node '{value}' already exists")]
+	ClAlreadyExists {
+		value: String,
+	},
+
+	// The cluster node does not exist
+	#[error("The node '{value}' does not exist")]
+	ClNotFound {
+		value: String,
+	},
 
 	/// The requested scope token does not exist
-	#[error("The scope token does not exist")]
-	StNotFound,
+	#[error("The scope token '{value}' does not exist")]
+	StNotFound {
+		value: String,
+	},
+
+	/// The requested param does not exist
+	#[error("The param '${value}' does not exist")]
+	PaNotFound {
+		value: String,
+	},
 
 	/// The requested table does not exist
-	#[error("The table does not exist")]
-	TbNotFound,
+	#[error("The table '{value}' does not exist")]
+	TbNotFound {
+		value: String,
+	},
+
+	/// The requested analyzer does not exist
+	#[error("The analyzer '{value}' does not exist")]
+	AzNotFound {
+		value: String,
+	},
+
+	/// The requested analyzer does not exist
+	#[error("The index '{value}' does not exist")]
+	IxNotFound {
+		value: String,
+	},
 
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
@@ -257,6 +366,15 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The specified field did not conform to the field type check
+	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
+	FieldCheck {
+		thing: String,
+		value: String,
+		field: Idiom,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
@@ -271,6 +389,55 @@ pub enum Error {
 	IdInvalid {
 		value: String,
 	},
+
+	/// Unable to coerce to a value to another value
+	#[error("Expected a {into} but found {from}")]
+	CoerceTo {
+		from: Value,
+		into: Cow<'static, str>,
+	},
+
+	/// Unable to convert a value to another value
+	#[error("Expected a {into} but cannot convert {from} into a {into}")]
+	ConvertTo {
+		from: Value,
+		into: Cow<'static, str>,
+	},
+
+	/// Unable to coerce to a value to another value
+	#[error("Expected a {kind} but the array had {size} items")]
+	LengthInvalid {
+		kind: Cow<'static, str>,
+		size: usize,
+	},
+
+	/// Cannot perform addition
+	#[error("Cannot perform addition with '{0}' and '{1}'")]
+	TryAdd(String, String),
+
+	/// Cannot perform subtraction
+	#[error("Cannot perform subtraction with '{0}' and '{1}'")]
+	TrySub(String, String),
+
+	/// Cannot perform multiplication
+	#[error("Cannot perform multiplication with '{0}' and '{1}'")]
+	TryMul(String, String),
+
+	/// Cannot perform division
+	#[error("Cannot perform division with '{0}' and '{1}'")]
+	TryDiv(String, String),
+
+	/// Cannot perform power
+	#[error("Cannot raise the value '{0}' with '{1}'")]
+	TryPow(String, String),
+
+	/// Cannot perform negation
+	#[error("Cannot negate the value '{0}'")]
+	TryNeg(String),
+
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFrom(String, &'static str),
 
 	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request")]
@@ -291,11 +458,69 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// The index has been found to be inconsistent
+	#[error("Index is corrupted")]
+	CorruptedIndex,
+
+	/// The query planner did not find an index able to support the match @@ operator on a given expression
+	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	NoIndexFoundForMatch {
+		value: String,
+	},
+
+	/// Represents an error when analyzing a value
+	#[error("A value can't be analyzed: {0}")]
+	AnalyzerError(String),
+
+	/// Represents an error when trying to highlight a value
+	#[error("A value can't be highlighted: {0}")]
+	HighlightError(String),
+
+	/// Represents an underlying error with Bincode serializing / deserializing
+	#[error("Bincode error: {0}")]
+	Bincode(#[from] BincodeError),
+
+	/// Represents an underlying error with FST
+	#[error("FstError error: {0}")]
+	FstError(#[from] FstError),
+
+	/// Represents an underlying error while reading UTF8 characters
+	#[error("Utf8 error: {0}")]
+	Utf8Error(#[from] FromUtf8Error),
+
+	/// The feature has not yet being implemented
+	#[error("Feature not yet implemented: {feature}")]
+	FeatureNotYetImplemented {
+		feature: &'static str,
+	},
+
+	#[doc(hidden)]
+	#[error("Bypass the query planner")]
+	BypassQueryPlanner,
+
+	/// Duplicated match references are not allowed
+	#[error("Duplicated Match reference: {mr}")]
+	DuplicatedMatchRef {
+		mr: MatchRef,
+	},
 }
 
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
+	}
+}
+
+impl From<Base64Error> for Error {
+	fn from(_: Base64Error) -> Error {
+		Error::InvalidAuth
+	}
+}
+
+impl From<JWTError> for Error {
+	fn from(_: JWTError) -> Error {
+		Error::InvalidAuth
 	}
 }
 
@@ -324,8 +549,23 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
+				abort,
+				..
+			}) if abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
+			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
+				raft_entry_too_large,
+				..
+			}) if raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
+	}
+}
+
+#[cfg(feature = "kv-speedb")]
+impl From<speedb::Error> for Error {
+	fn from(e: speedb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 

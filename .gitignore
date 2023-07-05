@@ -27,6 +27,7 @@ Temporary Items
 
 **/*.rs.bk
 *.db
+*.sw?
 
 # -----------------------------------
 # Folders
@@ -35,6 +36,7 @@ Temporary Items
 /target/
 /lib/target/
 .idea/
+.vscode/
 /result
 /bin/
 /docker/

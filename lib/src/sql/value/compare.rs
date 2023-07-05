@@ -4,7 +4,7 @@ use crate::sql::value::Value;
 use std::cmp::Ordering;
 
 impl Value {
-	pub fn compare(
+	pub(crate) fn compare(
 		&self,
 		other: &Self,
 		path: &[Part],
@@ -16,7 +16,7 @@ impl Value {
 			Some(p) => match (self, other) {
 				// Current path part is an object
 				(Value::Object(a), Value::Object(b)) => match p {
-					Part::Field(f) => match (a.get(f as &str), b.get(f as &str)) {
+					Part::Field(f) => match (a.get(f.as_str()), b.get(f.as_str())) {
 						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),
@@ -46,7 +46,7 @@ impl Value {
 						(None, Some(_)) => Some(Ordering::Less),
 						(_, _) => Some(Ordering::Equal),
 					},
-					Part::Last => match (a.first(), b.first()) {
+					Part::Last => match (a.last(), b.last()) {
 						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),
@@ -191,5 +191,14 @@ mod tests {
 		let two = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_last() {
+		let idi = Idiom::parse("test[$]");
+		let one = Value::parse("{ test: [1,5] }");
+		let two = Value::parse("{ test: [2,4] }");
+		let res = one.compare(&two, &idi, false, false);
+		assert_eq!(res, Some(Ordering::Greater))
 	}
 }

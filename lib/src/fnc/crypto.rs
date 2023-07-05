@@ -10,7 +10,7 @@ pub fn md5((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Md5::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
-	let val = format!("{:x}", val);
+	let val = format!("{val:x}");
 	Ok(val.into())
 }
 
@@ -18,7 +18,7 @@ pub fn sha1((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha1::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
-	let val = format!("{:x}", val);
+	let val = format!("{val:x}");
 	Ok(val.into())
 }
 
@@ -26,7 +26,7 @@ pub fn sha256((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
-	let val = format!("{:x}", val);
+	let val = format!("{val:x}");
 	Ok(val.into())
 }
 
@@ -34,7 +34,7 @@ pub fn sha512((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha512::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
-	let val = format!("{:x}", val);
+	let val = format!("{val:x}");
 	Ok(val.into())
 }
 
@@ -106,7 +106,7 @@ pub mod argon2 {
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let algo = Argon2::default();
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = algo.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
+		let hash = algo.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())
 	}
 }
@@ -123,12 +123,12 @@ pub mod bcrypt {
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		let parts = match HashParts::from_str(&hash) {
 			Ok(parts) => parts,
-			Err(_) => return Ok(Value::False),
+			Err(_) => return Ok(Value::Bool(false)),
 		};
 		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
 		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
 			// Too expensive to compute.
-			Value::False
+			Value::Bool(false)
 		} else {
 			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
 			// above and once in verity, by using bcrypt::bcrypt.
@@ -172,7 +172,7 @@ pub mod pbkdf2 {
 
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = Pbkdf2.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
+		let hash = Pbkdf2.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())
 	}
 }
@@ -207,7 +207,7 @@ pub mod scrypt {
 
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = Scrypt.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
+		let hash = Scrypt.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())
 	}
 }

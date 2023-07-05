@@ -1,13 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{fmt_separated_by, Fmt};
 use crate::sql::part::Next;
-use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
-use crate::sql::paths::{ID, IN, OUT};
+use crate::sql::part::{all, field, first, graph, index, last, part, value, Part};
+use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::value::Value;
 use md5::Digest;
 use md5::Md5;
@@ -18,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
@@ -41,6 +42,7 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Idiom")]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
@@ -62,6 +64,12 @@ impl From<Vec<Part>> for Idiom {
 	}
 }
 
+impl From<&[Part]> for Idiom {
+	fn from(v: &[Part]) -> Self {
+		Self(v.to_vec())
+	}
+}
+
 impl Idiom {
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
@@ -76,14 +84,14 @@ impl Idiom {
 	}
 	/// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {
-		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
+		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
 	}
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
 			.cloned()
-			.filter(|p| matches!(p, Part::Field(_) | Part::Thing(_) | Part::Graph(_)))
+			.filter(|p| matches!(p, Part::Field(_) | Part::Value(_) | Part::Graph(_)))
 			.collect::<Vec<_>>()
 			.into()
 	}
@@ -99,6 +107,10 @@ impl Idiom {
 	pub(crate) fn is_out(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&OUT[0])
 	}
+	/// Check if this expression is an 'out' field
+	pub(crate) fn is_meta(&self) -> bool {
+		self.0.len() == 1 && self.0[0].eq(&META[0])
+	}
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::split_multi_yield)
@@ -110,28 +122,26 @@ impl Idiom {
 }
 
 impl Idiom {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		self.0.iter().any(|v| v.writeable())
+	}
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		match self.first() {
-			// The first part is a thing record
-			Some(Part::Thing(v)) => {
-				// Use the thing as the document
-				let v: Value = v.clone().into();
-				// Fetch the Idiom from the document
-				v.get(ctx, opt, txn, self.as_ref().next())
+			// The starting part is a value
+			Some(Part::Value(v)) => {
+				v.compute(ctx, opt)
 					.await?
-					.compute(ctx, opt, txn, Some(&v))
+					.get(ctx, opt, self.as_ref().next())
+					.await?
+					.compute(ctx, opt)
 					.await
 			}
 			// Otherwise use the current document
-			_ => match doc {
+			_ => match ctx.doc() {
 				// There is a current document
-				Some(v) => v.get(ctx, opt, txn, self).await?.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.get(ctx, opt, self).await?.compute(ctx, opt).await,
 				// There isn't any document
 				None => Ok(Value::None),
 			},
@@ -139,25 +149,24 @@ impl Idiom {
 	}
 }
 
-impl fmt::Display for Idiom {
+impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
+		Display::fmt(
+			&Fmt::new(
+				self.0.iter().enumerate().map(|args| {
+					Fmt::new(args, |(i, p), f| match (i, p) {
+						(0, Part::Field(v)) => Display::fmt(v, f),
+						_ => Display::fmt(p, f),
+					})
+				}),
+				fmt_separated_by(""),
+			),
 			f,
-			"{}",
-			self.0
-				.iter()
-				.enumerate()
-				.map(|(i, p)| match (i, p) {
-					(0, Part::Field(v)) => format!("{}", v),
-					_ => format!("{}", p),
-				})
-				.collect::<Vec<_>>()
-				.join("")
 		)
 	}
 }
 
-/// Used in a DEFINE FIELD and DEFINE INDEX clauses
+/// Used in DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(alt((all, index, field)))(i)?;
@@ -173,35 +182,44 @@ pub fn basic(i: &str) -> IResult<&str, Idiom> {
 	Ok((i, Idiom::from(v)))
 }
 
-/// Used in a $param definition
-pub fn param(i: &str) -> IResult<&str, Idiom> {
+/// A simple idiom with one or more parts
+pub fn plain(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = alt((first, graph))(i)?;
+	let (i, mut v) = many0(part)(i)?;
+	v.insert(0, p);
+	Ok((i, Idiom::from(v)))
+}
+
+/// A complex idiom with graph or many parts
+pub fn multi(i: &str) -> IResult<&str, Idiom> {
+	alt((
+		|i| {
+			let (i, p) = graph(i)?;
+			let (i, mut v) = many0(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+		|i| {
+			let (i, p) = alt((first, value))(i)?;
+			let (i, mut v) = many1(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+	))(i)
+}
+
+/// A simple field based idiom
+pub fn path(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(part)(i)?;
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }
 
-/// Used in a RELATE statement
-pub fn plain(i: &str) -> IResult<&str, Idiom> {
-	let (i, p) = first(i)?;
-	Ok((i, Idiom::from(vec![p])))
-}
-
+/// A full complex idiom with any number of parts
+#[cfg(test)]
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
-	alt((
-		|i| {
-			let (i, p) = alt((thing, graph))(i)?;
-			let (i, mut v) = many1(part)(i)?;
-			v.insert(0, p);
-			Ok((i, Idiom::from(v)))
-		},
-		|i| {
-			let (i, p) = alt((first, graph))(i)?;
-			let (i, mut v) = many0(part)(i)?;
-			v.insert(0, p);
-			Ok((i, Idiom::from(v)))
-		},
-	))(i)
+	alt((plain, multi))(i)
 }
 
 #[cfg(test)]
@@ -210,10 +228,20 @@ mod tests {
 	use super::*;
 	use crate::sql::dir::Dir;
 	use crate::sql::expression::Expression;
+	use crate::sql::field::Fields;
 	use crate::sql::graph::Graph;
+	use crate::sql::number::Number;
+	use crate::sql::param::Param;
 	use crate::sql::table::Table;
 	use crate::sql::test::Parse;
 	use crate::sql::thing::Thing;
+
+	#[test]
+	fn idiom_number() {
+		let sql = "13.495";
+		let res = idiom(sql);
+		assert!(res.is_err());
+	}
 
 	#[test]
 	fn idiom_normal() {
@@ -252,7 +280,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp", format!("{}", out));
-		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"),]));
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp")]));
 	}
 
 	#[test]
@@ -262,7 +290,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.`some key`", format!("{}", out));
-		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("some key"),]));
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("some key")]));
 	}
 
 	#[test]
@@ -272,7 +300,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[*]", format!("{}", out));
-		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::All,]));
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::All]));
 	}
 
 	#[test]
@@ -282,7 +310,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[$]", format!("{}", out));
-		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last,]));
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last]));
 	}
 
 	#[test]
@@ -310,7 +338,7 @@ mod tests {
 			Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::from(Value::from(Expression::parse("test = true"))),
+				Part::Where(Value::from(Expression::parse("test = true"))),
 				Part::from("text")
 			])
 		);
@@ -328,8 +356,26 @@ mod tests {
 			Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::from(Value::from(Expression::parse("test = true"))),
+				Part::Where(Value::from(Expression::parse("test = true"))),
 				Part::from("text")
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_start_param_local_field() {
+		let sql = "$test.temporary[0].embedded";
+		let res = idiom(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("$test.temporary[0].embedded", format!("{}", out));
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Value(Param::from("test").into()),
+				Part::from("temporary"),
+				Part::Index(Number::Int(0)),
+				Part::from("embedded"),
 			])
 		);
 	}
@@ -344,19 +390,31 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom(vec![
-				Part::from(Thing::from(("person", "test"))),
+				Part::Value(Thing::from(("person", "test")).into()),
 				Part::from("friend"),
-				Part::from(Graph {
+				Part::Graph(Graph {
 					dir: Dir::Out,
+					expr: Fields::all(),
 					what: Table::from("like").into(),
 					cond: None,
 					alias: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
 				}),
-				Part::from(Graph {
+				Part::Graph(Graph {
 					dir: Dir::Out,
+					expr: Fields::all(),
 					what: Table::from("person").into(),
 					cond: None,
 					alias: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
 				}),
 			])
 		);

@@ -1,18 +1,23 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
+use crate::sql::Datetime;
+use chrono::TimeZone;
+use chrono::Utc;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
+use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Constant")]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,
@@ -24,6 +29,7 @@ pub enum Constant {
 	MathFracPi4,
 	MathFracPi6,
 	MathFracPi8,
+	MathInf,
 	MathLn10,
 	MathLn2,
 	MathLog102,
@@ -33,36 +39,49 @@ pub enum Constant {
 	MathPi,
 	MathSqrt2,
 	MathTau,
+	TimeEpoch,
+	// Add new variants here
+}
+
+/// A type of constant that may be converted to a value or JSON.
+pub(crate) enum ConstantValue {
+	Float(f64),
+	Datetime(Datetime),
 }
 
 impl Constant {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		Ok(match self {
-			Self::MathE => std::f64::consts::E.into(),
-			Self::MathFrac1Pi => std::f64::consts::FRAC_1_PI.into(),
-			Self::MathFrac1Sqrt2 => std::f64::consts::FRAC_1_SQRT_2.into(),
-			Self::MathFrac2Pi => std::f64::consts::FRAC_2_PI.into(),
-			Self::MathFrac2SqrtPi => std::f64::consts::FRAC_2_SQRT_PI.into(),
-			Self::MathFracPi2 => std::f64::consts::FRAC_PI_2.into(),
-			Self::MathFracPi3 => std::f64::consts::FRAC_PI_3.into(),
-			Self::MathFracPi4 => std::f64::consts::FRAC_PI_4.into(),
-			Self::MathFracPi6 => std::f64::consts::FRAC_PI_6.into(),
-			Self::MathFracPi8 => std::f64::consts::FRAC_PI_8.into(),
-			Self::MathLn10 => std::f64::consts::LN_10.into(),
-			Self::MathLn2 => std::f64::consts::LN_2.into(),
-			Self::MathLog102 => std::f64::consts::LOG10_2.into(),
-			Self::MathLog10E => std::f64::consts::LOG10_E.into(),
-			Self::MathLog210 => std::f64::consts::LOG2_10.into(),
-			Self::MathLog2E => std::f64::consts::LOG2_E.into(),
-			Self::MathPi => std::f64::consts::PI.into(),
-			Self::MathSqrt2 => std::f64::consts::SQRT_2.into(),
-			Self::MathTau => std::f64::consts::TAU.into(),
+	pub(crate) fn value(&self) -> ConstantValue {
+		use std::f64::consts as f64c;
+		match self {
+			Self::MathE => ConstantValue::Float(f64c::E),
+			Self::MathFrac1Pi => ConstantValue::Float(f64c::FRAC_1_PI),
+			Self::MathFrac1Sqrt2 => ConstantValue::Float(f64c::FRAC_1_SQRT_2),
+			Self::MathFrac2Pi => ConstantValue::Float(f64c::FRAC_2_PI),
+			Self::MathFrac2SqrtPi => ConstantValue::Float(f64c::FRAC_2_SQRT_PI),
+			Self::MathFracPi2 => ConstantValue::Float(f64c::FRAC_PI_2),
+			Self::MathFracPi3 => ConstantValue::Float(f64c::FRAC_PI_3),
+			Self::MathFracPi4 => ConstantValue::Float(f64c::FRAC_PI_4),
+			Self::MathFracPi6 => ConstantValue::Float(f64c::FRAC_PI_6),
+			Self::MathFracPi8 => ConstantValue::Float(f64c::FRAC_PI_8),
+			Self::MathInf => ConstantValue::Float(f64::INFINITY),
+			Self::MathLn10 => ConstantValue::Float(f64c::LN_10),
+			Self::MathLn2 => ConstantValue::Float(f64c::LN_2),
+			Self::MathLog102 => ConstantValue::Float(f64c::LOG10_2),
+			Self::MathLog10E => ConstantValue::Float(f64c::LOG10_E),
+			Self::MathLog210 => ConstantValue::Float(f64c::LOG2_10),
+			Self::MathLog2E => ConstantValue::Float(f64c::LOG2_E),
+			Self::MathPi => ConstantValue::Float(f64c::PI),
+			Self::MathSqrt2 => ConstantValue::Float(f64c::SQRT_2),
+			Self::MathTau => ConstantValue::Float(f64c::TAU),
+			Self::TimeEpoch => ConstantValue::Datetime(Datetime(Utc.timestamp_nanos(0))),
+		}
+	}
+
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
+		Ok(match self.value() {
+			ConstantValue::Datetime(d) => d.into(),
+			ConstantValue::Float(f) => f.into(),
 		})
 	}
 }
@@ -80,6 +99,7 @@ impl fmt::Display for Constant {
 			Self::MathFracPi4 => "math::FRAC_PI_4",
 			Self::MathFracPi6 => "math::FRAC_PI_6",
 			Self::MathFracPi8 => "math::FRAC_PI_8",
+			Self::MathInf => "math::INF",
 			Self::MathLn10 => "math::LN_10",
 			Self::MathLn2 => "math::LN_2",
 			Self::MathLog102 => "math::LOG10_2",
@@ -89,90 +109,45 @@ impl fmt::Display for Constant {
 			Self::MathPi => "math::PI",
 			Self::MathSqrt2 => "math::SQRT_2",
 			Self::MathTau => "math::TAU",
+			Self::TimeEpoch => "time::EPOCH",
 		})
 	}
 }
 
-#[rustfmt::skip]
-impl Serialize for Constant {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::MathE => s.serialize_unit_variant("Constant", 0, "MathE"),
-				Self::MathFrac1Pi => s.serialize_unit_variant("Constant", 1, "MathFrac1Pi"),
-				Self::MathFrac1Sqrt2 => s.serialize_unit_variant("Constant", 2, "MathFrac1Sqrt2"),
-				Self::MathFrac2Pi => s.serialize_unit_variant("Constant", 3, "MathFrac2Pi"),
-				Self::MathFrac2SqrtPi => s.serialize_unit_variant("Constant", 4, "MathFrac2SqrtPi"),
-				Self::MathFracPi2 => s.serialize_unit_variant("Constant", 5, "MathFracPi2"),
-				Self::MathFracPi3 => s.serialize_unit_variant("Constant", 6, "MathFracPi3"),
-				Self::MathFracPi4 => s.serialize_unit_variant("Constant", 7, "MathFracPi4"),
-				Self::MathFracPi6 => s.serialize_unit_variant("Constant", 8, "MathFracPi6"),
-				Self::MathFracPi8 => s.serialize_unit_variant("Constant", 9, "MathFracPi8"),
-				Self::MathLn10 => s.serialize_unit_variant("Constant", 10, "MathLn10"),
-				Self::MathLn2 => s.serialize_unit_variant("Constant", 11, "MathLn2"),
-				Self::MathLog102 => s.serialize_unit_variant("Constant", 12, "MathLog102"),
-				Self::MathLog10E => s.serialize_unit_variant("Constant", 13, "MathLog10E"),
-				Self::MathLog210 => s.serialize_unit_variant("Constant", 14, "MathLog210"),
-				Self::MathLog2E => s.serialize_unit_variant("Constant", 15, "MathLog2E"),
-				Self::MathPi => s.serialize_unit_variant("Constant", 16, "MathPi"),
-				Self::MathSqrt2 => s.serialize_unit_variant("Constant", 17, "MathSqrt2"),
-				Self::MathTau => s.serialize_unit_variant("Constant", 18, "MathTau"),
-			}
-		} else {
-			match self {
-				Self::MathE => s.serialize_f64(std::f64::consts::E),
-				Self::MathFrac1Pi => s.serialize_f64(std::f64::consts::FRAC_1_PI),
-				Self::MathFrac1Sqrt2 => s.serialize_f64(std::f64::consts::FRAC_1_SQRT_2),
-				Self::MathFrac2Pi => s.serialize_f64(std::f64::consts::FRAC_2_PI),
-				Self::MathFrac2SqrtPi => s.serialize_f64(std::f64::consts::FRAC_2_SQRT_PI),
-				Self::MathFracPi2 => s.serialize_f64(std::f64::consts::FRAC_PI_2),
-				Self::MathFracPi3 => s.serialize_f64(std::f64::consts::FRAC_PI_3),
-				Self::MathFracPi4 => s.serialize_f64(std::f64::consts::FRAC_PI_4),
-				Self::MathFracPi6 => s.serialize_f64(std::f64::consts::FRAC_PI_6),
-				Self::MathFracPi8 => s.serialize_f64(std::f64::consts::FRAC_PI_8),
-				Self::MathLn10 => s.serialize_f64(std::f64::consts::LN_10),
-				Self::MathLn2 => s.serialize_f64(std::f64::consts::LN_2),
-				Self::MathLog102 => s.serialize_f64(std::f64::consts::LOG10_2),
-				Self::MathLog10E => s.serialize_f64(std::f64::consts::LOG10_E),
-				Self::MathLog210 => s.serialize_f64(std::f64::consts::LOG2_10),
-				Self::MathLog2E => s.serialize_f64(std::f64::consts::LOG2_E),
-				Self::MathPi => s.serialize_f64(std::f64::consts::PI),
-				Self::MathSqrt2 => s.serialize_f64(std::f64::consts::SQRT_2),
-				Self::MathTau => s.serialize_f64(std::f64::consts::TAU),
-			}
-		}
-	}
-}
-
 pub fn constant(i: &str) -> IResult<&str, Constant> {
-	alt((constant_math,))(i)
+	alt((constant_math, constant_time))(i)
 }
 
 fn constant_math(i: &str) -> IResult<&str, Constant> {
-	alt((
-		map(tag_no_case("math::E"), |_| Constant::MathE),
-		map(tag_no_case("math::FRAC_1_PI"), |_| Constant::MathFrac1Pi),
-		map(tag_no_case("math::FRAC_1_SQRT_2"), |_| Constant::MathFrac1Sqrt2),
-		map(tag_no_case("math::FRAC_2_PI"), |_| Constant::MathFrac2Pi),
-		map(tag_no_case("math::FRAC_2_SQRT_PI"), |_| Constant::MathFrac2SqrtPi),
-		map(tag_no_case("math::FRAC_PI_2"), |_| Constant::MathFracPi2),
-		map(tag_no_case("math::FRAC_PI_3"), |_| Constant::MathFracPi3),
-		map(tag_no_case("math::FRAC_PI_4"), |_| Constant::MathFracPi4),
-		map(tag_no_case("math::FRAC_PI_6"), |_| Constant::MathFracPi6),
-		map(tag_no_case("math::FRAC_PI_8"), |_| Constant::MathFracPi8),
-		map(tag_no_case("math::LN_10"), |_| Constant::MathLn10),
-		map(tag_no_case("math::LN_2"), |_| Constant::MathLn2),
-		map(tag_no_case("math::LOG10_2"), |_| Constant::MathLog102),
-		map(tag_no_case("math::LOG10_E"), |_| Constant::MathLog10E),
-		map(tag_no_case("math::LOG2_10"), |_| Constant::MathLog210),
-		map(tag_no_case("math::LOG2_E"), |_| Constant::MathLog2E),
-		map(tag_no_case("math::PI"), |_| Constant::MathPi),
-		map(tag_no_case("math::SQRT_2"), |_| Constant::MathSqrt2),
-		map(tag_no_case("math::TAU"), |_| Constant::MathTau),
-	))(i)
+	preceded(
+		tag_no_case("math::"),
+		alt((
+			map(tag_no_case("E"), |_| Constant::MathE),
+			map(tag_no_case("FRAC_1_PI"), |_| Constant::MathFrac1Pi),
+			map(tag_no_case("FRAC_1_SQRT_2"), |_| Constant::MathFrac1Sqrt2),
+			map(tag_no_case("FRAC_2_PI"), |_| Constant::MathFrac2Pi),
+			map(tag_no_case("FRAC_2_SQRT_PI"), |_| Constant::MathFrac2SqrtPi),
+			map(tag_no_case("FRAC_PI_2"), |_| Constant::MathFracPi2),
+			map(tag_no_case("FRAC_PI_3"), |_| Constant::MathFracPi3),
+			map(tag_no_case("FRAC_PI_4"), |_| Constant::MathFracPi4),
+			map(tag_no_case("FRAC_PI_6"), |_| Constant::MathFracPi6),
+			map(tag_no_case("FRAC_PI_8"), |_| Constant::MathFracPi8),
+			map(tag_no_case("INF"), |_| Constant::MathInf),
+			map(tag_no_case("LN_10"), |_| Constant::MathLn10),
+			map(tag_no_case("LN_2"), |_| Constant::MathLn2),
+			map(tag_no_case("LOG10_2"), |_| Constant::MathLog102),
+			map(tag_no_case("LOG10_E"), |_| Constant::MathLog10E),
+			map(tag_no_case("LOG2_10"), |_| Constant::MathLog210),
+			map(tag_no_case("LOG2_E"), |_| Constant::MathLog2E),
+			map(tag_no_case("PI"), |_| Constant::MathPi),
+			map(tag_no_case("SQRT_2"), |_| Constant::MathSqrt2),
+			map(tag_no_case("TAU"), |_| Constant::MathTau),
+		)),
+	)(i)
+}
+
+fn constant_time(i: &str) -> IResult<&str, Constant> {
+	preceded(tag_no_case("time::"), alt((map(tag_no_case("EPOCH"), |_| Constant::TimeEpoch),)))(i)
 }
 
 #[cfg(test)]

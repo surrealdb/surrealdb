@@ -1,13 +1,13 @@
-#![cfg(feature = "parallel")]
+#![cfg(not(target_arch = "wasm32"))]
 
 mod parse;
 use parse::Parse;
 use std::future::Future;
 use std::thread::Builder;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[test]
 fn self_referential_field() -> Result<(), Error> {
@@ -102,7 +102,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
 		}
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::parse("[ [42] ]");
+		let val = Value::parse("[ { fut: [42] } ]");
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -184,7 +184,7 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail
-		let mut res = run_queries(&cast_chain(35)).await?;
+		let mut res = run_queries(&cast_chain(125)).await?;
 		//
 		assert_eq!(res.len(), 1);
 		//
@@ -203,7 +203,7 @@ async fn run_queries(
 > {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	dbs.execute(&sql, &ses, None, false).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute(sql, &ses, None, false).await.map(|v| v.into_iter().map(|res| res.result))
 }
 
 fn with_enough_stack(
@@ -212,6 +212,13 @@ fn with_enough_stack(
 	#[allow(unused_mut)]
 	let mut builder = Builder::new();
 
+	// Roughly how much stack is allocated for surreal server workers in release mode
+	#[cfg(not(debug_assertions))]
+	{
+		builder = builder.stack_size(8_000_000);
+	}
+
+	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
 		builder = builder.stack_size(16_000_000);

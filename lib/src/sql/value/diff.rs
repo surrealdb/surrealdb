@@ -4,7 +4,7 @@ use crate::sql::value::Value;
 use std::cmp::min;
 
 impl Value {
-	pub fn diff(&self, val: &Value, path: Idiom) -> Vec<Operation> {
+	pub(crate) fn diff(&self, val: &Value, path: Idiom) -> Vec<Operation> {
 		let mut ops: Vec<Operation> = vec![];
 		match (self, val) {
 			(Value::Object(a), Value::Object(b)) if a != b => {
@@ -65,9 +65,9 @@ impl Value {
 				op: Op::Change,
 				path,
 				value: {
-					let mut dmp = dmp::new();
-					let mut pch = dmp.patch_make1(a, b);
-					let txt = dmp.patch_to_text(&mut pch);
+					let dmp = dmp::new();
+					let pch = dmp.patch_make1(a, b);
+					let txt = dmp.patch_to_text(&pch);
 					txt.into()
 				},
 			}),

@@ -1,13 +1,13 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::data::Data;
 use crate::sql::expression::Expression;
 use crate::sql::field::{Field, Fields};
 use crate::sql::idiom::Idiom;
+use crate::sql::number::Number;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::statement::Statement as Query;
@@ -33,7 +33,6 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
@@ -44,6 +43,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
+		// Don't run permissions
+		let opt = &opt.perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
@@ -54,41 +55,43 @@ impl<'a> Document<'a> {
 		} else {
 			Action::Update
 		};
+		// Clone transaction
+		let txn = ctx.try_clone_transaction()?;
 		// Loop through all foreign table statements
-		for ft in self.ft(opt, txn).await?.iter() {
+		for ft in self.ft(opt, &txn).await?.iter() {
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
 			match &tb.group {
 				// There is a GROUP BY clause specified
 				Some(group) => {
+					let mut initial_ctx = Context::new(ctx);
+					initial_ctx.add_cursor_doc(&self.initial);
 					// Set the previous record id
 					let old = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
-						)
-						.await?
-						.into_iter()
-						.collect::<Vec<_>>()
-						.into(),
+						id: try_join_all(group.iter().map(|v| v.compute(&initial_ctx, opt)))
+							.await?
+							.into_iter()
+							.collect::<Vec<_>>()
+							.into(),
 					};
+					let mut current_ctx = Context::new(ctx);
+					current_ctx.add_cursor_doc(&self.current);
 					// Set the current record id
 					let rid = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
-						)
-						.await?
-						.into_iter()
-						.collect::<Vec<_>>()
-						.into(),
+						id: try_join_all(group.iter().map(|v| v.compute(&current_ctx, opt)))
+							.await?
+							.into_iter()
+							.collect::<Vec<_>>()
+							.into(),
 					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(&current_ctx, opt).await? {
 								v if v.is_truthy() => {
 									if !opt.force && act != Action::Create {
 										// Delete the old value
@@ -96,13 +99,11 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
-											),
+											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(ctx, opt).await?;
 									}
 									if act != Action::Delete {
 										// Update the new value
@@ -110,13 +111,11 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
-											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
-											),
+											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(ctx, opt).await?;
 									}
 								}
 								_ => {
@@ -126,13 +125,11 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
-											),
+											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(ctx, opt).await?;
 									}
 								}
 							}
@@ -145,11 +142,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(old)]),
-									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
+									data: Some(self.data(ctx, opt, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, None).await?;
+								stm.compute(ctx, opt).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value
@@ -157,11 +154,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
-									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
+									data: Some(self.data(ctx, opt, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, None).await?;
+								stm.compute(ctx, opt).await?;
 							}
 						}
 					}
@@ -174,12 +171,13 @@ impl<'a> Document<'a> {
 						id: rid.id.clone(),
 					};
 					// Use the current record data
-					let doc = Some(self.current.as_ref());
+					let mut ctx = Context::new(ctx);
+					ctx.add_cursor_doc(&self.current);
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, doc).await? {
+							match cond.compute(&ctx, opt).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -192,13 +190,13 @@ impl<'a> Document<'a> {
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(Data::ReplaceExpression(
-												tb.expr.compute(ctx, opt, txn, doc, false).await?,
+												tb.expr.compute(&ctx, opt, false).await?,
 											)),
 											..UpdateStatement::default()
 										}),
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, None).await?;
+									stm.compute(&ctx, opt).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -207,7 +205,7 @@ impl<'a> Document<'a> {
 										..DeleteStatement::default()
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, None).await?;
+									stm.compute(&ctx, opt).await?;
 								}
 							}
 						}
@@ -224,13 +222,13 @@ impl<'a> Document<'a> {
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
 									data: Some(Data::ReplaceExpression(
-										tb.expr.compute(ctx, opt, txn, doc, false).await?,
+										tb.expr.compute(&ctx, opt, false).await?,
 									)),
 									..UpdateStatement::default()
 								}),
 							};
 							// Execute the statement
-							stm.compute(ctx, opt, txn, None).await?;
+							stm.compute(&ctx, opt).await?;
 						}
 					}
 				}
@@ -244,81 +242,54 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		act: Action,
 		exp: &Fields,
 	) -> Result<Data, Error> {
 		//
 		let mut ops: Ops = vec![];
-		//
-		let doc = match act {
-			Action::Delete => Some(self.initial.as_ref()),
-			Action::Update => Some(self.current.as_ref()),
+		// Create a new context with the initial or the current doc
+		let mut ctx = Context::new(ctx);
+		match act {
+			Action::Delete => ctx.add_cursor_doc(self.initial.as_ref()),
+			Action::Update => ctx.add_cursor_doc(self.current.as_ref()),
 			_ => unreachable!(),
 		};
 		//
 		for field in exp.other() {
-			// Process it if it is a normal field
-			if let Field::Alone(v) = field {
-				match v {
+			// Process the field
+			if let Field::Single {
+				expr,
+				alias,
+			} = field
+			{
+				let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							let val = f.compute(&ctx, opt).await?;
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							let val = f.args()[0].compute(&ctx, opt).await?;
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.min(&mut ops, &act, v.to_idiom(), val);
+							let val = f.args()[0].compute(&ctx, opt).await?;
+							self.min(&mut ops, &act, idiom, val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.max(&mut ops, &act, v.to_idiom(), val);
+							let val = f.args()[0].compute(&ctx, opt).await?;
+							self.max(&mut ops, &act, idiom, val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.mean(&mut ops, &act, v.to_idiom(), val);
+							let val = f.args()[0].compute(&ctx, opt).await?;
+							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
-						self.set(&mut ops, v.to_idiom(), val);
-					}
-				}
-			}
-			// Process it if it is a aliased field
-			if let Field::Alias(v, i) = field {
-				match v {
-					Value::Function(f) if f.is_rolling() => match f.name() {
-						"count" => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.min(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.max(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.mean(&mut ops, &act, i.to_owned(), val);
-						}
-						_ => unreachable!(),
-					},
-					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
-						self.set(&mut ops, i.to_owned(), val);
+						let val = expr.compute(&ctx, opt).await?;
+						self.set(&mut ops, idiom, val);
 					}
 				}
 			}
@@ -350,7 +321,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::MoreThan,
 							r: val.clone(),
@@ -370,7 +341,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::LessThan,
 							r: val.clone(),
@@ -392,14 +363,26 @@ impl<'a> Document<'a> {
 		ops.push((
 			key.clone(),
 			Operator::Equal,
-			Value::Expression(Box::new(Expression {
+			Value::Expression(Box::new(Expression::Binary {
 				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
+					Expression::Binary {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression {
-								l: Value::Idiom(key),
+							Expression::Binary {
+								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression::Binary {
+										l: Value::Idiom(key),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
 								o: Operator::Mul,
-								r: Value::Idiom(key_c.clone()),
+								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression::Binary {
+										l: Value::Idiom(key_c.clone()),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
 							},
 						))))),
 						o: match act {
@@ -412,8 +395,14 @@ impl<'a> Document<'a> {
 				))))),
 				o: Operator::Div,
 				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
-						l: Value::Idiom(key_c.clone()),
+					Expression::Binary {
+						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+							Expression::Binary {
+								l: Value::Idiom(key_c.clone()),
+								o: Operator::Nco,
+								r: Value::Number(Number::Int(0)),
+							},
+						))))),
 						o: match act {
 							Action::Delete => Operator::Sub,
 							Action::Update => Operator::Add,

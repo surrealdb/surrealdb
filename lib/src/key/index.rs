@@ -1,61 +1,101 @@
+use crate::key::CHAR_INDEX;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-struct Prefix {
+struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
-	pub ix: String,
+	pub ix: &'a str,
+	_e: u8,
 }
 
-impl Prefix {
-	fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Prefix {
-		Prefix {
-			__: 0x2f, // /
-			_a: 0x2a, // *
-			ns: ns.to_string(),
-			_b: 0x2a, // *
-			db: db.to_string(),
-			_c: 0x2a, // *
-			tb: tb.to_string(),
-			_d: 0xa4, // ¤
-			ix: ix.to_string(),
+impl<'a> Prefix<'a> {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: CHAR_INDEX,
+			ix,
+			_e: b'*',
 		}
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Index {
+struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
-	pub ix: String,
+	pub ix: &'a str,
+	_e: u8,
 	pub fd: Array,
+	_f: u8,
+}
+
+impl<'a> PrefixIds<'a> {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &Array) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: CHAR_INDEX,
+			ix,
+			_e: b'*',
+			fd: fd.to_owned(),
+			_f: b'*',
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+pub struct Index<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: &'a str,
+	_b: u8,
+	pub db: &'a str,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub ix: &'a str,
+	_e: u8,
+	pub fd: Array,
+	_f: u8,
 	pub id: Option<Id>,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array, id: Option<&Id>) -> Index {
-	Index::new(
-		ns.to_string(),
-		db.to_string(),
-		tb.to_string(),
-		ix.to_string(),
-		fd.to_owned(),
-		id.cloned(),
-	)
+pub fn new<'a>(
+	ns: &'a str,
+	db: &'a str,
+	tb: &'a str,
+	ix: &'a str,
+	fd: &Array,
+	id: Option<&Id>,
+) -> Index<'a> {
+	Index::new(ns, db, tb, ix, fd.to_owned(), id.cloned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
@@ -70,19 +110,40 @@ pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
 	k
 }
 
-impl Index {
-	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Array, id: Option<Id>) -> Index {
-		Index {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+pub fn prefix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+	k.extend_from_slice(&[0x00]);
+	k
+}
+
+pub fn suffix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+	k.extend_from_slice(&[0xff]);
+	k
+}
+
+impl<'a> Index<'a> {
+	pub fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		ix: &'a str,
+		fd: Array,
+		id: Option<Id>,
+	) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0xa4, // ¤
+			_d: CHAR_INDEX,
 			ix,
+			_e: 0x2a, // *
 			fd,
+			_f: 0x2a, // *
 			id,
 		}
 	}
@@ -95,10 +156,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Index::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
+			"test",
 			vec!["test"].into(),
 			Some("test".into()),
 		);

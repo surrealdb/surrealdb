@@ -32,41 +32,26 @@ impl Datastore {
 	}
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		match lock {
-			false => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new optimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
-			true => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new pessimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
+		// Set whether this should be an optimistic or pessimistic transaction
+		let mut opt = if lock {
+			TransactionOptions::new_pessimistic()
+		} else {
+			TransactionOptions::new_optimistic()
+		};
+		// Set the behaviour when dropping an unfinished transaction
+		opt = opt.drop_check(CheckLevel::Warn);
+		// Set this transaction as read only if possible
+		if !write {
+			opt = opt.read_only();
+		}
+		// Create a new distributed transaction
+		match self.db.begin_with_options(opt).await {
+			Ok(tx) => Ok(Transaction {
+				ok: false,
+				rw: write,
+				tx,
+			}),
+			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
@@ -85,7 +70,9 @@ impl Transaction {
 		// Mark this transaction as done
 		self.ok = true;
 		// Cancel this transaction
-		self.tx.rollback().await?;
+		if self.rw {
+			self.tx.rollback().await?;
+		}
 		// Continue
 		Ok(())
 	}
@@ -101,7 +88,7 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		// Commit this transaction
 		self.tx.commit().await?;
 		// Continue
 		Ok(())
@@ -167,8 +154,15 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.tx.insert(key.into(), val.into()).await?;
+		// Get the key
+		let key = key.into();
+		// Get the val
+		let val = val.into();
+		// Set the key if empty
+		match self.tx.key_exists(key.clone()).await? {
+			false => self.tx.put(key, val).await?,
+			_ => return Err(Error::TxKeyAlreadyExists),
+		};
 		// Return result
 		Ok(())
 	}

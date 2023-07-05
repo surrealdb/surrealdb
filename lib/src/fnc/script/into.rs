@@ -1,7 +1,7 @@
 use super::classes;
+use crate::sql::number::decimal_is_integer;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
-use bigdecimal::ToPrimitive;
 use js::Array;
 use js::Class;
 use js::Ctx;
@@ -22,38 +22,36 @@ impl<'js> IntoJs<'js> for &Value {
 		match self {
 			Value::Null => Null.into_js(ctx),
 			Value::None => Undefined.into_js(ctx),
-			Value::True => Ok(js::Value::new_bool(ctx, true)),
-			Value::False => Ok(js::Value::new_bool(ctx, false)),
+			Value::Bool(boolean) => Ok(js::Value::new_bool(ctx, *boolean)),
 			Value::Strand(v) => js::String::from_str(ctx, v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => Ok(js::Value::new_int(ctx, *v as i32)),
-			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx, *v as f64)),
-			Value::Number(Number::Decimal(v)) => match v.is_integer() {
-				true => Ok(js::Value::new_int(ctx, v.to_i32().unwrap_or_default())),
-				false => Ok(js::Value::new_float(ctx, v.to_f64().unwrap_or_default())),
+			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx, *v)),
+			&Value::Number(Number::Decimal(v)) => match decimal_is_integer(&v) {
+				true => Ok(js::Value::new_int(ctx, v.try_into().unwrap_or_default())),
+				false => Ok(js::Value::new_float(ctx, v.try_into().unwrap_or_default())),
 			},
 			Value::Datetime(v) => {
 				let date: js::Function = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))
 			}
-			Value::Duration(v) => Ok(Class::<classes::duration::duration::Duration>::instance(
-				ctx,
-				classes::duration::duration::Duration {
-					value: v.to_raw(),
-				},
-			)?
-			.into_value()),
 			Value::Thing(v) => Ok(Class::<classes::record::record::Record>::instance(
 				ctx,
 				classes::record::record::Record {
-					tb: v.tb.to_owned(),
-					id: v.id.to_raw(),
+					value: v.to_owned(),
+				},
+			)?
+			.into_value()),
+			Value::Duration(v) => Ok(Class::<classes::duration::duration::Duration>::instance(
+				ctx,
+				classes::duration::duration::Duration {
+					value: Some(v.to_owned()),
 				},
 			)?
 			.into_value()),
 			Value::Uuid(v) => Ok(Class::<classes::uuid::uuid::Uuid>::instance(
 				ctx,
 				classes::uuid::uuid::Uuid {
-					value: v.to_raw(),
+					value: Some(v.to_owned()),
 				},
 			)?
 			.into_value()),

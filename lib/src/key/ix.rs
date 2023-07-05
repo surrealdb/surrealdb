@@ -2,49 +2,49 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Ix {
+pub struct Ix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: String,
+	pub ix: &'a str,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Ix {
-	Ix::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
+	Ix::new(ns, db, tb, ix)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x69, 0x78, 0x00]);
+	k.extend_from_slice(&[b'!', b'i', b'x', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x69, 0x78, 0xff]);
+	k.extend_from_slice(&[b'!', b'i', b'x', 0xff]);
 	k
 }
 
-impl Ix {
-	pub fn new(ns: String, db: String, tb: String, ix: String) -> Ix {
-		Ix {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+impl<'a> Ix<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x69, // i
-			_f: 0x78, // x
+			_d: b'!',
+			_e: b'i',
+			_f: b'x',
 			ix,
 		}
 	}
@@ -57,10 +57,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ix::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
+			"test",
 		);
 		let enc = Ix::encode(&val).unwrap();
 		let dec = Ix::decode(&enc).unwrap();

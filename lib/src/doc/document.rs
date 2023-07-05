@@ -7,16 +7,24 @@ use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
 use crate::sql::statements::define::DefineTableStatement;
+use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-pub struct Document<'a> {
-	pub(super) id: Option<Thing>,
+pub(crate) struct Document<'a> {
+	pub(super) id: Option<&'a Thing>,
 	pub(super) extras: Workable,
 	pub(super) current: Cow<'a, Value>,
 	pub(super) initial: Cow<'a, Value>,
+}
+
+impl<'a> Debug for Document<'a> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Document - id: <{:?}>", self.id)
+	}
 }
 
 impl<'a> From<&Document<'a>> for Vec<u8> {
@@ -26,7 +34,7 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 }
 
 impl<'a> Document<'a> {
-	pub fn new(id: Option<Thing>, val: &'a Value, ext: Workable) -> Self {
+	pub fn new(id: Option<&'a Thing>, val: &'a Value, ext: Workable) -> Self {
 		Document {
 			id,
 			extras: ext,
@@ -62,7 +70,9 @@ impl<'a> Document<'a> {
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
-			Err(Error::TbNotFound) => match opt.auth.check(Level::Db) {
+			Err(Error::TbNotFound {
+				value: _,
+			}) => match opt.auth.check(Level::Db) {
 				// We can create the table automatically
 				true => {
 					run.add_and_cache_ns(opt.ns(), opt.strict).await?;
@@ -121,5 +131,16 @@ impl<'a> Document<'a> {
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
 		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
+	}
+	// Get the lives for this document
+	pub async fn lv(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Arc<[LiveStatement]>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definition
+		txn.clone().lock().await.all_lv(opt.ns(), opt.db(), &id.tb).await
 	}
 }

@@ -7,12 +7,13 @@ use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
 const MAX: u64 = 1024 * 1024; // 1 MiB
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("sql").and(warp::path::end());
@@ -52,9 +53,12 @@ async fn handler(
 	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/msgpack" => Ok(output::pack(&res)),
+			// Simple serialization
+			"application/json" => Ok(output::json(&output::simplify(res))),
+			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+			"application/pack" => Ok(output::pack(&output::simplify(res))),
+			// Internal serialization
+			"application/surrealdb" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},

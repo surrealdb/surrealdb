@@ -5,105 +5,98 @@ on:
     tags:
       - "v*.*.*"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-latest-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run cargo test (+coverage)
+        run: |
+          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
+          cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
         with:
-          command: test
-          args: --workspace
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 30
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-latest-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --workspace
+        run: cargo check --workspace
 
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
 
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -W warnings
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+
+      - name: Check linting with clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
 
   build:
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-latest-xl
             file: surreal-${{ github.ref_name }}.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-latest-xl
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
@@ -114,18 +107,7 @@ jobs:
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ matrix.arch }}-build-cargo-${{ hashFiles('**/Cargo.lock') }}
+        uses: actions/checkout@v3
 
       - name: Prepare environment
         if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-gnu')
@@ -136,6 +118,12 @@ jobs:
         run: |
           vcpkg integrate install
           vcpkg install openssl:x64-windows-static
+          choco install protoc
+
+      - name: Install dependencies
+        if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
+        run: |
+          brew install protobuf
 
       - name: Install dependencies
         if: contains(matrix.arch, 'linux') && endsWith(matrix.arch, '-gnu')
@@ -143,6 +131,7 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
@@ -152,25 +141,20 @@ jobs:
           rm -rf foundationdb-clients_6.3.23-1_amd64.deb
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-          target: ${{ matrix.arch }}
+          targets: ${{ matrix.arch }}
 
       - name: Output package versions
-        run: go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+        run: set -x; go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
       - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
+        run: cargo build ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
         env:
           BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -200,7 +184,7 @@ jobs:
           cd -
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.file }}
           path: |
@@ -212,7 +196,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-latest
+    runs-on: macos-latest-xl
     steps:
 
       - name: Download amd64 binary
@@ -228,7 +212,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -248,14 +232,14 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -290,11 +274,11 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Download amd64 binary
         uses: actions/download-artifact@v3
@@ -329,7 +313,7 @@ jobs:
         shell: bash
         run: |
           VERSION=${{ github.ref_name }}
-          echo "VERSION=${VERSION:1}" >> $GITHUB_ENV
+          echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
 
       - name: Build and Push
         uses: docker/build-push-action@v3

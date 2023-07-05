@@ -5,12 +5,13 @@ use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::http;
 use warp::Filter;
 
 const MAX: u64 = 1024 * 1024 * 1024 * 4; // 4 GiB
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("import")
 		.and(warp::path::end())
@@ -39,9 +40,13 @@ async fn handler(
 			// Execute the sql query in the database
 			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					// Simple serialization
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
+					// Internal serialization
+					"application/surrealdb" => Ok(output::full(&res)),
+					// Return nothing
 					"application/octet-stream" => Ok(output::none()),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),

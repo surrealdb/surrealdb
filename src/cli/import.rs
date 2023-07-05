@@ -1,45 +1,60 @@
-use crate::cli::LOG;
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+};
 use crate::err::Error;
-use reqwest::blocking::Client;
-use reqwest::header::ACCEPT;
-use std::fs::OpenOptions;
-use std::io::prelude::Read;
+use clap::Args;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
 
-pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(3);
-	// Try to parse the file argument
-	let file = matches.value_of("file").unwrap();
-	// Try to open the specified file
-	let mut file = OpenOptions::new().read(true).open(file)?;
-	// Read the full contents of the file
-	let mut body = String::new();
-	file.read_to_string(&mut body)?;
-	// Parse all other cli arguments
-	let user = matches.value_of("user").unwrap();
-	let pass = matches.value_of("pass").unwrap();
-	let conn = matches.value_of("conn").unwrap();
-	let ns = matches.value_of("ns").unwrap();
-	let db = matches.value_of("db").unwrap();
-	// Set the correct import URL
-	let conn = format!("{}/import", conn);
+#[derive(Args, Debug)]
+pub struct ImportCommandArguments {
+	#[arg(help = "Path to the sql file to import")]
+	#[arg(index = 1)]
+	file: String,
+	#[command(flatten)]
+	conn: DatabaseConnectionArguments,
+	#[command(flatten)]
+	auth: AuthArguments,
+	#[command(flatten)]
+	sel: DatabaseSelectionArguments,
+}
+
+pub async fn init(
+	ImportCommandArguments {
+		file,
+		conn: DatabaseConnectionArguments {
+			endpoint,
+		},
+		auth: AuthArguments {
+			username,
+			password,
+		},
+		sel: DatabaseSelectionArguments {
+			namespace: ns,
+			database: db,
+		},
+	}: ImportCommandArguments,
+) -> Result<(), Error> {
+	// Initialize opentelemetry and logging
+	crate::o11y::builder().with_log_level("error").init();
+
+	let root = Root {
+		username: &username,
+		password: &password,
+	};
+	// Connect to the database engine
+	#[cfg(feature = "has-storage")]
+	let address = (endpoint, root);
+	#[cfg(not(feature = "has-storage"))]
+	let address = endpoint;
+	let client = connect(address).await?;
+	// Sign in to the server
+	client.signin(root).await?;
+	// Use the specified namespace / database
+	client.use_ns(ns).use_db(db).await?;
 	// Import the data into the database
-	let res = Client::new()
-		.post(&conn)
-		.header(ACCEPT, "application/octet-stream")
-		.basic_auth(user, Some(pass))
-		.header("NS", ns)
-		.header("DB", db)
-		.body(body)
-		.send()?;
-	// Check import result and report error
-	if res.status().is_success() {
-		info!(target: LOG, "The SQL file was imported successfully");
-	} else if res.status().is_client_error() || res.status().is_server_error() {
-		error!(target: LOG, "Request failed with status {}. Body: {}", res.status(), res.text()?);
-	} else {
-		error!(target: LOG, "Unexpected response status {}", res.status());
-	}
+	client.import(file).await?;
+	info!("The SQL file was imported successfully");
 	// Everything OK
 	Ok(())
 }

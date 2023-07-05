@@ -4,8 +4,8 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
@@ -14,6 +14,9 @@ use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
 use crate::sql::order::{order, Orders};
+use crate::sql::special::check_group_by_fields;
+use crate::sql::special::check_order_by_fields;
+use crate::sql::special::check_split_on_fields;
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
@@ -40,27 +43,18 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	pub explain: bool,
 }
 
 impl SelectStatement {
-	pub(crate) async fn limit(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<usize, Error> {
-		match &self.limit {
-			Some(v) => v.process(ctx, opt, txn, doc).await,
-			None => Ok(0),
-		}
-	}
-
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
 			Field::All => false,
-			Field::Alone(v) => v.writeable(),
-			Field::Alias(v, _) => v.writeable(),
+			Field::Single {
+				expr,
+				..
+			} => expr.writeable(),
 		}) {
 			return true;
 		}
@@ -69,27 +63,34 @@ impl SelectStatement {
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Check if this statement is for a single record
+	pub(crate) fn single(&self) -> bool {
+		match self.what.len() {
+			1 if self.what[0].is_object() => true,
+			1 if self.what[0].is_thing() => true,
+			_ => false,
+		}
+	}
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are processed
-		let opt = &opt.futures(true);
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
+
+		// Get a query planner
+		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(ctx, opt).await?;
 			match v {
-				Value::Table(v) => i.ingest(Iterable::Table(v)),
+				Value::Table(t) => {
+					i.ingest(planner.get_iterable(ctx, t).await?);
+				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
 				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
@@ -118,8 +119,16 @@ impl SelectStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
-		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		// Add query executors if any
+		if let Some(ex) = planner.finish() {
+			let mut ctx = Context::new(ctx);
+			ctx.set_query_executors(ex);
+			// Output the results
+			i.output(&ctx, opt, &stm).await
+		} else {
+			// Output the results
+			i.output(ctx, opt, &stm).await
+		}
 	}
 }
 
@@ -127,31 +136,31 @@ impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
 		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.split {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.order {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.start {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -170,14 +179,18 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, what) = selects(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
+	check_split_on_fields(i, &expr, &split)?;
 	let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+	check_group_by_fields(i, &expr, &group)?;
 	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
+	check_order_by_fields(i, &expr, &order)?;
 	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, start) = opt(preceded(shouldbespace, start))(i)?;
 	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+	let (i, explain) = opt(preceded(shouldbespace, tag_no_case("EXPLAIN")))(i)?;
 	Ok((
 		i,
 		SelectStatement {
@@ -193,6 +206,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 			version,
 			timeout,
 			parallel: parallel.is_some(),
+			explain: explain.is_some(),
 		},
 	))
 }
@@ -240,7 +254,7 @@ mod tests {
 
 	#[test]
 	fn select_statement_table_thing() {
-		let sql = "SELECT *, ((1 + 3) / 4), 1.3999 AS tester FROM test, test:thingy";
+		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;

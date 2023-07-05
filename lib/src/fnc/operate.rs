@@ -1,9 +1,21 @@
+use crate::ctx::Context;
 use crate::err::Error;
+use crate::sql::value::TryAdd;
+use crate::sql::value::TryDiv;
+use crate::sql::value::TryMul;
+use crate::sql::value::TryNeg;
+use crate::sql::value::TryPow;
+use crate::sql::value::TrySub;
 use crate::sql::value::Value;
-use std::ops::Add;
-use std::ops::Div;
-use std::ops::Mul;
-use std::ops::Sub;
+use crate::sql::Expression;
+
+pub fn neg(a: Value) -> Result<Value, Error> {
+	a.try_neg()
+}
+
+pub fn not(a: Value) -> Result<Value, Error> {
+	super::not::not((a,))
+}
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(match a.is_truthy() {
@@ -34,19 +46,23 @@ pub fn nco(a: Value, b: Value) -> Result<Value, Error> {
 }
 
 pub fn add(a: Value, b: Value) -> Result<Value, Error> {
-	Ok(a.add(b))
+	a.try_add(b)
 }
 
 pub fn sub(a: Value, b: Value) -> Result<Value, Error> {
-	Ok(a.sub(b))
+	a.try_sub(b)
 }
 
 pub fn mul(a: Value, b: Value) -> Result<Value, Error> {
-	Ok(a.mul(b))
+	a.try_mul(b)
 }
 
 pub fn div(a: Value, b: Value) -> Result<Value, Error> {
-	Ok(a.div(b))
+	a.try_div(b)
+}
+
+pub fn pow(a: Value, b: Value) -> Result<Value, Error> {
+	a.try_pow(b)
 }
 
 pub fn exact(a: &Value, b: &Value) -> Result<Value, Error> {
@@ -147,6 +163,18 @@ pub fn outside(a: &Value, b: &Value) -> Result<Value, Error> {
 
 pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
+}
+
+pub(crate) async fn matches(ctx: &Context<'_>, e: &Expression) -> Result<Value, Error> {
+	if let Some(thg) = ctx.thing() {
+		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
+			// Clone transaction
+			let txn = ctx.try_clone_transaction()?;
+			// Check the matches
+			return exe.matches(&txn, thg, e).await;
+		}
+	}
+	Ok(Value::Bool(false))
 }
 
 #[cfg(test)]
@@ -305,12 +333,22 @@ mod tests {
 	}
 
 	#[test]
-	fn div_basic() {
+	fn div_int() {
 		let one = Value::from(5);
 		let two = Value::from(4);
 		let res = div(one, two);
 		assert!(res.is_ok());
 		let out = res.unwrap();
-		assert_eq!("1.25", format!("{}", out));
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn div_float() {
+		let one = Value::from(5.0);
+		let two = Value::from(4.0);
+		let res = div(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1.25f", format!("{}", out));
 	}
 }

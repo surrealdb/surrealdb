@@ -1,11 +1,9 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Number, Strand};
+use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Strand, Thing};
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
 pub trait FromArg: Sized {
-	/// Potentially fallible conversion from a Value to an argument. Errors will be propagated
-	/// to the caller, although it is also possible to return a none/null Value.
 	fn from_arg(arg: Value) -> Result<Self, Error>;
 }
 
@@ -17,43 +15,85 @@ impl FromArg for Value {
 
 impl FromArg for String {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_string())
+		arg.coerce_to_string()
 	}
 }
 
 impl FromArg for Strand {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_strand())
+		arg.coerce_to_strand()
 	}
 }
 
 impl FromArg for Number {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_number())
+		arg.coerce_to_number()
 	}
 }
 
-impl FromArg for f64 {
+impl FromArg for Datetime {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_float())
+		arg.coerce_to_datetime()
+	}
+}
+
+impl FromArg for Duration {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_duration()
+	}
+}
+
+impl FromArg for Thing {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_record()
+	}
+}
+
+impl FromArg for Array {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_array()
+	}
+}
+
+impl FromArg for Bytes {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_bytes()
 	}
 }
 
 impl FromArg for i64 {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_int())
+		arg.coerce_to_i64()
+	}
+}
+
+impl FromArg for u64 {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_u64()
+	}
+}
+
+impl FromArg for f64 {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_f64()
 	}
 }
 
 impl FromArg for isize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_int() as isize)
+		Ok(arg.coerce_to_i64()? as isize)
 	}
 }
 
 impl FromArg for usize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.as_int() as usize)
+		Ok(arg.coerce_to_u64()? as usize)
+	}
+}
+
+impl FromArg for Vec<Number> {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_array_type(&Kind::Number)?.into_iter().map(Value::try_into).collect()
 	}
 }
 
@@ -87,7 +127,17 @@ macro_rules! impl_tuple {
 						_ => format!("Expected {} arguments.", $len),
 					}
 				})?;
-				Ok(($($T::from_arg($T)?,)*))
+				#[allow(unused_mut, unused_variables)]
+				let mut i = 0;
+				Ok((
+					$({
+						i += 1;
+						$T::from_arg($T).map_err(|e| Error::InvalidArguments {
+							name: name.to_owned(),
+							message: format!("Argument {i} was the wrong type. {e}"),
+						})?
+					},)*
+				))
 			}
 		}
 	}
@@ -106,14 +156,19 @@ impl<A: FromArg> FromArgs for (Option<A>,) {
 			name: name.to_owned(),
 			message: String::from("Expected 0 or 1 arguments."),
 		};
-
+		// Process the function arguments
 		let mut args = args.into_iter();
+		// Process the first function argument
 		let a = match args.next() {
-			Some(a) => Some(A::from_arg(a)?),
+			Some(a) => Some(A::from_arg(a).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process additional function arguments
 		if args.next().is_some() {
-			// Too many.
+			// Too many arguments
 			return Err(err());
 		}
 		Ok((a,))
@@ -127,18 +182,59 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 			name: name.to_owned(),
 			message: String::from("Expected 1 or 2 arguments."),
 		};
-
+		// Process the function arguments
 		let mut args = args.into_iter();
-		let a = A::from_arg(args.next().ok_or_else(err)?)?;
+		// Process the first argument
+		let a = A::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
 		let b = match args.next() {
 			Some(b) => Some(B::from_arg(b)?),
 			None => None,
 		};
+		// Process additional function arguments
 		if args.next().is_some() {
-			// Too many.
+			// Too many arguments
 			return Err(err());
 		}
 		Ok((a, b))
+	}
+}
+
+// Some functions take 2 or 3 arguments, so the third argument is optional.
+impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, B, Option<C>) {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		let err = || Error::InvalidArguments {
+			name: name.to_owned(),
+			message: String::from("Expected 2 or 3 arguments."),
+		};
+		// Process the function arguments
+		let mut args = args.into_iter();
+		// Process the first function argument
+		let a = A::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		// Process the second function argument
+		let b = B::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 2 was the wrong type. {e}"),
+		})?;
+		// Process the third function argument
+		let c = match args.next() {
+			Some(c) => Some(C::from_arg(c).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 3 was the wrong type. {e}"),
+			})?),
+			None => None,
+		};
+		// Process additional function arguments
+		if args.next().is_some() {
+			// Too many arguments
+			return Err(err());
+		}
+		Ok((a, b, c))
 	}
 }
 
@@ -150,18 +246,27 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<A>, Option<B>) {
 			name: name.to_owned(),
 			message: String::from("Expected 0, 1, or 2 arguments."),
 		};
-
+		// Process the function arguments
 		let mut args = args.into_iter();
+		// Process the first function argument
 		let a = match args.next() {
-			Some(a) => Some(A::from_arg(a)?),
+			Some(a) => Some(A::from_arg(a).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process the second function argument
 		let b = match args.next() {
-			Some(b) => Some(B::from_arg(b)?),
+			Some(b) => Some(B::from_arg(b).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 2 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process additional function arguments
 		if args.next().is_some() {
-			// Too many.
+			// Too many arguments
 			return Err(err());
 		}
 		Ok((a, b))
@@ -175,18 +280,27 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<(A, B)>,) {
 			name: name.to_owned(),
 			message: String::from("Expected 0 or 2 arguments."),
 		};
-
+		// Process the function arguments
 		let mut args = args.into_iter();
+		// Process the first function argument
 		let a = match args.next() {
-			Some(a) => Some(A::from_arg(a)?),
+			Some(a) => Some(A::from_arg(a).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process the second function argument
 		let b = match args.next() {
-			Some(b) => Some(B::from_arg(b)?),
+			Some(b) => Some(B::from_arg(b).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 2 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process additional function arguments
 		if a.is_some() != b.is_some() || args.next().is_some() {
-			// One argument, or too many arguments.
+			// One argument, or too many arguments
 			return Err(err());
 		}
 		Ok((a.zip(b),))
@@ -201,19 +315,32 @@ impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, Option<B>, Option<C>) 
 			name: name.to_owned(),
 			message: String::from("Expected 1, 2, or 3 arguments."),
 		};
-
+		// Process the function arguments
 		let mut args = args.into_iter();
-		let a = A::from_arg(args.next().ok_or_else(err)?)?;
+		// Process the first function argument
+		let a = A::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		// Process the second function argument
 		let b = match args.next() {
-			Some(b) => Some(B::from_arg(b)?),
+			Some(b) => Some(B::from_arg(b).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 2 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process the third function argument
 		let c = match args.next() {
-			Some(c) => Some(C::from_arg(c)?),
+			Some(c) => Some(C::from_arg(c).map_err(|e| Error::InvalidArguments {
+				name: name.to_owned(),
+				message: format!("Argument 3 was the wrong type. {e}"),
+			})?),
 			None => None,
 		};
+		// Process additional function arguments
 		if args.next().is_some() {
-			// Too many.
+			// Too many arguments
 			return Err(err());
 		}
 		Ok((a, b, c))

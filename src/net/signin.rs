@@ -1,11 +1,14 @@
+use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
+use crate::net::CF;
 use bytes::Bytes;
 use serde::Serialize;
+use surrealdb::dbs::Session;
+use surrealdb::opt::auth::Root;
 use surrealdb::sql::Value;
-use surrealdb::Session;
 use warp::Filter;
 
 const MAX: u64 = 1024; // 1 KiB
@@ -14,11 +17,11 @@ const MAX: u64 = 1024; // 1 KiB
 struct Success {
 	code: u16,
 	details: String,
-	token: String,
+	token: Option<String>,
 }
 
 impl Success {
-	fn new(token: String) -> Success {
+	fn new(token: Option<String>) -> Success {
 		Success {
 			token,
 			code: 200,
@@ -27,6 +30,7 @@ impl Success {
 	}
 }
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("signin").and(warp::path::end());
@@ -49,25 +53,43 @@ async fn handler(
 	body: Bytes,
 	mut session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	// Get a database reference
+	let kvs = DB.get().unwrap();
+	// Get the config options
+	let opts = CF.get().unwrap();
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
-		Ok(Value::Object(vars)) => match crate::iam::signin::signin(&mut session, vars).await {
-			// Authentication was successful
-			Ok(v) => match output.as_deref() {
-				Some("application/json") => Ok(output::json(&Success::new(v.as_string()))),
-				Some("application/cbor") => Ok(output::cbor(&Success::new(v.as_string()))),
-				Some("application/msgpack") => Ok(output::pack(&Success::new(v.as_string()))),
-				Some("text/plain") => Ok(output::text(v.as_string())),
-				None => Ok(output::text(v.as_string())),
-				// An incorrect content-type was requested
-				_ => Err(warp::reject::custom(Error::InvalidType)),
-			},
-			// There was an error with authentication
-			Err(e) => Err(warp::reject::custom(e)),
-		},
+		Ok(Value::Object(vars)) => {
+			let root = opts.pass.as_ref().map(|pass| Root {
+				username: &opts.user,
+				password: pass,
+			});
+			match surrealdb::iam::signin::signin(kvs, &root, opts.strict, &mut session, vars)
+				.await
+				.map_err(Error::from)
+			{
+				// Authentication was successful
+				Ok(v) => match output.as_deref() {
+					// Return nothing
+					None => Ok(output::none()),
+					// Text serialization
+					Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
+					// Simple serialization
+					Some("application/json") => Ok(output::json(&Success::new(v))),
+					Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
+					Some("application/pack") => Ok(output::pack(&Success::new(v))),
+					// Internal serialization
+					Some("application/surrealdb") => Ok(output::full(&Success::new(v))),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
+				},
+				// There was an error with authentication
+				Err(e) => Err(warp::reject::custom(e)),
+			}
+		}
 		// The provided value was not an object
 		_ => Err(warp::reject::custom(Error::Request)),
 	}

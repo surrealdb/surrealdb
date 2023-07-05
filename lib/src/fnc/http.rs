@@ -1,33 +1,43 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
 
 #[cfg(not(feature = "http"))]
-pub async fn head((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn head(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn get((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn get(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn put((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn put(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn post((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn post(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn patch((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn patch(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn delete(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
@@ -61,47 +71,55 @@ fn try_as_opts(
 }
 
 #[cfg(feature = "http")]
-pub async fn head((uri, opts): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn head(ctx: &Context<'_>, (uri, opts): (Value, Option<Value>)) -> Result<Value, Error> {
 	let uri = try_as_uri("http::head", uri)?;
 	let opts = try_as_opts("http::head", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::head(uri, opts).await
+	crate::fnc::util::http::head(ctx, uri, opts).await
 }
 
 #[cfg(feature = "http")]
-pub async fn get((uri, opts): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn get(ctx: &Context<'_>, (uri, opts): (Value, Option<Value>)) -> Result<Value, Error> {
 	let uri = try_as_uri("http::get", uri)?;
 	let opts = try_as_opts("http::get", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::get(uri, opts).await
+	crate::fnc::util::http::get(ctx, uri, opts).await
 }
 
 #[cfg(feature = "http")]
-pub async fn put((uri, body, opts): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn put(
+	ctx: &Context<'_>,
+	(uri, body, opts): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	let uri = try_as_uri("http::put", uri)?;
 	let opts = try_as_opts("http::put", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::put(uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::put(ctx, uri, body.unwrap_or(Value::Null), opts).await
 }
 
 #[cfg(feature = "http")]
 pub async fn post(
+	ctx: &Context<'_>,
 	(uri, body, opts): (Value, Option<Value>, Option<Value>),
 ) -> Result<Value, Error> {
 	let uri = try_as_uri("http::post", uri)?;
 	let opts = try_as_opts("http::post", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::post(uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::post(ctx, uri, body.unwrap_or(Value::Null), opts).await
 }
 
 #[cfg(feature = "http")]
 pub async fn patch(
+	ctx: &Context<'_>,
 	(uri, body, opts): (Value, Option<Value>, Option<Value>),
 ) -> Result<Value, Error> {
 	let uri = try_as_uri("http::patch", uri)?;
 	let opts = try_as_opts("http::patch", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::patch(uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::patch(ctx, uri, body.unwrap_or(Value::Null), opts).await
 }
 
 #[cfg(feature = "http")]
-pub async fn delete((uri, opts): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn delete(
+	ctx: &Context<'_>,
+	(uri, opts): (Value, Option<Value>),
+) -> Result<Value, Error> {
 	let uri = try_as_uri("http::delete", uri)?;
 	let opts = try_as_opts("http::delete", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::delete(uri, opts).await
+	crate::fnc::util::http::delete(ctx, uri, opts).await
 }

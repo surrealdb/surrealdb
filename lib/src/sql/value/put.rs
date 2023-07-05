@@ -3,20 +3,13 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
+	/// Synchronous method for setting a field on a `Value`
 	pub fn put(&mut self, path: &[Part], val: Value) {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Thing(t) => match v.get_mut(t.to_raw().as_str()) {
-						Some(v) if v.is_some() => v.put(path.next(), val),
-						_ => {
-							let mut obj = Value::base();
-							obj.put(path.next(), val);
-							v.insert(t.to_raw(), obj);
-						}
-					},
 					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
 						Some(v) if v.is_some() => v.put(path.next(), val),
 						_ => {
@@ -31,6 +24,14 @@ impl Value {
 							let mut obj = Value::base();
 							obj.put(path.next(), val);
 							v.insert(f.to_raw(), obj);
+						}
+					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) if v.is_some() => v.put(path.next(), val),
+						_ => {
+							let mut obj = Value::base();
+							obj.put(path.next(), val);
+							v.insert(i.to_string(), obj);
 						}
 					},
 					_ => (),

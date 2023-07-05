@@ -11,20 +11,35 @@ use crate::sql::start::Start;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::insert::InsertStatement;
+use crate::sql::statements::live::LiveStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
+use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
-use crate::sql::version::Version;
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub enum Statement<'a> {
+pub(crate) enum Statement<'a> {
+	Live(&'a LiveStatement),
+	Show(&'a ShowStatement),
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),
 	Relate(&'a RelateStatement),
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
+}
+
+impl<'a> From<&'a LiveStatement> for Statement<'a> {
+	fn from(v: &'a LiveStatement) -> Self {
+		Statement::Live(v)
+	}
+}
+
+impl<'a> From<&'a ShowStatement> for Statement<'a> {
+	fn from(v: &'a ShowStatement) -> Self {
+		Statement::Show(v)
+	}
 }
 
 impl<'a> From<&'a SelectStatement> for Statement<'a> {
@@ -66,12 +81,14 @@ impl<'a> From<&'a InsertStatement> for Statement<'a> {
 impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Statement::Select(v) => write!(f, "{}", v),
-			Statement::Create(v) => write!(f, "{}", v),
-			Statement::Update(v) => write!(f, "{}", v),
-			Statement::Relate(v) => write!(f, "{}", v),
-			Statement::Delete(v) => write!(f, "{}", v),
-			Statement::Insert(v) => write!(f, "{}", v),
+			Statement::Live(v) => write!(f, "{v}"),
+			Statement::Show(v) => write!(f, "{v}"),
+			Statement::Select(v) => write!(f, "{v}"),
+			Statement::Create(v) => write!(f, "{v}"),
+			Statement::Update(v) => write!(f, "{v}"),
+			Statement::Relate(v) => write!(f, "{v}"),
+			Statement::Delete(v) => write!(f, "{v}"),
+			Statement::Insert(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -92,6 +109,7 @@ impl<'a> Statement<'a> {
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
+			Statement::Live(v) => Some(&v.expr),
 			_ => None,
 		}
 	}
@@ -110,6 +128,7 @@ impl<'a> Statement<'a> {
 	#[inline]
 	pub fn conds(&self) -> Option<&Cond> {
 		match self {
+			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select(v) => v.cond.as_ref(),
 			Statement::Update(v) => v.cond.as_ref(),
 			Statement::Delete(v) => v.cond.as_ref(),
@@ -164,14 +183,6 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	/// Returns any VERSION clause if specified
-	#[inline]
-	pub fn version(&self) -> Option<&Version> {
-		match self {
-			Statement::Select(v) => v.version.as_ref(),
-			_ => None,
-		}
-	}
 	/// Returns any RETURN clause if specified
 	#[inline]
 	pub fn output(&self) -> Option<&Output> {
@@ -184,8 +195,9 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	/// Returns any RETURN clause if specified
+	/// Returns any PARALLEL clause if specified
 	#[inline]
+	#[allow(dead_code)]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,
@@ -194,6 +206,15 @@ impl<'a> Statement<'a> {
 			Statement::Relate(v) => v.parallel,
 			Statement::Delete(v) => v.parallel,
 			Statement::Insert(v) => v.parallel,
+			_ => false,
+		}
+	}
+	/// Returns any EXPLAIN clause if specified
+	#[inline]
+	pub fn explain(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.explain,
+			_ => false,
 		}
 	}
 }

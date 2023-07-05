@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
@@ -12,13 +11,12 @@ use async_recursion::async_recursion;
 use futures::future::try_join_all;
 
 impl Value {
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
-	pub async fn fetch(
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	pub(crate) async fn fetch(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 	) -> Result<(), Error> {
 		match path.first() {
@@ -27,47 +25,53 @@ impl Value {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => Value::Thing(v).fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
-					Part::All => self.fetch(ctx, opt, txn, path.next()).await,
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
+						None => Ok(()),
+					},
+					Part::All => self.fetch(ctx, opt, path.next()).await,
 					_ => Ok(()),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 						try_join_all(futs).await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						Some(v) => v.fetch(ctx, opt, path.next()).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-								v.fetch(ctx, opt, txn, path).await?;
+							let mut child_ctx = Context::new(ctx);
+							child_ctx.add_cursor_doc(v);
+							if w.compute(&child_ctx, opt).await?.is_truthy() {
+								v.fetch(ctx, opt, path).await?;
 							}
 						}
 						Ok(())
 					}
 					_ => {
-						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+						let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 						try_join_all(futs).await?;
 						Ok(())
 					}
@@ -81,7 +85,7 @@ impl Value {
 						// This is a graph traversal expression
 						Part::Graph(g) => {
 							let stm = SelectStatement {
-								expr: Fields(vec![Field::All]),
+								expr: Fields(vec![Field::All], false),
 								what: Values(vec![Value::from(Edges {
 									from: val,
 									dir: g.dir.clone(),
@@ -91,10 +95,10 @@ impl Value {
 								..SelectStatement::default()
 							};
 							*self = stm
-								.compute(ctx, opt, txn, None)
+								.compute(ctx, opt)
 								.await?
 								.all()
-								.get(ctx, opt, txn, path.next())
+								.get(ctx, opt, path.next())
 								.await?
 								.flatten()
 								.ok()?;
@@ -103,11 +107,11 @@ impl Value {
 						// This is a remote field expression
 						_ => {
 							let stm = SelectStatement {
-								expr: Fields(vec![Field::All]),
+								expr: Fields(vec![Field::All], false),
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							*self = stm.compute(ctx, opt, txn, None).await?.first();
+							*self = stm.compute(ctx, opt).await?.first();
 							Ok(())
 						}
 					}
@@ -119,7 +123,7 @@ impl Value {
 			None => match self {
 				// Current path part is an array
 				Value::Array(v) => {
-					let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, txn, path));
+					let futs = v.iter_mut().map(|v| v.fetch(ctx, opt, path));
 					try_join_all(futs).await?;
 					Ok(())
 				}
@@ -129,11 +133,11 @@ impl Value {
 					let val = v.clone();
 					// Fetch the remote embedded record
 					let stm = SelectStatement {
-						expr: Fields(vec![Field::All]),
+						expr: Fields(vec![Field::All], false),
 						what: Values(vec![Value::from(val)]),
 						..SelectStatement::default()
 					};
-					*self = stm.compute(ctx, opt, txn, None).await?.first();
+					*self = stm.compute(ctx, opt).await?.first();
 					Ok(())
 				}
 				// Ignore everything else

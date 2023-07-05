@@ -1,14 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::{Op, Operation};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -18,20 +16,29 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
-pub struct Object(pub BTreeMap<String, Value>);
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
+
+/// Invariant: Keys never contain NUL bytes.
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Object")]
+pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
 		Self(v)
+	}
+}
+
+impl From<HashMap<&str, Value>> for Object {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
@@ -50,13 +57,13 @@ impl From<Option<Self>> for Object {
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
 		Self(map! {
-			String::from("op") => match v.op {
-				Op::None => Value::from("none"),
-				Op::Add => Value::from("add"),
-				Op::Remove => Value::from("remove"),
-				Op::Replace => Value::from("replace"),
-				Op::Change => Value::from("change"),
-			},
+			String::from("op") => Value::from(match v.op {
+				Op::None => "none",
+				Op::Add => "add",
+				Op::Remove => "remove",
+				Op::Replace => "replace",
+				Op::Change => "change",
+			}),
 			String::from("path") => v.path.to_path().into(),
 			String::from("value") => v.value,
 		})
@@ -116,16 +123,11 @@ impl Object {
 }
 
 impl Object {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(ctx, opt, txn, doc).await {
+			match v.compute(ctx, opt).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};
@@ -134,42 +136,103 @@ impl Object {
 	}
 }
 
-impl fmt::Display for Object {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{{ {} }}",
-			Fmt::comma_separated(
-				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| {
-					write!(f, "{}: {}", escape_key(k), v)
-				}))
-			)
-		)
+impl Display for Object {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
+		if is_pretty() {
+			f.write_char('{')?;
+		} else {
+			f.write_str("{ ")?;
+		}
+		if !self.is_empty() {
+			let indent = pretty_indent();
+			write!(
+				f,
+				"{}",
+				Fmt::pretty_comma_separated(
+					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
+						f,
+						"{}: {}",
+						escape_key(k),
+						v
+					))),
+				)
+			)?;
+			drop(indent);
+		}
+		if is_pretty() {
+			f.write_char('}')
+		} else {
+			f.write_str(" }")
+		}
 	}
 }
 
-impl Serialize for Object {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+mod no_nul_bytes_in_keys {
+	use serde::{
+		de::{self, Visitor},
+		ser::SerializeMap,
+		Deserializer, Serializer,
+	};
+	use std::{collections::BTreeMap, fmt};
+
+	use crate::sql::Value;
+
+	pub(crate) fn serialize<S>(
+		m: &BTreeMap<String, Value>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
 	where
-		S: serde::Serializer,
+		S: Serializer,
 	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Object", &self.0)
-		} else {
-			let mut map = serializer.serialize_map(Some(self.len()))?;
-			for (ref k, ref v) in &self.0 {
-				map.serialize_key(k)?;
-				map.serialize_value(v)?;
-			}
-			map.end()
+		let mut s = serializer.serialize_map(Some(m.len()))?;
+		for (k, v) in m {
+			debug_assert!(!k.contains('\0'));
+			s.serialize_entry(k, v)?;
 		}
+		s.end()
+	}
+
+	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, Value>, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		struct NoNulBytesInKeysVisitor;
+
+		impl<'de> Visitor<'de> for NoNulBytesInKeysVisitor {
+			type Value = BTreeMap<String, Value>;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("a map without any NUL bytes in its keys")
+			}
+
+			fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+			where
+				A: de::MapAccess<'de>,
+			{
+				let mut ret = BTreeMap::new();
+				while let Some((k, v)) = map.next_entry()? {
+					ret.insert(k, v);
+				}
+				Ok(ret)
+			}
+		}
+
+		deserializer.deserialize_map(NoNulBytesInKeysVisitor)
 	}
 }
 
 pub fn object(i: &str) -> IResult<&str, Object> {
 	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, |i| {
+		let (i, k) = key(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(':')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = value(i)?;
+		Ok((i, (String::from(k), v)))
+	})(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -177,16 +240,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	Ok((i, Object(v.into_iter().collect())))
 }
 
-fn item(i: &str) -> IResult<&str, (String, Value)> {
-	let (i, k) = key(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, (String::from(k), v)))
-}
-
-fn key(i: &str) -> IResult<&str, &str> {
+pub fn key(i: &str) -> IResult<&str, &str> {
 	alt((key_none, key_single, key_double))(i)
 }
 
@@ -195,11 +249,11 @@ fn key_none(i: &str) -> IResult<&str, &str> {
 }
 
 fn key_single(i: &str) -> IResult<&str, &str> {
-	delimited(char('\''), is_not("\'"), char('\''))(i)
+	delimited(char('\''), is_not("\'\0"), char('\''))(i)
 }
 
 fn key_double(i: &str) -> IResult<&str, &str> {
-	delimited(char('\"'), is_not("\""), char('\"'))(i)
+	delimited(char('\"'), is_not("\"\0"), char('\"'))(i)
 }
 
 #[cfg(test)]

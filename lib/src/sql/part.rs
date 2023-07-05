@@ -1,16 +1,20 @@
 use crate::sql::comment::shouldbespace;
+use crate::sql::common::{closebracket, openbracket};
 use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
-use crate::sql::graph::{graph as graph_raw, Graph};
-use crate::sql::ident::{ident, Ident};
+use crate::sql::fmt::Fmt;
+use crate::sql::graph::{self, Graph};
+use crate::sql::ident::{self, Ident};
 use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
-use crate::sql::thing::{thing as thing_raw, Thing};
-use crate::sql::value::{value, Value};
+use crate::sql::strand::no_nul_bytes;
+use crate::sql::value::{self, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::not;
+use nom::combinator::peek;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -23,8 +27,9 @@ pub enum Part {
 	Field(Ident),
 	Index(Number),
 	Where(Value),
-	Thing(Thing),
 	Graph(Graph),
+	Value(Value),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 }
 
 impl From<i32> for Part {
@@ -42,6 +47,12 @@ impl From<isize> for Part {
 impl From<usize> for Part {
 	fn from(v: usize) -> Self {
 		Self::Index(v.into())
+	}
+}
+
+impl From<String> for Part {
+	fn from(v: String) -> Self {
+		Self::Field(v.into())
 	}
 }
 
@@ -63,21 +74,9 @@ impl From<Value> for Part {
 	}
 }
 
-impl From<Thing> for Part {
-	fn from(v: Thing) -> Self {
-		Self::Thing(v)
-	}
-}
-
 impl From<Graph> for Part {
 	fn from(v: Graph) -> Self {
 		Self::Graph(v)
-	}
-}
-
-impl From<String> for Part {
-	fn from(v: String) -> Self {
-		Self::Field(Ident(v))
 	}
 }
 
@@ -91,6 +90,15 @@ impl From<&str> for Part {
 }
 
 impl Part {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Part::Where(v) => v.writeable(),
+			Part::Value(v) => v.writeable(),
+			Part::Method(_, v) => v.iter().any(Value::writeable),
+			_ => false,
+		}
+	}
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
@@ -106,11 +114,12 @@ impl fmt::Display for Part {
 			Part::All => f.write_str("[*]"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
-			Part::Field(v) => write!(f, ".{}", v),
-			Part::Index(v) => write!(f, "[{}]", v),
-			Part::Where(v) => write!(f, "[WHERE {}]", v),
-			Part::Thing(v) => write!(f, "{}", v),
-			Part::Graph(v) => write!(f, "{}", v),
+			Part::Field(v) => write!(f, ".{v}"),
+			Part::Index(v) => write!(f, "[{v}]"),
+			Part::Where(v) => write!(f, "[WHERE {v}]"),
+			Part::Graph(v) => write!(f, "{v}"),
+			Part::Value(v) => write!(f, "{v}"),
+			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
 		}
 	}
 }
@@ -137,7 +146,8 @@ pub fn part(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn first(i: &str) -> IResult<&str, Part> {
-	let (i, v) = ident(i)?;
+	let (i, _) = peek(not(number))(i)?;
+	let (i, v) = ident::ident(i)?;
 	let (i, _) = ending(i)?;
 	Ok((i, Part::Field(v)))
 }
@@ -150,9 +160,9 @@ pub fn all(i: &str) -> IResult<&str, Part> {
 			Ok((i, ()))
 		},
 		|i| {
-			let (i, _) = char('[')(i)?;
+			let (i, _) = openbracket(i)?;
 			let (i, _) = char('*')(i)?;
-			let (i, _) = char(']')(i)?;
+			let (i, _) = closebracket(i)?;
 			Ok((i, ()))
 		},
 	))(i)?;
@@ -160,42 +170,42 @@ pub fn all(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn last(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, _) = char('$')(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Last))
 }
 
 pub fn index(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = number(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Index(v)))
 }
 
 pub fn field(i: &str) -> IResult<&str, Part> {
 	let (i, _) = char('.')(i)?;
-	let (i, v) = ident(i)?;
+	let (i, v) = ident::ident(i)?;
 	let (i, _) = ending(i)?;
 	Ok((i, Part::Field(v)))
 }
 
 pub fn filter(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, _) = alt((tag_no_case("WHERE"), tag("?")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, v) = value::value(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Where(v)))
 }
 
-pub fn thing(i: &str) -> IResult<&str, Part> {
-	let (i, v) = thing_raw(i)?;
-	Ok((i, Part::Thing(v)))
+pub fn value(i: &str) -> IResult<&str, Part> {
+	let (i, v) = value::start(i)?;
+	Ok((i, Part::Value(v)))
 }
 
 pub fn graph(i: &str) -> IResult<&str, Part> {
-	let (i, v) = graph_raw(i)?;
+	let (i, v) = graph::graph(i)?;
 	Ok((i, Part::Graph(v)))
 }
 
@@ -233,7 +243,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[0]", format!("{}", out));
-		assert_eq!(out, Part::Index(Number::from("0")));
+		assert_eq!(out, Part::Index(Number::from(0)));
 	}
 
 	#[test]

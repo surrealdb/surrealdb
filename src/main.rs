@@ -7,23 +7,50 @@
 //! can be used in distributed mode by connecting to a distributed [TiKV](https://tikv.org)
 //! key-value store.
 
+#![deny(clippy::mem_forget)]
 #![forbid(unsafe_code)]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
+#[cfg(feature = "has-storage")]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
+#[cfg(feature = "has-storage")]
 mod dbs;
 mod env;
 mod err;
+#[cfg(feature = "has-storage")]
 mod iam;
+#[cfg(feature = "has-storage")]
 mod net;
+mod o11y;
+#[cfg(feature = "has-storage")]
 mod rpc;
 
-fn main() {
-	cli::init(); // Initiate the command line
+use std::future::Future;
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+	// Initiate the command line
+	with_enough_stack(cli::init())
+}
+
+/// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
+fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
+	let stack_size = 8 * 1024 * 1024;
+
+	// Stack frames are generally larger in debug mode.
+	#[cfg(debug_assertions)]
+	let stack_size = stack_size * 2;
+
+	tokio::runtime::Builder::new_multi_thread()
+		.enable_all()
+		.thread_stack_size(stack_size)
+		.build()
+		.unwrap()
+		.block_on(fut)
 }

@@ -26,7 +26,7 @@ impl fmt::Display for Base {
 		match self {
 			Self::Ns => f.write_str("NAMESPACE"),
 			Self::Db => f.write_str("DATABASE"),
-			Self::Sc(sc) => write!(f, "SCOPE {}", sc),
+			Self::Sc(sc) => write!(f, "SCOPE {sc}"),
 			Self::Kv => f.write_str("KV"),
 		}
 	}
