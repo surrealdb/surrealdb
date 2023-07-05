@@ -90,6 +90,10 @@ impl Session {
 	pub(crate) fn db(&self) -> Option<Arc<str>> {
 		self.db.as_deref().map(Into::into)
 	}
+	/// Checks if live queries are allowed
+	pub(crate) fn live(&self) -> bool {
+		self.rt
+	}
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add auth data

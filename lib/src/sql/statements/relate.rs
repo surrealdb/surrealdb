@@ -63,7 +63,7 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();

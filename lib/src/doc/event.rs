@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Clone transaction
 		let txn = ctx.try_clone_transaction()?;
 		// Loop through all event statements

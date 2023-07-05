@@ -22,6 +22,10 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// The database encountered unreachable logic
+	#[error("The database encountered unreachable logic")]
+	Unreachable,
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),
@@ -61,10 +65,6 @@ pub enum Error {
 	/// The transaction writes too much data for the KV store
 	#[error("Transaction is too large")]
 	TxTooLarge,
-
-	/// The context does have any transaction
-	#[error("No transaction")]
-	NoTx,
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]

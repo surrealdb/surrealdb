@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
+		// Check indexes
 		if !opt.indexes {
 			return Ok(());
 		}

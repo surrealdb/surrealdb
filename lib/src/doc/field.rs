@@ -112,7 +112,7 @@ impl<'a> Document<'a> {
 						Permission::None => val = old,
 						Permission::Specific(e) => {
 							// Disable permissions
-							let opt = &opt.perms(false);
+							let opt = &opt.new_with_perms(false);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
 							ctx.add_value("input", &inp);

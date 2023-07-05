@@ -35,7 +35,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
+		// Check tables
 		if !opt.tables {
 			return Ok(());
 		}
@@ -44,7 +44,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
