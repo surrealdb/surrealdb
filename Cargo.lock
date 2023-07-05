@@ -4575,11 +4575,11 @@ dependencies = [
  "speedb",
  "storekey",
  "surrealdb-derive",
+ "surrealdb-tikv-client",
+ "surrealdb-tikv-client-proto",
  "temp-dir",
  "test-log",
  "thiserror",
- "tikv-client",
- "tikv-client-proto",
  "time 0.3.22",
  "tokio",
  "tokio-tungstenite",
@@ -4603,6 +4603,92 @@ checksum = "6ffbdb550fac410f0fc5a58df07e9956bb91f73dbf3905405d4dda5ea6208892"
 dependencies = [
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "surrealdb-tikv-client"
+version = "0.1.0-surreal.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8762cfabb7201a2a4794ca106a8293100d61a40809dce9902d5e694d3703809c"
+dependencies = [
+ "async-trait",
+ "derive-new",
+ "fail",
+ "futures 0.3.28",
+ "futures-timer",
+ "grpcio",
+ "lazy_static",
+ "log",
+ "prometheus",
+ "rand 0.8.5",
+ "regex",
+ "serde",
+ "serde_derive",
+ "surrealdb-tikv-client-common",
+ "surrealdb-tikv-client-pd",
+ "surrealdb-tikv-client-proto",
+ "surrealdb-tikv-client-store",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "surrealdb-tikv-client-common"
+version = "0.1.0-surreal.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fc78f67bf4526f33401570bbfb3332d4c3ca8d5d80ee0e10618f4b7071b2047"
+dependencies = [
+ "futures 0.3.28",
+ "grpcio",
+ "lazy_static",
+ "log",
+ "regex",
+ "surrealdb-tikv-client-proto",
+ "thiserror",
+]
+
+[[package]]
+name = "surrealdb-tikv-client-pd"
+version = "0.1.0-surreal.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fcfd012b2665a5470cc71e71a6492144eb623e353612816962dcac5a2816fec"
+dependencies = [
+ "async-trait",
+ "futures 0.3.28",
+ "grpcio",
+ "log",
+ "surrealdb-tikv-client-common",
+ "surrealdb-tikv-client-proto",
+]
+
+[[package]]
+name = "surrealdb-tikv-client-proto"
+version = "0.1.0-surreal.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31e97cfa7017ebdeed47679844e64c0bf7eccfaaeda933c0a4101011b1cc87d1"
+dependencies = [
+ "futures 0.3.28",
+ "grpcio",
+ "lazy_static",
+ "prost 0.7.0",
+ "prost-derive 0.7.0",
+ "protobuf",
+ "protobuf-build",
+]
+
+[[package]]
+name = "surrealdb-tikv-client-store"
+version = "0.1.0-surreal.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab86692ac2ef65f1a869451c9a4cb8e851da539e41c8154c2376cfa93dd52781"
+dependencies = [
+ "async-trait",
+ "derive-new",
+ "futures 0.3.28",
+ "grpcio",
+ "log",
+ "surrealdb-tikv-client-common",
+ "surrealdb-tikv-client-proto",
 ]
 
 [[package]]
@@ -4755,92 +4841,6 @@ checksum = "3fdd6f064ccff2d6567adcb3873ca630700f00b5ad3f060c25b5dcfd9a4ce152"
 dependencies = [
  "cfg-if",
  "once_cell",
-]
-
-[[package]]
-name = "tikv-client"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26904b386ca52ce25b3a620b397e6e4e93c4fd06d13c2c5936d9ac597f897263"
-dependencies = [
- "async-trait",
- "derive-new",
- "fail",
- "futures 0.3.28",
- "futures-timer",
- "grpcio",
- "lazy_static",
- "log",
- "prometheus",
- "rand 0.8.5",
- "regex",
- "serde",
- "serde_derive",
- "thiserror",
- "tikv-client-common",
- "tikv-client-pd",
- "tikv-client-proto",
- "tikv-client-store",
- "tokio",
-]
-
-[[package]]
-name = "tikv-client-common"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72fc3bb3fbec1f2a3354d4bbe48501b23ea47b79da2ffaedeadcc8a6183188e4"
-dependencies = [
- "futures 0.3.28",
- "grpcio",
- "lazy_static",
- "log",
- "regex",
- "thiserror",
- "tikv-client-proto",
-]
-
-[[package]]
-name = "tikv-client-pd"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8cadef1633d4e7952d9a3a88211f03f71e9f90769a5b50c40b5eccc06408977"
-dependencies = [
- "async-trait",
- "futures 0.3.28",
- "grpcio",
- "log",
- "tikv-client-common",
- "tikv-client-proto",
-]
-
-[[package]]
-name = "tikv-client-proto"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9707c63c11c19b87b6eb3df40c6103d0f1e2f06b53445bad91a8c9e06407d9b"
-dependencies = [
- "futures 0.3.28",
- "grpcio",
- "lazy_static",
- "prost 0.7.0",
- "prost-derive 0.7.0",
- "protobuf",
- "protobuf-build",
-]
-
-[[package]]
-name = "tikv-client-store"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ab348b60ef0a384985c488e25bf35721956b3b45332945f0841f9ac8a693586"
-dependencies = [
- "async-trait",
- "derive-new",
- "futures 0.3.28",
- "grpcio",
- "log",
- "tikv-client-common",
- "tikv-client-proto",
 ]
 
 [[package]]
