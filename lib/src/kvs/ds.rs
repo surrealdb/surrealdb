@@ -29,8 +29,6 @@ pub struct Datastore {
 	id: Uuid,
 	// Whether this datastore runs in strict mode by default
 	strict: bool,
-	// The maximum duration timeout for parsing SQL and GQL queries
-	parse_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -223,7 +221,6 @@ impl Datastore {
 			id: Uuid::default(),
 			inner,
 			strict: false,
-			parse_timeout: None,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -239,12 +236,6 @@ impl Datastore {
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
 		self.notification_channel = Some(channel::bounded(100));
-		self
-	}
-
-	/// Set a global parsing timeout for this Datastore
-	pub fn with_parse_timeout(mut self, duration: Option<Duration>) -> Self {
-		self.parse_timeout = duration;
 		self
 	}
 
