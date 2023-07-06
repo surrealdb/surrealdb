@@ -188,14 +188,19 @@ mod tests {
 		let fk = Thing::parse("other:test");
 		#[rustfmt::skip]
 		let val = Graph::new(
-			"test",
-			"test",
-			"test",
-			"test".into(),
+			"testns",
+			"testdb",
+			"testtb",
+			"testid".into(),
 			Dir::Out,
 			&fk,
 		);
 		let enc = Graph::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+		);
+
 		let dec = Graph::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

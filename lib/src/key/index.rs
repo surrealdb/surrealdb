@@ -146,14 +146,19 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Index::new(
-			"test",
-			"test",
-			"test",
-			"test",
-			vec!["test"].into(),
-			Some("test".into()),
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			vec!["testfd1", "testfd2"].into(),
+			Some("testid".into()),
 		);
 		let enc = Index::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0\xa4testix\0\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
+		);
+
 		let dec = Index::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

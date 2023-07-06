@@ -32,6 +32,8 @@ mod tests {
 		#[rustfmt::skip]
 		let val = Kv::new();
 		let enc = Kv::encode(&val).unwrap();
+		assert_eq!(enc, b"/");
+
 		let dec = Kv::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

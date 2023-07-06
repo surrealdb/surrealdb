@@ -56,13 +56,18 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Bo::new(
-			"test",
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
 			1,2
 		);
 		let enc = Bo::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0!botestix\0*\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x02"
+		);
+
 		let dec = Bo::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

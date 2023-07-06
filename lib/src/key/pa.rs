@@ -53,11 +53,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Pa::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testpa",
 		);
 		let enc = Pa::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0!patestpa\0");
+
 		let dec = Pa::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
