@@ -349,7 +349,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 			false => json!(d),
 		},
 		Value::Datetime(d) => d.to_raw().into(),
-		Value::Uuid(uuid) => json!(uuid),
+		Value::Uuid(uuid) => json!(uuid.0),
 		Value::Array(arr) => JsonValue::Array(Array::from((arr, simplify)).0),
 		Value::Object(obj) => JsonValue::Object(Object::from((obj, simplify)).0),
 		Value::Geometry(geo) => match simplify {

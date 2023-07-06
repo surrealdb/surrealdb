@@ -1,9 +1,9 @@
 use crate::sql::Value;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Notification {
 	pub id: Uuid,
 	pub action: Action,
@@ -35,5 +35,18 @@ impl fmt::Display for Action {
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
 		}
+	}
+}
+
+impl Serialize for Notification {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		let mut val = serializer.serialize_struct("Notification", 3)?;
+		val.serialize_field("id", &self.id.to_string())?;
+		val.serialize_field("action", &self.action)?;
+		val.serialize_field("result", &self.result)?;
+		val.end()
 	}
 }
