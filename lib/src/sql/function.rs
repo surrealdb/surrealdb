@@ -284,7 +284,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("concat"),
 			tag("difference"),
 			tag("distinct"),
-			tag("find"),
+			tag("find_index"),
 			tag("flatten"),
 			tag("group"),
 			tag("insert"),
@@ -305,14 +305,12 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		)),
 		alt((
 			tag("remove"),
-			tag("retain"),
 			tag("reverse"),
 			tag("slice"),
 			tag("sort::asc"),
 			tag("sort::desc"),
 			tag("sort"),
 			tag("transpose"),
-			tag("truthy_indices"),
 			tag("union"),
 		)),
 	))(i)

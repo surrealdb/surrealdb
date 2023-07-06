@@ -9,7 +9,6 @@ use crate::sql::array::Flatten;
 use crate::sql::array::Intersect;
 use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
-use crate::sql::array::TruthyIndices;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
@@ -114,7 +113,7 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
-pub fn find((array, value): (Array, Value)) -> Result<Value, Error> {
+pub fn find_index((array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array
 		.iter()
 		.enumerate()
@@ -278,16 +277,6 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn retain((mut value_array, decider_array): (Array, Array)) -> Result<Value, Error> {
-	let mut i = 0;
-	value_array.retain(|_| {
-		let out = decider_array.get(i).map_or(false, |v| v.is_truthy());
-		i += 1;
-		out
-	});
-	Ok(value_array.into())
-}
-
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
 	Ok(array.into())
@@ -346,10 +335,6 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 
 pub fn transpose((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.transpose().into())
-}
-
-pub fn truthy_indices((array,): (Array,)) -> Result<Value, Error> {
-	Ok(array.truthy_indices().into())
 }
 
 pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {

@@ -386,10 +386,10 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_array_find() -> Result<(), Error> {
-	let sql = r#"RETURN array::find([5, 6, 7], 7);
-RETURN array::find(["hello world", null, true], null);
-RETURN array::find([0, 1, 2], 3);"#;
+async fn function_array_find_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
+RETURN array::find_index(["hello world", null, true], null);
+RETURN array::find_index([0, 1, 2], 3);"#;
 	let desired_responses = ["2", "1", "null"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
@@ -833,18 +833,6 @@ async fn function_array_remove() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_array_retain() -> Result<(), Error> {
-	test_queries(
-		r#"RETURN array::retain([0, 1, 2], [false, true, false]);
-		RETURN array::retain([0, 1, 2], [true]);
-		RETURN array::retain([0, 1], [1, 1]);"#,
-		&["[1]", "[0]", "[0, 1]"],
-	)
-	.await?;
-	Ok(())
-}
-
-#[tokio::test]
 async fn function_array_reverse() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::reverse([]);
@@ -1060,16 +1048,6 @@ async fn function_array_transpose() -> Result<(), Error> {
 		"[[0, 2, 4], [1, 3, 5]]",
 		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
 	];
-	test_queries(sql, &desired_responses).await?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_array_truthy_indices() -> Result<(), Error> {
-	let sql = r#"RETURN array::truthy_indices([true, true, false, false, true, false]);
-RETURN array::truthy_indices([true, 1, "true", [0], {has_something: true}]);
-RETURN array::truthy_indices([false, 0, "false", [], {}, "this one is good"]);"#;
-	let desired_responses = ["[0, 1, 4]", "[0, 1, 2, 3, 4]", "[5]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
