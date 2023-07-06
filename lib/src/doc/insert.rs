@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check current record
-		match self.current.is_some() {
+		match self.current.doc.is_some() {
 			// Run INSERT clause
 			false => {
 				// Check if allowed

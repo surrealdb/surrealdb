@@ -1,4 +1,3 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
@@ -16,7 +15,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(ctx, opt, txn, &CursorDoc::NONE, path).await? {
+		match self.get(ctx, opt, txn, None, path).await? {
 			Value::Number(v) => match val {
 				Value::Number(x) => self.set(ctx, opt, txn, path, Value::from(v + x)).await,
 				_ => Ok(()),

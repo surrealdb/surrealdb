@@ -1,10 +1,10 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
@@ -78,7 +78,7 @@ impl SelectStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;

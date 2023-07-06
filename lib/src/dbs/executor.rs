@@ -1,5 +1,4 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Level;
@@ -280,9 +279,7 @@ impl<'a> Executor<'a> {
 							// Check if the variable is a protected variable
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
-								false => {
-									stm.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE).await
-								}
+								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
 									// Move the parameter name, as we no longer need it
@@ -350,9 +347,7 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										ctx.add_timeout(timeout);
 										// Process the statement
-										let res = stm
-											.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE)
-											.await;
+										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
 											true => Err(Error::QueryTimedout),
@@ -360,9 +355,7 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => {
-										stm.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE).await
-									}
+									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {

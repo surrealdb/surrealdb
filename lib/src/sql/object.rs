@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
@@ -130,7 +130,7 @@ impl Object {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {

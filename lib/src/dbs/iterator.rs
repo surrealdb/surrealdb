@@ -1,8 +1,8 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Canceller;
 use crate::ctx::Context;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
@@ -125,7 +125,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.limit() {
-			self.limit = Some(v.process(ctx, opt, txn, &CursorDoc::NONE).await?);
+			self.limit = Some(v.process(ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -139,7 +139,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(ctx, opt, txn, &CursorDoc::NONE).await?);
+			self.start = Some(v.process(ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -241,24 +241,19 @@ impl Iterator {
 								.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
 							match expr {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals
-										.all()
-										.get(ctx, opt, txn, &CursorDoc::NONE, idiom.as_ref())
-										.await?;
-									let x = f
-										.aggregate(x)
-										.compute(ctx, opt, txn, &CursorDoc::NONE)
-										.await?;
+									let x =
+										vals.all().get(ctx, opt, txn, None, idiom.as_ref()).await?;
+									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 								_ => {
 									let x = vals.first();
 									let x = if let Some(alias) = alias {
-										let cur = CursorDoc::new(None, None, Some(&x));
-										alias.compute(ctx, opt, txn, &cur).await?
+										let cur = CursorDoc::new(None, None, &x);
+										alias.compute(ctx, opt, txn, Some(&cur)).await?
 									} else {
-										let cur = CursorDoc::new(None, None, Some(&x));
-										expr.compute(ctx, opt, txn, &cur).await?
+										let cur = CursorDoc::new(None, None, &x);
+										expr.compute(ctx, opt, txn, Some(&cur)).await?
 									};
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
@@ -536,7 +531,7 @@ impl Iterator {
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(thg, doc_id, &val, ext);
+		let mut doc = Document::new(thg.as_ref(), doc_id, &val, ext);
 		// Process the document
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,

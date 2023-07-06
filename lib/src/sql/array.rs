@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebracket, commas, openbracket};
@@ -123,7 +123,7 @@ impl Array {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {

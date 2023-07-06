@@ -1,7 +1,7 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -34,7 +34,7 @@ pub mod util;
 pub async fn run(
 	ctx: &Context<'_>,
 	txn: &Transaction,
-	doc: &CursorDoc<'_>,
+	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -277,7 +277,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 pub async fn asynchronous(
 	ctx: &Context<'_>,
 	txn: Option<&Transaction>,
-	doc: &CursorDoc<'_>,
+	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {

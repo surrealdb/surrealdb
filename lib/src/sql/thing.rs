@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
@@ -108,7 +108,7 @@ impl Thing {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),

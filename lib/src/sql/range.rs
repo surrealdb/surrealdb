@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
@@ -54,7 +54,7 @@ impl Range {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Range(Box::new(Range {
 			tb: self.tb.clone(),

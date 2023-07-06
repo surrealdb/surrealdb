@@ -21,13 +21,13 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the user applied input
-		let inp = self.initial.changed(self.current.as_ref());
+		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
-			for (k, mut val) in self.current.walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value
-				let old = self.initial.pick(&k);
+				let old = self.initial.doc.pick(&k);
 				// Get the input value
 				let inp = inp.pick(&k);
 				// Check for a TYPE clause
@@ -58,7 +58,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the VALUE clause
-					val = expr.compute(&ctx, opt, txn, &self.current_doc()).await?;
+					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
@@ -86,7 +86,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the ASSERT clause
-					if !expr.compute(&ctx, opt, txn, &self.current_doc()).await?.is_truthy() {
+					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
 							thing: rid.to_string(),
 							field: fd.name.clone(),
@@ -117,7 +117,7 @@ impl<'a> Document<'a> {
 							ctx.add_value("after", &val);
 							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
-							if !e.compute(&ctx, opt, txn, &self.current_doc()).await?.is_truthy() {
+							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 								val = old
 							}
 						}
@@ -125,8 +125,8 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					_ => self.current.to_mut().set(ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.doc.to_mut().del(ctx, opt, txn, &k).await?,
+					_ => self.current.doc.to_mut().set(ctx, opt, txn, &k, val).await?,
 				};
 			}
 		}

@@ -1,7 +1,7 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
@@ -44,7 +44,7 @@ impl RemoveStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn).await,

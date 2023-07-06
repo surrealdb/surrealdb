@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check if exists
-		self.exist(ctx, opt, stm).await?;
+		self.exist(ctx, opt, txn, stm).await?;
 		// Alter record data
 		self.alter(ctx, opt, txn, stm).await?;
 		// Merge fields data

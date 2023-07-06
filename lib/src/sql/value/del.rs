@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
@@ -106,8 +106,8 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								let cur = CursorDoc::new(None, None, Some(v));
-								if w.compute(ctx, opt, txn, &cur).await?.is_truthy() {
+								let cur = CursorDoc::new(None, None, v);
+								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 									m.insert(i);
 								};
 							}
@@ -117,8 +117,8 @@ impl Value {
 						_ => {
 							let path = path.next();
 							for v in v.iter_mut() {
-								let cur = CursorDoc::new(None, None, Some(v));
-								if w.compute(ctx, opt, txn, &cur).await?.is_truthy() {
+								let cur = CursorDoc::new(None, None, v);
+								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 									v.del(ctx, opt, txn, path).await?;
 								}
 							}

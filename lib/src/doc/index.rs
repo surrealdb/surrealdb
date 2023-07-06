@@ -1,8 +1,7 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
-use crate::doc::Document;
+use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
 use crate::idx::IndexKeyBase;
@@ -10,7 +9,7 @@ use crate::sql::array::Array;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Ident, Thing, Value};
+use crate::sql::{Ident, Thing};
 use crate::{key, kvs};
 
 impl<'a> Document<'a> {
@@ -77,15 +76,14 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		ix: &DefineIndexStatement,
-		value: &Value,
+		doc: &CursorDoc<'_>,
 	) -> Result<Option<Array>, Error> {
-		if !value.is_some() {
+		if !doc.doc.is_some() {
 			return Ok(None);
 		}
-		let cur = CursorDoc::new(None, None, Some(value));
 		let mut o = Array::with_capacity(ix.cols.len());
 		for i in ix.cols.iter() {
-			let v = i.compute(ctx, opt, txn, &cur).await?;
+			let v = i.compute(ctx, opt, txn, Some(doc)).await?;
 			o.push(v);
 		}
 		Ok(Some(o))

@@ -1,7 +1,7 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::duration;
@@ -23,7 +23,7 @@ impl SleepStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
@@ -95,7 +95,7 @@ mod tests {
 		let opt = Options::default().with_auth(Arc::new(Auth::Kv));
 		let (ctx, _, _) = mock().await;
 		let (_, stm) = sleep(sql).unwrap();
-		let value = stm.compute(&ctx, &opt, &CursorDoc::NONE).await.unwrap();
+		let value = stm.compute(&ctx, &opt, None).await.unwrap();
 		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
 		assert_eq!(value, Value::None);
 	}

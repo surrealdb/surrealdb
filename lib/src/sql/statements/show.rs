@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
@@ -32,7 +32,7 @@ impl ShowStatement {
 		&self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
 			feature: "change feed",

@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
@@ -84,7 +84,7 @@ impl Constant {
 		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),

@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::TryAdd;
 use crate::sql::value::TryDiv;
@@ -170,13 +170,15 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 pub(crate) async fn matches(
 	ctx: &Context<'_>,
 	txn: &Transaction,
-	doc: &CursorDoc<'_>,
+	doc: Option<&CursorDoc<'_>>,
 	e: &Expression,
 ) -> Result<Value, Error> {
-	if let Some(thg) = doc.rid() {
-		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
-			// Check the matches
-			return exe.matches(txn, thg, e).await;
+	if let Some(doc) = doc {
+		if let Some(thg) = doc.rid {
+			if let Some(exe) = ctx.get_query_executor(&thg.tb) {
+				// Check the matches
+				return exe.matches(txn, thg, e).await;
+			}
 		}
 	}
 	Ok(Value::Bool(false))

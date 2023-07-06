@@ -1,7 +1,7 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
 use crate::idx::IndexKeyBase;
@@ -28,7 +28,7 @@ impl AnalyzeStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {

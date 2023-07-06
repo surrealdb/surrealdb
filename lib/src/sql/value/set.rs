@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::part::Next;
@@ -77,8 +77,8 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							let cur = CursorDoc::new(None, None, Some(v));
-							if w.compute(ctx, opt, txn, &cur).await?.is_truthy() {
+							let cur = CursorDoc::new(None, None, v);
+							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								v.set(ctx, opt, txn, path, val.clone()).await?;
 							}
 						}

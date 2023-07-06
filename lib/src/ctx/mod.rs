@@ -27,5 +27,4 @@ pub use self::reason::*;
 pub mod cancellation;
 pub mod canceller;
 pub mod context;
-pub(crate) mod cursordoc;
 pub mod reason;

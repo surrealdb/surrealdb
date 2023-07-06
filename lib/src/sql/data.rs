@@ -1,4 +1,3 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
@@ -50,20 +49,20 @@ impl Data {
 		match self {
 			Self::MergeExpression(v) => {
 				// This MERGE expression has an 'id' field
-				v.compute(ctx, opt, txn, &CursorDoc::NONE).await?.rid().generate(tb, false)
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
 			}
 			Self::ReplaceExpression(v) => {
 				// This REPLACE expression has an 'id' field
-				v.compute(ctx, opt, txn, &CursorDoc::NONE).await?.rid().generate(tb, false)
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
 			}
 			Self::ContentExpression(v) => {
 				// This CONTENT expression has an 'id' field
-				v.compute(ctx, opt, txn, &CursorDoc::NONE).await?.rid().generate(tb, false)
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					v.compute(ctx, opt, txn, &CursorDoc::NONE).await?.generate(tb, false)
+					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
 				}
 				// This SET expression had no 'id' field
 				_ => Ok(tb.generate()),

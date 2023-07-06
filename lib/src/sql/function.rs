@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -137,7 +137,7 @@ impl Function {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;

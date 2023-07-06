@@ -4,9 +4,9 @@ use super::globals;
 use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::async_with;
@@ -21,7 +21,7 @@ pub async fn run(
 	ctx: &Context<'_>,
 	_opt: &Options,
 	_txn: &Transaction,
-	doc: &CursorDoc<'_>,
+	doc: Option<&CursorDoc<'_>>,
 	src: &str,
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -69,8 +69,10 @@ pub async fn run(
 			let res = ctx.compile("script", src)?;
 			// Attempt to fetch the main export
 			let fnc = res.get::<_, Function>("default")?;
+			// Extract the doc if any
+			let doc = doc.map(|v|v.doc.as_ref());
 			// Execute the main function
-			let promise: Promise<Value> = fnc.call((This(doc.doc()), Rest(arg)))?;
+			let promise: Promise<Value> = fnc.call((This(doc), Rest(arg)))?;
 			promise.await
 		}.await;
 

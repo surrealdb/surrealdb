@@ -43,9 +43,9 @@ impl<'a> Document<'a> {
 			let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
-			self.current.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.to_mut().put(&*IN, l.clone().into());
-			self.current.to_mut().put(&*OUT, r.clone().into());
+			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.doc.to_mut().put(&*IN, l.clone().into());
+			self.current.doc.to_mut().put(&*OUT, r.clone().into());
 		}
 		// Carry on
 		Ok(())

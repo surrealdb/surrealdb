@@ -1,10 +1,10 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
@@ -51,7 +51,7 @@ impl InsertStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -70,7 +70,7 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+						let v = v.compute(ctx, opt, txn, None).await?;
 						o.set(ctx, opt, txn, k, v).await?;
 					}
 					// Specify the new table record id

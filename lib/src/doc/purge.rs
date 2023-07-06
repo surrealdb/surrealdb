@@ -1,4 +1,3 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
@@ -34,12 +33,16 @@ impl<'a> Document<'a> {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Get the record id
-		if let Some(rid) = &self.id {
+		if let Some(rid) = self.id {
 			// Purge the record data
 			let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
 			run.del(key).await?;
 			// Purge the record edges
-			match (self.initial.pick(&*EDGE), self.initial.pick(&*IN), self.initial.pick(&*OUT)) {
+			match (
+				self.initial.doc.pick(&*EDGE),
+				self.initial.doc.pick(&*IN),
+				self.initial.doc.pick(&*OUT),
+			) {
 				(Value::Bool(true), Value::Thing(ref l), Value::Thing(ref r)) => {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
@@ -69,7 +72,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+					stm.compute(ctx, opt, txn, None).await?;
 				}
 			}
 		}

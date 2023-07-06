@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
@@ -65,7 +65,7 @@ impl Subquery {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(2)?;
@@ -80,8 +80,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -102,8 +102,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -124,8 +124,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -146,8 +146,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -168,8 +168,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -190,8 +190,8 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = doc.doc() {
-					ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {

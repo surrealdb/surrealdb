@@ -1,4 +1,3 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
@@ -80,7 +79,7 @@ impl<'a> TreeBuilder<'a> {
 			Value::Bool(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
 			Value::Param(p) => {
-				let v = p.compute(self.ctx, self.opt, self.txn, &CursorDoc::NONE).await?;
+				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
 				self.eval_value(&v).await?
 			}
 			_ => Node::Unsupported,

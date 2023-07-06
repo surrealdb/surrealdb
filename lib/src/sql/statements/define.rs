@@ -1,7 +1,7 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
@@ -67,7 +67,7 @@ impl DefineStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -138,7 +138,7 @@ impl DefineNamespaceStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
@@ -191,7 +191,7 @@ impl DefineDatabaseStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected NS?
 		opt.needs(Level::Ns)?;
@@ -272,7 +272,7 @@ impl DefineFunctionStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -354,7 +354,7 @@ impl DefineAnalyzerStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -428,7 +428,7 @@ impl DefineLoginStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
@@ -548,7 +548,7 @@ impl DefineTokenStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match &self.base {
 			Base::Ns => {
@@ -663,7 +663,7 @@ impl DefineScopeStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -781,7 +781,7 @@ impl DefineParamStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -845,7 +845,7 @@ impl DefineTableStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -1048,7 +1048,7 @@ impl DefineEventStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -1132,7 +1132,7 @@ impl DefineFieldStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: &CursorDoc<'_>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -1292,7 +1292,7 @@ impl DefineIndexStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;

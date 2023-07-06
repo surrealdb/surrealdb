@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
@@ -77,17 +77,30 @@ impl Fields {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
+		if let Some(doc) = doc {
+			self.compute_value(ctx, opt, txn, doc, group).await
+		} else {
+			let doc = CursorDoc::new(None, None, &Value::None);
+			self.compute_value(ctx, opt, txn, &doc, group).await
+		}
+	}
+
+	async fn compute_value(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: &CursorDoc<'_>,
+		group: bool,
+	) -> Result<Value, Error> {
 		let opt = &opt.new_with_futures(true);
-		//
-		let new_doc = doc.doc().unwrap_or(&Value::None);
-		let doc = CursorDoc::new(doc.rid(), doc.doc_id(), Some(new_doc));
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => new_doc.compute(ctx, opt, txn, &doc).await?,
+			true => doc.doc.compute(ctx, opt, txn, Some(doc)).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {
@@ -106,9 +119,9 @@ impl Fields {
 						Value::Function(f) if group && f.is_aggregate() => {
 							let x = match f.args().len() {
 								// If no function arguments, then compute the result
-								0 => f.compute(ctx, opt, txn, &doc).await?,
+								0 => f.compute(ctx, opt, txn, Some(doc)).await?,
 								// If arguments, then pass the first value through
-								_ => f.args()[0].compute(ctx, opt, txn, &doc).await?,
+								_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
 							};
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
@@ -125,13 +138,13 @@ impl Fields {
 								// Use the last fetched value for each fetch
 								let x = match res.last() {
 									Some((_, r)) => r,
-									None => new_doc,
+									None => doc.doc.as_ref(),
 								};
 								// Continue fetching the next idiom part
 								let x = x
-									.get(ctx, opt, txn, &doc, v)
+									.get(ctx, opt, txn, Some(doc), v)
 									.await?
-									.compute(ctx, opt, txn, &doc)
+									.compute(ctx, opt, txn, Some(doc))
 									.await?
 									.flatten();
 								// Add the result to the temporary store
@@ -157,7 +170,7 @@ impl Fields {
 						}
 						// This expression is a normal field expression
 						_ => {
-							let x = expr.compute(ctx, opt, txn, &doc).await?;
+							let x = expr.compute(ctx, opt, txn, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => out.set(ctx, opt, txn, idiom.as_ref(), x).await?,

@@ -1,5 +1,4 @@
 use super::tx::Transaction;
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
@@ -461,7 +460,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, &CursorDoc::NONE).await?;
+		let res = val.compute(&ctx, &opt, &txn, None).await?;
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,

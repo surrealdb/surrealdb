@@ -37,15 +37,15 @@ impl<'a> Document<'a> {
 			// Configure the context
 			let mut ctx = Context::new(ctx);
 			ctx.add_value("event", met);
-			ctx.add_value("value", self.current.deref());
-			ctx.add_value("after", self.current.deref());
-			ctx.add_value("before", self.initial.deref());
+			ctx.add_value("value", self.current.doc.deref());
+			ctx.add_value("after", self.current.doc.deref());
+			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
-			let val = ev.when.compute(&ctx, opt, txn, &self.current_doc()).await?;
+			let val = ev.when.compute(&ctx, opt, txn, Some(&self.current)).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(&ctx, opt, txn, &self.current_doc()).await?;
+					v.compute(&ctx, opt, txn, Some(&self.current)).await?;
 				}
 			}
 		}

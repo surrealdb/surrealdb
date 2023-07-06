@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::edges::Edges;
@@ -23,7 +23,7 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		match path.first() {
@@ -112,9 +112,9 @@ impl Value {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in v.iter() {
-							let cur = CursorDoc::new(None, None, Some(v));
-							if w.compute(ctx, opt, txn, &cur).await?.is_truthy() {
-								a.push(v.get(ctx, opt, txn, &cur, path).await?)
+							let cur = Some(CursorDoc::new(None, None, v));
+							if w.compute(ctx, opt, txn, cur.as_ref()).await?.is_truthy() {
+								a.push(v.get(ctx, opt, txn, cur.as_ref(), path).await?)
 							}
 						}
 						Ok(a.into())
@@ -139,10 +139,10 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							stm.compute(ctx, opt, txn, &CursorDoc::NONE)
+							stm.compute(ctx, opt, txn, None)
 								.await?
 								.first()
-								.get(ctx, opt, txn, &CursorDoc::NONE, path)
+								.get(ctx, opt, txn, None, path)
 								.await
 						}
 					}
@@ -171,18 +171,18 @@ impl Value {
 								};
 								match path.len() {
 									1 => stm
-										.compute(ctx, opt, txn, &CursorDoc::NONE)
+										.compute(ctx, opt, txn, None)
 										.await?
 										.all()
-										.get(ctx, opt, txn, &CursorDoc::NONE, ID.as_ref())
+										.get(ctx, opt, txn, None, ID.as_ref())
 										.await?
 										.flatten()
 										.ok(),
 									_ => stm
-										.compute(ctx, opt, txn, &CursorDoc::NONE)
+										.compute(ctx, opt, txn, None)
 										.await?
 										.all()
-										.get(ctx, opt, txn, &CursorDoc::NONE, path.next())
+										.get(ctx, opt, txn, None, path.next())
 										.await?
 										.flatten()
 										.ok(),
@@ -195,10 +195,10 @@ impl Value {
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								stm.compute(ctx, opt, txn, &CursorDoc::NONE)
+								stm.compute(ctx, opt, txn, None)
 									.await?
 									.first()
-									.get(ctx, opt, txn, &CursorDoc::NONE, path)
+									.get(ctx, opt, txn, None, path)
 									.await
 							}
 						},
@@ -228,7 +228,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -237,7 +237,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
@@ -246,7 +246,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -261,7 +261,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
@@ -270,7 +270,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -285,7 +285,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
@@ -294,7 +294,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -303,7 +303,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -312,7 +312,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
@@ -321,7 +321,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -335,7 +335,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
-		let res = val.get(&ctx, &opt, &txn, &CursorDoc::NONE, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -350,8 +350,8 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let cur = CursorDoc::new(None, None, Some(&doc));
-		let res = val.get(&ctx, &opt, &txn, &cur, &idi).await.unwrap();
+		let cur = CursorDoc::new(None, None, &doc);
+		let res = val.get(&ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

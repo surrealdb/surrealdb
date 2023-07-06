@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
@@ -64,8 +64,8 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							let cur = CursorDoc::new(None, None, Some(v));
-							if w.compute(ctx, opt, txn, &cur).await?.is_truthy() {
+							let cur = CursorDoc::new(None, None, v);
+							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								v.fetch(ctx, opt, txn, path).await?;
 							}
 						}
@@ -96,10 +96,10 @@ impl Value {
 								..SelectStatement::default()
 							};
 							*self = stm
-								.compute(ctx, opt, txn, &CursorDoc::NONE)
+								.compute(ctx, opt, txn, None)
 								.await?
 								.all()
-								.get(ctx, opt, txn, &CursorDoc::NONE, path.next())
+								.get(ctx, opt, txn, None, path.next())
 								.await?
 								.flatten()
 								.ok()?;
@@ -112,7 +112,7 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							*self = stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?.first();
+							*self = stm.compute(ctx, opt, txn, None).await?.first();
 							Ok(())
 						}
 					}
@@ -138,7 +138,7 @@ impl Value {
 						what: Values(vec![Value::from(val)]),
 						..SelectStatement::default()
 					};
-					*self = stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?.first();
+					*self = stm.compute(ctx, opt, txn, None).await?.first();
 					Ok(())
 				}
 				// Ignore everything else

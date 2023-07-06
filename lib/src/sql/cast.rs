@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
@@ -42,7 +42,7 @@ impl Cast {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent long cast chains
 		let opt = &opt.dive(1)?;

@@ -1,6 +1,6 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -49,14 +49,14 @@ impl Param {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Find the variable by name
 		match self.as_str() {
 			// This is a special param
-			"this" | "self" => match doc.doc() {
+			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.doc.compute(ctx, opt, txn, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},

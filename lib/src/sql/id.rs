@@ -1,7 +1,7 @@
 use crate::cnf::ID_CHARS;
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
@@ -172,7 +172,7 @@ impl Id {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'_>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Id, Error> {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),

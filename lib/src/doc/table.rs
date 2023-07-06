@@ -1,4 +1,3 @@
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
@@ -66,11 +65,10 @@ impl<'a> Document<'a> {
 				// There is a GROUP BY clause specified
 				Some(group) => {
 					// Set the previous record id
-					let initial_doc = self.initial_doc();
 					let old = Thing {
 						tb: ft.name.to_raw(),
 						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, &initial_doc)),
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
 						)
 						.await?
 						.into_iter()
@@ -78,11 +76,10 @@ impl<'a> Document<'a> {
 						.into(),
 					};
 					// Set the current record id
-					let current_doc = self.current_doc();
 					let rid = Thing {
 						tb: ft.name.to_raw(),
 						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, &current_doc)),
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
 						)
 						.await?
 						.into_iter()
@@ -93,7 +90,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, &self.current_doc()).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									if !opt.force && act != Action::Create {
 										// Delete the old value
@@ -107,7 +104,7 @@ impl<'a> Document<'a> {
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 									if act != Action::Delete {
 										// Update the new value
@@ -121,7 +118,7 @@ impl<'a> Document<'a> {
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 								}
 								_ => {
@@ -137,7 +134,7 @@ impl<'a> Document<'a> {
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 								}
 							}
@@ -154,7 +151,7 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+								stm.compute(ctx, opt, txn, None).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value
@@ -166,7 +163,7 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+								stm.compute(ctx, opt, txn, None).await?;
 							}
 						}
 					}
@@ -179,12 +176,11 @@ impl<'a> Document<'a> {
 						id: rid.id.clone(),
 					};
 					// Use the current record data
-					let doc = self.current_doc();
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, &doc).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -197,13 +193,21 @@ impl<'a> Document<'a> {
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(Data::ReplaceExpression(
-												tb.expr.compute(ctx, opt, txn, &doc, false).await?,
+												tb.expr
+													.compute(
+														ctx,
+														opt,
+														txn,
+														Some(&self.current),
+														false,
+													)
+													.await?,
 											)),
 											..UpdateStatement::default()
 										}),
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+									stm.compute(ctx, opt, txn, None).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -212,7 +216,7 @@ impl<'a> Document<'a> {
 										..DeleteStatement::default()
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+									stm.compute(ctx, opt, txn, None).await?;
 								}
 							}
 						}
@@ -229,13 +233,15 @@ impl<'a> Document<'a> {
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
 									data: Some(Data::ReplaceExpression(
-										tb.expr.compute(ctx, opt, txn, &doc, false).await?,
+										tb.expr
+											.compute(ctx, opt, txn, Some(&self.current), false)
+											.await?,
 									)),
 									..UpdateStatement::default()
 								}),
 							};
 							// Execute the statement
-							stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
+							stm.compute(ctx, opt, txn, None).await?;
 						}
 					}
 				}
@@ -257,8 +263,8 @@ impl<'a> Document<'a> {
 		let mut ops: Ops = vec![];
 		// Create a new context with the initial or the current doc
 		let doc = match act {
-			Action::Delete => self.initial_doc(),
-			Action::Update => self.current_doc(),
+			Action::Delete => Some(&self.initial),
+			Action::Update => Some(&self.current),
 			_ => unreachable!(),
 		};
 		//
@@ -273,29 +279,29 @@ impl<'a> Document<'a> {
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
-							let val = f.compute(ctx, opt, txn, &doc).await?;
+							let val = f.compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, &doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, &doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.min(&mut ops, &act, idiom, val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, &doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.max(&mut ops, &act, idiom, val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, &doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(ctx, opt, txn, &doc).await?;
+						let val = expr.compute(ctx, opt, txn, doc).await?;
 						self.set(&mut ops, idiom, val);
 					}
 				}

@@ -1,8 +1,8 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
@@ -2490,7 +2490,7 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: &CursorDoc<'async_recursion>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
 			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
