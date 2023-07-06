@@ -1,4 +1,3 @@
-use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
@@ -33,19 +32,17 @@ async fn handler(
 		true => {
 			// Get the datastore reference
 			let db = DB.get().unwrap();
-			// Get local copy of options
-			let opt = CF.get().unwrap();
 			// Convert the body to a byte slice
 			let sql = bytes_to_utf8(&sql)?;
 			// Execute the sql query in the database
-			match db.execute(sql, &session, None, opt.strict).await {
+			match db.execute(sql, &session, None).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
 					"application/json" => Ok(output::json(&output::simplify(res))),
 					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
 					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
-					"application/bung" => Ok(output::full(&res)),
+					"application/surrealdb" => Ok(output::full(&res)),
 					// Return nothing
 					"application/octet-stream" => Ok(output::none()),
 					// An incorrect content-type was requested

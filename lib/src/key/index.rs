@@ -15,7 +15,6 @@ struct Prefix<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 }
 
 impl<'a> Prefix<'a> {
@@ -30,7 +29,6 @@ impl<'a> Prefix<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: b'*',
 		}
 	}
 }
@@ -46,9 +44,7 @@ struct PrefixIds<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 	pub fd: Array,
-	_f: u8,
 }
 
 impl<'a> PrefixIds<'a> {
@@ -63,9 +59,7 @@ impl<'a> PrefixIds<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: b'*',
 			fd: fd.to_owned(),
-			_f: b'*',
 		}
 	}
 }
@@ -81,9 +75,7 @@ pub struct Index<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 	pub fd: Array,
-	_f: u8,
 	pub id: Option<Id>,
 }
 
@@ -141,9 +133,7 @@ impl<'a> Index<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: 0x2a, // *
 			fd,
-			_f: 0x2a, // *
 			id,
 		}
 	}
@@ -156,14 +146,19 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Index::new(
-			"test",
-			"test",
-			"test",
-			"test",
-			vec!["test"].into(),
-			Some("test".into()),
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			vec!["testfd1", "testfd2"].into(),
+			Some("testid".into()),
 		);
 		let enc = Index::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0\xa4testix\0\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
+		);
+
 		let dec = Index::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

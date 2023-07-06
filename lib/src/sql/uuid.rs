@@ -18,7 +18,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
-pub struct Uuid(pub uuid::Uuid);
+pub struct Uuid(#[serde(with = "uuid::serde::compact")] pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {
 	fn from(v: uuid::Uuid) -> Self {

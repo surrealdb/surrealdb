@@ -14,11 +14,12 @@ pub struct Lv<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
+	#[serde(with = "uuid::serde::compact")]
 	pub lv: Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lv: &Uuid) -> Lv<'a> {
-	Lv::new(ns, db, tb, lv.to_owned())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lv: Uuid) -> Lv<'a> {
+	Lv::new(ns, db, tb, lv)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {

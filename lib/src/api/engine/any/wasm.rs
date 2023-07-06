@@ -50,9 +50,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-fdb")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -65,9 +63,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -80,9 +76,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -95,9 +89,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -111,9 +103,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-speedb")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-speedb"))]
@@ -127,9 +117,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						engine::local::wasm::router(address, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -157,9 +145,7 @@ impl Connection for Any {
 						let mut address = address;
 						address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
 						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
-						if let Err(error) = conn_rx.into_recv_async().await? {
-							return Err(error);
-						}
+						conn_rx.into_recv_async().await??;
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]

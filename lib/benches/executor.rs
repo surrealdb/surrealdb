@@ -13,14 +13,14 @@ macro_rules! query {
 				let ses = Session::for_kv().with_ns("test").with_db("test");
 				let setup = $setup;
 				if !setup.is_empty() {
-					dbs.execute(setup, &ses, None, false).await.unwrap();
+					dbs.execute(setup, &ses, None).await.unwrap();
 				}
 				(dbs, ses)
 			});
 
 			b.iter(|| {
 				futures::executor::block_on(async {
-					black_box(dbs.execute(black_box($query), &ses, None, false).await).unwrap();
+					black_box(dbs.execute(black_box($query), &ses, None).await).unwrap();
 				});
 			})
 		});

@@ -41,12 +41,14 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Bs::new(
-			"test",
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
 		);
 		let enc = Bs::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!bstestix\0");
+
 		let dec = Bs::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

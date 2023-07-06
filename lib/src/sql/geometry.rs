@@ -1,9 +1,13 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
+use crate::sql::array::Array;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebracket, closeparentheses, commas, openbracket, openparentheses};
+use crate::sql::common::{
+	closebraces, closebracket, closeparentheses, commas, openbraces, openbracket, openparentheses,
+};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
+use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, Point, Polygon};
@@ -40,35 +44,122 @@ pub enum Geometry {
 	// Add new variants here
 }
 
+impl Geometry {
+	/// Check if this is a Point
+	pub fn is_point(&self) -> bool {
+		matches!(self, Self::Point(_))
+	}
+	/// Check if this is a Line
+	pub fn is_line(&self) -> bool {
+		matches!(self, Self::Line(_))
+	}
+	/// Check if this is a Polygon
+	pub fn is_polygon(&self) -> bool {
+		matches!(self, Self::Polygon(_))
+	}
+	/// Check if this is a MultiPoint
+	pub fn is_multipoint(&self) -> bool {
+		matches!(self, Self::MultiPoint(_))
+	}
+	/// Check if this is a MultiLine
+	pub fn is_multiline(&self) -> bool {
+		matches!(self, Self::MultiLine(_))
+	}
+	/// Check if this is a MultiPolygon
+	pub fn is_multipolygon(&self) -> bool {
+		matches!(self, Self::MultiPolygon(_))
+	}
+	/// Check if this is not a Collection
+	pub fn is_geometry(&self) -> bool {
+		!matches!(self, Self::Collection(_))
+	}
+	/// Check if this is a Collection
+	pub fn is_collection(&self) -> bool {
+		matches!(self, Self::Collection(_))
+	}
+	/// Get the type of this Geometry as text
+	pub fn as_type(&self) -> &'static str {
+		match self {
+			Self::Point(_) => "Point",
+			Self::Line(_) => "LineString",
+			Self::Polygon(_) => "Polygon",
+			Self::MultiPoint(_) => "MultiPoint",
+			Self::MultiLine(_) => "MultiLineString",
+			Self::MultiPolygon(_) => "MultiPolygon",
+			Self::Collection(_) => "GeometryCollection",
+		}
+	}
+	/// Get the raw coordinates of this Geometry as an Array
+	pub fn as_coordinates(&self) -> Value {
+		fn point(v: &Point) -> Value {
+			Array::from(vec![v.x(), v.y()]).into()
+		}
+
+		fn line(v: &LineString) -> Value {
+			v.points().map(|v| point(&v)).collect::<Vec<Value>>().into()
+		}
+
+		fn polygon(v: &Polygon) -> Value {
+			once(v.exterior()).chain(v.interiors()).map(line).collect::<Vec<Value>>().into()
+		}
+
+		fn multipoint(v: &MultiPoint) -> Value {
+			v.iter().map(point).collect::<Vec<Value>>().into()
+		}
+
+		fn multiline(v: &MultiLineString) -> Value {
+			v.iter().map(line).collect::<Vec<Value>>().into()
+		}
+
+		fn multipolygon(v: &MultiPolygon) -> Value {
+			v.iter().map(polygon).collect::<Vec<Value>>().into()
+		}
+
+		fn collection(v: &[Geometry]) -> Value {
+			v.iter().map(Geometry::as_coordinates).collect::<Vec<Value>>().into()
+		}
+
+		match self {
+			Self::Point(v) => point(v),
+			Self::Line(v) => line(v),
+			Self::Polygon(v) => polygon(v),
+			Self::MultiPoint(v) => multipoint(v),
+			Self::MultiLine(v) => multiline(v),
+			Self::MultiPolygon(v) => multipolygon(v),
+			Self::Collection(v) => collection(v),
+		}
+	}
+}
+
 impl PartialOrd for Geometry {
 	#[rustfmt::skip]
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		fn coord(coord: &Coord) -> (f64, f64) {
-			coord.x_y()
+		fn coord(v: &Coord) -> (f64, f64) {
+			v.x_y()
 		}
 
-		fn point(point: &Point) -> (f64, f64) {
-			coord(&point.0)
+		fn point(v: &Point) -> (f64, f64) {
+			coord(&v.0)
 		}
 
-		fn line(line: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			line.into_iter().map(coord)
+		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.into_iter().map(coord)
 		}
 
-		fn polygon(polygon: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
-			polygon.interiors().iter().chain(once(polygon.exterior())).flat_map(line)
+		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.interiors().iter().chain(once(v.exterior())).flat_map(line)
 		}
 
-		fn multi_point(multi_point: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
-			multi_point.iter().map(point)
+		fn multipoint(v: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().map(point)
 		}
 
-		fn multi_line(multi_line: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			multi_line.iter().flat_map(line)
+		fn multiline(v: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(line)
 		}
 
-		fn multi_polygon(multi_polygon: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
-			multi_polygon.iter().flat_map(polygon)
+		fn multipolygon(v: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(polygon)
 		}
 
 		match (self, other) {
@@ -125,9 +216,9 @@ impl PartialOrd for Geometry {
 			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
 			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
 			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
-			(Self::MultiPoint(a), Self::MultiPoint(b)) => multi_point(a).partial_cmp(multi_point(b)),
-			(Self::MultiLine(a), Self::MultiLine(b)) => multi_line(a).partial_cmp(multi_line(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multi_polygon(a).partial_cmp(multi_polygon(b)),
+			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
+			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
+			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
 			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
 		}
 	}
@@ -547,13 +638,11 @@ fn simple(i: &str) -> IResult<&str, Geometry> {
 }
 
 fn normal(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbraces(i)?;
 	let (i, v) = alt((point, line, polygon, multipoint, multiline, multipolygon, collection))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	let (i, _) = closebraces(i)?;
 	Ok((i, v))
 }
 
@@ -706,15 +795,11 @@ fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
 	let (i, e) = line_vals(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, v) = separated_list0(commas, line_vals)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = closebracket(i)?;
-	let (i, v) = separated_list0(commas, |i| {
-		let (i, _) = openbracket(i)?;
-		let (i, v) = line_vals(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = closebracket(i)?;
-		Ok((i, v))
-	})(i)?;
 	Ok((i, Polygon::new(e, v)))
 }
 
@@ -876,10 +961,63 @@ mod tests {
 
 	#[test]
 	fn simple() {
-		let sql = "(51.509865, -0.118092)";
+		let sql = "(-0.118092, 51.509865)";
 		let res = geometry(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("(51.509865, -0.118092)", format!("{}", out));
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn point() {
+		let sql = r#"{
+			type: 'Point',
+			coordinates: [-0.118092, 51.509865]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_exterior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_interior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				],
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]]] }", format!("{}", out));
 	}
 }

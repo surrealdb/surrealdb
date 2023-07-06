@@ -1,4 +1,3 @@
-use super::LOG;
 use super::PATH;
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
@@ -17,6 +16,7 @@ use crate::api::opt::Tls;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
+use crate::sql::serde::deserialize;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -26,6 +26,7 @@ use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
+use serde::Deserialize;
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -241,7 +242,7 @@ pub(crate) fn router(
 									request.insert("params".to_owned(), params.into());
 								}
 								let payload = Value::from(request);
-								trace!(target: LOG, "Request {payload}");
+								trace!("Request {payload}");
 								Message::Binary(payload.into())
 							};
 							if let Method::Authenticate
@@ -266,7 +267,7 @@ pub(crate) fn router(
 												.await
 												.is_err()
 											{
-												trace!(target: LOG, "Receiver dropped");
+												trace!("Receiver dropped");
 											}
 										}
 									}
@@ -274,7 +275,7 @@ pub(crate) fn router(
 								Err(error) => {
 									let error = Error::Ws(error.to_string());
 									if response.into_send_async(Err(error.into())).await.is_err() {
-										trace!(target: LOG, "Receiver dropped");
+										trace!("Receiver dropped");
 									}
 									break;
 								}
@@ -283,39 +284,60 @@ pub(crate) fn router(
 						Either::Response(result) => {
 							last_activity = Instant::now();
 							match result {
-								Ok(message) => match Response::try_from(message) {
+								Ok(message) => match Response::try_from(&message) {
 									Ok(option) => {
 										if let Some(response) = option {
-											trace!(target: LOG, "{response:?}");
+											trace!("{response:?}");
 											if let Some(Ok(id)) =
 												response.id.map(Value::coerce_to_i64)
 											{
-												if let Some((method, sender)) = routes.remove(&id) {
+												if let Some((_method, sender)) = routes.remove(&id)
+												{
 													let _res = sender
-														.into_send_async(DbResponse::from((
-															method,
-															response.content,
-														)))
+														.into_send_async(DbResponse::from(
+															response.result,
+														))
 														.await;
 												}
 											}
 										}
 									}
-									Err(_error) => {
-										// Unfortunately, we don't know which response failed to deserialize
-										warn!(target: LOG, "Failed to deserialise message");
+									Err(error) => {
+										#[derive(Deserialize)]
+										struct Response {
+											id: Option<Value>,
+										}
+
+										// Let's try to find out the ID of the response that failed to deserialise
+										if let Message::Binary(binary) = message {
+											if let Ok(Response {
+												id,
+											}) = deserialize(&binary)
+											{
+												// Return an error if an ID was returned
+												if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+													if let Some((_method, sender)) =
+														routes.remove(&id)
+													{
+														let _res = sender
+															.into_send_async(Err(error))
+															.await;
+													}
+												}
+											} else {
+												// Unfortunately, we don't know which response failed to deserialize
+												warn!("Failed to deserialise message; {error:?}");
+											}
+										}
 									}
 								},
 								Err(error) => {
 									match error {
 										WsError::ConnectionClosed => {
-											trace!(
-												target: LOG,
-												"Connection successfully closed on the server"
-											);
+											trace!("Connection successfully closed on the server");
 										}
 										error => {
-											trace!(target: LOG, "{error}");
+											trace!("{error}");
 										}
 									}
 									break;
@@ -325,9 +347,9 @@ pub(crate) fn router(
 						Either::Ping => {
 							// only ping if we haven't talked to the server recently
 							if last_activity.elapsed() >= PING_INTERVAL {
-								trace!(target: LOG, "Pinging the server");
+								trace!("Pinging the server");
 								if let Err(error) = socket_sink.send(ping.clone()).await {
-									trace!(target: LOG, "failed to ping the server; {error:?}");
+									trace!("failed to ping the server; {error:?}");
 									break;
 								}
 							}
@@ -340,13 +362,13 @@ pub(crate) fn router(
 			}
 
 			'reconnect: loop {
-				trace!(target: LOG, "Reconnecting...");
+				trace!("Reconnecting...");
 				match connect(&url, Some(config), maybe_connector.clone()).await {
 					Ok(s) => {
 						socket = s;
 						for (_, message) in &replay {
 							if let Err(error) = socket.send(message.clone()).await {
-								trace!(target: LOG, "{error}");
+								trace!("{error}");
 								time::sleep(time::Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
@@ -360,18 +382,18 @@ pub(crate) fn router(
 								vec![key.as_str().into(), value.clone()].into(),
 							);
 							let payload = Value::from(request);
-							trace!(target: LOG, "Request {payload}");
+							trace!("Request {payload}");
 							if let Err(error) = socket.send(Message::Binary(payload.into())).await {
-								trace!(target: LOG, "{error}");
+								trace!("{error}");
 								time::sleep(time::Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
 						}
-						trace!(target: LOG, "Reconnected successfully");
+						trace!("Reconnected successfully");
 						break;
 					}
 					Err(error) => {
-						trace!(target: LOG, "Failed to reconnect; {error}");
+						trace!("Failed to reconnect; {error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 					}
 				}
@@ -381,33 +403,33 @@ pub(crate) fn router(
 }
 
 impl Response {
-	fn try_from(message: Message) -> Result<Option<Self>> {
+	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
-				trace!(target: LOG, "Received an unexpected text message; {text}");
+				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => bung::from_slice(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
-					binary,
+					binary: binary.clone(),
 					error,
 				}
 				.into()
 			}),
 			Message::Ping(..) => {
-				trace!(target: LOG, "Received a ping from the server");
+				trace!("Received a ping from the server");
 				Ok(None)
 			}
 			Message::Pong(..) => {
-				trace!(target: LOG, "Received a pong from the server");
+				trace!("Received a pong from the server");
 				Ok(None)
 			}
 			Message::Frame(..) => {
-				trace!(target: LOG, "Received an unexpected raw frame");
+				trace!("Received an unexpected raw frame");
 				Ok(None)
 			}
 			Message::Close(..) => {
-				trace!(target: LOG, "Received an unexpected close message");
+				trace!("Received an unexpected close message");
 				Ok(None)
 			}
 		}
@@ -421,9 +443,9 @@ impl Drop for Socket {
 		if let Some(mut conn) = mem::take(&mut self.0) {
 			futures::executor::block_on(async move {
 				match conn.borrow_mut().close().await {
-					Ok(..) => trace!(target: LOG, "Connection closed successfully"),
+					Ok(..) => trace!("Connection closed successfully"),
 					Err(error) => {
-						trace!(target: LOG, "Failed to close database connection; {error}")
+						trace!("Failed to close database connection; {error}")
 					}
 				}
 			});

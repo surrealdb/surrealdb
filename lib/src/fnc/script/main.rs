@@ -5,7 +5,8 @@ use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::async_with;
@@ -19,6 +20,8 @@ use js::Module;
 pub async fn run(
 	ctx: &Context<'_>,
 	_opt: &Options,
+	_txn: &Transaction,
+	doc: Option<&CursorDoc<'_>>,
 	src: &str,
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -26,8 +29,6 @@ pub async fn run(
 	if ctx.is_done() {
 		return Ok(Value::None);
 	}
-	// Get the optional doc
-	let doc = ctx.doc();
 	// Create an JavaScript context
 	let run = js::AsyncRuntime::new().unwrap();
 	// Explicitly set max stack size to 256 KiB
@@ -68,6 +69,8 @@ pub async fn run(
 			let res = ctx.compile("script", src)?;
 			// Attempt to fetch the main export
 			let fnc = res.get::<_, Function>("default")?;
+			// Extract the doc if any
+			let doc = doc.map(|v|v.doc.as_ref());
 			// Execute the main function
 			let promise: Promise<Value> = fnc.call((This(doc), Rest(arg)))?;
 			promise.await

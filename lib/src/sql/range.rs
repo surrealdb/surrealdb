@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
@@ -48,17 +49,23 @@ impl TryFrom<&str> for Range {
 
 impl Range {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		Ok(Value::Range(Box::new(Range {
 			tb: self.tb.clone(),
 			beg: match &self.beg {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt).await?),
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 			end: match &self.end {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt).await?),
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 		})))

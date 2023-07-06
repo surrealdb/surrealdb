@@ -11,6 +11,7 @@ pub struct Hb {
 	_c: u8,
 	_d: u8,
 	pub hb: Timestamp,
+	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
 

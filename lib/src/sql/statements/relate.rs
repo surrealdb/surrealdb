@@ -1,9 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
@@ -55,7 +56,13 @@ impl RelateStatement {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -63,11 +70,11 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(ctx, opt).await? {
+			match self.from.compute(ctx, opt, txn, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -109,7 +116,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(ctx, opt).await? {
+			match self.with.compute(ctx, opt, txn, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -158,7 +165,7 @@ impl RelateStatement {
 					// The relation does not have a specific record id
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
-						Some(data) => match data.rid(ctx, opt, tb).await {
+						Some(data) => match data.rid(ctx, opt, txn, tb).await {
 							// There was a problem creating the record id
 							Err(e) => return Err(e),
 							// There is an id field so use the record id
@@ -175,7 +182,7 @@ impl RelateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, &stm).await
+		i.output(ctx, opt, txn, &stm).await
 	}
 }
 

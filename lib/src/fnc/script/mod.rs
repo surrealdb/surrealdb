@@ -1,7 +1,5 @@
 #![cfg(feature = "scripting")]
 
-const LOG: &str = "surrealdb::jsr";
-
 pub use main::run;
 
 mod classes;

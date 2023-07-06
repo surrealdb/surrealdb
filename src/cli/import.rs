@@ -1,7 +1,6 @@
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
-use crate::cli::LOG;
 use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::connect;
@@ -44,14 +43,18 @@ pub async fn init(
 		password: &password,
 	};
 	// Connect to the database engine
-	let client = connect((endpoint, root)).await?;
+	#[cfg(feature = "has-storage")]
+	let address = (endpoint, root);
+	#[cfg(not(feature = "has-storage"))]
+	let address = endpoint;
+	let client = connect(address).await?;
 	// Sign in to the server
 	client.signin(root).await?;
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;
 	// Import the data into the database
 	client.import(file).await?;
-	info!(target: LOG, "The SQL file was imported successfully");
+	info!("The SQL file was imported successfully");
 	// Everything OK
 	Ok(())
 }

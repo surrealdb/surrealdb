@@ -1,3 +1,4 @@
+#[cfg(feature = "has-storage")]
 use std::{
 	path::{Path, PathBuf},
 	str::FromStr,
@@ -6,6 +7,7 @@ use std::{
 
 pub(crate) mod parser;
 
+#[cfg(feature = "has-storage")]
 pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 	match v {
 		"memory" => Ok(v.to_string()),
@@ -18,6 +20,7 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 	}
 }
 
+#[cfg(feature = "has-storage")]
 pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 	let path = Path::new(path);
 	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {
@@ -59,6 +62,7 @@ pub(crate) fn into_valid(v: &str) -> Result<String, String> {
 	}
 }
 
+#[cfg(feature = "has-storage")]
 pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 	match v.len() {
 		16 => Ok(v.to_string()),
@@ -68,6 +72,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 	}
 }
 
+#[cfg(feature = "has-storage")]
 pub(crate) fn duration(v: &str) -> Result<Duration, String> {
 	surrealdb::sql::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
 }

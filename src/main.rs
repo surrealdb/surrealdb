@@ -11,19 +11,24 @@
 #![forbid(unsafe_code)]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
+#[cfg(feature = "has-storage")]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
+#[cfg(feature = "has-storage")]
 mod dbs;
 mod env;
 mod err;
+#[cfg(feature = "has-storage")]
 mod iam;
+#[cfg(feature = "has-storage")]
 mod net;
 mod o11y;
+#[cfg(feature = "has-storage")]
 mod rpc;
 
 use std::future::Future;

@@ -13,7 +13,7 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::{Uuid, Value};
+use crate::sql::value::Value;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -34,9 +34,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(debug_assertions)]
-const LOG: &str = "surrealdb::txn";
+use uuid::Uuid;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -96,7 +94,7 @@ impl Transaction {
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Closed");
+		trace!("Closed");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -138,7 +136,7 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Cancel");
+		trace!("Cancel");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -180,7 +178,7 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Commit");
+		trace!("Commit");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -224,7 +222,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Del {:?}", key);
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -268,7 +266,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Exi {:?}", key);
+		trace!("Exi {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -312,7 +310,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Get {:?}", key);
+		trace!("Get {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -357,7 +355,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Set {:?} => {:?}", key, val);
+		trace!("Set {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -402,7 +400,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Put {:?} => {:?}", key, val);
+		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -448,7 +446,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -493,7 +491,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
+		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -538,7 +536,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
+		trace!("Delc {:?} if {:?}", key, chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -796,14 +794,14 @@ impl Transaction {
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
 	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::cl::Cl::new(id.0);
-		match self.get_cl(id.clone()).await? {
+		let key = crate::key::cl::Cl::new(id);
+		match self.get_cl(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
-				value: id.0.to_string(),
+				value: id.to_string(),
 			}),
 			None => {
 				let value = ClusterMembership {
-					name: id.0.to_string(),
+					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
 				self.put(key, value).await?;
@@ -814,7 +812,7 @@ impl Transaction {
 
 	// Retrieve cluster information
 	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
-		let key = crate::key::cl::Cl::new(id.0);
+		let key = crate::key::cl::Cl::new(id);
 		let val = self.get(key).await?;
 		match val {
 			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
@@ -833,12 +831,12 @@ impl Transaction {
 	// Set heartbeat
 	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
 		let now = self.clock();
-		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+		let key = crate::key::hb::Hb::new(now.clone(), id);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
 			ClusterMembership {
-				name: id.0.to_string(),
+				name: id.to_string(),
 				heartbeat: now,
 			},
 		)

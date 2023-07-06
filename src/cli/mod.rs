@@ -5,6 +5,7 @@ mod export;
 mod import;
 mod isready;
 mod sql;
+#[cfg(feature = "has-storage")]
 mod start;
 mod upgrade;
 pub(crate) mod validator;
@@ -14,15 +15,15 @@ use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
+#[cfg(feature = "has-storage")]
 pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use sql::SqlCommandArguments;
+#[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
 use std::process::ExitCode;
-
-pub const LOG: &str = "surrealdb::cli";
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -49,6 +50,7 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
+	#[cfg(feature = "has-storage")]
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
 	#[command(about = "Backup data to or from an existing database")]
@@ -73,6 +75,7 @@ enum Commands {
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
 	let output = match args.command {
+		#[cfg(feature = "has-storage")]
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,
@@ -83,7 +86,7 @@ pub async fn init() -> ExitCode {
 		Commands::IsReady(args) => isready::init(args).await,
 	};
 	if let Err(e) = output {
-		error!(target: LOG, "{}", e);
+		error!("{}", e);
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS

@@ -1,9 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -42,7 +43,13 @@ impl DeleteStatement {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -50,10 +57,10 @@ impl DeleteStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt).await?;
+			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
@@ -109,7 +116,7 @@ impl DeleteStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, &stm).await
+		i.output(ctx, opt, txn, &stm).await
 	}
 }
 

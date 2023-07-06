@@ -48,9 +48,7 @@ impl Connection for Db {
 
 			router(address, conn_tx, route_rx);
 
-			if let Err(error) = conn_rx.into_recv_async().await? {
-				return Err(error);
-			}
+			conn_rx.into_recv_async().await??;
 
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {
@@ -104,6 +102,8 @@ pub(crate) fn router(
 			}
 		};
 
+		let kvs = kvs.with_strict_mode(address.strict);
+
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
 		let configured_root = match address.auth {
@@ -122,15 +122,8 @@ pub(crate) fn router(
 		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(
-				route.request,
-				&kvs,
-				&configured_root,
-				address.strict,
-				&mut session,
-				&mut vars,
-			)
-			.await
+			match super::router(route.request, &kvs, &configured_root, &mut session, &mut vars)
+				.await
 			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;

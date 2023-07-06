@@ -15,7 +15,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -61,7 +61,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
@@ -92,17 +92,23 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
-	let sql = r"
+async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(), Error> {
+	let sql = format!(
+		r"
 		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
-		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' EXPLAIN;
-	";
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {} EXPLAIN;
+	",
+		if parallel {
+			"PARALLEL"
+		} else {
+			""
+		}
+	);
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -142,6 +148,16 @@ async fn select_where_matches_using_index_and_arrays() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_where_matches_using_index_and_arrays_non_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_arrays(false).await
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_arrays(true).await
+}
+
+#[tokio::test]
 async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
@@ -152,7 +168,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	for _ in 0..4 {
@@ -164,7 +180,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 			{
 				id: blog:1,
 				title: {
-					0: [{s:5, e:10}],		
+					0: [{s:5, e:10}],
 				},
 				content: {
 					0: [{s:0, e:5}],
@@ -206,7 +222,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..6 {
@@ -240,7 +256,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..7 {

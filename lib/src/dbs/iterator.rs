@@ -1,10 +1,11 @@
 use crate::ctx::Canceller;
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::LOG;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::Plan;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
@@ -75,37 +76,38 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!(target: LOG, "Iterating: {}", stm);
+		trace!("Iterating: {}", stm);
 		// Enable context override
-		let mut run = Context::new(ctx);
-		self.run = run.add_cancel();
+		let mut cancel_ctx = Context::new(ctx);
+		self.run = cancel_ctx.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(ctx, opt, stm).await?;
+		self.setup_limit(&cancel_ctx, opt, txn, stm).await?;
 		// Process the query START clause
-		self.setup_start(ctx, opt, stm).await?;
+		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Process any EXPLAIN clause
-		let explanation = self.output_explain(ctx, opt, stm)?;
+		let explanation = self.output_explain(&cancel_ctx, opt, txn, stm)?;
 		// Process prepared values
-		self.iterate(ctx, opt, stm).await?;
+		self.iterate(&cancel_ctx, opt, txn, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
 		}
 		// Process any SPLIT clause
-		self.output_split(ctx, opt, stm).await?;
+		self.output_split(ctx, opt, txn, stm).await?;
 		// Process any GROUP clause
-		self.output_group(ctx, opt, stm).await?;
+		self.output_group(ctx, opt, txn, stm).await?;
 		// Process any ORDER clause
-		self.output_order(ctx, opt, stm).await?;
+		self.output_order(ctx, opt, txn, stm).await?;
 		// Process any START clause
-		self.output_start(ctx, opt, stm).await?;
+		self.output_start(ctx, opt, txn, stm).await?;
 		// Process any LIMIT clause
-		self.output_limit(ctx, opt, stm).await?;
+		self.output_limit(ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
-		self.output_fetch(ctx, opt, stm).await?;
+		self.output_fetch(ctx, opt, txn, stm).await?;
 		// Add the EXPLAIN clause to the result
 		if let Some(e) = explanation {
 			self.results.push(e);
@@ -119,10 +121,11 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.limit() {
-			self.limit = Some(v.process(ctx, opt).await?);
+			self.limit = Some(v.process(ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -132,10 +135,11 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(ctx, opt).await?);
+			self.start = Some(v.process(ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -145,6 +149,7 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(splits) = stm.split() {
@@ -163,7 +168,7 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(ctx, opt, split, val).await?;
+								obj.set(ctx, opt, txn, split, val).await?;
 								// Add the object to the results
 								self.results.push(obj);
 							}
@@ -172,7 +177,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(ctx, opt, split, val).await?;
+							obj.set(ctx, opt, txn, split, val).await?;
 							// Add the object to the results
 							self.results.push(obj);
 						}
@@ -188,6 +193,7 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fields) = stm.expr() {
@@ -235,20 +241,21 @@ impl Iterator {
 								.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
 							match expr {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals.all().get(ctx, opt, idiom.as_ref()).await?;
-									let x = f.aggregate(x).compute(ctx, opt).await?;
-									obj.set(ctx, opt, idiom.as_ref(), x).await?;
+									let x =
+										vals.all().get(ctx, opt, txn, None, idiom.as_ref()).await?;
+									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
+									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 								_ => {
 									let x = vals.first();
-									let mut child_ctx = Context::new(ctx);
-									child_ctx.add_cursor_doc(&x);
 									let x = if let Some(alias) = alias {
-										alias.compute(&child_ctx, opt).await?
+										let cur = CursorDoc::new(None, None, &x);
+										alias.compute(ctx, opt, txn, Some(&cur)).await?
 									} else {
-										expr.compute(&child_ctx, opt).await?
+										let cur = CursorDoc::new(None, None, &x);
+										expr.compute(ctx, opt, txn, Some(&cur)).await?
 									};
-									obj.set(ctx, opt, idiom.as_ref(), x).await?;
+									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 							}
 						}
@@ -266,6 +273,7 @@ impl Iterator {
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
+		_txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(orders) = stm.order() {
@@ -304,6 +312,7 @@ impl Iterator {
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = self.start {
@@ -317,6 +326,7 @@ impl Iterator {
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = self.limit {
@@ -330,6 +340,7 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
@@ -337,7 +348,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut self.results {
 					// Fetch the value at the path
-					obj.fetch(ctx, opt, fetch).await?;
+					obj.fetch(ctx, opt, txn, fetch).await?;
 				}
 			}
 		}
@@ -349,6 +360,7 @@ impl Iterator {
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
+		_txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Option<Value>, Error> {
 		Ok(if stm.explain() {
@@ -406,13 +418,14 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, stm, self).await?;
+			v.iterate(ctx, opt, txn, stm, self).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -424,6 +437,7 @@ impl Iterator {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
@@ -434,7 +448,7 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, stm, self).await?;
+					v.iterate(ctx, opt, txn, stm, self).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -453,7 +467,7 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
-						e.spawn(v.channel(ctx, opt, stm, chn.clone()))
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -465,8 +479,8 @@ impl Iterator {
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
-					while let Ok((k, v)) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, stm, chn.clone(), k, v))
+					while let Ok((k, d, v)) = docs.recv().await {
+						e.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), k, d, v))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -495,11 +509,15 @@ impl Iterator {
 	}
 
 	/// Process a new record Thing and Value
+	#[allow(clippy::too_many_arguments)]
 	pub async fn process(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
+		thg: Option<Thing>,
+		doc_id: Option<DocId>,
 		val: Operable,
 	) {
 		// Check current context
@@ -513,15 +531,15 @@ impl Iterator {
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(ctx.thing(), &val, ext);
+		let mut doc = Document::new(thg.as_ref(), doc_id, &val, ext);
 		// Process the document
 		let res = match stm {
-			Statement::Select(_) => doc.select(ctx, opt, stm).await,
-			Statement::Create(_) => doc.create(ctx, opt, stm).await,
-			Statement::Update(_) => doc.update(ctx, opt, stm).await,
-			Statement::Relate(_) => doc.relate(ctx, opt, stm).await,
-			Statement::Delete(_) => doc.delete(ctx, opt, stm).await,
-			Statement::Insert(_) => doc.insert(ctx, opt, stm).await,
+			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
+			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
+			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
+			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
+			Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
+			Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
 			_ => unreachable!(),
 		};
 		// Process the result

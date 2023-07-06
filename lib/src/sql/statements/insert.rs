@@ -1,9 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
@@ -45,7 +46,13 @@ impl InsertStatement {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -53,7 +60,7 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Parse the expression
 		match &self.data {
 			// Check if this is a traditional statement
@@ -63,8 +70,8 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(ctx, opt).await?;
-						o.set(ctx, opt, k, v).await?;
+						let v = v.compute(ctx, opt, txn, None).await?;
+						o.set(ctx, opt, txn, k, v).await?;
 					}
 					// Specify the new table record id
 					let id = o.rid().generate(&self.into, true)?;
@@ -74,7 +81,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(ctx, opt).await?;
+				let v = v.compute(ctx, opt, txn, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -102,7 +109,7 @@ impl InsertStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, &stm).await
+		i.output(ctx, opt, txn, &stm).await
 	}
 }
 

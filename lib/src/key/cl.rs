@@ -10,6 +10,7 @@ pub struct Cl {
 	_a: u8,
 	_b: u8,
 	_c: u8,
+	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
 

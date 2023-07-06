@@ -1,7 +1,8 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
@@ -106,7 +107,6 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
-#[format(Named)]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to
@@ -2485,21 +2485,27 @@ impl Value {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self {
-			Value::Cast(v) => v.compute(ctx, opt).await,
-			Value::Thing(v) => v.compute(ctx, opt).await,
-			Value::Block(v) => v.compute(ctx, opt).await,
-			Value::Range(v) => v.compute(ctx, opt).await,
-			Value::Param(v) => v.compute(ctx, opt).await,
-			Value::Idiom(v) => v.compute(ctx, opt).await,
-			Value::Array(v) => v.compute(ctx, opt).await,
-			Value::Object(v) => v.compute(ctx, opt).await,
-			Value::Future(v) => v.compute(ctx, opt).await,
-			Value::Constant(v) => v.compute(ctx, opt).await,
-			Value::Function(v) => v.compute(ctx, opt).await,
-			Value::Subquery(v) => v.compute(ctx, opt).await,
-			Value::Expression(v) => v.compute(ctx, opt).await,
+			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}
@@ -2942,13 +2948,13 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(5, Value::None.to_vec().len());
-		assert_eq!(5, Value::Null.to_vec().len());
-		assert_eq!(7, Value::Bool(true).to_vec().len());
-		assert_eq!(7, Value::Bool(false).to_vec().len());
-		assert_eq!(13, Value::from("test").to_vec().len());
-		assert_eq!(29, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(45, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		assert_eq!(1, Value::None.to_vec().len());
+		assert_eq!(1, Value::Null.to_vec().len());
+		assert_eq!(2, Value::Bool(true).to_vec().len());
+		assert_eq!(2, Value::Bool(false).to_vec().len());
+		assert_eq!(6, Value::from("test").to_vec().len());
+		assert_eq!(15, Value::parse("{ hello: 'world' }").to_vec().len());
+		assert_eq!(22, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
 	}
 
 	#[test]

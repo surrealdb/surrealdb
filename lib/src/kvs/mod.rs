@@ -29,5 +29,3 @@ mod tests;
 pub use self::ds::*;
 pub use self::kv::*;
 pub use self::tx::*;
-
-pub(crate) const LOG: &str = "surrealdb::kvs";
