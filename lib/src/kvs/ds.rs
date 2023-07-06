@@ -447,8 +447,6 @@ impl Datastore {
 		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
 		let mut ctx = Context::default();
-		// Add the transaction
-		ctx.add_transaction(Some(&txn));
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
@@ -462,7 +460,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Compute the value
-		let res = val.compute(&ctx, &opt).await?;
+		let res = val.compute(&ctx, &opt, &txn, None).await?;
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,

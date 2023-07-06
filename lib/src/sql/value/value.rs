@@ -1,7 +1,8 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
@@ -2484,21 +2485,27 @@ impl Value {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self {
-			Value::Cast(v) => v.compute(ctx, opt).await,
-			Value::Thing(v) => v.compute(ctx, opt).await,
-			Value::Block(v) => v.compute(ctx, opt).await,
-			Value::Range(v) => v.compute(ctx, opt).await,
-			Value::Param(v) => v.compute(ctx, opt).await,
-			Value::Idiom(v) => v.compute(ctx, opt).await,
-			Value::Array(v) => v.compute(ctx, opt).await,
-			Value::Object(v) => v.compute(ctx, opt).await,
-			Value::Future(v) => v.compute(ctx, opt).await,
-			Value::Constant(v) => v.compute(ctx, opt).await,
-			Value::Function(v) => v.compute(ctx, opt).await,
-			Value::Subquery(v) => v.compute(ctx, opt).await,
-			Value::Expression(v) => v.compute(ctx, opt).await,
+			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

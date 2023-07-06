@@ -11,6 +11,6 @@ impl<'a> Document<'a> {
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		self.current.to_mut().clear()
+		self.current.doc.to_mut().clear()
 	}
 }

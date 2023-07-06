@@ -4523,7 +4523,6 @@ dependencies = [
  "async-channel",
  "async-executor",
  "async-recursion",
- "async-trait",
  "base64 0.21.2",
  "bcrypt",
  "bincode",

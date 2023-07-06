@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::bkeys::FstKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, Statistics};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use roaring::RoaringTreemap;
@@ -11,7 +11,7 @@ pub(crate) type TermId = u64;
 pub(super) struct Terms {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree<TermsKeyProvider>,
+	btree: BTree,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 	updated: bool,
@@ -23,9 +23,7 @@ impl Terms {
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 	) -> Result<Self, Error> {
-		let keys = TermsKeyProvider {
-			index_key_base: index_key_base.clone(),
-		};
+		let keys = KeyProvider::Terms(index_key_base.clone());
 		let state_key: Key = keys.get_state_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
@@ -140,20 +138,6 @@ impl State {
 			available_ids: None,
 			next_term_id: 0,
 		}
-	}
-}
-
-#[derive(Clone)]
-struct TermsKeyProvider {
-	index_key_base: IndexKeyBase,
-}
-
-impl KeyProvider for TermsKeyProvider {
-	fn get_node_key(&self, node_id: NodeId) -> Key {
-		self.index_key_base.new_bt_key(Some(node_id))
-	}
-	fn get_state_key(&self) -> Key {
-		self.index_key_base.new_bt_key(None)
 	}
 }
 
