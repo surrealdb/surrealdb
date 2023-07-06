@@ -172,7 +172,23 @@ async fn function_array_append() -> Result<(), Error> {
 	Ok(())
 }
 
-// Skipping array_boolean_and since it's similar enough to 'or'.
+#[tokio::test]
+async fn function_array_boolean_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_and([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_and([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_and([true, false], [false]);
+RETURN array::boolean_and([true, true], [false]);"#,
+		&[
+			"[false, false, false, true]",
+			"[false, false, false, true]",
+			"[false, false]",
+			"[false, false]",
+		],
+	)
+	.await?;
+	Ok(())
+}
 
 #[tokio::test]
 async fn function_array_boolean_not() -> Result<(), Error> {
