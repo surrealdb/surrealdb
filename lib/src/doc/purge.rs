@@ -34,7 +34,7 @@ impl<'a> Document<'a> {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Get the record id
-		if let Some(rid) = self.id {
+		if let Some(rid) = &self.id {
 			// Purge the record data
 			let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
 			run.del(key).await?;

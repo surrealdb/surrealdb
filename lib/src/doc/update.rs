@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 		// Merge fields data
 		self.field(ctx, opt, txn, stm).await?;
 		// Reset fields data
-		self.reset(ctx, opt, stm).await?;
+		self.reset(ctx, opt, txn, stm).await?;
 		// Clean fields data
 		self.clean(ctx, opt, txn, stm).await?;
 		// Check if allowed

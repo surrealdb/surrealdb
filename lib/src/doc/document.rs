@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub(crate) struct Document<'a> {
-	pub(super) id: Option<&'a Thing>,
+	pub(super) id: Option<Thing>,
 	pub(super) doc_id: Option<DocId>,
 	pub(super) extras: Workable,
 	pub(super) current: Cow<'a, Value>,
@@ -37,12 +37,7 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 }
 
 impl<'a> Document<'a> {
-	pub fn new(
-		id: Option<&'a Thing>,
-		doc_id: Option<DocId>,
-		val: &'a Value,
-		ext: Workable,
-	) -> Self {
+	pub fn new(id: Option<Thing>, doc_id: Option<DocId>, val: &'a Value, ext: Workable) -> Self {
 		Document {
 			id,
 			doc_id,
@@ -55,11 +50,11 @@ impl<'a> Document<'a> {
 
 impl<'a> Document<'a> {
 	pub(crate) fn current_doc(&self) -> CursorDoc {
-		CursorDoc::new(self.id, self.doc_id, Some(self.current.as_ref()))
+		CursorDoc::new(self.id.as_ref(), self.doc_id, Some(self.current.as_ref()))
 	}
 
 	pub(crate) fn initial_doc(&self) -> CursorDoc {
-		CursorDoc::new(self.id, self.doc_id, Some(self.initial.as_ref()))
+		CursorDoc::new(self.id.as_ref(), self.doc_id, Some(self.initial.as_ref()))
 	}
 
 	/// Check if document has changed

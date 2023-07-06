@@ -536,7 +536,7 @@ impl Iterator {
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(thg.as_ref(), doc_id, &val, ext);
+		let mut doc = Document::new(thg, doc_id, &val, ext);
 		// Process the document
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
