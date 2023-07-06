@@ -284,6 +284,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("concat"),
 			tag("difference"),
 			tag("distinct"),
+			tag("filter_index"),
 			tag("find_index"),
 			tag("flatten"),
 			tag("group"),

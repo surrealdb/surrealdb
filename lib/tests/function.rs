@@ -386,6 +386,17 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_filter_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
+RETURN array::filter_index([0, 0, 2], 0);
+RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
+RETURN array::filter_index(["nothing here"], 0);"#;
+	let desired_responses = ["[1]", "[0, 1]", "[1, 3]", "[]"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_find_index() -> Result<(), Error> {
 	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
 RETURN array::find_index(["hello world", null, true], null);

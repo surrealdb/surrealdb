@@ -113,6 +113,21 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
+pub fn filter_index((array, value): (Array, Value)) -> Result<Value, Error> {
+	Ok(array
+		.iter()
+		.enumerate()
+		.filter_map(|(i, v)| {
+			if *v == value {
+				Some(Value::from(i))
+			} else {
+				None
+			}
+		})
+		.collect::<Vec<_>>()
+		.into())
+}
+
 pub fn find_index((array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array
 		.iter()

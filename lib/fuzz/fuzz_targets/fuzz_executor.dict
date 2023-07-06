@@ -161,6 +161,7 @@
 "array::concat("
 "array::difference("
 "array::distinct("
+"array::filter_index("
 "array::find_index("
 "array::flatten("
 "array::group("

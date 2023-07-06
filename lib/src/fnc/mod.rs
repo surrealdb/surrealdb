@@ -83,6 +83,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::filter_index" => array::filter_index,
 		"array::find_index" => array::find_index,
 		"array::flatten" => array::flatten,
 		"array::group" => array::group,
