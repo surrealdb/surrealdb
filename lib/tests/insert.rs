@@ -16,7 +16,7 @@ async fn insert_statement_object_single() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -44,7 +44,7 @@ async fn insert_statement_object_multiple() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -66,7 +66,7 @@ async fn insert_statement_values_single() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -83,7 +83,7 @@ async fn insert_statement_values_multiple() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -105,7 +105,7 @@ async fn insert_statement_values_retable_id() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -128,7 +128,7 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -149,7 +149,7 @@ async fn insert_statement_output() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;

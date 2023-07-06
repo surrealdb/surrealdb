@@ -54,12 +54,12 @@ impl LiveStatement {
 				// Clone the current statement
 				let mut stm = self.clone();
 				// Store the current Node ID
-				stm.node = Uuid(*opt.id);
+				stm.node = Uuid(opt.id()?);
 				// Insert the node live query
-				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
+				let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, &self.id);
+				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, self.id.0);
 				run.putc(key, stm, None).await?;
 			}
 			v => {
@@ -69,7 +69,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(Value::Uuid(self.id.clone()))
+		Ok(self.id.clone().into())
 	}
 }
 

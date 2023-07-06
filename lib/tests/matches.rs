@@ -15,7 +15,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -61,7 +61,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
@@ -108,7 +108,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	);
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -168,7 +168,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	for _ in 0..4 {
@@ -180,7 +180,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 			{
 				id: blog:1,
 				title: {
-					0: [{s:5, e:10}],		
+					0: [{s:5, e:10}],
 				},
 				content: {
 					0: [{s:0, e:5}],
@@ -222,7 +222,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..6 {
@@ -256,7 +256,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..7 {

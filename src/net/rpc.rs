@@ -13,7 +13,6 @@ use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
 use futures::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
-
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -125,35 +124,37 @@ impl Rpc {
 		let moved_rpc = rpc.clone();
 		tokio::task::spawn(async move {
 			let rpc = moved_rpc;
-			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
-				trace!("Received notification: {:?}", v);
-				// Find which websocket the notification belongs to
-				match LIVE_QUERIES.read().await.get(&v.id) {
-					Some(ws_id) => {
-						// Send the notification to the client
-						let msg_text = res::success(None, v.clone());
-						let ws_write = WEBSOCKETS.write().await;
-						match ws_write.get(ws_id) {
-							None => {
-								error!(
-									"Tracked WebSocket {:?} not found for lq: {:?}",
-									ws_id, &v.id
-								);
-							}
-							Some(ws_sender) => {
-								msg_text
-									.send(rpc.read().await.format.clone(), ws_sender.clone())
-									.await;
-								trace!(
-									"Sent notification to WebSocket {:?} for lq: {:?}",
-									ws_id,
-									&v.id
-								);
+			if let Some(channel) = DB.get().unwrap().notifications() {
+				while let Ok(v) = channel.recv().await {
+					trace!("Received notification: {:?}", v);
+					// Find which websocket the notification belongs to
+					match LIVE_QUERIES.read().await.get(&v.id) {
+						Some(ws_id) => {
+							// Send the notification to the client
+							let msg_text = res::success(None, v.clone());
+							let ws_write = WEBSOCKETS.write().await;
+							match ws_write.get(ws_id) {
+								None => {
+									error!(
+										"Tracked WebSocket {:?} not found for lq: {:?}",
+										ws_id, &v.id
+									);
+								}
+								Some(ws_sender) => {
+									msg_text
+										.send(rpc.read().await.format.clone(), ws_sender.clone())
+										.await;
+									trace!(
+										"Sent notification to WebSocket {:?} for lq: {:?}",
+										ws_id,
+										&v.id
+									);
+								}
 							}
 						}
-					}
-					None => {
-						error!("Unknown websocket for live query: {:?}", v.id);
+						None => {
+							error!("Unknown websocket for live query: {:?}", v.id);
+						}
 					}
 				}
 			}
@@ -434,8 +435,7 @@ impl Rpc {
 	#[instrument(skip_all, name = "rpc signup", fields(websocket=self.uuid.to_string()))]
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		let opts = CF.get().unwrap();
-		surrealdb::iam::signup::signup(kvs, opts.strict, &mut self.session, vars)
+		surrealdb::iam::signup::signup(kvs, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -449,7 +449,7 @@ impl Rpc {
 			username: &opts.user,
 			password: pass,
 		});
-		surrealdb::iam::signin::signin(kvs, &root, opts.strict, &mut self.session, vars)
+		surrealdb::iam::signin::signin(kvs, &root, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -475,12 +475,10 @@ impl Rpc {
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, None).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -560,8 +558,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
@@ -570,7 +566,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -590,8 +586,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
@@ -601,7 +595,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -621,8 +615,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
@@ -632,7 +624,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -652,8 +644,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
 		// Specify the query parameters
@@ -663,7 +653,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -683,8 +673,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
@@ -694,7 +682,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -714,8 +702,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
@@ -724,7 +710,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -763,12 +749,10 @@ impl Rpc {
 	async fn query(&self, sql: Strand) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var).await?;
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;
@@ -781,12 +765,10 @@ impl Rpc {
 	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var).await?;
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;

@@ -58,7 +58,7 @@ impl UpdateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the update targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;

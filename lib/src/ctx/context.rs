@@ -1,7 +1,9 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::Notification;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -27,11 +29,13 @@ pub struct Context<'a> {
 	// An optional deadline.
 	deadline: Option<Instant>,
 	// Whether or not this context is cancelled.
-	cancelled: Option<Arc<AtomicBool>>,
+	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: Option<HashMap<Cow<'static, str>, Cow<'a, Value>>>,
+	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
+	// Stores the notification channel if available
+	notifications: Option<Sender<Notification>>,
 	// An optional query executor
-	query_executors: Option<HashMap<String, QueryExecutor>>,
+	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -55,10 +59,11 @@ impl<'a> Context<'a> {
 	/// Create an empty background context.
 	pub fn background() -> Self {
 		Context {
-			values: None,
+			values: HashMap::default(),
 			parent: None,
 			deadline: None,
-			cancelled: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
 			query_executors: None,
 		}
 	}
@@ -66,24 +71,30 @@ impl<'a> Context<'a> {
 	/// Create a new child from a frozen context.
 	pub fn new(parent: &'a Context) -> Self {
 		Context {
-			values: None,
+			values: HashMap::default(),
 			parent: Some(parent),
 			deadline: parent.deadline,
-			cancelled: None,
-			query_executors: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: parent.notifications.clone(),
+			query_executors: parent.query_executors.clone(),
 		}
+	}
+
+	/// Add a value to the context. It overwrites any previously set values
+	/// with the same key.
+	pub fn add_value<K, V>(&mut self, key: K, value: V)
+	where
+		K: Into<Cow<'static, str>>,
+		V: Into<Cow<'a, Value>>,
+	{
+		self.values.insert(key.into(), value.into());
 	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
 	pub fn add_cancel(&mut self) -> Canceller {
-		if let Some(c) = &self.cancelled {
-			Canceller::new(c.clone())
-		} else {
-			let c = Arc::new(AtomicBool::new(false));
-			self.cancelled = Some(c.clone());
-			Canceller::new(c)
-		}
+		let cancelled = self.cancelled.clone();
+		Canceller::new(cancelled)
 	}
 
 	/// Add a deadline to the context. If the current deadline is sooner than
@@ -101,25 +112,15 @@ impl<'a> Context<'a> {
 		self.add_deadline(Instant::now() + timeout)
 	}
 
-	/// Set the query executors
-	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
-		self.query_executors = Some(executors);
+	/// Add the LIVE query notification channel to the context, so that we
+	/// can send notifications to any subscribers.
+	pub fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+		self.notifications = chn.cloned()
 	}
 
-	/// Add a value to the context. It overwrites any previously set values
-	/// with the same key.
-	pub fn add_value<K, V>(&mut self, key: K, value: V)
-	where
-		K: Into<Cow<'static, str>>,
-		V: Into<Cow<'a, Value>>,
-	{
-		let key = key.into();
-		let val = value.into();
-		if let Some(v) = &mut self.values {
-			v.insert(key, val);
-		} else {
-			self.values = Some(HashMap::from([(key, val)]));
-		}
+	/// Set the query executors
+	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
+		self.query_executors = Some(Arc::new(executors));
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -128,37 +129,29 @@ impl<'a> Context<'a> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
+	pub fn notifications(&self) -> Option<Sender<Notification>> {
+		self.notifications.clone()
+	}
+
 	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
 		if let Some(qe) = &self.query_executors {
-			return qe.get(tb);
+			qe.get(tb)
+		} else {
+			None
 		}
-		if let Some(p) = self.parent {
-			return p.get_query_executor(tb);
-		}
-		None
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	pub fn done(&self) -> Option<Reason> {
-		// Did we reach the time out?
-		if let Some(dl) = &self.deadline {
-			if Instant::now().ge(dl) {
-				return Some(Reason::Timedout);
-			}
+		match self.deadline {
+			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
+			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
+			_ => match self.parent {
+				Some(ctx) => ctx.done(),
+				_ => None,
+			},
 		}
-		// Did we cancel this context?
-		if let Some(c) = &self.cancelled {
-			if c.load(Ordering::Relaxed) {
-				return Some(Reason::Canceled);
-			}
-		}
-		// Is the parent context done?
-		if let Some(p) = self.parent {
-			return p.done();
-		}
-		// Otherwise we're not done
-		None
 	}
 
 	/// Check if the context is ok to continue.
@@ -179,17 +172,15 @@ impl<'a> Context<'a> {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub fn value(&self, key: &str) -> Option<&Value> {
-		if let Some(values) = &self.values {
-			if let Some(v) = values.get(key) {
-				return match v {
-					Cow::Borrowed(v) => Some(*v),
-					Cow::Owned(v) => Some(v),
-				};
-			}
-		}
-		match self.parent {
-			Some(p) => p.value(key),
-			_ => None,
+		match self.values.get(key) {
+			Some(v) => match v {
+				Cow::Borrowed(v) => Some(*v),
+				Cow::Owned(v) => Some(v),
+			},
+			None => match self.parent {
+				Some(p) => p.value(key),
+				_ => None,
+			},
 		}
 	}
 
@@ -199,7 +190,7 @@ impl<'a> Context<'a> {
 		crate::ctx::cancellation::Cancellation::new(
 			self.deadline,
 			std::iter::successors(Some(self), |ctx| ctx.parent)
-				.filter_map(|ctx| ctx.cancelled.clone())
+				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)
 	}

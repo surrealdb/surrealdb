@@ -9,7 +9,6 @@ pub static CF: OnceCell<Config> = OnceCell::new();
 
 #[derive(Clone, Debug)]
 pub struct Config {
-	pub strict: bool,
 	pub bind: SocketAddr,
 	pub path: String,
 	#[cfg(feature = "has-storage")]

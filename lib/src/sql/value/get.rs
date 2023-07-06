@@ -46,7 +46,6 @@ impl Value {
 					// otherwise return none
 					_ => Ok(Value::None),
 				},
-
 				// Current path part is a future
 				Value::Future(v) => {
 					// Check how many path parts are remaining
@@ -56,7 +55,7 @@ impl Value {
 						// Process the future and fetch the embedded field
 						_ => {
 							// Ensure the future is processed
-							let fut = &opt.futures(true);
+							let fut = &opt.new_with_futures(true);
 							// Get the future return value
 							let val = v.compute(ctx, fut, txn, doc).await?;
 							// Fetch the embedded field

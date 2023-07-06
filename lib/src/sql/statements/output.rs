@@ -33,7 +33,7 @@ impl OutputStatement {
 		doc: &CursorDoc<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		// Process the output value
 		let mut val = self.what.compute(ctx, opt, txn, doc).await?;
 		// Fetch any

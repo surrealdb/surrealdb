@@ -81,7 +81,7 @@ impl Fields {
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		//
 		let new_doc = doc.doc().unwrap_or(&Value::None);
 		let doc = CursorDoc::new(doc.rid(), doc.doc_id(), Some(new_doc));

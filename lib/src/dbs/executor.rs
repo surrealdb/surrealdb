@@ -14,7 +14,7 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
-use channel::{Receiver, Sender};
+use channel::Receiver;
 use futures::lock::Mutex;
 use std::sync::Arc;
 use tracing::instrument;
@@ -127,7 +127,7 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: Sender<Notification>, rcv: Receiver<Notification>) {
+	async fn clear(&self, _: &Context<'_>, rcv: Receiver<Notification>) {
 		while rcv.try_recv().is_ok() {
 			// Ignore notification
 		}
@@ -135,9 +135,15 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, chn: Sender<Notification>, rcv: Receiver<Notification>) {
-		while let Ok(v) = rcv.try_recv() {
-			let _ = chn.send(v).await;
+	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<Notification>) {
+		if let Some(chn) = ctx.notifications() {
+			while let Ok(v) = rcv.try_recv() {
+				let _ = chn.send(v).await;
+			}
+		} else {
+			while rcv.try_recv().is_ok() {
+				// Ignore notification
+			}
 		}
 	}
 
@@ -145,14 +151,14 @@ impl<'a> Executor<'a> {
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(NS.as_ref(), ns.to_owned().into());
 		ctx.add_value("session", session);
-		opt.ns = Some(ns.into());
+		opt.set_ns(Some(ns.into()));
 	}
 
 	async fn set_db(&self, ctx: &mut Context<'_>, opt: &mut Options, db: &str) {
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(DB.as_ref(), db.to_owned().into());
 		ctx.add_value("session", session);
-		opt.db = Some(db.into());
+		opt.set_db(Some(db.into()));
 	}
 
 	#[instrument(name = "executor", skip_all)]
@@ -162,12 +168,10 @@ impl<'a> Executor<'a> {
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
-		// Take the notification channel
-		let chn = opt.sender.clone();
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
-		// Swap the notification channel
-		let mut opt = opt.sender(send);
+		// Set the notification channel
+		let mut opt = opt.new_with_sender(send);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
@@ -196,11 +200,11 @@ impl<'a> Executor<'a> {
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
 					opt = match stm.name.0.as_str() {
-						"FIELDS" => opt.fields(stm.what),
-						"EVENTS" => opt.events(stm.what),
-						"TABLES" => opt.tables(stm.what),
-						"IMPORT" => opt.import(stm.what),
-						"FORCE" => opt.force(stm.what),
+						"FIELDS" => opt.with_fields(stm.what),
+						"EVENTS" => opt.with_events(stm.what),
+						"TABLES" => opt.with_tables(stm.what),
+						"IMPORT" => opt.with_import(stm.what),
+						"FORCE" => opt.with_force(stm.what),
 						_ => break,
 					};
 					// Continue
@@ -214,7 +218,7 @@ impl<'a> Executor<'a> {
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
 					self.cancel(true).await;
-					self.clear(chn.clone(), recv.clone()).await;
+					self.clear(&ctx, recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
@@ -225,7 +229,7 @@ impl<'a> Executor<'a> {
 				Statement::Commit(_) => {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
-					self.flush(chn.clone(), recv.clone()).await;
+					self.flush(&ctx, recv.clone()).await;
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
@@ -240,7 +244,7 @@ impl<'a> Executor<'a> {
 							Auth::Ns(v) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
 							Auth::Db(v, _) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
 							_ => {
-								opt.ns = None;
+								opt.set_ns(None);
 								return Err(Error::NsNotAllowed {
 									ns: ns.to_owned(),
 								});
@@ -254,7 +258,7 @@ impl<'a> Executor<'a> {
 							Auth::Ns(_) => self.set_db(&mut ctx, &mut opt, db).await,
 							Auth::Db(_, v) if v == db => self.set_db(&mut ctx, &mut opt, db).await,
 							_ => {
-								opt.db = None;
+								opt.set_db(None);
 								return Err(Error::DbNotAllowed {
 									db: db.to_owned(),
 								});
@@ -297,20 +301,20 @@ impl<'a> Executor<'a> {
 										match self.commit(loc).await {
 											Err(e) => {
 												// Clear live query notifications
-												self.clear(chn.clone(), recv.clone()).await;
+												self.clear(&ctx, recv.clone()).await;
 												Err(Error::QueryNotExecutedDetail {
 													message: e.to_string(),
 												})
 											}
 											Ok(_) => {
 												// Flush live query notifications
-												self.flush(chn.clone(), recv.clone()).await;
+												self.flush(&ctx, recv.clone()).await;
 												Ok(Value::None)
 											}
 										}
 									} else {
 										self.cancel(loc).await;
-										self.clear(chn.clone(), recv.clone()).await;
+										self.clear(&ctx, recv.clone()).await;
 										Ok(Value::None)
 									}
 								}
@@ -369,21 +373,21 @@ impl<'a> Executor<'a> {
 								if res.is_ok() && stm.writeable() {
 									if let Err(e) = self.commit(loc).await {
 										// Clear live query notification details
-										self.clear(chn.clone(), recv.clone()).await;
+										self.clear(&ctx, recv.clone()).await;
 										// The commit failed
 										Err(Error::QueryNotExecutedDetail {
 											message: e.to_string(),
 										})
 									} else {
 										// Flush the live query change notifications
-										self.flush(chn.clone(), recv.clone()).await;
+										self.flush(&ctx, recv.clone()).await;
 										// Successful, committed result
 										res
 									}
 								} else {
 									self.cancel(loc).await;
 									// Clear live query notification details
-									self.clear(chn.clone(), recv.clone()).await;
+									self.clear(&ctx, recv.clone()).await;
 									// Return an error
 									res
 								}

@@ -16,11 +16,12 @@ pub struct Lq<'a> {
 	_f: u8,
 	_g: u8,
 	_h: u8,
+	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
-pub fn new<'a>(nd: &Uuid, ns: &'a str, db: &'a str, lq: &Uuid) -> Lq<'a> {
-	Lq::new(nd.to_owned(), ns, db, lq.to_owned())
+pub fn new<'a>(nd: Uuid, ns: &'a str, db: &'a str, lq: Uuid) -> Lq<'a> {
+	Lq::new(nd, ns, db, lq)
 }
 
 impl<'a> Lq<'a> {

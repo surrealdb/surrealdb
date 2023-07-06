@@ -21,7 +21,7 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
+		// Check indexes
 		if !opt.indexes {
 			return Ok(());
 		}

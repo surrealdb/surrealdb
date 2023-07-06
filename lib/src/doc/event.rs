@@ -23,7 +23,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Loop through all event statements
 		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action

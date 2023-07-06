@@ -87,7 +87,7 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.cond);

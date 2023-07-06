@@ -35,7 +35,7 @@ impl<'a> Document<'a> {
 					Permission::Full => return Ok(()),
 					Permission::Specific(e) => {
 						// Disable permissions
-						let opt = &opt.perms(false);
+						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
 						if !e.compute(ctx, opt, txn, &self.current_doc()).await?.is_truthy() {
 							return Err(Error::Ignore);

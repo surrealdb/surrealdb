@@ -24,11 +24,18 @@ use uuid::Uuid;
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
-	pub(super) id: Arc<Uuid>,
-	pub(super) inner: Inner,
-	pub(super) send: Sender<Notification>,
-	pub(super) recv: Receiver<Notification>,
+	// The inner datastore type
+	inner: Inner,
+	// The unique id of this datastore, used in notifications
+	id: Uuid,
+	// Whether this datastore runs in strict mode by default
+	strict: bool,
+	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
+	// The maximum duration timeout for running multiple statements in a transaction
+	transaction_timeout: Option<Duration>,
+	// Whether this datastore enables live query notifications to subscribers
+	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -210,28 +217,46 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		};
-		// Create a live query notification channel
-		let (send, recv) = channel::bounded(100);
+		// Set the properties on the datastore
 		inner.map(|inner| Self {
-			id: Arc::new(Uuid::new_v4()),
+			id: Uuid::default(),
 			inner,
-			send,
-			recv,
+			strict: false,
 			query_timeout: None,
+			transaction_timeout: None,
+			notification_channel: None,
 		})
 	}
 
-	/// Set global query timeout
-	pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
+	/// Specify whether this Datastore should run in strict mode
+	pub fn with_strict_mode(mut self, strict: bool) -> Self {
+		self.strict = strict;
+		self
+	}
+
+	/// Specify whether this datastore should enable live query notifications
+	pub fn with_notifications(mut self) -> Self {
+		self.notification_channel = Some(channel::bounded(100));
+		self
+	}
+
+	/// Set a global query timeout for this Datastore
+	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
+		self
+	}
+
+	/// Set a global transaction timeout for this Datastore
+	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
+		self.transaction_timeout = duration;
 		self
 	}
 
 	// Adds entries to the KV store indicating membership information
 	pub async fn register_membership(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_cl(sql::Uuid::from(*self.id.as_ref())).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		tx.set_cl(self.id).await?;
+		tx.set_hb(self.id).await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -240,7 +265,7 @@ impl Datastore {
 	// that the node is alive
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		tx.set_hb(self.id).await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -315,7 +340,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let ast = "USE NS test DB test; SELECT * FROM person;";
-	///     let res = ds.execute(ast, &ses, None, false).await?;
+	///     let res = ds.execute(ast, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
@@ -325,12 +350,11 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
 		// Process the AST
-		self.process(ast, sess, vars, strict).await
+		self.process(ast, sess, vars).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -346,7 +370,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
-	///     let res = ds.process(ast, &ses, None, false).await?;
+	///     let res = ds.process(ast, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
@@ -356,10 +380,15 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::default();
+		let opt = Options::default()
+			.with_id(self.id)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -368,21 +397,14 @@ impl Datastore {
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
 		}
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
-		// Setup the notification channel
-		opt.sender = self.send.clone();
-		// Setup the auth options
-		opt.auth = sess.au.clone();
-		// Setup the live options
-		opt.live = sess.rt;
-		// Set current NS and DB
-		opt.ns = sess.ns();
-		opt.db = sess.db();
-		// Set strict config
-		opt.strict = strict;
 		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
@@ -401,7 +423,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.compute(val, &ses, None, false).await?;
+	///     let res = ds.compute(val, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
@@ -411,33 +433,33 @@ impl Datastore {
 		val: Value,
 		sess: &Session,
 		vars: Variables,
-		strict: bool,
 	) -> Result<Value, Error> {
+		// Create a new query options
+		let opt = Options::default()
+			.with_id(self.id)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict);
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
 		//
 		let txn = Arc::new(Mutex::new(txn));
-		// Create a new query options
-		let mut opt = Options::default();
 		// Create a default context
 		let mut ctx = Context::default();
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
 		}
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
-		// Setup the notification channel
-		opt.sender = self.send.clone();
-		// Setup the auth options
-		opt.auth = sess.au.clone();
-		// Set current NS and DB
-		opt.ns = sess.ns();
-		opt.db = sess.db();
-		// Set strict config
-		opt.strict = strict;
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, &CursorDoc::NONE).await?;
 		// Store any data
@@ -458,17 +480,19 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
-	///     let ds = Datastore::new("memory").await?;
+	///     let ds = Datastore::new("memory").await?.with_notifications();
 	///     let ses = Session::for_kv();
-	///     while let Ok(v) = ds.notifications().recv().await {
-	///         println!("Received notification: {v}");
-	///     }
+	/// 	if let Some(channel) = ds.notifications() {
+	///     	while let Ok(v) = channel.recv().await {
+	///     	    println!("Received notification: {v}");
+	///     	}
+	/// 	}
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(skip_all)]
-	pub fn notifications(&self) -> Receiver<Notification> {
-		self.recv.clone()
+	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a full database export as SQL

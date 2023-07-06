@@ -18,7 +18,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
@@ -66,7 +66,7 @@ impl<'a> Document<'a> {
 							Permission::None => out.del(ctx, opt, txn, k).await?,
 							Permission::Specific(e) => {
 								// Disable permissions
-								let opt = &opt.perms(false);
+								let opt = &opt.new_with_perms(false);
 								// Get the current value
 								let val = self.current.pick(k);
 								// Configure the context
