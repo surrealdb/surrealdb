@@ -132,11 +132,11 @@ impl Rpc {
 						// Check to see if the WebSocket exists
 						if let Some(websocket) = WEBSOCKETS.read().await.get(ws_id) {
 							// Serialize the message to send
-							let msg = res::success(None, notification);
+							let message = res::success(None, notification);
 							// Get the current output format
-							let fmt = rpc.read().await.format.clone();
+							let format = rpc.read().await.format.clone();
 							// Send the notification to the client
-							msg.send(fmt, websocket.clone()).await;
+							message.send(format, websocket.clone()).await;
 						}
 					}
 				}
