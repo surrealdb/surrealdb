@@ -1,4 +1,6 @@
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::TryAdd;
 use crate::sql::value::TryDiv;
@@ -165,13 +167,16 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-pub(crate) async fn matches(ctx: &Context<'_>, e: &Expression) -> Result<Value, Error> {
-	if let Some(thg) = ctx.thing() {
+pub(crate) async fn matches(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	doc: &CursorDoc<'_>,
+	e: &Expression,
+) -> Result<Value, Error> {
+	if let Some(thg) = doc.rid() {
 		if let Some(exe) = ctx.get_query_executor(&thg.tb) {
-			// Clone transaction
-			let txn = ctx.try_clone_transaction()?;
 			// Check the matches
-			return exe.matches(&txn, thg, e).await;
+			return exe.matches(txn, thg, e).await;
 		}
 	}
 	Ok(Value::Bool(false))

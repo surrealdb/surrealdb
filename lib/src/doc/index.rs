@@ -1,6 +1,7 @@
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
@@ -17,6 +18,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
@@ -27,21 +29,19 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check if the table is a view
-		if self.tb(opt, &txn).await?.drop {
+		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Loop through all index statements
-		for ix in self.ix(opt, &txn).await?.iter() {
+		for ix in self.ix(opt, txn).await?.iter() {
 			// Calculate old values
-			let o = Self::build_opt_array(ctx, opt, ix, &self.initial).await?;
+			let o = Self::build_opt_array(ctx, opt, txn, ix, &self.initial).await?;
 
 			// Calculate new values
-			let n = Self::build_opt_array(ctx, opt, ix, &self.current).await?;
+			let n = Self::build_opt_array(ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
 			if opt.force || o != n {
@@ -75,17 +75,17 @@ impl<'a> Document<'a> {
 	async fn build_opt_array(
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		ix: &DefineIndexStatement,
 		value: &Value,
 	) -> Result<Option<Array>, Error> {
 		if !value.is_some() {
 			return Ok(None);
 		}
-		let mut ctx = Context::new(ctx);
-		ctx.add_cursor_doc(value);
+		let cur = CursorDoc::new(None, None, Some(value));
 		let mut o = Array::with_capacity(ix.cols.len());
 		for i in ix.cols.iter() {
-			let v = i.compute(&ctx, opt).await?;
+			let v = i.compute(ctx, opt, txn, &cur).await?;
 			o.push(v);
 		}
 		Ok(Some(o))

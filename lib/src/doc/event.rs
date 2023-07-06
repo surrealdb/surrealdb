@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -11,6 +11,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
@@ -23,10 +24,8 @@ impl<'a> Document<'a> {
 		}
 		// Don't run permissions
 		let opt = &opt.perms(false);
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Loop through all event statements
-		for ev in self.ev(opt, &txn).await?.iter() {
+		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")
@@ -41,13 +40,12 @@ impl<'a> Document<'a> {
 			ctx.add_value("value", self.current.deref());
 			ctx.add_value("after", self.current.deref());
 			ctx.add_value("before", self.initial.deref());
-			ctx.add_cursor_doc(&self.current);
 			// Process conditional clause
-			let val = ev.when.compute(&ctx, opt).await?;
+			let val = ev.when.compute(&ctx, opt, txn, &self.current_doc()).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(&ctx, opt).await?;
+					v.compute(&ctx, opt, txn, &self.current_doc()).await?;
 				}
 			}
 		}

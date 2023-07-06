@@ -1,3 +1,4 @@
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -27,7 +28,12 @@ pub struct ShowStatement {
 
 impl ShowStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_doc: &CursorDoc<'_>,
+	) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
 			feature: "change feed",
 		})

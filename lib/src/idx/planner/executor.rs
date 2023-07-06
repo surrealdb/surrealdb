@@ -177,7 +177,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		txn: Transaction,
+		txn: &Transaction,
 		thg: &Thing,
 		prefix: Value,
 		suffix: Value,
@@ -195,7 +195,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		txn: Transaction,
+		txn: &Transaction,
 		thg: &Thing,
 		match_ref: &Value,
 	) -> Result<Value, Error> {
@@ -208,7 +208,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		txn: Transaction,
+		txn: &Transaction,
 		match_ref: &Value,
 		rid: &Thing,
 		mut doc_id: Option<DocId>,

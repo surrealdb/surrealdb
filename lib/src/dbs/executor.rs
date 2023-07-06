@@ -1,4 +1,5 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Level;
@@ -32,6 +33,10 @@ impl<'a> Executor<'a> {
 			txn: None,
 			err: false,
 		}
+	}
+
+	fn txn(&self) -> Transaction {
+		self.txn.clone().expect("unreachable: txn was None after successful begin")
 	}
 
 	/// # Return
@@ -272,8 +277,7 @@ impl<'a> Executor<'a> {
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
 								false => {
-									ctx.add_transaction(self.txn.as_ref());
-									stm.compute(&ctx, &opt).await
+									stm.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE).await
 								}
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
@@ -334,9 +338,7 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
-								// Create an statement level cancellable context
 								let mut ctx = Context::new(&ctx);
-								ctx.add_transaction(self.txn.as_ref());
 								// Process the statement
 								let res = match stm.timeout() {
 									// There is a timeout clause
@@ -344,7 +346,9 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										ctx.add_timeout(timeout);
 										// Process the statement
-										let res = stm.compute(&ctx, &opt).await;
+										let res = stm
+											.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE)
+											.await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
 											true => Err(Error::QueryTimedout),
@@ -352,7 +356,9 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => stm.compute(&ctx, &opt).await,
+									None => {
+										stm.compute(&ctx, &opt, &self.txn(), &CursorDoc::NONE).await
+									}
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {

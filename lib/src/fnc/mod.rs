@@ -1,5 +1,7 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -29,7 +31,13 @@ pub mod r#type;
 pub mod util;
 
 /// Attempts to run any function
-pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	doc: &CursorDoc<'_>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	if name.eq("sleep")
 		|| name.starts_with("search")
 		|| name.starts_with("http")
@@ -38,7 +46,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, name, args).await
+		asynchronous(ctx, Some(txn), doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -266,7 +274,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 }
 
 /// Attempts to run any asynchronous function.
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn asynchronous(
+	ctx: &Context<'_>,
+	txn: Option<&Transaction>,
+	doc: &CursorDoc<'_>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_arch = "wasm32"))]
@@ -302,9 +316,9 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::score" => search::score(ctx).await,
-		"search::highlight" => search::highlight(ctx).await,
-		"search::offsets" => search::offsets(ctx).await,
+		"search::score" => search::score((ctx, txn, doc)).await,
+		"search::highlight" => search::highlight((ctx,txn, doc)).await,
+		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)

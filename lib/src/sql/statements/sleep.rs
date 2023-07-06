@@ -1,3 +1,4 @@
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -18,7 +19,12 @@ pub struct SleepStatement {
 
 impl SleepStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		_doc: &CursorDoc<'_>,
+	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
@@ -89,9 +95,9 @@ mod tests {
 		let time = SystemTime::now();
 		let opt =
 			Options::new(Arc::new(Uuid::new_v4()), channel::unbounded().0, Arc::new(Auth::Kv));
-		let (ctx, _) = mock().await;
+		let (ctx, _, _) = mock().await;
 		let (_, stm) = sleep(sql).unwrap();
-		let value = stm.compute(&ctx, &opt).await.unwrap();
+		let value = stm.compute(&ctx, &opt, &CursorDoc::NONE).await.unwrap();
 		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
 		assert_eq!(value, Value::None);
 	}

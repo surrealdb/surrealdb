@@ -1,6 +1,7 @@
+use crate::ctx::cursordoc::CursorDoc;
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
@@ -17,16 +18,15 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check if the table is a view
-		if self.tb(opt, &txn).await?.drop {
+		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
 		// Clone transaction
@@ -69,7 +69,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(ctx, opt).await?;
+					stm.compute(ctx, opt, txn, &CursorDoc::NONE).await?;
 				}
 			}
 		}

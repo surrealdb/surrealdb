@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Operable, Options, Statement};
+use crate::dbs::{Iterable, Iterator, Operable, Options, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::Plan;
@@ -15,10 +15,11 @@ impl Iterable {
 		self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
-		Processor::Iterator(ite).process_iterable(ctx, opt, stm, self).await
+		Processor::Iterator(ite).process_iterable(ctx, opt, txn, stm, self).await
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -26,10 +27,11 @@ impl Iterable {
 		self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
 	) -> Result<(), Error> {
-		Processor::Channel(chn).process_iterable(ctx, opt, stm, self).await
+		Processor::Channel(chn).process_iterable(ctx, opt, txn, stm, self).await
 	}
 }
 
@@ -40,10 +42,12 @@ enum Processor<'a> {
 }
 
 impl<'a> Processor<'a> {
+	#[allow(clippy::too_many_arguments)]
 	async fn process(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		rid: Option<Thing>,
 		doc_id: Option<DocId>,
@@ -51,19 +55,7 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		match self {
 			Processor::Iterator(ite) => {
-				if rid.is_some() || doc_id.is_some() {
-					// Create a new child context
-					let mut child_ctx = Context::new(ctx);
-					if let Some(rid) = &rid {
-						child_ctx.add_thing(rid);
-					}
-					if let Some(doc_id) = doc_id {
-						child_ctx.add_doc_id(doc_id);
-					}
-					ite.process(&child_ctx, opt, stm, val).await;
-				} else {
-					ite.process(ctx, opt, stm, val).await;
-				}
+				ite.process(ctx, opt, txn, stm, rid, doc_id, val).await;
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			Processor::Channel(chn) => {
@@ -77,20 +69,23 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		iterable: Iterable,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.process_value(ctx, opt, stm, v).await?,
-				Iterable::Thing(v) => self.process_thing(ctx, opt, stm, v).await?,
-				Iterable::Table(v) => self.process_table(ctx, opt, stm, v).await?,
-				Iterable::Range(v) => self.process_range(ctx, opt, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(ctx, opt, stm, e).await?,
-				Iterable::Index(t, p) => self.process_index(ctx, opt, stm, t, p).await?,
-				Iterable::Mergeable(v, o) => self.process_mergeable(ctx, opt, stm, v, o).await?,
+				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
+				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
+				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
+				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
+				Iterable::Index(t, p) => self.process_index(ctx, opt, txn, stm, t, p).await?,
+				Iterable::Mergeable(v, o) => {
+					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
+				}
 				Iterable::Relatable(f, v, w) => {
-					self.process_relatable(ctx, opt, stm, f, v, w).await?
+					self.process_relatable(ctx, opt, txn, stm, f, v, w).await?
 				}
 			}
 		}
@@ -101,24 +96,24 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Value,
 	) -> Result<(), Error> {
 		// Pass the value through
 		let val = Operable::Value(v);
 		// Process the document record
-		self.process(ctx, opt, stm, None, None, val).await
+		self.process(ctx, opt, txn, stm, None, None, val).await
 	}
 
 	async fn process_thing(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -130,7 +125,7 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		});
 		// Process the document record
-		self.process(ctx, opt, stm, Some(v), None, val).await?;
+		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -139,12 +134,11 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
 		o: Value,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -158,22 +152,22 @@ impl<'a> Processor<'a> {
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
 		// Process the document record
-		self.process(ctx, opt, stm, Some(v), None, val).await?;
+		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn process_relatable(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -187,7 +181,7 @@ impl<'a> Processor<'a> {
 		// Create a new operable value
 		let val = Operable::Relatable(f, x, w);
 		// Process the document record
-		self.process(ctx, opt, stm, Some(v), None, val).await?;
+		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -196,11 +190,10 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Table,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
 		// Prepare the start and end keys
@@ -249,7 +242,7 @@ impl<'a> Processor<'a> {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					self.process(ctx, opt, stm, Some(rid), None, val).await?;
+					self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
 				}
 				continue;
 			}
@@ -263,11 +256,10 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Range,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Prepare the range start key
@@ -333,7 +325,7 @@ impl<'a> Processor<'a> {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					self.process(ctx, opt, stm, Some(rid), None, val).await?;
+					self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
 				}
 				continue;
 			}
@@ -347,6 +339,7 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		e: Edges,
 	) -> Result<(), Error> {
@@ -433,13 +426,13 @@ impl<'a> Processor<'a> {
 					None => {
 						let min = beg.clone();
 						let max = end.clone();
-						ctx.try_clone_transaction()?.lock().await.scan(min..max, 1000).await?
+						txn.lock().await.scan(min..max, 1000).await?
 					}
 					Some(ref mut beg) => {
 						beg.push(0x00);
 						let min = beg.clone();
 						let max = end.clone();
-						ctx.try_clone_transaction()?.lock().await.scan(min..max, 1000).await?
+						txn.lock().await.scan(min..max, 1000).await?
 					}
 				};
 				// If there are key-value entries then fetch them
@@ -464,7 +457,7 @@ impl<'a> Processor<'a> {
 						let gra: crate::key::graph::Graph = (&k).into();
 						// Fetch the data from the store
 						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
-						let val = ctx.try_clone_transaction()?.lock().await.get(key).await?;
+						let val = txn.lock().await.get(key).await?;
 						let rid = Thing::from((gra.ft, gra.fk));
 						// Parse the data from the store
 						let val = Operable::Value(match val {
@@ -472,7 +465,7 @@ impl<'a> Processor<'a> {
 							None => Value::None,
 						});
 						// Process the record
-						self.process(ctx, opt, stm, Some(rid), None, val).await?;
+						self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
 					}
 					continue;
 				}
@@ -487,18 +480,17 @@ impl<'a> Processor<'a> {
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: Table,
 		plan: Plan,
 	) -> Result<(), Error> {
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		let exe = ctx.get_query_executor(&table.0);
 		if let Some(exe) = exe {
-			let mut iterator = plan.new_iterator(opt, &txn, exe).await?;
-			let mut things = iterator.next_batch(&txn, 1000).await?;
+			let mut iterator = plan.new_iterator(opt, txn, exe).await?;
+			let mut things = iterator.next_batch(txn, 1000).await?;
 			while !things.is_empty() {
 				// Check if the context is finished
 				if ctx.is_done() {
@@ -526,11 +518,11 @@ impl<'a> Processor<'a> {
 						None => Value::None,
 					});
 					// Process the document record
-					self.process(ctx, opt, stm, Some(rid), Some(doc_id), val).await?;
+					self.process(ctx, opt, txn, stm, Some(rid), Some(doc_id), val).await?;
 				}
 
 				// Collect the next batch of ids
-				things = iterator.next_batch(&txn, 1000).await?;
+				things = iterator.next_batch(txn, 1000).await?;
 			}
 			// Everything ok
 			Ok(())
