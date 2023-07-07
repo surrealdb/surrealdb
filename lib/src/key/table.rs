@@ -37,11 +37,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Table::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
 		);
 		let enc = Table::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
+
 		let dec = Table::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

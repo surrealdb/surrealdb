@@ -53,12 +53,25 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Fc::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testfc",
 		);
 		let enc = Fc::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\x00*testdb\x00!fntestfc\x00");
 		let dec = Fc::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix("testns", "testdb");
+		assert_eq!(val, b"/*testns\0*testdb\0!fn\0");
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix("testns", "testdb");
+		assert_eq!(val, b"/*testns\0*testdb\0!fn\xff");
 	}
 }

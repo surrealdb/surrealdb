@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, Statistics};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use roaring::RoaringTreemap;
@@ -13,7 +13,7 @@ pub(crate) const NO_DOC_ID: u64 = u64::MAX;
 pub(crate) struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree<DocIdsKeyProvider>,
+	btree: BTree,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,
 	updated: bool,
@@ -25,9 +25,7 @@ impl DocIds {
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 	) -> Result<Self, Error> {
-		let keys = DocIdsKeyProvider {
-			index_key_base: index_key_base.clone(),
-		};
+		let keys = KeyProvider::DocIds(index_key_base.clone());
 		let state_key: Key = keys.get_state_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
@@ -176,20 +174,6 @@ impl Resolved {
 			Resolved::New(_) => false,
 			Resolved::Existing(_) => true,
 		}
-	}
-}
-
-#[derive(Clone)]
-struct DocIdsKeyProvider {
-	index_key_base: IndexKeyBase,
-}
-
-impl KeyProvider for DocIdsKeyProvider {
-	fn get_node_key(&self, node_id: NodeId) -> Key {
-		self.index_key_base.new_bd_key(Some(node_id))
-	}
-	fn get_state_key(&self) -> Key {
-		self.index_key_base.new_bd_key(None)
 	}
 }
 

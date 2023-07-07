@@ -45,3 +45,12 @@ pub struct DatabaseConnectionArguments {
 	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) endpoint: String,
 }
+
+#[derive(Args, Debug)]
+pub struct OptionalDatabaseConnectionArguments {
+	// Endpoint w/o default value
+	#[arg(help = "Remote database server url to connect to")]
+	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(value_parser = super::validator::endpoint_valid)]
+	pub(crate) endpoint: Option<String>,
+}

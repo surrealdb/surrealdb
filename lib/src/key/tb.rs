@@ -53,11 +53,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tb::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
 		);
 		let enc = Tb::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0!tbtesttb\0");
+
 		let dec = Tb::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

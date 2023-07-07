@@ -38,11 +38,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Scope::new(
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testsc",
 		);
 		let enc = Scope::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0\xb1testsc\0");
+
 		let dec = Scope::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

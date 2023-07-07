@@ -49,11 +49,25 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
-			"test",
-			"test",
+			"testns",
+			"testdb",
 		);
 		let enc = Db::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
+
 		let dec = Db::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix("testns");
+		assert_eq!(val, b"/*testns\0!db\0")
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix("testns");
+		assert_eq!(val, b"/*testns\0!db\xff")
 	}
 }
