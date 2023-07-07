@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -17,8 +18,24 @@ use std::sync::Arc;
 pub(crate) struct Document<'a> {
 	pub(super) id: Option<&'a Thing>,
 	pub(super) extras: Workable,
-	pub(super) current: Cow<'a, Value>,
-	pub(super) initial: Cow<'a, Value>,
+	pub(super) initial: CursorDoc<'a>,
+	pub(super) current: CursorDoc<'a>,
+}
+
+pub struct CursorDoc<'a> {
+	pub(crate) rid: Option<&'a Thing>,
+	pub(crate) doc: Cow<'a, Value>,
+	pub(crate) doc_id: Option<DocId>,
+}
+
+impl<'a> CursorDoc<'a> {
+	pub(crate) fn new(rid: Option<&'a Thing>, doc_id: Option<DocId>, doc: &'a Value) -> Self {
+		Self {
+			rid,
+			doc: Cow::Borrowed(doc),
+			doc_id,
+		}
+	}
 }
 
 impl<'a> Debug for Document<'a> {
@@ -29,17 +46,22 @@ impl<'a> Debug for Document<'a> {
 
 impl<'a> From<&Document<'a>> for Vec<u8> {
 	fn from(val: &Document<'a>) -> Vec<u8> {
-		val.current.as_ref().into()
+		val.current.doc.as_ref().into()
 	}
 }
 
 impl<'a> Document<'a> {
-	pub fn new(id: Option<&'a Thing>, val: &'a Value, ext: Workable) -> Self {
+	pub fn new(
+		id: Option<&'a Thing>,
+		doc_id: Option<DocId>,
+		val: &'a Value,
+		extras: Workable,
+	) -> Self {
 		Document {
 			id,
-			extras: ext,
-			current: Cow::Borrowed(val),
-			initial: Cow::Borrowed(val),
+			extras,
+			current: CursorDoc::new(id, doc_id, val),
+			initial: CursorDoc::new(id, doc_id, val),
 		}
 	}
 }
@@ -47,11 +69,11 @@ impl<'a> Document<'a> {
 impl<'a> Document<'a> {
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
-		self.initial != self.current
+		self.initial.doc != self.current.doc
 	}
 	/// Check if document has changed
 	pub fn is_new(&self) -> bool {
-		self.initial.is_none()
+		self.initial.doc.is_none()
 	}
 	/// Get the table for this document
 	pub async fn tb(

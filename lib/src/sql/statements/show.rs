@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
@@ -27,7 +28,12 @@ pub struct ShowStatement {
 
 impl ShowStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, _ctx: &Context<'_>, _opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
 			feature: "change feed",
 		})

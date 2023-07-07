@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
@@ -36,11 +37,17 @@ impl Cast {
 impl Cast {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Prevent long cast chains
 		let opt = &opt.dive(1)?;
 		// Compute the value to be cast and convert it
-		self.1.compute(ctx, opt).await?.convert_to(&self.0)
+		self.1.compute(ctx, opt, txn, doc).await?.convert_to(&self.0)
 	}
 }
 

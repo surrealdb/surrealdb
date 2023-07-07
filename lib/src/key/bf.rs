@@ -57,14 +57,21 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bf::new(
-			"test",
-			"test",
-			"test",
-			"test",
-			1,
-			2
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			7,
+			13
 		);
 		let enc = Bf::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0!bftestix\0*\
+		    \0\0\0\0\0\0\0\x07\
+		    \0\0\0\0\0\0\0\x0d"
+		);
+
 		let dec = Bf::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

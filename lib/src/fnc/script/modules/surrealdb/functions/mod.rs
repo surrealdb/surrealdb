@@ -68,7 +68,7 @@ async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value>
 	// Create a default context
 	let ctx = Context::background();
 	// Process the called function
-	let res = fnc::asynchronous(&ctx, name, args).await;
+	let res = fnc::asynchronous(&ctx, None, None, name, args).await;
 	// Convert any response error
 	res.map_err(|err| {
 		js::Exception::from_message(js_ctx, &err.to_string())

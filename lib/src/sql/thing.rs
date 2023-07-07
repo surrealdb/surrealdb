@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
@@ -102,10 +103,16 @@ impl fmt::Display for Thing {
 
 impl Thing {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: self.id.compute(ctx, opt).await?,
+			id: self.id.compute(ctx, opt, txn, doc).await?,
 		}))
 	}
 }

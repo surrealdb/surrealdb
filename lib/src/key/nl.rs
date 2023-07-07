@@ -49,10 +49,12 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Nl::new(
-			"test",
-			"test",
+			"testns",
+			"testus",
 		);
 		let enc = Nl::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0!nltestus\0");
+
 		let dec = Nl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 
@@ -9,12 +10,13 @@ impl<'a> Document<'a> {
 		&self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// There is no current record
-			if self.current.is_none() {
+			if self.current.doc.is_none() {
 				// Ignore this requested record
 				return Err(Error::Ignore);
 			}

@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -101,13 +102,19 @@ impl Expression {
 	}
 
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		let (l, o, r) = match self {
 			Self::Unary {
 				o,
 				v,
 			} => {
-				let operand = v.compute(ctx, opt).await?;
+				let operand = v.compute(ctx, opt, txn, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
 					Operator::Not => fnc::operate::not(operand),
@@ -121,7 +128,7 @@ impl Expression {
 			} => (l, o, r),
 		};
 
-		let l = l.compute(ctx, opt).await?;
+		let l = l.compute(ctx, opt, txn, doc).await?;
 		match o {
 			Operator::Or => {
 				if let true = l.is_truthy() {
@@ -145,7 +152,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = r.compute(ctx, opt).await?;
+		let r = r.compute(ctx, opt, txn, doc).await?;
 		match o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -181,7 +188,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(ctx, self).await,
+			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
 			_ => unreachable!(),
 		}
 	}
