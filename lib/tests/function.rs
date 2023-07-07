@@ -8,7 +8,7 @@ use surrealdb::sql::{Number, Value};
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = Datastore::new("memory").await?;
 	let session = Session::for_kv().with_ns("test").with_db("test");
-	let response = db.execute(sql, &session, None, false).await?;
+	let response = db.execute(sql, &session, None).await?;
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
