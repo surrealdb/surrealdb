@@ -185,10 +185,14 @@ impl<'a> Executor<'a> {
 			}
 			// Get the statement start time
 			let now = Instant::now();
+			// Check if this is a LIVE statement
+			let is_stm_live = matches!(stm, Statement::Live(_));
+			// Check if this is a KILL statement
+			let is_stm_kill = matches!(stm, Statement::Kill(_));
 			// Check if this is a RETURN statement
-			let clr = matches!(stm, Statement::Output(_));
+			let is_stm_output = matches!(stm, Statement::Output(_));
 			// Process a single statement
-			let res = match stm.clone() {
+			let res = match stm {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
@@ -399,15 +403,15 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
-				query_type: match stm {
-					Statement::Live(_) => QueryType::Live,
-					Statement::Kill(_) => QueryType::Kill,
+				query_type: match (is_stm_live, is_stm_kill) {
+					(true, _) => QueryType::Live,
+					(_, true) => QueryType::Kill,
 					_ => QueryType::Other,
 				},
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if clr {
+				if is_stm_output {
 					buf.clear();
 				}
 				buf.push(res);
