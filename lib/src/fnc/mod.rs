@@ -1,4 +1,7 @@
+//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
+use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -19,6 +22,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod script;
+pub mod search;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -27,15 +31,22 @@ pub mod r#type;
 pub mod util;
 
 /// Attempts to run any function
-pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	if name.eq("sleep")
+		|| name.starts_with("search")
 		|| name.starts_with("http")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, name, args).await
+		asynchronous(ctx, Some(txn), doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -225,6 +236,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
+		"time::ceil" => time::ceil,
 		"time::day" => time::day,
 		"time::floor" => time::floor,
 		"time::format" => time::format,
@@ -262,7 +274,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 }
 
 /// Attempts to run any asynchronous function.
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn asynchronous(
+	ctx: &Context<'_>,
+	txn: Option<&Transaction>,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_arch = "wasm32"))]
@@ -298,6 +316,10 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
+		"search::score" => search::score((ctx, txn, doc)).await,
+		"search::highlight" => search::highlight((ctx,txn, doc)).await,
+		"search::offsets" => search::offsets((ctx, txn, doc)).await,
+		//
 		"sleep" => sleep::sleep(ctx).await,
 	)
 }
@@ -322,7 +344,7 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			if crate::sql::function::function_names(&name).is_err() {
+			if crate::sql::function::function_names(name).is_err() {
 				problems.push(format!("couldn't parse {name} function"));
 			}
 
@@ -335,7 +357,7 @@ mod tests {
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
 				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
 				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
-				let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
+				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == Value::from("object") {
 					// Assume this function is superseded by a module of the same name.

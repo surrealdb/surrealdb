@@ -11,7 +11,7 @@ impl Mode for Vec<Number> {
 	fn mode(self) -> Number {
 		// Iterate over all numbers, and get their frequency
 		let frequencies = self.into_iter().fold(BTreeMap::new(), |mut freqs, value| {
-			let entry = freqs.entry(value).or_insert_with(|| 0);
+			let entry = freqs.entry(value).or_insert_with(|| 0u32);
 			*entry += 1;
 			freqs
 		});

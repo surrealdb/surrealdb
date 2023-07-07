@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -29,6 +30,23 @@ pub struct Range {
 	pub end: Bound<Id>,
 }
 
+impl FromStr for Range {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<&str> for Range {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match range(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
+	}
+}
+
 impl Range {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -36,7 +54,7 @@ impl Range {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Range(Box::new(Range {
 			tb: self.tb.clone(),

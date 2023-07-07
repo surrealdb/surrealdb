@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::part::Next;
@@ -43,6 +43,15 @@ impl Value {
 							Ok(())
 						}
 					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) if v.is_some() => v.set(ctx, opt, txn, path.next(), val).await,
+						_ => {
+							let mut obj = Value::base();
+							obj.set(ctx, opt, txn, path.next(), val).await?;
+							v.insert(i.to_string(), obj);
+							Ok(())
+						}
+					},
 					_ => Ok(()),
 				},
 				// Current path part is an array
@@ -68,7 +77,8 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
+							let cur = CursorDoc::new(None, None, v);
+							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								v.set(ctx, opt, txn, path, val.clone()).await?;
 							}
 						}

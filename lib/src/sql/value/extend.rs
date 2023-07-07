@@ -1,6 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::part::Part;

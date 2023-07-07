@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::{block, Block};
 use crate::sql::comment::mightbespace;
@@ -30,7 +30,7 @@ impl Future {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent long future chains
 		let opt = &opt.dive(1)?;
@@ -65,11 +65,11 @@ mod tests {
 
 	#[test]
 	fn future_expression() {
-		let sql = "<future> { 1.2345 + 5.4321 }";
+		let sql = "<future> { 5 + 10 }";
 		let res = future(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
-		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("1.2345 + 5.4321")))));
+		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
+		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));
 	}
 }

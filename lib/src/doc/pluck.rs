@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
@@ -19,36 +18,40 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
-				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
-				Output::After => self.current.compute(ctx, opt, txn, Some(&self.current)).await,
-				Output::Before => self.initial.compute(ctx, opt, txn, Some(&self.initial)).await,
+				Output::Diff => {
+					Ok(self.initial.doc.diff(self.current.doc.as_ref(), Idiom::default()).into())
+				}
+				Output::After => self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await,
+				Output::Before => {
+					self.initial.doc.compute(ctx, opt, txn, Some(&self.initial)).await
+				}
 				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
-					0 => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
+					0 => Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into()),
 					_ => s.expr.compute(ctx, opt, txn, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
 					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await
 				}
 				Statement::Update(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await
 				}
 				Statement::Relate(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await
 				}
 				Statement::Insert(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -67,9 +70,9 @@ impl<'a> Document<'a> {
 							Permission::None => out.del(ctx, opt, txn, k).await?,
 							Permission::Specific(e) => {
 								// Disable permissions
-								let opt = &opt.perms(false);
+								let opt = &opt.new_with_perms(false);
 								// Get the current value
-								let val = self.current.pick(k);
+								let val = self.current.doc.pick(k);
 								// Configure the context
 								let mut ctx = Context::new(ctx);
 								ctx.add_value("value", &val);

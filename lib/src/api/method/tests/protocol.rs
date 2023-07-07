@@ -11,6 +11,7 @@ use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Level;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
 use std::collections::HashSet;
@@ -33,6 +34,9 @@ impl IntoEndpoint<Test> for () {
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
+			auth: Level::No,
+			username: String::new(),
+			password: String::new(),
 		})
 	}
 }
@@ -73,7 +77,6 @@ impl Connection for Client {
 		Box::pin(async move {
 			let (route_tx, route_rx) = flume::bounded(capacity);
 			let mut features = HashSet::new();
-			features.insert(ExtraFeatures::Auth);
 			features.insert(ExtraFeatures::Backup);
 			let router = Router {
 				features,

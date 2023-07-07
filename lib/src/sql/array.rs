@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebracket, commas, openbracket};
@@ -39,6 +39,12 @@ impl From<Vec<Value>> for Array {
 
 impl From<Vec<i32>> for Array {
 	fn from(v: Vec<i32>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
+impl From<Vec<f64>> for Array {
+	fn from(v: Vec<f64>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
 	}
 }
@@ -117,7 +123,7 @@ impl Array {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {

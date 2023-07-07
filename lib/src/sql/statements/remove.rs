@@ -1,7 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
@@ -45,21 +44,21 @@ impl RemoveStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Function(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Param(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn).await,
 		}
 	}
 }
@@ -105,7 +104,6 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 }
@@ -117,16 +115,13 @@ impl RemoveNamespaceStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ns::new(&self.name);
 		run.del(key).await?;
@@ -163,7 +158,6 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 }
@@ -175,16 +169,13 @@ impl RemoveDatabaseStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected NS?
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::db::new(opt.ns(), &self.name);
 		run.del(key).await?;
@@ -221,7 +212,6 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
 }
@@ -233,16 +223,13 @@ impl RemoveFunctionStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -294,16 +281,13 @@ impl RemoveAnalyzerStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -338,7 +322,6 @@ fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -351,7 +334,6 @@ impl RemoveLoginStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
@@ -359,10 +341,8 @@ impl RemoveLoginStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::nl::new(opt.ns(), &self.name);
 				run.del(key).await?;
@@ -374,10 +354,8 @@ impl RemoveLoginStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
@@ -419,7 +397,6 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -432,7 +409,6 @@ impl RemoveTokenStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match &self.base {
 			Base::Ns => {
@@ -440,10 +416,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::nt::new(opt.ns(), &self.name);
 				run.del(key).await?;
@@ -455,10 +429,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
@@ -470,10 +442,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Delete the definition
 				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
 				run.del(key).await?;
@@ -515,7 +485,6 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
 }
@@ -527,16 +496,13 @@ impl RemoveScopeStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -573,7 +539,6 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 }
@@ -585,16 +550,13 @@ impl RemoveParamStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -629,7 +591,6 @@ fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 }
@@ -641,16 +602,13 @@ impl RemoveTableStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
@@ -687,7 +645,6 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -700,16 +657,13 @@ impl RemoveEventStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
@@ -752,7 +706,6 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -765,16 +718,13 @@ impl RemoveFieldStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let fd = self.name.to_string();
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
@@ -818,7 +768,6 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -831,16 +780,13 @@ impl RemoveIndexStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Delete the definition
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
@@ -892,6 +838,6 @@ mod tests {
 		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident::from("test"),
 		});
-		assert_eq!(22, stm.to_vec().len());
+		assert_eq!(6, stm.to_vec().len());
 	}
 }

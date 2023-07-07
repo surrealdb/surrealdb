@@ -1,8 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::dbs::Workable;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::paths::EDGE;
@@ -23,10 +22,8 @@ impl<'a> Document<'a> {
 		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges
@@ -46,9 +43,9 @@ impl<'a> Document<'a> {
 			let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
-			self.current.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.to_mut().put(&*IN, l.clone().into());
-			self.current.to_mut().put(&*OUT, r.clone().into());
+			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.doc.to_mut().put(&*IN, l.clone().into());
+			self.current.doc.to_mut().put(&*OUT, r.clone().into());
 		}
 		// Carry on
 		Ok(())

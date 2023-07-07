@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::edges::Edges;
@@ -23,12 +23,29 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&'async_recursion Value>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
+				// Current path part is a geometry
+				Value::Geometry(v) => match p {
+					// If this is the 'type' field then continue
+					Part::Field(f) if f.is_type() => {
+						Value::from(v.as_type()).get(ctx, opt, txn, doc, path.next()).await
+					}
+					// If this is the 'coordinates' field then continue
+					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
+						v.as_coordinates().get(ctx, opt, txn, doc, path.next()).await
+					}
+					// If this is the 'geometries' field then continue
+					Part::Field(f) if f.is_geometries() && v.is_collection() => {
+						v.as_coordinates().get(ctx, opt, txn, doc, path.next()).await
+					}
+					// otherwise return none
+					_ => Ok(Value::None),
+				},
 				// Current path part is a future
 				Value::Future(v) => {
 					// Check how many path parts are remaining
@@ -38,7 +55,7 @@ impl Value {
 						// Process the future and fetch the embedded field
 						_ => {
 							// Ensure the future is processed
-							let fut = &opt.futures(true);
+							let fut = &opt.new_with_futures(true);
 							// Get the future return value
 							let val = v.compute(ctx, fut, txn, doc).await?;
 							// Fetch the embedded field
@@ -95,8 +112,9 @@ impl Value {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in v.iter() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-								a.push(v.get(ctx, opt, txn, doc, path).await?)
+							let cur = Some(CursorDoc::new(None, None, v));
+							if w.compute(ctx, opt, txn, cur.as_ref()).await?.is_truthy() {
+								a.push(v.get(ctx, opt, txn, cur.as_ref(), path).await?)
 							}
 						}
 						Ok(a.into())
@@ -332,7 +350,8 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let res = val.get(&ctx, &opt, &txn, Some(&doc), &idi).await.unwrap();
+		let cur = CursorDoc::new(None, None, &doc);
+		let res = val.get(&ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

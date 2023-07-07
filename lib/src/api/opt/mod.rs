@@ -9,6 +9,7 @@ mod strict;
 mod tls;
 
 use crate::api::err::Error;
+use crate::sql::constant::ConstantValue;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -340,14 +341,14 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Number(Number::Float(n)) => n.into(),
 		Value::Number(Number::Decimal(n)) => json!(n),
 		Value::Strand(strand) => match simplify {
-			true => strand.0.into(),
+			true => strand.to_raw().into(),
 			false => json!(strand),
 		},
 		Value::Duration(d) => match simplify {
 			true => d.to_string().into(),
 			false => json!(d),
 		},
-		Value::Datetime(d) => json!(d),
+		Value::Datetime(d) => d.to_raw().into(),
 		Value::Uuid(uuid) => json!(uuid),
 		Value::Array(arr) => JsonValue::Array(Array::from((arr, simplify)).0),
 		Value::Object(obj) => JsonValue::Object(Object::from((obj, simplify)).0),
@@ -370,9 +371,13 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Edges(edges) => json!(edges),
 		Value::Future(future) => json!(future),
 		Value::Constant(constant) => match simplify {
-			true => constant.as_f64().into(),
+			true => match constant.value() {
+				ConstantValue::Datetime(d) => json!(d),
+				ConstantValue::Float(f) => f.into(),
+			},
 			false => json!(constant),
 		},
+		Value::Cast(cast) => json!(cast),
 		Value::Function(function) => json!(function),
 		Value::Subquery(subquery) => json!(subquery),
 		Value::Expression(expression) => json!(expression),

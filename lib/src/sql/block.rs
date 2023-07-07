@@ -1,7 +1,7 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::{closebraces, colons, openbraces};
@@ -20,7 +20,7 @@ use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::multi::many0;
-use nom::multi::separated_list1;
+use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -57,7 +57,7 @@ impl Block {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Duplicate context
 		let mut ctx = Context::new(ctx);
@@ -117,6 +117,7 @@ impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
+			(0, _) => f.write_str("{}"),
 			(1, Some(Entry::Value(v))) => {
 				write!(f, "{{ {v} }}")
 			}
@@ -159,7 +160,7 @@ impl Display for Block {
 
 pub fn block(i: &str) -> IResult<&str, Block> {
 	let (i, _) = openbraces(i)?;
-	let (i, v) = separated_list1(colons, entry)(i)?;
+	let (i, v) = separated_list0(colons, entry)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
 	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
@@ -244,6 +245,15 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn block_empty() {
+		let sql = "{}";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
 
 	#[test]
 	fn block_value() {

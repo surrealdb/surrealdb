@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
@@ -32,6 +32,16 @@ impl Value {
 							Ok(())
 						}
 						_ => match v.get_mut(f.as_str()) {
+							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
+							_ => Ok(()),
+						},
+					},
+					Part::Index(i) => match path.len() {
+						1 => {
+							v.remove(&i.to_string());
+							Ok(())
+						}
+						_ => match v.get_mut(&i.to_string()) {
 							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
 							_ => Ok(()),
 						},
@@ -96,7 +106,8 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
+								let cur = CursorDoc::new(None, None, v);
+								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 									m.insert(i);
 								};
 							}
@@ -106,7 +117,8 @@ impl Value {
 						_ => {
 							let path = path.next();
 							for v in v.iter_mut() {
-								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
+								let cur = CursorDoc::new(None, None, v);
+								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 									v.del(ctx, opt, txn, path).await?;
 								}
 							}

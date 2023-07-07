@@ -311,27 +311,3 @@ impl Transaction {
 		Ok(res)
 	}
 }
-
-#[cfg(test)]
-mod tests {
-	use crate::kvs::tests::transaction::verify_transaction_isolation;
-	use temp_dir::TempDir;
-
-	// https://github.com/surrealdb/surrealdb/issues/76
-	#[tokio::test]
-	async fn soundness() {
-		let mut transaction = get_transaction().await;
-		transaction.put("uh", "oh").await.unwrap();
-
-		async fn get_transaction() -> crate::kvs::Transaction {
-			let datastore = crate::kvs::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
-			datastore.transaction(true, false).await.unwrap()
-		}
-	}
-
-	#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-	async fn rocksdb_transaction() {
-		let p = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		verify_transaction_isolation(&format!("file:{}", p)).await;
-	}
-}

@@ -1,7 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -24,7 +24,7 @@ impl KillStatement {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.realtime()?;
@@ -32,21 +32,19 @@ impl KillStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
-		// Create the live query key
-		let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+		let mut run = txn.lock().await;
+		// Fetch the live query key
+		let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 		// Fetch the live query key if it exists
 		match run.get(key).await? {
 			Some(val) => match std::str::from_utf8(&val) {
 				Ok(tb) => {
-					// Delete the live query
-					let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+					// Delete the node live query
+					let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 					run.del(key).await?;
 					// Delete the table live query
-					let key = crate::key::lv::new(opt.ns(), opt.db(), tb, &self.id);
+					let key = crate::key::lv::new(opt.ns(), opt.db(), tb, self.id.0);
 					run.del(key).await?;
 				}
 				_ => {

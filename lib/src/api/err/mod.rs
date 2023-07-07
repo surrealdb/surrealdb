@@ -4,6 +4,7 @@ use crate::sql::Edges;
 use crate::sql::Object;
 use crate::sql::Thing;
 use crate::sql::Value;
+use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -98,7 +99,7 @@ pub enum Error {
 	#[error("Failed to deserialize a binary response: {error}")]
 	ResponseFromBinary {
 		binary: Vec<u8>,
-		error: bung::decode::Error,
+		error: bincode::Error,
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string
@@ -145,11 +146,6 @@ pub enum Error {
 	/// it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]
 	BackupsNotSupported,
-
-	/// The protocol or storage engine being used does not support authentication on the
-	/// architecture it's running on
-	#[error("The protocol or storage engine does not support authentication on this architecture")]
-	AuthNotSupported,
 }
 
 #[cfg(feature = "protocol-http")]
@@ -198,5 +194,14 @@ impl From<ws_stream_wasm::WsErr> for crate::Error {
 impl From<pharos::PharErr> for crate::Error {
 	fn from(error: pharos::PharErr) -> Self {
 		Self::Api(Error::Ws(error.to_string()))
+	}
+}
+
+impl Serialize for Error {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_str(self.to_string().as_str())
 	}
 }

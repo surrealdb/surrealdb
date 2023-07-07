@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::data::Data;
@@ -37,7 +36,7 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
+		// Check tables
 		if !opt.tables {
 			return Ok(());
 		}
@@ -46,7 +45,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
@@ -177,12 +176,11 @@ impl<'a> Document<'a> {
 						id: rid.id.clone(),
 					};
 					// Use the current record data
-					let doc = Some(self.current.as_ref());
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, doc).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -195,7 +193,15 @@ impl<'a> Document<'a> {
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(Data::ReplaceExpression(
-												tb.expr.compute(ctx, opt, txn, doc, false).await?,
+												tb.expr
+													.compute(
+														ctx,
+														opt,
+														txn,
+														Some(&self.current),
+														false,
+													)
+													.await?,
 											)),
 											..UpdateStatement::default()
 										}),
@@ -227,7 +233,9 @@ impl<'a> Document<'a> {
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
 									data: Some(Data::ReplaceExpression(
-										tb.expr.compute(ctx, opt, txn, doc, false).await?,
+										tb.expr
+											.compute(ctx, opt, txn, Some(&self.current), false)
+											.await?,
 									)),
 									..UpdateStatement::default()
 								}),
@@ -253,75 +261,48 @@ impl<'a> Document<'a> {
 	) -> Result<Data, Error> {
 		//
 		let mut ops: Ops = vec![];
-		//
+		// Create a new context with the initial or the current doc
 		let doc = match act {
-			Action::Delete => Some(self.initial.as_ref()),
-			Action::Update => Some(self.current.as_ref()),
+			Action::Delete => Some(&self.initial),
+			Action::Update => Some(&self.current),
 			_ => unreachable!(),
 		};
 		//
 		for field in exp.other() {
-			// Process it if it is a normal field
-			if let Field::Alone(v) = field {
-				match v {
+			// Process the field
+			if let Field::Single {
+				expr,
+				alias,
+			} = field
+			{
+				let idiom = alias.clone().unwrap_or_else(|| expr.to_idiom());
+				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
 							let val = f.compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::sum" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, v.to_idiom(), val);
+							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::min" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.min(&mut ops, &act, v.to_idiom(), val);
+							self.min(&mut ops, &act, idiom, val);
 						}
 						"math::max" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.max(&mut ops, &act, v.to_idiom(), val);
+							self.max(&mut ops, &act, idiom, val);
 						}
 						"math::mean" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.mean(&mut ops, &act, v.to_idiom(), val);
+							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
-						self.set(&mut ops, v.to_idiom(), val);
-					}
-				}
-			}
-			// Process it if it is a aliased field
-			if let Field::Alias(v, i) = field {
-				match v {
-					Value::Function(f) if f.is_rolling() => match f.name() {
-						"count" => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.chg(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.min(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.max(&mut ops, &act, i.to_owned(), val);
-						}
-						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
-							self.mean(&mut ops, &act, i.to_owned(), val);
-						}
-						_ => unreachable!(),
-					},
-					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
-						self.set(&mut ops, i.to_owned(), val);
+						let val = expr.compute(ctx, opt, txn, doc).await?;
+						self.set(&mut ops, idiom, val);
 					}
 				}
 			}
@@ -353,7 +334,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::MoreThan,
 							r: val.clone(),
@@ -373,7 +354,7 @@ impl<'a> Document<'a> {
 				Operator::Equal,
 				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 					exprs: vec![(
-						Value::Expression(Box::new(Expression {
+						Value::Expression(Box::new(Expression::Binary {
 							l: Value::Idiom(key.clone()),
 							o: Operator::LessThan,
 							r: val.clone(),
@@ -395,13 +376,13 @@ impl<'a> Document<'a> {
 		ops.push((
 			key.clone(),
 			Operator::Equal,
-			Value::Expression(Box::new(Expression {
+			Value::Expression(Box::new(Expression::Binary {
 				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
+					Expression::Binary {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression {
+							Expression::Binary {
 								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression {
+									Box::new(Expression::Binary {
 										l: Value::Idiom(key),
 										o: Operator::Nco,
 										r: Value::Number(Number::Int(0)),
@@ -409,7 +390,7 @@ impl<'a> Document<'a> {
 								)))),
 								o: Operator::Mul,
 								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression {
+									Box::new(Expression::Binary {
 										l: Value::Idiom(key_c.clone()),
 										o: Operator::Nco,
 										r: Value::Number(Number::Int(0)),
@@ -427,9 +408,9 @@ impl<'a> Document<'a> {
 				))))),
 				o: Operator::Div,
 				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression {
+					Expression::Binary {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression {
+							Expression::Binary {
 								l: Value::Idiom(key_c.clone()),
 								o: Operator::Nco,
 								r: Value::Number(Number::Int(0)),

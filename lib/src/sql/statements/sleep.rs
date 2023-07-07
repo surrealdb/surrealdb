@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::duration;
@@ -23,8 +23,7 @@ impl SleepStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
@@ -65,10 +64,10 @@ pub fn sleep(i: &str) -> IResult<&str, SleepStatement> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::dbs::Auth;
+	use std::sync::Arc;
 	use std::time::SystemTime;
 
 	#[test]
@@ -93,10 +92,10 @@ mod tests {
 	async fn test_sleep_compute() {
 		let sql = "SLEEP 500ms";
 		let time = SystemTime::now();
-		let opt = Options::new(Auth::Kv);
-		let (ctx, _, txn) = mock().await;
+		let opt = Options::default().with_auth(Arc::new(Auth::Kv));
+		let (ctx, _, _) = mock().await;
 		let (_, stm) = sleep(sql).unwrap();
-		let value = stm.compute(&ctx, &opt, &txn, None).await.unwrap();
+		let value = stm.compute(&ctx, &opt, None).await.unwrap();
 		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
 		assert_eq!(value, Value::None);
 	}

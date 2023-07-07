@@ -19,7 +19,7 @@ impl Default for Kv {
 impl Kv {
 	pub fn new() -> Kv {
 		Kv {
-			__: 0x2f, // /
+			__: b'/',
 		}
 	}
 }
@@ -32,6 +32,8 @@ mod tests {
 		#[rustfmt::skip]
 		let val = Kv::new();
 		let enc = Kv::encode(&val).unwrap();
+		assert_eq!(enc, b"/");
+
 		let dec = Kv::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

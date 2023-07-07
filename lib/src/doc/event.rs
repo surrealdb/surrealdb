@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -24,7 +23,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Loop through all event statements
 		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action
@@ -38,9 +37,9 @@ impl<'a> Document<'a> {
 			// Configure the context
 			let mut ctx = Context::new(ctx);
 			ctx.add_value("event", met);
-			ctx.add_value("value", self.current.deref());
-			ctx.add_value("after", self.current.deref());
-			ctx.add_value("before", self.initial.deref());
+			ctx.add_value("value", self.current.doc.deref());
+			ctx.add_value("after", self.current.doc.deref());
+			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
 			let val = ev.when.compute(&ctx, opt, txn, Some(&self.current)).await?;
 			// Execute event if value is truthy

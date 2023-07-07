@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
@@ -51,7 +51,7 @@ impl InsertStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -60,7 +60,7 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Parse the expression
 		match &self.data {
 			// Check if this is a traditional statement

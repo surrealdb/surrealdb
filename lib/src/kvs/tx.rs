@@ -2,6 +2,8 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
+use crate::dbs::cl::ClusterMembership;
+use crate::dbs::cl::Timestamp;
 use crate::err::Error;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
@@ -11,7 +13,7 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::Value;
+use crate::sql::value::Value;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -31,9 +33,8 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-
-#[cfg(debug_assertions)]
-const LOG: &str = "surrealdb::txn";
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -48,12 +49,14 @@ pub(super) enum Inner {
 	Mem(super::mem::Transaction),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Transaction),
+	#[cfg(feature = "kv-speedb")]
+	SpeeDB(super::speedb::Transaction),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Transaction),
+	FoundationDB(super::fdb::Transaction),
 }
 
 impl fmt::Display for Transaction {
@@ -64,12 +67,14 @@ impl fmt::Display for Transaction {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
+			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
+			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -89,7 +94,7 @@ impl Transaction {
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Closed");
+		trace!("Closed");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -99,6 +104,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.closed(),
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
@@ -113,7 +123,7 @@ impl Transaction {
 			} => v.closed(),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.closed(),
 			#[allow(unreachable_patterns)]
@@ -126,7 +136,7 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Cancel");
+		trace!("Cancel");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -136,6 +146,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.cancel().await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-indxdb")]
@@ -150,7 +165,7 @@ impl Transaction {
 			} => v.cancel().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
@@ -163,7 +178,7 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Commit");
+		trace!("Commit");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -173,6 +188,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-indxdb")]
@@ -187,7 +207,7 @@ impl Transaction {
 			} => v.commit().await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -202,7 +222,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Del {:?}", key);
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -212,6 +232,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.del(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -226,7 +251,7 @@ impl Transaction {
 			} => v.del(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
@@ -241,7 +266,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Exi {:?}", key);
+		trace!("Exi {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -251,6 +276,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.exi(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -265,7 +295,7 @@ impl Transaction {
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.exi(key).await,
 			#[allow(unreachable_patterns)]
@@ -280,7 +310,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Get {:?}", key);
+		trace!("Get {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -290,6 +320,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -304,7 +339,7 @@ impl Transaction {
 			} => v.get(key).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -320,7 +355,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Set {:?} => {:?}", key, val);
+		trace!("Set {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -330,6 +365,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.set(key, val).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -344,7 +384,7 @@ impl Transaction {
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -360,7 +400,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Put {:?} => {:?}", key, val);
+		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -370,6 +410,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.put(key, val).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -384,7 +429,7 @@ impl Transaction {
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.put(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -401,7 +446,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -411,6 +456,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -425,7 +475,7 @@ impl Transaction {
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
@@ -441,7 +491,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
+		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -451,6 +501,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -465,7 +520,7 @@ impl Transaction {
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
@@ -481,7 +536,7 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
+		trace!("Delc {:?} if {:?}", key, chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -491,6 +546,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -505,7 +565,7 @@ impl Transaction {
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
-				inner: Inner::FDB(v),
+				inner: Inner::FoundationDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]
@@ -727,6 +787,60 @@ impl Transaction {
 	{
 		let key: Key = key.into();
 		self.cache.del(&key);
+		Ok(())
+	}
+
+	// Register cluster membership
+	// NOTE: Setting cluster membership sets the heartbeat
+	// Remember to set the heartbeat as well
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(id);
+		match self.get_cl(id).await? {
+			Some(_) => Err(Error::ClAlreadyExists {
+				value: id.to_string(),
+			}),
+			None => {
+				let value = ClusterMembership {
+					name: id.to_string(),
+					heartbeat: self.clock(),
+				};
+				self.put(key, value).await?;
+				Ok(())
+			}
+		}
+	}
+
+	// Retrieve cluster information
+	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
+		let key = crate::key::cl::Cl::new(id);
+		let val = self.get(key).await?;
+		match val {
+			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
+			None => Ok(None),
+		}
+	}
+
+	fn clock(&self) -> Timestamp {
+		// Use a timestamp oracle if available
+		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+		Timestamp {
+			value: now as u64,
+		}
+	}
+
+	// Set heartbeat
+	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
+		let now = self.clock();
+		let key = crate::key::hb::Hb::new(now.clone(), id);
+		// We do not need to do a read, we always want to overwrite
+		self.put(
+			key,
+			ClusterMembership {
+				name: id.to_string(),
+				heartbeat: now,
+			},
+		)
+		.await?;
 		Ok(())
 	}
 
@@ -1257,6 +1371,20 @@ impl Transaction {
 		})?;
 		Ok(val.into())
 	}
+	/// Retrieve a specific analyzer definition.
+	pub async fn get_ix(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineIndexStatement, Error> {
+		let key = crate::key::ix::new(ns, db, tb, ix);
+		let val = self.get(key).await?.ok_or(Error::IxNotFound {
+			value: ix.to_owned(),
+		})?;
+		Ok(val.into())
+	}
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
 	pub async fn add_ns(
 		&mut self,
@@ -1299,6 +1427,7 @@ impl Transaction {
 					let key = crate::key::db::new(ns, db);
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						changefeed: None,
 					};
 					self.put(key, &val).await?;
 					Ok(val)
@@ -1484,6 +1613,7 @@ impl Transaction {
 					let key = crate::key::db::new(ns, db);
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						changefeed: None,
 					};
 					self.put(key, &val).await?;
 					Ok(Arc::new(val))

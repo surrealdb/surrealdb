@@ -1,6 +1,6 @@
 use crate::sql::common::is_hex;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::take_while_m_n;
@@ -18,7 +18,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
-pub struct Uuid(pub uuid::Uuid);
+pub struct Uuid(#[serde(with = "uuid::serde::compact")] pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {
 	fn from(v: uuid::Uuid) -> Self {
@@ -99,7 +99,7 @@ impl Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_str(&self.0.to_string()), f)
+		Display::fmt(&quote_str(&self.0.to_string()), f)
 	}
 }
 

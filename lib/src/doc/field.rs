@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::permission::Permission;
@@ -22,21 +21,21 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the user applied input
-		let inp = self.initial.changed(self.current.as_ref());
+		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
-			for (k, mut val) in self.current.walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value
-				let old = self.initial.pick(&k);
+				let old = self.initial.doc.pick(&k);
 				// Get the input value
 				let inp = inp.pick(&k);
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
 					if !val.is_none() {
-						val = val.convert_to(kind).map_err(|e| match e {
+						val = val.coerce_to(kind).map_err(|e| match e {
 							// There was a conversion error
-							Error::ConvertTo {
+							Error::CoerceTo {
 								from,
 								..
 							} => Error::FieldCheck {
@@ -63,9 +62,9 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = val.convert_to(kind).map_err(|e| match e {
+					val = val.coerce_to(kind).map_err(|e| match e {
 						// There was a conversion error
-						Error::ConvertTo {
+						Error::CoerceTo {
 							from,
 							..
 						} => Error::FieldCheck {
@@ -110,7 +109,7 @@ impl<'a> Document<'a> {
 						Permission::None => val = old,
 						Permission::Specific(e) => {
 							// Disable permissions
-							let opt = &opt.perms(false);
+							let opt = &opt.new_with_perms(false);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
 							ctx.add_value("input", &inp);
@@ -126,8 +125,8 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					_ => self.current.to_mut().set(ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.doc.to_mut().del(ctx, opt, txn, &k).await?,
+					_ => self.current.doc.to_mut().set(ctx, opt, txn, &k, val).await?,
 				};
 			}
 		}

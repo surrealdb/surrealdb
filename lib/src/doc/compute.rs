@@ -1,17 +1,18 @@
 use crate::ctx::Context;
-use crate::dbs::Operable;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::dbs::Workable;
+use crate::dbs::{Operable, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::ft::docids::DocId;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use channel::Sender;
 
 impl<'a> Document<'a> {
 	#[allow(dead_code)]
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn compute(
 		ctx: &Context<'_>,
 		opt: &Options,
@@ -19,6 +20,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
+		doc_id: Option<DocId>,
 		val: Operable,
 	) -> Result<(), Error> {
 		// Setup a new workable
@@ -28,7 +30,7 @@ impl<'a> Document<'a> {
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(thg, &ins.0, ins.1);
+		let mut doc = Document::new(thg.as_ref(), doc_id, &ins.0, ins.1);
 		// Process the statement
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
