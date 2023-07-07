@@ -3,6 +3,7 @@ use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 struct Prefix<'a> {
@@ -90,28 +91,20 @@ pub fn new<'a>(
 	Index::new(ns, db, tb, ix, fd.to_owned(), id.cloned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	k.extend_from_slice(&[0x00]);
-	k
+pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+	let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
+	beg.extend_from_slice(&[0x00]);
+	let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
+	end.extend_from_slice(&[0xff]);
+	beg..end
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	k.extend_from_slice(&[0xff]);
-	k
-}
-
-pub fn prefix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
-	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	k.extend_from_slice(&[0x00]);
-	k
-}
-
-pub fn suffix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
-	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	k.extend_from_slice(&[0xff]);
-	k
+pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
+	let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+	beg.extend_from_slice(&[0x00]);
+	let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+	end.extend_from_slice(&[0xff]);
+	(beg, end)
 }
 
 impl<'a> Index<'a> {

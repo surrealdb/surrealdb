@@ -198,8 +198,7 @@ impl NonUniqueEqualThingIterator {
 		v: &Value,
 	) -> Result<NonUniqueEqualThingIterator, Error> {
 		let v = Array::from(v.clone());
-		let beg = key::index::prefix_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
-		let end = key::index::suffix_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
+		let (beg, end) = key::index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
 		Ok(Self {
 			beg,
 			end,
