@@ -13,7 +13,7 @@ pub(crate) const NO_DOC_ID: u64 = u64::MAX;
 pub(crate) struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree,
+	btree: BTree<TrieKeys>,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,
 	updated: bool,
@@ -64,7 +64,7 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		self.btree.search::<TrieKeys>(tx, &doc_key).await
+		self.btree.search(tx, &doc_key).await
 	}
 
 	/// Returns the doc_id for the given doc_key.
@@ -74,12 +74,12 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
-		if let Some(doc_id) = self.btree.search::<TrieKeys>(tx, &doc_key).await? {
+		if let Some(doc_id) = self.btree.search(tx, &doc_key).await? {
 			Ok(Resolved::Existing(doc_id))
 		} else {
 			let doc_id = self.get_next_doc_id();
 			tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
-			self.btree.insert::<TrieKeys>(tx, doc_key, doc_id).await?;
+			self.btree.insert(tx, doc_key, doc_id).await?;
 			self.updated = true;
 			Ok(Resolved::New(doc_id))
 		}
@@ -90,7 +90,7 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		if let Some(doc_id) = self.btree.delete::<TrieKeys>(tx, doc_key).await? {
+		if let Some(doc_id) = self.btree.delete(tx, doc_key).await? {
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
@@ -120,7 +120,7 @@ impl DocIds {
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics::<TrieKeys>(tx).await
+		self.btree.statistics(tx).await
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {

@@ -11,7 +11,7 @@ pub(crate) type TermId = u64;
 pub(super) struct Terms {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree,
+	btree: BTree<FstKeys>,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 	updated: bool,
@@ -63,12 +63,12 @@ impl Terms {
 		term: &str,
 	) -> Result<TermId, Error> {
 		let term_key = term.into();
-		if let Some(term_id) = self.btree.search::<FstKeys>(tx, &term_key).await? {
+		if let Some(term_id) = self.btree.search(tx, &term_key).await? {
 			Ok(term_id)
 		} else {
 			let term_id = self.get_next_term_id();
 			tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
-			self.btree.insert::<FstKeys>(tx, term_key, term_id).await?;
+			self.btree.insert(tx, term_key, term_id).await?;
 			self.updated = true;
 			Ok(term_id)
 		}
@@ -79,7 +79,7 @@ impl Terms {
 		tx: &mut Transaction,
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
-		self.btree.search::<FstKeys>(tx, &term.into()).await
+		self.btree.search(tx, &term.into()).await
 	}
 
 	pub(super) async fn remove_term_id(
@@ -90,7 +90,7 @@ impl Terms {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
 		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
 			debug!("Delete In {}", String::from_utf8(term_key.clone()).unwrap());
-			self.btree.delete::<FstKeys>(tx, term_key.clone()).await?;
+			self.btree.delete(tx, term_key.clone()).await?;
 			debug!("Delete Out {}", String::from_utf8(term_key.clone()).unwrap());
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
@@ -106,7 +106,7 @@ impl Terms {
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics::<FstKeys>(tx).await
+		self.btree.statistics(tx).await
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {

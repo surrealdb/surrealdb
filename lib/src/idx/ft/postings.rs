@@ -11,7 +11,7 @@ pub(super) type TermFrequency = u64;
 pub(super) struct Postings {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree,
+	btree: BTree<TrieKeys>,
 }
 
 impl Postings {
@@ -42,7 +42,7 @@ impl Postings {
 		term_freq: TermFrequency,
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
+		self.btree.insert(tx, key, term_freq).await
 	}
 
 	pub(super) async fn get_term_frequency(
@@ -52,7 +52,7 @@ impl Postings {
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.search::<TrieKeys>(tx, &key).await
+		self.btree.search(tx, &key).await
 	}
 
 	pub(super) async fn remove_posting(
@@ -62,11 +62,11 @@ impl Postings {
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.delete::<TrieKeys>(tx, key).await
+		self.btree.delete(tx, key).await
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics::<TrieKeys>(tx).await
+		self.btree.statistics(tx).await
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {

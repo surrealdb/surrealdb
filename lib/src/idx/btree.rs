@@ -5,7 +5,7 @@ use crate::kvs::{Key, Transaction};
 use crate::sql::{Object, Value};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 
 pub type NodeId = u64;
@@ -56,11 +56,15 @@ impl KeyProvider {
 	}
 }
 
-pub struct BTree {
+pub struct BTree<BK>
+where
+	BK: BKeys + Serialize + DeserializeOwned,
+{
 	keys: KeyProvider,
 	state: State,
 	full_size: u32,
 	updated: bool,
+	_node_cache: HashMap<NodeId, StoredNode<BK>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -183,24 +187,25 @@ where
 	median_key: Key,
 }
 
-impl BTree {
+impl<BK> BTree<BK>
+where
+	BK: BKeys + Serialize + DeserializeOwned + Default,
+{
 	pub fn new(keys: KeyProvider, state: State) -> Self {
 		Self {
 			keys,
 			full_size: state.minimum_degree * 2 - 1,
 			state,
 			updated: false,
+			_node_cache: Default::default(),
 		}
 	}
 
-	pub async fn search<BK>(
+	pub async fn search(
 		&self,
 		tx: &mut Transaction,
 		searched_key: &Key,
-	) -> Result<Option<Payload>, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<Option<Payload>, Error> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
 			let current = self.keys.load_node::<BK>(tx, node_id).await?;
@@ -215,15 +220,12 @@ impl BTree {
 		Ok(None)
 	}
 
-	pub async fn insert<BK>(
+	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
 		key: Key,
 		payload: Payload,
-	) -> Result<(), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned + Default,
-	{
+	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
 			let root = self.keys.load_node::<BK>(tx, root_id).await?;
 			if root.node.keys().len() == self.full_size {
@@ -246,16 +248,13 @@ impl BTree {
 		Ok(())
 	}
 
-	async fn insert_non_full<BK>(
+	async fn insert_non_full(
 		&mut self,
 		tx: &mut Transaction,
 		node: StoredNode<BK>,
 		key: Key,
 		payload: Payload,
-	) -> Result<(), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(), Error> {
 		let mut next_node = Some(node);
 		while let Some(mut node) = next_node.take() {
 			let key: Key = key.clone();
@@ -273,8 +272,7 @@ impl BTree {
 					let child_idx = keys.get_child_idx(&key);
 					let child = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
 					let next = if child.node.keys().len() == self.full_size {
-						let split_result =
-							self.split_child::<BK>(tx, node, child_idx, child).await?;
+						let split_result = self.split_child(tx, node, child_idx, child).await?;
 						if key.gt(&split_result.median_key) {
 							split_result.right_node
 						} else {
@@ -290,18 +288,15 @@ impl BTree {
 		Ok(())
 	}
 
-	async fn split_child<BK>(
+	async fn split_child(
 		&mut self,
 		tx: &mut Transaction,
 		mut parent_node: StoredNode<BK>,
 		idx: usize,
 		child_node: StoredNode<BK>,
-	) -> Result<SplitResult<BK>, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<SplitResult<BK>, Error> {
 		let (left_node, right_node, median_key, median_payload) = match child_node.node {
-			Node::Internal(keys, children) => self.split_internal_node::<BK>(keys, children),
+			Node::Internal(keys, children) => self.split_internal_node(keys, children),
 			Node::Leaf(keys) => self.split_leaf_node(keys),
 		};
 		let right_node_id = self.new_node_id();
@@ -315,10 +310,10 @@ impl BTree {
 			}
 		};
 		// Save the mutated split child with half the (lower) keys
-		let mut left_node = self.new_node::<BK>(child_node.id, left_node);
+		let mut left_node = self.new_node(child_node.id, left_node);
 		left_node.write(tx).await?;
 		// Save the new child with half the (upper) keys
-		let mut right_node = self.new_node::<BK>(right_node_id, right_node);
+		let mut right_node = self.new_node(right_node_id, right_node);
 		right_node.write(tx).await?;
 		// Save the parent node
 		parent_node.write(tx).await?;
@@ -330,14 +325,11 @@ impl BTree {
 		})
 	}
 
-	fn split_internal_node<BK>(
+	fn split_internal_node(
 		&mut self,
 		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> (Node<BK>, Node<BK>, Key, Payload)
-	where
-		BK: BKeys,
-	{
+	) -> (Node<BK>, Node<BK>, Key, Payload) {
 		let r = keys.split_keys();
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = Node::Internal(r.left, left_children);
@@ -345,10 +337,7 @@ impl BTree {
 		(left_node, right_node, r.median_key, r.median_payload)
 	}
 
-	fn split_leaf_node<BK>(&mut self, keys: BK) -> (Node<BK>, Node<BK>, Key, Payload)
-	where
-		BK: BKeys,
-	{
+	fn split_leaf_node(&mut self, keys: BK) -> (Node<BK>, Node<BK>, Key, Payload) {
 		let r = keys.split_keys();
 		let left_node = Node::Leaf(r.left);
 		let right_node = Node::Leaf(r.right);
@@ -361,14 +350,11 @@ impl BTree {
 		new_node_id
 	}
 
-	pub(super) async fn delete<BK>(
+	pub(super) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
 		key_to_delete: Key,
-	) -> Result<Option<Payload>, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<Option<Payload>, Error> {
 		let mut deleted_payload = None;
 
 		if let Some(root_id) = self.state.root {
@@ -434,16 +420,13 @@ impl BTree {
 		Ok(deleted_payload)
 	}
 
-	async fn deleted_from_internal<BK>(
+	async fn deleted_from_internal(
 		&mut self,
 		tx: &mut Transaction,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
-	) -> Result<(bool, Key, StoredNode<BK>), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(bool, Key, StoredNode<BK>), Error> {
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
 		let mut left_node = self.keys.load_node::<BK>(tx, left_id).await?;
@@ -478,17 +461,14 @@ impl BTree {
 		Ok((false, key_to_delete, left_node))
 	}
 
-	async fn deleted_traversal<BK>(
+	async fn deleted_traversal(
 		&mut self,
 		tx: &mut Transaction,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
 		is_main_key: bool,
-	) -> Result<(bool, bool, Key, StoredNode<BK>), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(bool, bool, Key, StoredNode<BK>), Error> {
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_stored_node = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
@@ -563,7 +543,7 @@ impl BTree {
 		Ok((false, true, key_to_delete, child_stored_node))
 	}
 
-	async fn delete_adjust_successor<BK>(
+	async fn delete_adjust_successor(
 		tx: &mut Transaction,
 		keys: &mut BK,
 		child_idx: usize,
@@ -571,10 +551,7 @@ impl BTree {
 		is_main_key: bool,
 		mut child_stored_node: StoredNode<BK>,
 		mut right_child_stored_node: StoredNode<BK>,
-	) -> Result<(bool, bool, Key, StoredNode<BK>), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(bool, bool, Key, StoredNode<BK>), Error> {
 		debug!("** delete_adjust_successor - child_idx: {}", child_idx);
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.node.keys().get_first_key()
@@ -594,7 +571,7 @@ impl BTree {
 		Err(Error::CorruptedIndex)
 	}
 
-	async fn delete_adjust_predecessor<BK>(
+	async fn delete_adjust_predecessor(
 		tx: &mut Transaction,
 		keys: &mut BK,
 		child_idx: usize,
@@ -602,10 +579,7 @@ impl BTree {
 		is_main_key: bool,
 		mut child_stored_node: StoredNode<BK>,
 		mut left_child_stored_node: StoredNode<BK>,
-	) -> Result<(bool, bool, Key, StoredNode<BK>), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(bool, bool, Key, StoredNode<BK>), Error> {
 		// TODO: Remove once everything is stable
 		// debug!("** delete_adjust_predecessor - child_idx: {}", child_idx);
 		// keys.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
@@ -632,7 +606,7 @@ impl BTree {
 	}
 
 	#[allow(clippy::too_many_arguments)]
-	async fn merge_nodes<BK>(
+	async fn merge_nodes(
 		tx: &mut Transaction,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -641,10 +615,7 @@ impl BTree {
 		is_main_key: bool,
 		mut left_child: StoredNode<BK>,
 		right_child: StoredNode<BK>,
-	) -> Result<(bool, bool, Key, StoredNode<BK>), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	) -> Result<(bool, bool, Key, StoredNode<BK>), Error> {
 		// TODO: Remove once everything is stable
 		// debug!("** merge_nodes - child_idx: {}", child_idx);
 		// keys.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
@@ -662,10 +633,7 @@ impl BTree {
 		Err(Error::CorruptedIndex)
 	}
 
-	pub(super) async fn statistics<BK>(&self, tx: &mut Transaction) -> Result<Statistics, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		let mut stats = Statistics::default();
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
@@ -697,10 +665,7 @@ impl BTree {
 		self.updated
 	}
 
-	fn new_node<BK>(&self, id: NodeId, node: Node<BK>) -> StoredNode<BK>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
+	fn new_node(&self, id: NodeId, node: Node<BK>) -> StoredNode<BK> {
 		StoredNode {
 			node,
 			id,
@@ -772,7 +737,7 @@ mod tests {
 
 	async fn insertions_test<F, BK>(
 		tx: &mut Transaction,
-		t: &mut BTree,
+		t: &mut BTree<BK>,
 		samples_size: usize,
 		sample_provider: F,
 	) where
@@ -782,9 +747,9 @@ mod tests {
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
 			// Insert the sample
-			t.insert::<BK>(tx, key.clone(), payload).await.unwrap();
+			t.insert(tx, key.clone(), payload).await.unwrap();
 			// Check we can find it
-			assert_eq!(t.search::<BK>(tx, &key).await.unwrap(), Some(payload));
+			assert_eq!(t.search(tx, &key).await.unwrap(), Some(payload));
 		}
 	}
 
@@ -801,7 +766,7 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<FstKeys>(&mut tx).await.unwrap(),
+			t.statistics(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 100,
 				max_depth: 3,
@@ -820,7 +785,7 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<TrieKeys>(&mut tx).await.unwrap(),
+			t.statistics(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 100,
 				max_depth: 3,
@@ -841,7 +806,7 @@ mod tests {
 		insertions_test::<_, FstKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<FstKeys>(&mut tx).await.unwrap();
+		let s = t.statistics(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
 	}
 
@@ -856,7 +821,7 @@ mod tests {
 		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		let s = t.statistics(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
 	}
 
@@ -869,7 +834,7 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<FstKeys>(&mut tx).await.unwrap(),
+			t.statistics(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 10000,
 				max_depth: 3,
@@ -888,7 +853,7 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<TrieKeys>(&mut tx).await.unwrap(),
+			t.statistics(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 10000,
 				max_depth: 3,
@@ -917,7 +882,7 @@ mod tests {
 		.await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		t.statistics::<BK>(&mut tx).await.unwrap()
+		t.statistics(&mut tx).await.unwrap()
 	}
 
 	#[test(tokio::test)]
@@ -1008,15 +973,15 @@ mod tests {
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn clrs_insertion_test() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(KeyProvider::Debug, State::new(3));
+		let mut t = BTree::<TrieKeys>::new(KeyProvider::Debug, State::new(3));
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in CLRS_EXAMPLE {
-			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
+			t.insert(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		let s = t.statistics(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 23);
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
@@ -1024,7 +989,7 @@ mod tests {
 		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes::<TrieKeys, _>(&mut tx, |count, depth, node_id, node| match count {
+			.inspect_nodes(&mut tx, |count, depth, node_id, node| match count {
 				0 => {
 					assert_eq!(depth, 1);
 					assert_eq!(node_id, 7);
@@ -1087,27 +1052,26 @@ mod tests {
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn test_btree_clrs_deletion_test<BK>()
+	async fn test_btree_clrs_deletion_test<BK>(mut t: BTree<BK>)
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(KeyProvider::Debug, State::new(3));
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in CLRS_EXAMPLE {
-			t.insert::<BK>(&mut tx, key.into(), payload).await.unwrap();
+			t.insert(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
 			debug!("Delete {}", key);
-			assert_eq!(t.delete::<BK>(&mut tx, key.into()).await.unwrap(), Some(payload));
+			assert_eq!(t.delete(&mut tx, key.into()).await.unwrap(), Some(payload));
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<BK>(&mut tx).await.unwrap();
+		let s = t.statistics(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 18);
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
@@ -1115,7 +1079,7 @@ mod tests {
 		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes::<BK, _>(&mut tx, |count, depth, node_id, node| {
+			.inspect_nodes(&mut tx, |count, depth, node_id, node| {
 				debug!("{} -> {}", depth, node_id);
 				node.node.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
 				match count {
@@ -1168,52 +1132,50 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_clrs_deletion_test() {
-		test_btree_clrs_deletion_test::<TrieKeys>().await
+		let t = BTree::<TrieKeys>::new(KeyProvider::Debug, State::new(3));
+		test_btree_clrs_deletion_test(t).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_clrs_deletion_test() {
-		test_btree_clrs_deletion_test::<FstKeys>().await
+		let t = BTree::<FstKeys>::new(KeyProvider::Debug, State::new(3));
+		test_btree_clrs_deletion_test(t).await
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn test_btree_fill_and_empty<BK>()
+	async fn test_btree_fill_and_empty<BK>(mut t: BTree<BK>)
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(KeyProvider::Debug, State::new(3));
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut expected_keys = HashMap::new();
 		for (key, payload) in CLRS_EXAMPLE {
 			expected_keys.insert(key.to_string(), payload);
-			t.insert::<BK>(&mut tx, key.into(), payload).await.unwrap();
+			t.insert(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		print_tree::<BK>(&mut tx, &t).await;
+		print_tree(&mut tx, &t).await;
 
 		for (key, _) in CLRS_EXAMPLE {
 			debug!("------------------------");
 			debug!("Delete {}", key);
-			t.delete::<BK>(&mut tx, key.into()).await.unwrap();
+			t.delete(&mut tx, key.into()).await.unwrap();
 			print_tree::<BK>(&mut tx, &t).await;
 
 			// Check that every expected keys are still found in the tree
 			expected_keys.remove(key);
 			for (key, payload) in &expected_keys {
-				assert_eq!(
-					t.search::<BK>(&mut tx, &key.as_str().into()).await.unwrap(),
-					Some(*payload)
-				)
+				assert_eq!(t.search(&mut tx, &key.as_str().into()).await.unwrap(), Some(*payload))
 			}
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<BK>(&mut tx).await.unwrap();
+		let s = t.statistics(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
@@ -1223,12 +1185,14 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_fill_and_empty() {
-		test_btree_fill_and_empty::<TrieKeys>().await
+		let t = BTree::<TrieKeys>::new(KeyProvider::Debug, State::new(3));
+		test_btree_fill_and_empty(t).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_fill_and_empty() {
-		test_btree_fill_and_empty::<FstKeys>().await
+		let t = BTree::<FstKeys>::new(KeyProvider::Debug, State::new(3));
+		test_btree_fill_and_empty(t).await
 	}
 
 	/////////////
@@ -1261,12 +1225,12 @@ mod tests {
 		}
 	}
 
-	async fn print_tree<BK>(tx: &mut Transaction, t: &BTree)
+	async fn print_tree<BK>(tx: &mut Transaction, t: &BTree<BK>)
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		debug!("----------------------------------");
-		t.inspect_nodes::<BK, _>(tx, |_count, depth, node_id, node| {
+		t.inspect_nodes(tx, |_count, depth, node_id, node| {
 			debug!("{} -> {}", depth, node_id);
 			node.node.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
 		})
@@ -1290,16 +1254,18 @@ mod tests {
 		}
 	}
 
-	impl BTree {
+	impl<BK> BTree<BK>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
 		/// This is for debugging
-		async fn inspect_nodes<BK, F>(
+		async fn inspect_nodes<F>(
 			&self,
 			tx: &mut Transaction,
 			inspect_func: F,
 		) -> Result<usize, Error>
 		where
 			F: Fn(usize, usize, NodeId, StoredNode<BK>),
-			BK: BKeys + Serialize + DeserializeOwned,
 		{
 			let mut node_queue = VecDeque::new();
 			if let Some(node_id) = self.state.root {

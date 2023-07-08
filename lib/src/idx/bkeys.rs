@@ -11,6 +11,7 @@ use std::io;
 pub trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
+	fn is_empty(&self) -> bool;
 	fn get(&self, key: &Key) -> Option<Payload>;
 	// It is okay to return a owned Vec rather than an iterator,
 	// because BKeys are intended to be stored as Node in the BTree.
@@ -59,6 +60,10 @@ impl BKeys for FstKeys {
 
 	fn len(&self) -> u32 {
 		self.len
+	}
+
+	fn is_empty(&self) -> bool {
+		self.len == 0
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {
@@ -371,6 +376,10 @@ impl BKeys for TrieKeys {
 
 	fn len(&self) -> u32 {
 		self.keys.len() as u32
+	}
+
+	fn is_empty(&self) -> bool {
+		self.keys.is_empty()
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {

@@ -9,7 +9,7 @@ pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	state_key: Key,
-	btree: BTree,
+	btree: BTree<TrieKeys>,
 }
 
 impl DocLengths {
@@ -36,7 +36,7 @@ impl DocLengths {
 		tx: &mut Transaction,
 		doc_id: DocId,
 	) -> Result<Option<DocLength>, Error> {
-		self.btree.search::<TrieKeys>(tx, &doc_id.to_be_bytes().to_vec()).await
+		self.btree.search(tx, &doc_id.to_be_bytes().to_vec()).await
 	}
 
 	pub(super) async fn set_doc_length(
@@ -45,7 +45,7 @@ impl DocLengths {
 		doc_id: DocId,
 		doc_length: DocLength,
 	) -> Result<(), Error> {
-		self.btree.insert::<TrieKeys>(tx, doc_id.to_be_bytes().to_vec(), doc_length).await
+		self.btree.insert(tx, doc_id.to_be_bytes().to_vec(), doc_length).await
 	}
 
 	pub(super) async fn remove_doc_length(
@@ -53,11 +53,11 @@ impl DocLengths {
 		tx: &mut Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Payload>, Error> {
-		self.btree.delete::<TrieKeys>(tx, doc_id.to_be_bytes().to_vec()).await
+		self.btree.delete(tx, doc_id.to_be_bytes().to_vec()).await
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics::<TrieKeys>(tx).await
+		self.btree.statistics(tx).await
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
