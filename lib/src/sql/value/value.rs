@@ -2782,7 +2782,7 @@ pub fn start(i: &str) -> IResult<&str, Value> {
 }
 
 /// Used in CREATE, UPDATE, and DELETE clauses
-fn what(i: &str) -> IResult<&str, Value> {
+pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(idiom::multi, Value::from),
 		map(function, Value::from),
