@@ -258,6 +258,58 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
+	let sql = "
+		CREATE person:tobie SET name = 'Tobie';	
+		DEFINE INDEX author ON TABLE post COLUMNS author;
+		CREATE post:1 SET author = person:tobie;
+		CREATE post:2 SET author = person:tobie;
+		SELECT * FROM post WHERE author = person:tobie EXPLAIN;";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				author: person:tobie,
+				id: post:1
+			},
+			{
+				author: person:tobie,
+				id: post:2
+			},
+			{
+				explain:
+				[
+					{
+						detail: {
+							plan: {
+								index: 'author',
+								operator: '=',
+								value: person:tobie
+							},
+							table: 'post',
+						},
+						operation: 'Iterate Index'
+					}
+				]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
 #[tokio::test]
 async fn select_where_and_with_index() -> Result<(), Error> {
 	let sql = "
