@@ -45,7 +45,7 @@ impl<'a> Bp<'a> {
 		}
 	}
 
-	pub(crate) fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
 		let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
 		beg.extend_from_slice(&[0x00]);
 		let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();

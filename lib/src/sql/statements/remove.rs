@@ -807,7 +807,7 @@ impl RemoveIndexStatement {
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		let rng = crate::key::index::range(opt.ns(), opt.db(), tb, ix);
+		let rng = crate::key::index::Index::range(opt.ns(), opt.db(), tb, ix);
 		run.delr(rng, u32::MAX).await?;
 		let rng = crate::key::bc::Bc::range(opt.ns(), opt.db(), tb, ix);
 		run.delr(rng, u32::MAX).await?;

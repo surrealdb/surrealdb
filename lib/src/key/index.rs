@@ -80,33 +80,6 @@ pub struct Index<'a> {
 	pub id: Option<Id>,
 }
 
-pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
-	tb: &'a str,
-	ix: &'a str,
-	fd: &Array,
-	id: Option<&Id>,
-) -> Index<'a> {
-	Index::new(ns, db, tb, ix, fd.to_owned(), id.cloned())
-}
-
-pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
-	let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	beg.extend_from_slice(&[0x00]);
-	let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	end.extend_from_slice(&[0xff]);
-	beg..end
-}
-
-pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
-	let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	beg.extend_from_slice(&[0x00]);
-	let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	end.extend_from_slice(&[0xff]);
-	(beg, end)
-}
-
 impl<'a> Index<'a> {
 	pub fn new(
 		ns: &'a str,
@@ -129,6 +102,22 @@ impl<'a> Index<'a> {
 			fd,
 			id,
 		}
+	}
+
+	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+		let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
+		beg.extend_from_slice(&[0x00]);
+		let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
+		end.extend_from_slice(&[0xff]);
+		beg..end
+	}
+
+	pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
+		let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+		beg.extend_from_slice(&[0x00]);
+		let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+		end.extend_from_slice(&[0xff]);
+		(beg, end)
 	}
 }
 

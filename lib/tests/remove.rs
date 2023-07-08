@@ -10,10 +10,11 @@ use surrealdb::key::bi::Bi;
 use surrealdb::key::bk::Bk;
 use surrealdb::key::bl::Bl;
 use surrealdb::key::bo::Bo;
+use surrealdb::key::bp::Bp;
 use surrealdb::key::bs::Bs;
 use surrealdb::key::bt::Bt;
 use surrealdb::key::bu::Bu;
-use surrealdb::key::index::range;
+use surrealdb::key::index::Index;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
@@ -85,6 +86,20 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	Ok(())
 }
 
+macro_rules! check_empty_range {
+	($tx:expr, $rng:expr) => {{
+		let r = $tx.getr($rng, 1).await?;
+		assert!(r.is_empty());
+	}};
+}
+
+macro_rules! check_none_val {
+	($tx:expr, $key:expr) => {{
+		let r = $tx.get($key).await?;
+		assert!(r.is_none());
+	}};
+}
+
 #[tokio::test]
 async fn remove_statement_index() -> Result<(), Error> {
 	let sql = "
@@ -117,42 +132,21 @@ async fn remove_statement_index() -> Result<(), Error> {
 		}",
 	);
 	assert_eq!(tmp, val);
+
 	let mut tx = dbs.transaction(false, false).await?;
 	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		let rng = Bc::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bd::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bf::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bi::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bk::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bl::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bo::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let key = Bs::new("test", "test", "book", ix);
-		let r = tx.get(key).await?;
-		assert!(r.is_none());
-		let rng = Bt::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = Bu::range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		let rng = range("test", "test", "book", ix);
-		let r = tx.getr(rng, 1).await?;
-		assert!(r.is_empty());
-		assert!(r.is_empty());
+		check_empty_range!(&mut tx, Bc::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bd::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bf::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bi::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bk::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bl::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bo::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bp::range("test", "test", "book", ix));
+		check_none_val!(&mut tx, Bs::new("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bt::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Bu::range("test", "test", "book", ix));
+		check_empty_range!(&mut tx, Index::range("test", "test", "book", ix));
 	}
 	Ok(())
 }

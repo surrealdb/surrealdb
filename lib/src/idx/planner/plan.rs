@@ -198,7 +198,8 @@ impl NonUniqueEqualThingIterator {
 		v: &Value,
 	) -> Result<NonUniqueEqualThingIterator, Error> {
 		let v = Array::from(v.clone());
-		let (beg, end) = key::index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
+		let (beg, end) =
+			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
 		Ok(Self {
 			beg,
 			end,
@@ -229,7 +230,7 @@ pub(crate) struct UniqueEqualThingIterator {
 impl UniqueEqualThingIterator {
 	fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
 		let v = Array::from(v.clone());
-		let key = key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &v, None).into();
+		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, v, None).into();
 		Ok(Self {
 			key: Some(key),
 		})
