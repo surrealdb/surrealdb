@@ -8,16 +8,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 
-pub(crate) type NodeId = u64;
-pub(super) type Payload = u64;
+pub type NodeId = u64;
+pub type Payload = u64;
 
 #[derive(Clone)]
-pub(super) enum KeyProvider {
+pub enum KeyProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
 	Postings(IndexKeyBase),
 	Terms(IndexKeyBase),
-	#[cfg(test)]
 	Debug,
 }
 
@@ -28,7 +27,6 @@ impl KeyProvider {
 			KeyProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
 			KeyProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
 			KeyProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
-			#[cfg(test)]
 			KeyProvider::Debug => node_id.to_be_bytes().to_vec(),
 		}
 	}
@@ -39,7 +37,6 @@ impl KeyProvider {
 			KeyProvider::DocLengths(ikb) => ikb.new_bl_key(None),
 			KeyProvider::Postings(ikb) => ikb.new_bp_key(None),
 			KeyProvider::Terms(ikb) => ikb.new_bt_key(None),
-			#[cfg(test)]
 			KeyProvider::Debug => "".into(),
 		}
 	}
@@ -59,7 +56,7 @@ impl KeyProvider {
 	}
 }
 
-pub(super) struct BTree {
+pub struct BTree {
 	keys: KeyProvider,
 	state: State,
 	full_size: u32,
@@ -67,7 +64,7 @@ pub(super) struct BTree {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(super) struct State {
+pub struct State {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
@@ -76,7 +73,7 @@ pub(super) struct State {
 impl SerdeState for State {}
 
 impl State {
-	pub(super) fn new(minimum_degree: u32) -> Self {
+	pub fn new(minimum_degree: u32) -> Self {
 		assert!(minimum_degree >= 2, "Minimum degree should be >= 2");
 		Self {
 			minimum_degree,
@@ -187,7 +184,7 @@ where
 }
 
 impl BTree {
-	pub(super) fn new(keys: KeyProvider, state: State) -> Self {
+	pub fn new(keys: KeyProvider, state: State) -> Self {
 		Self {
 			keys,
 			full_size: state.minimum_degree * 2 - 1,
@@ -196,7 +193,7 @@ impl BTree {
 		}
 	}
 
-	pub(super) async fn search<BK>(
+	pub async fn search<BK>(
 		&self,
 		tx: &mut Transaction,
 		searched_key: &Key,
@@ -218,7 +215,7 @@ impl BTree {
 		Ok(None)
 	}
 
-	pub(super) async fn insert<BK>(
+	pub async fn insert<BK>(
 		&mut self,
 		tx: &mut Transaction,
 		key: Key,

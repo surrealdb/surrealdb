@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::io;
 
-pub(super) trait BKeys: Display + Sized {
+pub trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
 	fn get(&self, key: &Key) -> Option<Payload>;
@@ -31,7 +31,7 @@ pub(super) trait BKeys: Display + Sized {
 		F: Fn(Key) -> Result<String, Error>;
 }
 
-pub(super) struct SplitKeys<BK>
+pub struct SplitKeys<BK>
 where
 	BK: BKeys,
 {
@@ -43,7 +43,7 @@ where
 }
 
 #[derive(Default)]
-pub(super) struct FstKeys {
+pub struct FstKeys {
 	map: Map<Vec<u8>>,
 	additions: Trie<Key, Payload>,
 	deletions: Trie<Key, bool>,
@@ -305,7 +305,7 @@ impl Display for FstKeys {
 }
 
 #[derive(Default)]
-pub(super) struct TrieKeys {
+pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
 
