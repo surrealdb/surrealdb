@@ -83,6 +83,7 @@ impl Connection for Client {
 				conn: PhantomData,
 				sender: route_tx,
 				last_id: AtomicI64::new(0),
+				datastore: None,
 			};
 			server::mock(route_rx);
 			Ok(Surreal {
