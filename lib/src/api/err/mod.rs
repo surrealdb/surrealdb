@@ -33,6 +33,10 @@ pub enum Error {
 	#[error("Connection uninitialised")]
 	ConnectionUninitialised,
 
+	/// Tried to extract datastore on a remote connection
+	#[error("Datastore is not available for this connection")]
+	DatastoreUnavailable,
+
 	/// `Query::bind` not called with an object nor a key/value tuple
 	#[error("Invalid bindings: {0}")]
 	InvalidBindings(Value),

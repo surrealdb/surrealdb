@@ -49,7 +49,7 @@ impl Connection for Db {
 
 			router(address, conn_tx, route_rx);
 
-			conn_rx.into_recv_async().await??;
+			let datastore = conn_rx.into_recv_async().await??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -60,6 +60,7 @@ impl Connection for Db {
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
+					datastore,
 				})),
 			})
 		})
@@ -84,7 +85,7 @@ impl Connection for Db {
 
 pub(crate) fn router(
 	address: Endpoint,
-	conn_tx: Sender<Result<()>>,
+	conn_tx: Sender<Result<Option<OnceCell<Arc<Datastore>>>>>,
 	route_rx: Receiver<Option<Route>>,
 ) {
 	tokio::spawn(async move {
@@ -106,7 +107,9 @@ pub(crate) fn router(
 
 			match Datastore::new(&path).await {
 				Ok(kvs) => {
-					let _ = conn_tx.into_send_async(Ok(())).await;
+					let kvs = kvs.with_strict_mode(address.strict);
+					let kvs = OnceCell::with_value(Arc::new(kvs));
+					let _ = conn_tx.into_send_async(Ok(Some(kvs.clone()))).await;
 					kvs
 				}
 				Err(error) => {
@@ -116,7 +119,6 @@ pub(crate) fn router(
 			}
 		};
 
-		let kvs = kvs.with_strict_mode(address.strict);
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
@@ -136,7 +138,7 @@ pub(crate) fn router(
 		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &configured_root, &mut session, &mut vars)
+			match super::router(route.request, kvs.get().unwrap(), &configured_root, &mut session, &mut vars)
 				.await
 			{
 				Ok(value) => {

@@ -13,6 +13,7 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
+use crate::kvs::Datastore;
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
@@ -190,5 +191,23 @@ where
 	fn extract(&self) -> Result<&Router<C>> {
 		let router = self.get().ok_or(Error::ConnectionUninitialised)?;
 		Ok(router)
+	}
+}
+
+pub trait ExtractDatastore<C>
+where
+	C: Connection,
+{
+	fn extract_datastore(&self) -> Result<Arc<Datastore>>;
+}
+
+impl<C> ExtractDatastore<C> for Surreal<C>
+where
+	C: Connection,
+{
+	fn extract_datastore(&self) -> Result<Arc<Datastore>> {
+		let router = self.router.get().ok_or(Error::ConnectionUninitialised)?.clone();
+		let datastore = router.datastore.as_ref().ok_or(Error::DatastoreUnavailable)?.get().unwrap();
+		Ok(datastore.clone())
 	}
 }

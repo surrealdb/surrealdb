@@ -37,6 +37,12 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
 
+impl fmt::Debug for Datastore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("Datastore { .. }")
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]

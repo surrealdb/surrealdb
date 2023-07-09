@@ -57,8 +57,9 @@ impl Connection for Any {
 				capacity => flume::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = flume::bounded::<_>(1);
 			let mut features = HashSet::new();
+			let mut datastore = None;
 
 			match address.endpoint.scheme() {
 				"fdb" => {
@@ -66,7 +67,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
+						datastore = conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -80,7 +81,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
+						datastore = conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -94,7 +95,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
+						datastore = conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -109,7 +110,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
+						datastore = conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-speedb"))]
@@ -124,7 +125,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
+						datastore = conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -216,6 +217,7 @@ impl Connection for Any {
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
+					datastore,
 				})),
 			})
 		})

@@ -5,11 +5,13 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::kvs::Datastore;
 use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
 use flume::Receiver;
 use flume::Sender;
+use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -18,6 +20,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
@@ -35,6 +38,7 @@ pub struct Router<C: api::Connection> {
 	pub(crate) sender: Sender<Option<Route>>,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
+	pub(crate) datastore: Option<OnceCell<Arc<Datastore>>>,
 }
 
 impl<C> Router<C>
