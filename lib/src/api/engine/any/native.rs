@@ -20,6 +20,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
+use crate::kvs::Datastore;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
 #[cfg(feature = "protocol-http")]
@@ -57,17 +58,16 @@ impl Connection for Any {
 				capacity => flume::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded::<_>(1);
+			let (conn_tx, conn_rx) = flume::bounded::<Result<Option<OnceCell<Arc<Datastore>>>>>(1);
 			let mut features = HashSet::new();
-			let mut datastore = None;
 
-			match address.endpoint.scheme() {
+			let datastore = match address.endpoint.scheme() {
 				"fdb" => {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						datastore = conn_rx.into_recv_async().await??
+						conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -81,7 +81,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						datastore = conn_rx.into_recv_async().await??
+						conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -95,7 +95,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						datastore = conn_rx.into_recv_async().await??
+						conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -110,7 +110,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						datastore = conn_rx.into_recv_async().await??
+						conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-speedb"))]
@@ -125,7 +125,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						engine::local::native::router(address, conn_tx, route_rx);
-						datastore = conn_rx.into_recv_async().await??
+						conn_rx.into_recv_async().await??
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -157,6 +157,7 @@ impl Connection for Any {
 						)
 						.await?;
 						engine::remote::http::native::router(base_url, client, route_rx);
+						None
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
@@ -197,6 +198,7 @@ impl Connection for Any {
 							socket,
 							route_rx,
 						);
+						None
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
@@ -209,7 +211,7 @@ impl Connection for Any {
 				scheme => {
 					return Err(Error::Scheme(scheme.to_owned()).into());
 				}
-			}
+			};
 
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {

@@ -20,9 +20,9 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections

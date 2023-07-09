@@ -150,13 +150,13 @@ pub use api::Connect;
 #[doc(inline)]
 pub use api::Connection;
 #[doc(inline)]
+pub use api::ExtractDatastore;
+#[doc(inline)]
 pub use api::Response;
 #[doc(inline)]
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
-#[doc(inline)]
-pub use api::ExtractDatastore;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export

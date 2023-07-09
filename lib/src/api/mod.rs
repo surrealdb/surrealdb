@@ -207,7 +207,8 @@ where
 {
 	fn extract_datastore(&self) -> Result<Arc<Datastore>> {
 		let router = self.router.get().ok_or(Error::ConnectionUninitialised)?.clone();
-		let datastore = router.datastore.as_ref().ok_or(Error::DatastoreUnavailable)?.get().unwrap();
+		let datastore =
+			router.datastore.as_ref().ok_or(Error::DatastoreUnavailable)?.get().unwrap();
 		Ok(datastore.clone())
 	}
 }

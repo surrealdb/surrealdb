@@ -38,9 +38,9 @@ pub struct Datastore {
 }
 
 impl fmt::Debug for Datastore {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_str("Datastore { .. }")
-    }
+	}
 }
 
 #[allow(clippy::large_enum_variant)]
