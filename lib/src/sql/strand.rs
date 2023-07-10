@@ -96,7 +96,7 @@ pub fn string_any_quote(i: &str) -> IResult<&str, String> {
 pub fn string_specific_quote(i: &str, quote: char) -> IResult<&str, String> {
 	let (i, _) = char(quote)(i)?;
 	let (i, v) = escaped_transform(
-		is_not(alt((char(quote), char('\0')))),
+		is_not(alt((char(quote), char('\\'), char('\0')))),
 		'\\',
 		alt((char_unicode, value(quote, char(quote)), nonquote_escape)),
 	)(i)?;
