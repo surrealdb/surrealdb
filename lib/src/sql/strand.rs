@@ -2,7 +2,7 @@ use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::escape::quote_str;
 use nom::branch::alt;
-use nom::bytes::complete::{escaped_transform, tag, take, take_until, take_while_m_n};
+use nom::bytes::complete::{escaped_transform, tag, take, take_till, take_while_m_n};
 use nom::character::complete::char;
 use nom::combinator::value;
 use nom::sequence::preceded;
@@ -96,7 +96,7 @@ pub fn string_any_quote(i: &str) -> IResult<&str, String> {
 pub fn string_specific_quote(i: &str, quote: char) -> IResult<&str, String> {
 	let (i, _) = char(quote)(i)?;
 	let (i, v) = escaped_transform(
-		|i| Ok(take_until(alt((char(quote), char('\\'), char('\0'))))(i).unwrap_or((i, ""))),
+		take_till(|c| c == quote || c == '\\' || c == '\0'),
 		'\\',
 		alt((char_unicode, value(quote, char(quote)), nonquote_escape)),
 	)(i)?;
