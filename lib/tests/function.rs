@@ -5,6 +5,31 @@ use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::{Number, Value};
 
+async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let response = db.execute(sql, &session, None).await?;
+	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
+		let v = r?;
+		if let Some(desired_response) = desired_responses.get(i) {
+			let desired_value = Value::parse(*desired_response);
+			assert_eq!(
+				v,
+				desired_value,
+				"Recieved responce did not match \
+	expected.
+	Query responce #{},
+	Desired responce: {desired_value},
+	Actual response: {v}",
+				i + 1
+			);
+		} else {
+			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
+
 // --------------------------------------------------
 // array
 // --------------------------------------------------
@@ -148,6 +173,62 @@ async fn function_array_append() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_boolean_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_and([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_and([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_and([true, false], [false]);
+RETURN array::boolean_and([true, true], [false]);"#,
+		&[
+			"[false, false, false, true]",
+			"[false, false, false, true]",
+			"[false, false]",
+			"[false, false]",
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_not() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_not([false, true, 0, 1]);"#,
+		&["[true, false, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_or([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_or([true, false], [false]);
+RETURN array::boolean_or([true, true], [false]);"#,
+		&[
+			"[false, true, true, true]",
+			"[false, true, true, true]",
+			"[true, false]",
+			"[true, true]",
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_xor([false, true, false, true], [false, false, true, true]);"#,
+		&["[false, true, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_combine() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::combine([], []);
@@ -176,6 +257,20 @@ async fn function_array_combine() -> Result<(), Error> {
 	let val = Value::parse("[ [1,2], [1,3], [2,2], [2,3] ]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_clump() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::clump([0, 1, 2, 3], 2);
+		RETURN array::clump([0, 1, 2], 2);
+		RETURN array::clump([0, 1, 2], 3);
+		RETURN array::clump([0, 1, 2, 3, 4, 5], 3);
+	"#;
+	let desired_responses =
+		["[[0, 1], [2, 3]]", "[[0, 1], [2]]", "[[0, 1, 2]]", "[[0, 1, 2], [3, 4, 5]]"];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -303,6 +398,27 @@ async fn function_array_distinct() -> Result<(), Error> {
 	let val = Value::parse("[1,2,3,4]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_filter_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
+RETURN array::filter_index([0, 0, 2], 0);
+RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
+RETURN array::filter_index(["nothing here"], 0);"#;
+	let desired_responses = ["[1]", "[0, 1]", "[1, 3]", "[]"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_find_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
+RETURN array::find_index(["hello world", null, true], null);
+RETURN array::find_index([0, 1, 2], 3);"#;
+	let desired_responses = ["2", "1", "null"];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -500,6 +616,54 @@ async fn function_array_len() -> Result<(), Error> {
 	let val = Value::from(6);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_and([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_and([0, 1], []);"#,
+		&["[true, false, false, false]", r#"[1, 0, "false", 0]"#, "[0, null]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_or([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_or([0, 1], []);"#,
+		&["[true, true, true, false]", r#"[1, "true", 1, 0]"#, "[0, 1]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_xor([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_xor([0, 1], []);"#,
+		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_matches() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::matches([0, 1, 2], 1);
+RETURN array::matches([[], [0]], []);
+RETURN array::matches([{id: "ohno:0"}, {id: "ohno:1"}], {id: "ohno:1"});"#,
+		&["[false, true, false]", "[true, false]", "[false, true]"],
+	)
+	.await?;
 	Ok(())
 }
 
@@ -892,6 +1056,26 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	let val = Value::parse("['text',4,4,3,2,1]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_transpose() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::transpose([[0, 1], [2, 3]]);
+		RETURN array::transpose([[0, 1, 2], [3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3], [4, 5]]);
+		RETURN array::transpose([[0, 1, 2], "oops", [null, "sorry"]]);
+	"#;
+	let desired_responses = [
+		"[[0, 2], [1, 3]]",
+		"[[0, 3], [1, 4], [2]]",
+		"[[0, 2], [1, 3], [4]]",
+		"[[0, 2, 4], [1, 3, 5]]",
+		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
+	];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
