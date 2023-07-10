@@ -32,7 +32,7 @@ pub fn trace(args: Rest<Value>) {
 	trace!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
 }
 
-pub fn console<'js>(ctx: Ctx<'js>) -> Result<Object<'js>> {
+pub fn console(ctx: Ctx<'_>) -> Result<Object<'_>> {
 	let console = Object::new(ctx)?;
 	console.set("log", js_log)?;
 	console.set("info", js_info)?;

@@ -189,7 +189,7 @@ impl Blob {
 
 	// Convert the object to a string
 	#[qjs(rename = "toString")]
-	pub fn to_string(&self) -> String {
+	pub fn js_to_string(&self) -> String {
 		String::from("[object Blob]")
 	}
 }

@@ -36,12 +36,12 @@ impl Record {
 		self.value.id.to_raw()
 	}
 	// Compare two Record instances
-	pub fn is<'js>(a: &Record, b: &Record) -> bool {
+	pub fn is(a: &Record, b: &Record) -> bool {
 		a.value == b.value
 	}
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
-	pub fn to_string(&self) -> String {
+	pub fn js_to_string(&self) -> String {
 		self.value.to_raw()
 	}
 	/// Convert the object to JSON

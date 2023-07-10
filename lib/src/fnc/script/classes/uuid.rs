@@ -24,12 +24,12 @@ impl Uuid {
 		}
 	}
 	// Compare two Uuid instances
-	pub fn is<'js>(a: &Uuid, b: &Uuid) -> bool {
+	pub fn is(a: &Uuid, b: &Uuid) -> bool {
 		a.value.is_some() && b.value.is_some() && a.value == b.value
 	}
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
-	pub fn to_string(&self) -> String {
+	pub fn js_to_string(&self) -> String {
 		match &self.value {
 			Some(v) => v.to_raw(),
 			None => String::from("Invalid Uuid"),

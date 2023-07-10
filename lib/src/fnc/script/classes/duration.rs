@@ -31,7 +31,7 @@ impl Duration {
 	}
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
-	pub fn to_string(&self) -> String {
+	pub fn js_to_string(&self) -> String {
 		match &self.value {
 			Some(v) => v.to_raw(),
 			None => String::from("Invalid Duration"),

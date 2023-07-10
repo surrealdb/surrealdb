@@ -412,9 +412,7 @@ impl<'js> Request<'js> {
 				url,
 				init,
 			})
-		} else if let Some(request) =
-			input.into_object().and_then(|obj| Class::<Self>::from_object(obj))
-		{
+		} else if let Some(request) = input.into_object().and_then(Class::<Self>::from_object) {
 			// existing request object, just return it
 			request.try_borrow()?.clone_js(ctx)
 		} else {
@@ -469,7 +467,7 @@ impl<'js> Request<'js> {
 
 	// Convert the object to a string
 	#[qjs(rename = "toString")]
-	pub fn to_string(&self) -> String {
+	pub fn js_to_string(&self) -> String {
 		String::from("[object Request]")
 	}
 
