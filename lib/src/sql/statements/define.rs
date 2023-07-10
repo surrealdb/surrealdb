@@ -22,7 +22,7 @@ use crate::sql::index::Index;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
 use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::sql::strand::string_any_quote;
+use crate::sql::strand::strand_raw;
 use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
@@ -517,7 +517,7 @@ fn login_pass(i: &str) -> IResult<&str, DefineLoginOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PASSWORD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = string_any_quote(i)?;
+	let (i, v) = strand_raw(i)?;
 	Ok((i, DefineLoginOption::Password(v)))
 }
 
@@ -525,7 +525,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PASSHASH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = string_any_quote(i)?;
+	let (i, v) = strand_raw(i)?;
 	Ok((i, DefineLoginOption::Passhash(v)))
 }
 
@@ -631,7 +631,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, code) = string_any_quote(i)?;
+	let (i, code) = strand_raw(i)?;
 	Ok((
 		i,
 		DefineTokenStatement {
