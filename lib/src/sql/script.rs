@@ -1,6 +1,6 @@
 use crate::sql::comment::{block, slash};
 use crate::sql::error::IResult;
-use crate::sql::strand::{no_nul_bytes, string_specific_quote};
+use crate::sql::strand::no_nul_bytes;
 use nom::branch::alt;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;

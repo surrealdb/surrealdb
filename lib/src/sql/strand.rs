@@ -114,7 +114,7 @@ fn nonquote_escape(i: &str) -> IResult<&str, char> {
 		value('\u{0a}', char('n')),
 		value('\u{0d}', char('r')),
 		value('\u{09}', char('t')),
-	))
+	))(i)
 }
 
 fn char_unicode(i: &str) -> IResult<&str, char> {
