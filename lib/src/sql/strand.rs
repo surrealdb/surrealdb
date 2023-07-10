@@ -16,10 +16,7 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
 const SINGLE: char = '\'';
-const SINGLE_ESC_NUL: &str = "'\\\0";
-
 const DOUBLE: char = '"';
-const DOUBLE_ESC_NUL: &str = "\"\\\0";
 
 const LEADING_SURROGATES: RangeInclusive<u16> = 0xD800..=0xDBFF;
 const TRAILING_SURROGATES: RangeInclusive<u16> = 0xDC00..=0xDFFF;
@@ -86,69 +83,38 @@ impl ops::Add for Strand {
 }
 
 pub fn strand(i: &str) -> IResult<&str, Strand> {
-	let (i, v) = strand_raw(i)?;
+	let (i, v) = string_any_quote(i)?;
 	Ok((i, Strand(v)))
 }
 
-pub fn strand_raw(i: &str) -> IResult<&str, String> {
-	alt((strand_blank, strand_single, strand_double))(i)
+/// A string with either single or double quotes.
+pub fn string_any_quote(i: &str) -> IResult<&str, String> {
+	alt((|i| string_specific_quote(i, SINGLE), |i| string_specific_quote(i, DOUBLE)))(i)
 }
 
-fn strand_blank(i: &str) -> IResult<&str, String> {
+/// A string quoted by `quote`.
+pub fn string_specific_quote(i: &str, quote: char) -> IResult<&str, String> {
+	let (i, _) = char(quote)(i)?;
+	let (i, v) = escaped_transform(
+		is_not(alt((char(quote), char('\0')))),
+		'\\',
+		alt((char_unicode, value(quote, char(quote)), nonquote_escape)),
+	)(i)?;
+	let (i, _) = char(quote)(i)?;
+	Ok((i, v))
+}
+
+/// Escape characters except quotes.
+fn nonquote_escape(i: &str) -> IResult<&str, char> {
 	alt((
-		|i| {
-			let (i, _) = char(SINGLE)(i)?;
-			let (i, _) = char(SINGLE)(i)?;
-			Ok((i, String::new()))
-		},
-		|i| {
-			let (i, _) = char(DOUBLE)(i)?;
-			let (i, _) = char(DOUBLE)(i)?;
-			Ok((i, String::new()))
-		},
-	))(i)
-}
-
-fn strand_single(i: &str) -> IResult<&str, String> {
-	let (i, _) = char(SINGLE)(i)?;
-	let (i, v) = escaped_transform(
-		is_not(SINGLE_ESC_NUL),
-		'\\',
-		alt((
-			char_unicode,
-			value('\u{5c}', char('\\')),
-			value('\u{27}', char('\'')),
-			value('\u{2f}', char('/')),
-			value('\u{08}', char('b')),
-			value('\u{0c}', char('f')),
-			value('\u{0a}', char('n')),
-			value('\u{0d}', char('r')),
-			value('\u{09}', char('t')),
-		)),
-	)(i)?;
-	let (i, _) = char(SINGLE)(i)?;
-	Ok((i, v))
-}
-
-fn strand_double(i: &str) -> IResult<&str, String> {
-	let (i, _) = char(DOUBLE)(i)?;
-	let (i, v) = escaped_transform(
-		is_not(DOUBLE_ESC_NUL),
-		'\\',
-		alt((
-			char_unicode,
-			value('\u{5c}', char('\\')),
-			value('\u{22}', char('\"')),
-			value('\u{2f}', char('/')),
-			value('\u{08}', char('b')),
-			value('\u{0c}', char('f')),
-			value('\u{0a}', char('n')),
-			value('\u{0d}', char('r')),
-			value('\u{09}', char('t')),
-		)),
-	)(i)?;
-	let (i, _) = char(DOUBLE)(i)?;
-	Ok((i, v))
+		value('\u{5c}', char('\\')),
+		value('\u{2f}', char('/')),
+		value('\u{08}', char('b')),
+		value('\u{0c}', char('f')),
+		value('\u{0a}', char('n')),
+		value('\u{0d}', char('r')),
+		value('\u{09}', char('t')),
+	))
 }
 
 fn char_unicode(i: &str) -> IResult<&str, char> {
