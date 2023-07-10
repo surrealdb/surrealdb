@@ -221,7 +221,7 @@ fn with_enough_stack(
 	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
-		builder = builder.stack_size(16_000_000);
+		builder = builder.stack_size(24_000_000);
 	}
 
 	builder
