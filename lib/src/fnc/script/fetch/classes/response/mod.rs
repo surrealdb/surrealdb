@@ -104,7 +104,7 @@ impl<'js> Response<'js> {
 		self.init.status_text.clone()
 	}
 
-	#[qjs(get)]
+	#[qjs(get, rename = "type")]
 	pub fn r#type(&self) -> &'static str {
 		match self.r#type {
 			ResponseType::Basic => "basic",
@@ -254,6 +254,7 @@ impl<'js> Response<'js> {
 	}
 
 	// Returns a new response representing a network error
+	#[qjs(r#static)]
 	pub fn error(ctx: Ctx<'js>) -> Result<Self> {
 		let headers = Class::instance(ctx, Headers::new_empty())?;
 		Ok(Response {
@@ -270,6 +271,7 @@ impl<'js> Response<'js> {
 	}
 
 	// Creates a new response with a different URL
+	#[qjs(r#static)]
 	pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response> {
 		let url = url
 			.parse::<Url>()
