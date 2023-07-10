@@ -1,6 +1,6 @@
 use std::{error::Error, fmt, sync::Arc};
 
-use js::{Ctx, Result};
+use js::{Class, Ctx, Result};
 
 mod body;
 mod classes;
@@ -9,7 +9,7 @@ mod stream;
 mod util;
 
 use classes::{Blob, FormData, Headers, Request, Response};
-use func::Fetch;
+use func::js_fetch;
 
 // Anoyingly errors aren't clone,
 // But with how we implement streams RequestError must be clone.
@@ -32,13 +32,12 @@ impl Error for RequestError {}
 /// Register the fetch types in the context.
 pub fn register(ctx: Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
-	globals.init_def::<Fetch>()?;
-
-	globals.init_def::<Response>()?;
-	globals.init_def::<Request>()?;
-	globals.init_def::<Blob>()?;
-	globals.init_def::<FormData>()?;
-	globals.init_def::<Headers>()?;
+	globals.set("fetch", js_fetch)?;
+	Class::<Response>::define(&globals)?;
+	Class::<Request>::define(&globals)?;
+	Class::<Blob>::define(&globals)?;
+	Class::<FormData>::define(&globals)?;
+	Class::<Headers>::define(&globals)?;
 
 	Ok(())
 }
@@ -57,7 +56,7 @@ mod test {
 				js::async_with!(ctx => |$ctx|{
 					crate::fnc::script::fetch::register($ctx).unwrap();
 
-					$ctx.eval::<(),_>(r#"
+					$ctx.eval::<(),_>(r"
 					globalThis.assert = (...arg) => {
 						arg.forEach(x => {
 							if (!x) {
@@ -91,7 +90,7 @@ mod test {
 						}
 						throw new Error(`Code which should throw, didnt: \n${cb}`)
 					}
-					"#).unwrap();
+					").unwrap();
 
 					$($t)*
 				}).await;

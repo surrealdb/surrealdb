@@ -61,8 +61,9 @@ pub async fn run(
 					.get::<_, js::Value>("default")?,
 			)?;
 			fetch::register(ctx)?;
+			let console = globals::console::console(ctx)?;
 			// Register the console function to the globals
-			global.init_def::<globals::console::Console>()?;
+			global.set("console",console)?;
 			// Register the special SurrealDB types as classes
 			classes::init(ctx)?;
 			// Attempt to compile the script

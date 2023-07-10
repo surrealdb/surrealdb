@@ -31,26 +31,26 @@ impl<'js> IntoJs<'js> for &Value {
 				false => Ok(js::Value::new_float(ctx, v.try_into().unwrap_or_default())),
 			},
 			Value::Datetime(v) => {
-				let date: js::Function = ctx.globals().get("Date")?;
+				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))
 			}
-			Value::Thing(v) => Ok(Class::<classes::record::record::Record>::instance(
+			Value::Thing(v) => Ok(Class::<classes::record::Record>::instance(
 				ctx,
-				classes::record::record::Record {
+				classes::record::Record {
 					value: v.to_owned(),
 				},
 			)?
 			.into_value()),
-			Value::Duration(v) => Ok(Class::<classes::duration::duration::Duration>::instance(
+			Value::Duration(v) => Ok(Class::<classes::duration::Duration>::instance(
 				ctx,
-				classes::duration::duration::Duration {
+				classes::duration::Duration {
 					value: Some(v.to_owned()),
 				},
 			)?
 			.into_value()),
-			Value::Uuid(v) => Ok(Class::<classes::uuid::uuid::Uuid>::instance(
+			Value::Uuid(v) => Ok(Class::<classes::uuid::Uuid>::instance(
 				ctx,
-				classes::uuid::uuid::Uuid {
+				classes::uuid::Uuid {
 					value: Some(v.to_owned()),
 				},
 			)?

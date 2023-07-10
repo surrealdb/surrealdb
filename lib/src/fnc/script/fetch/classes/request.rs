@@ -1,18 +1,9 @@
 //! Request class implementation
-//!
-use js::{
-	bind,
-	class::{HasRefs, RefsMarker},
-	prelude::Coerced,
-	Class, Ctx, Exception, FromJs, Object, Persistent, Result, Value,
-};
+
+use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
 use reqwest::Method;
 
-use crate::fnc::script::fetch::{
-	body::Body,
-	classes::{BlobClass, HeadersClass},
-	RequestError,
-};
+use crate::fnc::script::fetch::{body::Body, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestMode {
@@ -213,9 +204,9 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 	}
 }
 
-pub struct RequestInit {
+pub struct RequestInit<'js> {
 	pub method: Method,
-	pub headers: Persistent<Class<'static, HeadersClass>>,
+	pub headers: Class<'js, Headers>,
 	pub body: Option<Body>,
 	pub referrer: String,
 	pub referrer_policy: ReferrerPolicy,
@@ -227,15 +218,15 @@ pub struct RequestInit {
 	pub keep_alive: bool,
 }
 
-impl HasRefs for RequestInit {
-	fn mark_refs(&self, marker: &RefsMarker) {
-		self.headers.mark_refs(marker);
+impl<'js> Trace<'js> for RequestInit<'js> {
+	fn trace<'a>(&self, tracer: js::class::Tracer<'a, 'js>) {
+		self.headers.trace(tracer);
 	}
 }
 
-impl RequestInit {
-	pub fn default(ctx: Ctx<'_>) -> Result<Self> {
-		let headers = Persistent::save(ctx, Class::instance(ctx, HeadersClass::new_empty())?);
+impl<'js> RequestInit<'js> {
+	pub fn default(ctx: Ctx<'js>) -> Result<Self> {
+		let headers = Class::instance(ctx, Headers::new_empty())?;
 		Ok(RequestInit {
 			method: Method::GET,
 			headers,
@@ -251,9 +242,9 @@ impl RequestInit {
 		})
 	}
 
-	pub fn clone_js(&self, ctx: Ctx<'_>) -> Result<Self> {
-		let headers = self.headers.clone().restore(ctx).unwrap();
-		let headers = Persistent::save(ctx, Class::instance(ctx, headers.borrow().clone())?);
+	pub fn clone_js(&self, ctx: Ctx<'js>) -> Result<Self> {
+		let headers = self.headers.clone();
+		let headers = Class::instance(ctx, headers.borrow().clone())?;
 
 		let body = self.body.as_ref().map(|x| x.clone_js(ctx));
 
@@ -309,7 +300,7 @@ fn normalize_method(ctx: Ctx<'_>, m: String) -> Result<Method> {
 	}
 }
 
-impl<'js> FromJs<'js> for RequestInit {
+impl<'js> FromJs<'js> for RequestInit<'js> {
 	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
@@ -346,15 +337,14 @@ impl<'js> FromJs<'js> for RequestInit {
 		}
 
 		let headers = if let Some(hdrs) = object.get::<_, Option<Object>>("headers")? {
-			if let Ok(cls) = Class::<HeadersClass>::from_object(hdrs.clone()) {
+			if let Some(cls) = Class::<Headers>::from_object(hdrs.clone()) {
 				cls
 			} else {
-				Class::instance(ctx, HeadersClass::new_inner(ctx, hdrs.into_value())?)?
+				Class::instance(ctx, Headers::new_inner(ctx, hdrs.into_value())?)?
 			}
 		} else {
-			Class::instance(ctx, HeadersClass::new_empty())?
+			Class::instance(ctx, Headers::new_empty())?
 		};
-		let headers = Persistent::save(ctx, headers);
 
 		let body = object.get::<_, Option<Body>>("body")?;
 
@@ -376,192 +366,175 @@ impl<'js> FromJs<'js> for RequestInit {
 
 pub use request::Request as RequestClass;
 
-#[bind(object, public)]
-#[quickjs(bare)]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-#[allow(clippy::module_inception)]
-mod request {
+pub use super::*;
 
-	pub use super::*;
+use bytes::Bytes;
+use js::function::Opt;
+// TODO: change implementation based on features.
+use reqwest::{header::HeaderName, Url};
 
-	use bytes::Bytes;
-	use js::{
-		function::{Opt, Rest},
-		Class, Ctx, Exception, HasRefs, Result, Value,
-	};
-	// TODO: change implementation based on features.
-	use reqwest::{header::HeaderName, Url};
+#[allow(dead_code)]
+#[js::class]
+#[derive(Trace)]
+pub struct Request<'js> {
+	#[qjs(skip_trace)]
+	pub(crate) url: Url,
+	pub(crate) init: RequestInit<'js>,
+}
 
-	#[allow(dead_code)]
-	#[derive(HasRefs)]
-	#[quickjs(has_refs)]
-	pub struct Request {
-		pub(crate) url: Url,
-		#[quickjs(has_refs)]
-		pub(crate) init: RequestInit,
+#[js::methods]
+impl<'js> Request<'js> {
+	// ------------------------------
+	// Constructor
+	// ------------------------------
+
+	#[qjs(constructor)]
+	pub fn new(ctx: Ctx<'js>, input: Value<'js>, init: Opt<RequestInit<'js>>) -> Result<Self> {
+		if let Some(url) = input.as_string() {
+			// url string
+			let url_str = url.to_string()?;
+			let url = Url::parse(&url_str)
+				.map_err(|e| Exception::throw_type(ctx, &format!("failed to parse url: {e}")))?;
+			if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
+				// url cannot contain non empty username and passwords
+				return Err(Exception::throw_type(ctx, "Url contained credentials."));
+			}
+			let init = init.into_inner().map_or_else(|| RequestInit::default(ctx), Ok)?;
+			// HEAD and GET methods can't have a body
+			if init.body.is_some() && init.method == Method::GET || init.method == Method::HEAD {
+				return Err(Exception::throw_type(
+					ctx,
+					&format!("Request with method `{}` cannot have a body", init.method),
+				));
+			}
+
+			Ok(Self {
+				url,
+				init,
+			})
+		} else if let Some(request) =
+			input.into_object().and_then(|obj| Class::<Self>::from_object(obj))
+		{
+			// existing request object, just return it
+			request.try_borrow()?.clone_js(ctx)
+		} else {
+			Err(Exception::throw_type(
+				ctx,
+				"request `init` paramater must either be a request object or a string",
+			))
+		}
 	}
 
-	impl Request {
-		// ------------------------------
-		// Constructor
-		// ------------------------------
+	/// Clone the response, teeing any possible underlying streams.
+	#[qjs(rename = "clone")]
+	pub fn clone_js(&self, ctx: Ctx<'js>) -> Result<Self> {
+		Ok(Self {
+			url: self.url.clone(),
+			init: self.init.clone_js(ctx)?,
+		})
+	}
 
-		#[quickjs(constructor)]
-		pub fn new<'js>(
-			ctx: Ctx<'js>,
-			input: Value<'js>,
-			init: Opt<RequestInit>,
-			args: Rest<()>,
-		) -> Result<Self> {
-			if let Some(url) = input.as_string() {
-				// url string
-				let url_str = url.to_string()?;
-				let url = Url::parse(&url_str).map_err(|e| {
-					Exception::throw_type(ctx, &format!("failed to parse url: {e}"))
-				})?;
-				if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true)
-				{
-					// url cannot contain non empty username and passwords
-					return Err(Exception::throw_type(ctx, "Url contained credentials."));
+	// ------------------------------
+	// Instance properties
+	// ------------------------------
+	#[qjs(get, rename = "body_used")]
+	pub fn body_used(&self) -> bool {
+		self.init.body.as_ref().map(Body::used).unwrap_or(true)
+	}
+
+	#[qjs(get)]
+	pub fn method(&self) -> String {
+		self.init.method.to_string()
+	}
+
+	#[qjs(get)]
+	pub fn url(&self) -> String {
+		self.url.to_string()
+	}
+
+	#[qjs(get)]
+	pub fn headers(&self) -> Class<'js, Headers> {
+		self.init.headers.clone()
+	}
+
+	#[qjs(get)]
+	pub fn referrer(&self) -> String {
+		self.init.referrer.clone()
+	}
+	// TODO
+
+	// ------------------------------
+	// Instance methods
+	// ------------------------------
+
+	// Convert the object to a string
+	#[qjs(rename = "toString")]
+	pub fn to_string(&self) -> String {
+		String::from("[object Request]")
+	}
+
+	/// Takes the buffer from the body leaving it used.
+	#[qjs(skip)]
+	async fn take_buffer(&self, ctx: Ctx<'js>) -> Result<Bytes> {
+		let Some(body) = self.init.body.as_ref() else {
+			return Ok(Bytes::new());
+		};
+		match body.to_buffer().await {
+			Ok(Some(x)) => Ok(x),
+			Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
+			Err(e) => match e {
+				RequestError::Reqwest(e) => {
+					Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
 				}
-				let init = init.into_inner().map_or_else(|| RequestInit::default(ctx), Ok)?;
-				// HEAD and GET methods can't have a body
-				if init.body.is_some() && init.method == Method::GET || init.method == Method::HEAD
-				{
-					return Err(Exception::throw_type(
-						ctx,
-						&format!("Request with method `{}` cannot have a body", init.method),
-					));
-				}
-
-				Ok(Self {
-					url,
-					init,
-				})
-			} else if let Some(request) = input
-				.into_object()
-				.and_then(|obj| Class::<Self>::from_object(obj).ok().map(|x| x.borrow()))
-			{
-				// existing request object, just return it
-				request.clone_js(ctx, Default::default())
-			} else {
-				Err(Exception::throw_type(
-					ctx,
-					"request `init` paramater must either be a request object or a string",
-				))
-			}
+			},
 		}
+	}
 
-		/// Clone the response, teeing any possible underlying streams.
-		#[quickjs(rename = "clone")]
-		pub fn clone_js(&self, ctx: Ctx<'_>, _rest: Rest<()>) -> Result<Self> {
-			Ok(Self {
-				url: self.url.clone(),
-				init: self.init.clone_js(ctx)?,
-			})
-		}
+	// Returns a promise with the request body as a Blob
+	pub async fn blob(&self, ctx: Ctx<'js>) -> Result<Blob> {
+		let headers = self.init.headers.clone();
+		let mime = {
+			let headers = headers.borrow();
+			let headers = &headers.inner;
+			let key = HeaderName::from_static("content-type");
+			let types = headers.get_all(key);
+			// TODO: This is not according to spec.
+			types
+				.iter()
+				.next()
+				.map(|x| x.to_str().unwrap_or("text/html"))
+				.unwrap_or("text/html")
+				.to_owned()
+		};
 
-		// ------------------------------
-		// Instance properties
-		// ------------------------------
-		#[quickjs(get)]
-		pub fn bodyUsed(&self) -> bool {
-			self.init.body.as_ref().map(Body::used).unwrap_or(true)
-		}
+		let data = self.take_buffer(ctx).await?;
+		Ok(Blob {
+			mime,
+			data,
+		})
+	}
 
-		#[quickjs(get)]
-		pub fn method(&self) -> String {
-			self.init.method.to_string()
-		}
+	// Returns a promise with the request body as FormData
+	#[qjs(rename = "formData")]
+	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
+		Err(Exception::throw_internal(ctx, "Not yet implemented"))
+	}
 
-		#[quickjs(get)]
-		pub fn url(&self) -> String {
-			self.url.to_string()
-		}
+	// Returns a promise with the request body as JSON
+	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
+		let text = self.text(ctx).await?;
+		ctx.json_parse(text)
+	}
 
-		#[quickjs(get)]
-		pub fn headers<'js>(&self, ctx: Ctx<'js>) -> Class<'js, HeadersClass> {
-			self.init.headers.clone().restore(ctx).unwrap()
-		}
+	// Returns a promise with the request body as text
+	pub async fn text(&self, ctx: Ctx<'js>) -> Result<String> {
+		let data = self.take_buffer(ctx).await?;
 
-		#[quickjs(get)]
-		pub fn referrer(&self, ctx: Ctx<'_>) -> String {
-			self.init.referrer.clone()
-		}
-		// TODO
-
-		// ------------------------------
-		// Instance methods
-		// ------------------------------
-
-		// Convert the object to a string
-		pub fn toString(&self) -> String {
-			String::from("[object Request]")
-		}
-
-		/// Takes the buffer from the body leaving it used.
-		#[quickjs(skip)]
-		async fn take_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<Bytes> {
-			let Some(body) = self.init.body.as_ref() else {
-				return Ok(Bytes::new())
-			};
-			match body.to_buffer().await {
-				Ok(Some(x)) => Ok(x),
-				Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
-				Err(e) => match e {
-					RequestError::Reqwest(e) => {
-						Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
-					}
-				},
-			}
-		}
-
-		// Returns a promise with the request body as a Blob
-		pub async fn blob(&self, ctx: Ctx<'_>, args: Rest<()>) -> Result<BlobClass> {
-			let headers = self.init.headers.clone().restore(ctx).unwrap();
-			let mime = {
-				let headers = headers.borrow();
-				let headers = headers.inner.borrow();
-				let key = HeaderName::from_static("content-type");
-				let types = headers.get_all(key);
-				// TODO: This is not according to spec.
-				types
-					.iter()
-					.next()
-					.map(|x| x.to_str().unwrap_or("text/html"))
-					.unwrap_or("text/html")
-					.to_owned()
-			};
-
-			let data = self.take_buffer(ctx).await?;
-			Ok(BlobClass {
-				mime,
-				data,
-			})
-		}
-
-		// Returns a promise with the request body as FormData
-		pub async fn formData<'js>(&self, ctx: Ctx<'js>, args: Rest<()>) -> Result<Value<'js>> {
-			Err(Exception::throw_internal(ctx, "Not yet implemented"))
-		}
-
-		// Returns a promise with the request body as JSON
-		pub async fn json<'js>(&self, ctx: Ctx<'js>, args: Rest<()>) -> Result<Value<'js>> {
-			let text = self.text(ctx, args).await?;
-			ctx.json_parse(text)
-		}
-
-		// Returns a promise with the request body as text
-		pub async fn text<'js>(&self, ctx: Ctx<'js>, args: Rest<()>) -> Result<String> {
-			let data = self.take_buffer(ctx).await?;
-
-			// Skip UTF-BOM
-			if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
-				Ok(String::from_utf8_lossy(&data[3..]).into_owned())
-			} else {
-				Ok(String::from_utf8_lossy(&data).into_owned())
-			}
+		// Skip UTF-BOM
+		if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
+			Ok(String::from_utf8_lossy(&data[3..]).into_owned())
+		} else {
+			Ok(String::from_utf8_lossy(&data).into_owned())
 		}
 	}
 }
