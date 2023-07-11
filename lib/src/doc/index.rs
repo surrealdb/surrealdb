@@ -195,7 +195,6 @@ impl<'a> IndexOperation<'a> {
 		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
 		let mut ft = FtIndex::new(run, az, ikb, order, scoring, hl, BTreeStoreType::Write).await?;
 		if let Some(n) = &self.n {
-			// TODO: Apply the analyzer
 			ft.index_document(run, self.rid, n).await?;
 		} else {
 			ft.remove_document(run, self.rid).await?;
