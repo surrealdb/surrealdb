@@ -1,5 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
@@ -273,9 +274,9 @@ impl MatchesThingIterator {
 		{
 			let mut run = txn.lock().await;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
+			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl, BTreeStoreType::Read).await?;
 			if let Some(terms_docs) = terms_docs {
-				let hits = fti.new_hits_iterator(&mut run, terms_docs).await?;
+				let hits = fti.new_hits_iterator(terms_docs)?;
 				Ok(Self {
 					hits,
 				})

@@ -6,7 +6,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::time::Duration;
 use surrealdb::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-use surrealdb::idx::btree::{BTree, KeyProvider, Payload, State};
+use surrealdb::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use surrealdb::idx::btree::{BTree, Payload, State};
 use surrealdb::kvs::{Datastore, Key};
 
 macro_rules! get_key_value {
@@ -55,13 +56,15 @@ where
 {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(true, false).await.unwrap();
-	let mut t = BTree::new(KeyProvider::Debug, State::new(100));
+	let mut t = BTree::<BK>::new(State::new(100));
+	let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+	let mut s = s.lock().await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);
 		// Insert the sample
-		t.insert::<BK>(&mut tx, key.clone(), payload).await.unwrap();
+		t.insert(&mut tx, &mut s, key.clone(), payload).await.unwrap();
 		// Search for it
-		black_box(t.search::<BK>(&mut tx, &key).await.unwrap());
+		black_box(t.search(&mut tx, &mut s, &key).await.unwrap());
 	}
 }
 

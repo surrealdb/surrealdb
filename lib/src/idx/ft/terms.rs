@@ -1,10 +1,13 @@
 use crate::err::Error;
 use crate::idx::bkeys::FstKeys;
-use crate::idx::btree::{BTree, KeyProvider, Statistics};
+use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use crate::idx::btree::{BTree, Statistics};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) type TermId = u64;
 
@@ -12,6 +15,7 @@ pub(super) struct Terms {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
+	store: Arc<Mutex<BTreeNodeStore<FstKeys>>>,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 	updated: bool,
@@ -22,18 +26,20 @@ impl Terms {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
+		store_type: BTreeStoreType,
 	) -> Result<Self, Error> {
-		let keys = KeyProvider::Terms(index_key_base.clone());
-		let state_key: Key = keys.get_state_key();
+		let state_key: Key = index_key_base.new_bt_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {
 			State::new(default_btree_order)
 		};
+		let store = BTreeNodeStore::new(KeyProvider::Terms(index_key_base.clone()), store_type, 20);
 		Ok(Self {
 			state_key,
 			index_key_base,
-			btree: BTree::new(keys, state.btree),
+			btree: BTree::new(state.btree),
+			store,
 			available_ids: state.available_ids,
 			next_term_id: state.next_term_id,
 			updated: false,
@@ -63,15 +69,18 @@ impl Terms {
 		term: &str,
 	) -> Result<TermId, Error> {
 		let term_key = term.into();
-		if let Some(term_id) = self.btree.search(tx, &term_key).await? {
-			Ok(term_id)
-		} else {
-			let term_id = self.get_next_term_id();
-			tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
-			self.btree.insert(tx, term_key, term_id).await?;
-			self.updated = true;
-			Ok(term_id)
+		{
+			let mut store = self.store.lock().await;
+			if let Some(term_id) = self.btree.search(tx, &mut store, &term_key).await? {
+				return Ok(term_id);
+			}
 		}
+		let term_id = self.get_next_term_id();
+		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
+		let mut store = self.store.lock().await;
+		self.btree.insert(tx, &mut store, term_key, term_id).await?;
+		self.updated = true;
+		Ok(term_id)
 	}
 
 	pub(super) async fn get_term_id(
@@ -79,7 +88,8 @@ impl Terms {
 		tx: &mut Transaction,
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
-		self.btree.search(tx, &term.into()).await
+		let mut store = self.store.lock().await;
+		self.btree.search(tx, &mut store, &term.into()).await
 	}
 
 	pub(super) async fn remove_term_id(
@@ -89,9 +99,8 @@ impl Terms {
 	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
 		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
-			debug!("Delete In {}", String::from_utf8(term_key.clone()).unwrap());
-			self.btree.delete(tx, term_key.clone()).await?;
-			debug!("Delete Out {}", String::from_utf8(term_key.clone()).unwrap());
+			let mut store = self.store.lock().await;
+			self.btree.delete(tx, &mut store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(term_id);
@@ -106,17 +115,19 @@ impl Terms {
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics(tx).await
+		let mut store = self.store.lock().await;
+		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.updated || self.btree.is_updated() {
+	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+		let updated = self.store.lock().await.finish(tx).await?;
+		if self.updated || updated {
 			let state = State {
 				btree: self.btree.get_state().clone(),
-				available_ids: self.available_ids,
+				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};
-			tx.set(self.state_key, state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
 		}
 		Ok(())
 	}
@@ -143,6 +154,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::Terms;
 	use crate::idx::IndexKeyBase;
@@ -174,48 +186,63 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+		{
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut t =
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
+			t.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 
 		// Resolve a first term
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
-		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+		{
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut t =
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
+			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
+			t.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 
 		// Resolve a second term
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
-		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+		{
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut t =
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
+			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
+			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
+			t.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 
 		// Resolve two existing terms with new frequencies
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
-		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
+		{
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut t =
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
+			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
 
-		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
+			t.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 
 		// Resolve one existing terms and two new terms
-		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
+		{
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut t =
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 
-		assert_eq!(t.resolve_term_id(&mut tx, "A").await.unwrap(), 2);
-		assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
-		assert_eq!(t.resolve_term_id(&mut tx, "E").await.unwrap(), 3);
+			assert_eq!(t.resolve_term_id(&mut tx, "A").await.unwrap(), 2);
+			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+			assert_eq!(t.resolve_term_id(&mut tx, "E").await.unwrap(), 3);
 
-		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 4);
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 4);
+			t.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 	}
 
 	#[tokio::test]
@@ -227,7 +254,8 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
+		let mut t =
+			Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 
 		// Check removing an non-existing term id returns None
 		assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
@@ -270,7 +298,9 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..100 {
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100).await.unwrap();
+			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, BTreeStoreType::Write)
+				.await
+				.unwrap();
 			let terms_string = random_term_freq_vec(50);
 			for (term, _) in terms_string {
 				t.resolve_term_id(&mut tx, &term).await.unwrap();
@@ -285,7 +315,9 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..10 {
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100).await.unwrap();
+			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, BTreeStoreType::Write)
+				.await
+				.unwrap();
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
 				for (term, _) in terms_string {
