@@ -119,13 +119,13 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_non_unique_index_key(&self, v: &Array) -> key::index::Index {
-		key::index::new(
+		key::index::Index::new(
 			self.opt.ns(),
 			self.opt.db(),
 			&self.ix.what,
 			&self.ix.name,
-			v,
-			Some(&self.rid.id),
+			v.to_owned(),
+			Some(self.rid.id.to_owned()),
 		)
 	}
 
@@ -146,7 +146,14 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_unique_index_key(&self, v: &Array) -> key::index::Index {
-		key::index::new(self.opt.ns(), self.opt.db(), &self.ix.what, &self.ix.name, v, None)
+		key::index::Index::new(
+			self.opt.ns(),
+			self.opt.db(),
+			&self.ix.what,
+			&self.ix.name,
+			v.to_owned(),
+			None,
+		)
 	}
 
 	async fn index_unique(&self, run: &mut kvs::Transaction) -> Result<(), Error> {
