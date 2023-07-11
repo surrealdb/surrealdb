@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
 use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
@@ -51,7 +52,16 @@ impl AnalyzeStatement {
 						hl,
 					} => {
 						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl).await?;
+						let ft = FtIndex::new(
+							&mut run,
+							az,
+							ikb,
+							*order,
+							sc,
+							*hl,
+							BTreeStoreType::Traversal,
+						)
+						.await?;
 						ft.statistics(&mut run).await?
 					}
 					_ => {
