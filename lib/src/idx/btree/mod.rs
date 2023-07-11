@@ -261,8 +261,8 @@ where
 		child_node: StoredNode<BK>,
 	) -> Result<SplitResult, Error> {
 		let (left_node, right_node, median_key, median_payload) = match child_node.node {
-			Node::Internal(keys, children) => self.split_internal_node(keys, children),
-			Node::Leaf(keys) => self.split_leaf_node(keys),
+			Node::Internal(keys, children) => self.split_internal_node(keys, children)?,
+			Node::Leaf(keys) => self.split_leaf_node(keys)?,
 		};
 		let right_node_id = self.new_node_id();
 		match parent_node.node {
@@ -294,19 +294,19 @@ where
 		&mut self,
 		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> (Node<BK>, Node<BK>, Key, Payload) {
-		let r = keys.split_keys();
+	) -> Result<(Node<BK>, Node<BK>, Key, Payload), Error> {
+		let r = keys.split_keys()?;
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = Node::Internal(r.left, left_children);
 		let right_node = Node::Internal(r.right, right_children);
-		(left_node, right_node, r.median_key, r.median_payload)
+		Ok((left_node, right_node, r.median_key, r.median_payload))
 	}
 
-	fn split_leaf_node(&mut self, keys: BK) -> (Node<BK>, Node<BK>, Key, Payload) {
-		let r = keys.split_keys();
+	fn split_leaf_node(&mut self, keys: BK) -> Result<(Node<BK>, Node<BK>, Key, Payload), Error> {
+		let r = keys.split_keys()?;
 		let left_node = Node::Leaf(r.left);
 		let right_node = Node::Leaf(r.right);
-		(left_node, right_node, r.median_key, r.median_payload)
+		Ok((left_node, right_node, r.median_key, r.median_payload))
 	}
 
 	fn new_node_id(&mut self) -> NodeId {

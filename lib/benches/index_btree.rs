@@ -39,9 +39,9 @@ fn bench_index_btree(c: &mut Criterion) {
 
 fn setup() -> (usize, Vec<usize>) {
 	let samples_len = if cfg!(debug_assertions) {
-		2000 // debug is much slower!
+		1000 // debug is much slower!
 	} else {
-		20_000
+		100_000
 	};
 	let mut samples: Vec<usize> = (0..samples_len).collect();
 	let mut rng = thread_rng();

@@ -17,11 +17,11 @@ pub trait BKeys: Display + Sized {
 	// because BKeys are intended to be stored as Node in the BTree.
 	// The size of the Node should be small, therefore one instance of
 	// BKeys would never be store a large volume of keys.
-	fn collect_with_prefix(&self, prefix_key: &Key) -> VecDeque<(Key, Payload)>;
+	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error>;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
-	fn split_keys(self) -> SplitKeys<Self>;
+	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
 	fn get_key(&self, idx: usize) -> Option<Key>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn get_first_key(&self) -> Option<(Key, Payload)>;
@@ -98,8 +98,8 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> VecDeque<(Key, Payload)> {
-		panic!("Not supported!")
+	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
+		Err(Error::Unreachable)
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -138,11 +138,11 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn split_keys(mut self) -> SplitKeys<Self> {
+	fn split_keys(mut self) -> Result<SplitKeys<Self>, Error> {
 		self.edit();
 		if let Inner::Trie(t) = self.i {
-			let s = t.split_keys();
-			SplitKeys {
+			let s = t.split_keys()?;
+			Ok(SplitKeys {
 				left: Self {
 					i: Inner::Trie(s.left),
 				},
@@ -152,9 +152,9 @@ impl BKeys for FstKeys {
 				median_idx: s.median_idx,
 				median_key: s.median_key,
 				median_payload: s.median_payload,
-			}
+			})
 		} else {
-			panic!("Not reachable")
+			Err(Error::Unreachable)
 		}
 	}
 
@@ -217,7 +217,7 @@ impl BKeys for FstKeys {
 		if let Inner::Trie(t) = &self.i {
 			let mut builder = MapBuilder::memory();
 			for (key, payload) in t.keys.iter() {
-				builder.insert(key.to_vec(), *payload).unwrap();
+				builder.insert(key, *payload).unwrap();
 			}
 			let m = Map::new(builder.into_inner().unwrap()).unwrap();
 			self.i = Inner::Map(m);
@@ -399,13 +399,13 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key) -> VecDeque<(Key, Payload)> {
+	fn collect_with_prefix(&self, prefix: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
 		let mut i = KeysIterator::new(prefix, &self.keys);
 		let mut r = VecDeque::new();
 		while let Some((k, p)) = i.next() {
 			r.push_back((k.clone(), p))
 		}
-		r
+		Ok(r)
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -422,7 +422,7 @@ impl BKeys for TrieKeys {
 		self.keys.remove(key)
 	}
 
-	fn split_keys(self) -> SplitKeys<Self> {
+	fn split_keys(self) -> Result<SplitKeys<Self>, Error> {
 		let median_idx = self.keys.len() / 2;
 		let mut s = self.keys.iter();
 		let mut left = Trie::default();
@@ -433,20 +433,22 @@ impl BKeys for TrieKeys {
 			}
 			n -= 1;
 		}
-		let (median_key, median_payload) = s
-			.next()
-			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.clone(), *v));
+		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
+			(k.clone(), *v)
+		} else {
+			return Err(Error::Unreachable);
+		};
 		let mut right = Trie::default();
 		for (key, val) in s {
 			right.insert(key.clone(), *val);
 		}
-		SplitKeys {
+		Ok(SplitKeys {
 			left: Self::from(left),
 			right: Self::from(right),
 			median_idx,
 			median_key,
 			median_payload,
-		}
+		})
 	}
 
 	fn get_key(&self, mut idx: usize) -> Option<Key> {
@@ -652,7 +654,7 @@ mod tests {
 		keys.insert("there".into(), 10);
 
 		{
-			let r = keys.collect_with_prefix(&"appli".into());
+			let r = keys.collect_with_prefix(&"appli".into()).unwrap();
 			check_keys(
 				r,
 				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
@@ -660,7 +662,7 @@ mod tests {
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"the".into());
+			let r = keys.collect_with_prefix(&"the".into()).unwrap();
 			check_keys(
 				r,
 				vec![
@@ -675,17 +677,17 @@ mod tests {
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"blue".into());
+			let r = keys.collect_with_prefix(&"blue".into()).unwrap();
 			check_keys(r, vec![("blueberry".into(), 6)]);
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"apple".into());
+			let r = keys.collect_with_prefix(&"apple".into()).unwrap();
 			check_keys(r, vec![("apple".into(), 1)]);
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"zz".into());
+			let r = keys.collect_with_prefix(&"zz".into()).unwrap();
 			check_keys(r, vec![]);
 		}
 	}
@@ -697,7 +699,7 @@ mod tests {
 		keys.insert("d".into(), 4);
 		keys.insert("e".into(), 5);
 		keys.compile();
-		let r = keys.split_keys();
+		let r = keys.split_keys().unwrap();
 		assert_eq!(r.median_payload, 3);
 		let c: Key = "c".into();
 		assert_eq!(r.median_key, c);
