@@ -1,5 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
@@ -15,6 +16,7 @@ use crate::sql::{Expression, Table, Thing, Value};
 use roaring::RoaringTreemap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub(crate) struct QueryExecutor {
 	table: String,
@@ -58,7 +60,8 @@ impl QueryExecutor {
 				} else {
 					let ikb = IndexKeyBase::new(opt, io.ix());
 					let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl).await?;
+					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl, BTreeStoreType::Read)
+						.await?;
 					let ixn = ixn.to_owned();
 					if entry.is_none() {
 						entry = FtEntry::new(&mut run, &ft, io).await?;
@@ -130,7 +133,9 @@ impl QueryExecutor {
 			if let Some(ft) = self.exp_entries.get(exp) {
 				let mut run = txn.lock().await;
 				let doc_key: Key = thg.into();
-				if let Some(doc_id) = ft.0.doc_ids.get_doc_id(&mut run, doc_key).await? {
+				if let Some(doc_id) =
+					ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await?
+				{
 					let term_goals = ft.0.terms_docs.len();
 					// If there is no terms, it can't be a match
 					if term_goals == 0 {
@@ -218,7 +223,7 @@ impl QueryExecutor {
 				let mut run = txn.lock().await;
 				if doc_id.is_none() {
 					let key: Key = rid.into();
-					doc_id = e.0.doc_ids.get_doc_id(&mut run, key).await?;
+					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?;
 				};
 				if let Some(doc_id) = doc_id {
 					let score = scorer.score(&mut run, doc_id).await?;
@@ -237,7 +242,7 @@ struct FtEntry(Arc<Inner>);
 
 struct Inner {
 	index_option: IndexOption,
-	doc_ids: DocIds,
+	doc_ids: Arc<RwLock<DocIds>>,
 	terms: Vec<Option<TermId>>,
 	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
 	scorer: Option<BM25Scorer>,
@@ -254,8 +259,8 @@ impl FtEntry {
 			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
-				doc_ids: ft.doc_ids(tx).await?,
-				scorer: ft.new_scorer(tx, terms_docs.clone()).await?,
+				doc_ids: ft.doc_ids(),
+				scorer: ft.new_scorer(terms_docs.clone())?,
 				terms,
 				terms_docs,
 			}))))

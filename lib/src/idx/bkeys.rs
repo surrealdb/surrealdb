@@ -8,19 +8,20 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::io;
 
-pub(super) trait BKeys: Display + Sized {
+pub trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
+	fn is_empty(&self) -> bool;
 	fn get(&self, key: &Key) -> Option<Payload>;
 	// It is okay to return a owned Vec rather than an iterator,
 	// because BKeys are intended to be stored as Node in the BTree.
 	// The size of the Node should be small, therefore one instance of
 	// BKeys would never be store a large volume of keys.
-	fn collect_with_prefix(&self, prefix_key: &Key) -> VecDeque<(Key, Payload)>;
+	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error>;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
-	fn split_keys(&self) -> SplitKeys<Self>;
+	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
 	fn get_key(&self, idx: usize) -> Option<Key>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn get_first_key(&self) -> Option<(Key, Payload)>;
@@ -31,7 +32,7 @@ pub(super) trait BKeys: Display + Sized {
 		F: Fn(Key) -> Result<String, Error>;
 }
 
-pub(super) struct SplitKeys<BK>
+pub struct SplitKeys<BK>
 where
 	BK: BKeys,
 {
@@ -42,204 +43,209 @@ where
 	pub(super) median_payload: Payload,
 }
 
-#[derive(Default)]
-pub(super) struct FstKeys {
-	map: Map<Vec<u8>>,
-	additions: Trie<Key, Payload>,
-	deletions: Trie<Key, bool>,
-	len: u32,
+pub struct FstKeys {
+	i: Inner,
+}
+
+enum Inner {
+	Map(Map<Vec<u8>>),
+	Trie(TrieKeys),
+}
+
+impl FstKeys {
+	fn edit(&mut self) {
+		if let Inner::Map(m) = &self.i {
+			let t: TrieKeys = m.into();
+			self.i = Inner::Trie(t);
+		}
+	}
+}
+
+impl Default for FstKeys {
+	fn default() -> Self {
+		Self {
+			i: Inner::Trie(TrieKeys::default()),
+		}
+	}
 }
 
 impl BKeys for FstKeys {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
-		let mut builder = MapBuilder::memory();
-		builder.insert(key, payload).unwrap();
-		Ok(Self::try_from(builder)?)
+		let i = Inner::Trie(TrieKeys::with_key_val(key, payload)?);
+		Ok(Self {
+			i,
+		})
 	}
 
 	fn len(&self) -> u32 {
-		self.len
+		match &self.i {
+			Inner::Map(m) => m.len() as u32,
+			Inner::Trie(t) => t.len(),
+		}
+	}
+
+	fn is_empty(&self) -> bool {
+		match &self.i {
+			Inner::Map(m) => m.is_empty(),
+			Inner::Trie(t) => t.is_empty(),
+		}
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {
-		if let Some(payload) = self.additions.get(key) {
-			Some(*payload)
-		} else {
-			self.map.get(key).filter(|_| self.deletions.get(key).is_none())
+		match &self.i {
+			Inner::Map(m) => m.get(key),
+			Inner::Trie(t) => t.get(key),
 		}
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> VecDeque<(Key, Payload)> {
-		panic!("Not supported!")
+	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
+		Err(Error::Unreachable)
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
-		self.deletions.remove(&key);
-		let existing_key = self.map.get(&key).is_some();
-		if self.additions.insert(key, payload).is_none() && !existing_key {
-			self.len += 1;
+		self.edit();
+		if let Inner::Trie(t) = &mut self.i {
+			t.insert(key, payload);
 		}
 	}
 
-	fn append(&mut self, mut keys: Self) {
-		keys.compile();
-		let mut s = keys.map.stream();
-		while let Some((key, payload)) = s.next() {
-			self.insert(key.to_vec(), payload);
+	fn append(&mut self, keys: Self) {
+		if keys.is_empty() {
+			return;
+		}
+		self.edit();
+		match keys.i {
+			Inner::Map(other) => {
+				let mut s = other.stream();
+				while let Some((key, payload)) = s.next() {
+					self.insert(key.to_vec(), payload);
+				}
+			}
+			Inner::Trie(other) => {
+				if let Inner::Trie(t) = &mut self.i {
+					t.append(other)
+				}
+			}
 		}
 	}
 
 	fn remove(&mut self, key: &Key) -> Option<Payload> {
-		if self.deletions.get(key).is_some() {
-			return None;
+		self.edit();
+		if let Inner::Trie(t) = &mut self.i {
+			t.remove(key)
+		} else {
+			None
 		}
-		if let Some(payload) = self.additions.remove(key) {
-			self.len -= 1;
-			return Some(payload);
-		}
-		self.get(key).map(|payload| {
-			if self.deletions.insert(key.clone(), true).is_none() {
-				self.len -= 1;
-			}
-			payload
-		})
 	}
 
-	fn split_keys(&self) -> SplitKeys<Self> {
-		let median_idx = self.map.len() / 2;
-		let mut s = self.map.stream();
-		let mut left = MapBuilder::memory();
-		let mut n = median_idx;
-		while n > 0 {
-			if let Some((key, payload)) = s.next() {
-				left.insert(key, payload).unwrap();
-			}
-			n -= 1;
-		}
-		let (median_key, median_payload) = s
-			.next()
-			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.into(), v));
-		let mut right = MapBuilder::memory();
-		while let Some((key, value)) = s.next() {
-			right.insert(key, value).unwrap();
-		}
-		SplitKeys {
-			left: Self::try_from(left).unwrap(),
-			right: Self::try_from(right).unwrap(),
-			median_idx,
-			median_key,
-			median_payload,
+	fn split_keys(mut self) -> Result<SplitKeys<Self>, Error> {
+		self.edit();
+		if let Inner::Trie(t) = self.i {
+			let s = t.split_keys()?;
+			Ok(SplitKeys {
+				left: Self {
+					i: Inner::Trie(s.left),
+				},
+				right: Self {
+					i: Inner::Trie(s.right),
+				},
+				median_idx: s.median_idx,
+				median_key: s.median_key,
+				median_payload: s.median_payload,
+			})
+		} else {
+			Err(Error::Unreachable)
 		}
 	}
 
 	fn get_key(&self, mut idx: usize) -> Option<Key> {
-		let mut s = self.map.keys().into_stream();
-		while let Some(key) = s.next() {
-			if idx == 0 {
-				return Some(key.to_vec());
+		match &self.i {
+			Inner::Map(m) => {
+				let mut s = m.keys().into_stream();
+				while let Some(key) = s.next() {
+					if idx == 0 {
+						return Some(key.to_vec());
+					}
+					idx -= 1;
+				}
+				None
 			}
-			idx -= 1;
+			Inner::Trie(t) => t.get_key(idx),
 		}
-		None
 	}
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
-		let searched_key = searched_key.as_slice();
-		let mut s = self.map.keys().into_stream();
-		let mut child_idx = 0;
-		while let Some(key) = s.next() {
-			if searched_key.le(key) {
-				break;
+		match &self.i {
+			Inner::Map(m) => {
+				let searched_key = searched_key.as_slice();
+				let mut s = m.keys().into_stream();
+				let mut child_idx = 0;
+				while let Some(key) = s.next() {
+					if searched_key.le(key) {
+						break;
+					}
+					child_idx += 1;
+				}
+				child_idx
 			}
-			child_idx += 1;
+			Inner::Trie(t) => t.get_child_idx(searched_key),
 		}
-		child_idx
 	}
 
 	fn get_first_key(&self) -> Option<(Key, Payload)> {
-		self.map.stream().next().map(|(k, p)| (k.to_vec(), p))
+		match &self.i {
+			Inner::Map(m) => m.stream().next().map(|(k, p)| (k.to_vec(), p)),
+			Inner::Trie(t) => t.get_first_key(),
+		}
 	}
 
 	fn get_last_key(&self) -> Option<(Key, Payload)> {
-		let mut last = None;
-		let mut s = self.map.stream();
-		while let Some((k, p)) = s.next() {
-			last = Some((k.to_vec(), p));
+		match &self.i {
+			Inner::Map(m) => {
+				let mut last = None;
+				let mut s = m.stream();
+				while let Some((k, p)) = s.next() {
+					last = Some((k.to_vec(), p));
+				}
+				last
+			}
+			Inner::Trie(t) => t.get_last_key(),
 		}
-		last
 	}
 
-	/// Rebuilt the FST by incorporating the changes (additions and deletions)
 	fn compile(&mut self) {
-		if self.additions.is_empty() && self.deletions.is_empty() {
-			return;
-		}
-		let mut existing_keys = self.map.stream();
-		let mut new_keys = self.additions.iter();
-		let mut current_existing = existing_keys.next();
-		let mut current_new = new_keys.next();
-
-		let mut builder = MapBuilder::memory();
-		// We use a double iterator because the map as to be filled with sorted terms
-		loop {
-			match current_new {
-				None => break,
-				Some((new_key_vec, new_value)) => match current_existing {
-					None => break,
-					Some((existing_key_vec, existing_value)) => {
-						if self.deletions.get(existing_key_vec).is_some()
-							|| self.additions.get(existing_key_vec).is_some()
-						{
-							current_existing = existing_keys.next();
-						} else if new_key_vec.as_slice().ge(existing_key_vec) {
-							builder.insert(existing_key_vec, existing_value).unwrap();
-							current_existing = existing_keys.next();
-						} else {
-							builder.insert(new_key_vec, *new_value).unwrap();
-							current_new = new_keys.next();
-						}
-					}
-				},
-			};
-		}
-
-		// Insert any existing term left over
-		while let Some((existing_key_vec, value)) = current_existing {
-			if self.deletions.get(existing_key_vec).is_none()
-				&& self.additions.get(existing_key_vec).is_none()
-			{
-				builder.insert(existing_key_vec, value).unwrap();
+		if let Inner::Trie(t) = &self.i {
+			let mut builder = MapBuilder::memory();
+			for (key, payload) in t.keys.iter() {
+				builder.insert(key, *payload).unwrap();
 			}
-			current_existing = existing_keys.next();
+			let m = Map::new(builder.into_inner().unwrap()).unwrap();
+			self.i = Inner::Map(m);
 		}
-		// Insert any new term left over
-		while let Some((new_key_vec, value)) = current_new {
-			builder.insert(new_key_vec, *value).unwrap();
-			current_new = new_keys.next();
-		}
-
-		self.map = Map::new(builder.into_inner().unwrap()).unwrap();
-		self.additions = Default::default();
-		self.deletions = Default::default();
 	}
 
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
 		F: Fn(Key) -> Result<String, Error>,
 	{
-		let mut s = String::new();
-		let mut iter = self.map.stream();
-		let mut start = true;
-		while let Some((k, p)) = iter.next() {
-			if !start {
-				s.push(',');
-			} else {
-				start = false;
+		match &self.i {
+			Inner::Map(m) => {
+				let mut s = String::new();
+				let mut iter = m.stream();
+				let mut start = true;
+				while let Some((k, p)) = iter.next() {
+					if !start {
+						s.push(',');
+					} else {
+						start = false;
+					}
+					s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
+				}
+				debug!("FSTKeys[{}]", s);
+				Ok(())
 			}
-			s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
+			Inner::Trie(t) => t.debug(to_string),
 		}
-		debug!("FSTKeys[{}]", s);
-		Ok(())
 	}
 }
 
@@ -254,12 +260,8 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	type Error = fst::Error;
 	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
 		let map = Map::new(bytes)?;
-		let len = map.len() as u32;
 		Ok(Self {
-			map,
-			len,
-			additions: Default::default(),
-			deletions: Default::default(),
+			i: Inner::Map(map),
 		})
 	}
 }
@@ -269,10 +271,10 @@ impl Serialize for FstKeys {
 	where
 		S: serde::Serializer,
 	{
-		if !self.deletions.is_empty() || !self.additions.is_empty() {
-			Err(ser::Error::custom("bkeys.compile() should be called prior serializing"))
+		if let Inner::Map(m) = &self.i {
+			serializer.serialize_bytes(m.as_fst().as_bytes())
 		} else {
-			serializer.serialize_bytes(self.map.as_fst().as_bytes())
+			Err(ser::Error::custom("bkeys.to_map() should be called prior serializing"))
 		}
 	}
 }
@@ -289,23 +291,28 @@ impl<'de> Deserialize<'de> for FstKeys {
 
 impl Display for FstKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut s = self.map.stream();
-		let mut start = true;
-		while let Some((key, val)) = s.next() {
-			let key = String::from_utf8_lossy(key);
-			if start {
-				start = false;
-			} else {
-				f.write_str(", ")?;
+		match &self.i {
+			Inner::Map(m) => {
+				let mut s = m.stream();
+				let mut start = true;
+				while let Some((key, val)) = s.next() {
+					let key = String::from_utf8_lossy(key);
+					if start {
+						start = false;
+					} else {
+						f.write_str(", ")?;
+					}
+					write!(f, "{}=>{}", key, val)?;
+				}
+				Ok(())
 			}
-			write!(f, "{}=>{}", key, val)?;
+			Inner::Trie(t) => t.fmt(f),
 		}
-		Ok(())
 	}
 }
 
 #[derive(Default)]
-pub(super) struct TrieKeys {
+pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
 
@@ -360,6 +367,17 @@ impl Display for TrieKeys {
 	}
 }
 
+impl From<&Map<Vec<u8>>> for TrieKeys {
+	fn from(m: &Map<Vec<u8>>) -> Self {
+		let mut keys = TrieKeys::default();
+		let mut s = m.stream();
+		while let Some((key, payload)) = s.next() {
+			keys.insert(key.to_vec(), payload);
+		}
+		keys
+	}
+}
+
 impl BKeys for TrieKeys {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
 		let mut trie_keys = Self {
@@ -373,17 +391,21 @@ impl BKeys for TrieKeys {
 		self.keys.len() as u32
 	}
 
+	fn is_empty(&self) -> bool {
+		self.keys.is_empty()
+	}
+
 	fn get(&self, key: &Key) -> Option<Payload> {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key) -> VecDeque<(Key, Payload)> {
+	fn collect_with_prefix(&self, prefix: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
 		let mut i = KeysIterator::new(prefix, &self.keys);
 		let mut r = VecDeque::new();
 		while let Some((k, p)) = i.next() {
 			r.push_back((k.clone(), p))
 		}
-		r
+		Ok(r)
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -400,7 +422,7 @@ impl BKeys for TrieKeys {
 		self.keys.remove(key)
 	}
 
-	fn split_keys(&self) -> SplitKeys<Self> {
+	fn split_keys(self) -> Result<SplitKeys<Self>, Error> {
 		let median_idx = self.keys.len() / 2;
 		let mut s = self.keys.iter();
 		let mut left = Trie::default();
@@ -411,20 +433,22 @@ impl BKeys for TrieKeys {
 			}
 			n -= 1;
 		}
-		let (median_key, median_payload) = s
-			.next()
-			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.clone(), *v));
+		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
+			(k.clone(), *v)
+		} else {
+			return Err(Error::Unreachable);
+		};
 		let mut right = Trie::default();
 		for (key, val) in s {
 			right.insert(key.clone(), *val);
 		}
-		SplitKeys {
+		Ok(SplitKeys {
 			left: Self::from(left),
 			right: Self::from(right),
 			median_idx,
 			median_key,
 			median_payload,
-		}
+		})
 	}
 
 	fn get_key(&self, mut idx: usize) -> Option<Key> {
@@ -530,7 +554,8 @@ mod tests {
 	#[test]
 	fn test_fst_keys_serde() {
 		let key: Key = "a".as_bytes().into();
-		let keys = FstKeys::with_key_val(key.clone(), 130).unwrap();
+		let mut keys = FstKeys::with_key_val(key.clone(), 130).unwrap();
+		keys.compile();
 		let buf = bincode::serialize(&keys).unwrap();
 		let keys: FstKeys = bincode::deserialize(&buf).unwrap();
 		assert_eq!(keys.get(&key), Some(130));
@@ -539,7 +564,8 @@ mod tests {
 	#[test]
 	fn test_trie_keys_serde() {
 		let key: Key = "a".as_bytes().into();
-		let keys = TrieKeys::with_key_val(key.clone(), 130).unwrap();
+		let mut keys = TrieKeys::with_key_val(key.clone(), 130).unwrap();
+		keys.compile();
 		let buf = bincode::serialize(&keys).unwrap();
 		let keys: TrieKeys = bincode::deserialize(&buf).unwrap();
 		assert_eq!(keys.get(&key), Some(130));
@@ -628,7 +654,7 @@ mod tests {
 		keys.insert("there".into(), 10);
 
 		{
-			let r = keys.collect_with_prefix(&"appli".into());
+			let r = keys.collect_with_prefix(&"appli".into()).unwrap();
 			check_keys(
 				r,
 				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
@@ -636,7 +662,7 @@ mod tests {
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"the".into());
+			let r = keys.collect_with_prefix(&"the".into()).unwrap();
 			check_keys(
 				r,
 				vec![
@@ -651,17 +677,17 @@ mod tests {
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"blue".into());
+			let r = keys.collect_with_prefix(&"blue".into()).unwrap();
 			check_keys(r, vec![("blueberry".into(), 6)]);
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"apple".into());
+			let r = keys.collect_with_prefix(&"apple".into()).unwrap();
 			check_keys(r, vec![("apple".into(), 1)]);
 		}
 
 		{
-			let r = keys.collect_with_prefix(&"zz".into());
+			let r = keys.collect_with_prefix(&"zz".into()).unwrap();
 			check_keys(r, vec![]);
 		}
 	}
@@ -673,7 +699,7 @@ mod tests {
 		keys.insert("d".into(), 4);
 		keys.insert("e".into(), 5);
 		keys.compile();
-		let r = keys.split_keys();
+		let r = keys.split_keys().unwrap();
 		assert_eq!(r.median_payload, 3);
 		let c: Key = "c".into();
 		assert_eq!(r.median_key, c);

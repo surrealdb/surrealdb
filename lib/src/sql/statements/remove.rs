@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::kvs;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
@@ -238,7 +239,7 @@ impl RemoveFunctionStatement {
 	}
 }
 
-impl fmt::Display for RemoveFunctionStatement {
+impl Display for RemoveFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "REMOVE FUNCTION fn::{}", self.name)
 	}
@@ -793,12 +794,44 @@ impl RemoveIndexStatement {
 		// Clear the cache
 		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
-		// Remove the resource data
-		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
-		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
-		run.delr(beg..end, u32::MAX).await?;
+		// Delete resource
+		Self::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	// Remove the resource data (whatever the type of the index)
+	pub(crate) async fn delete_resources(
+		run: &mut kvs::Transaction,
+		opt: &Options,
+		tb: &str,
+		ix: &str,
+	) -> Result<(), Error> {
+		let rng = crate::key::index::Index::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bc::Bc::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bd::Bd::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bf::Bf::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bi::Bi::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bk::Bk::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bl::Bl::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bo::Bo::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bp::Bp::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let key = crate::key::bs::Bs::new(opt.ns(), opt.db(), tb, ix);
+		run.del(key).await?;
+		let rng = crate::key::bt::Bt::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		let rng = crate::key::bu::Bu::range(opt.ns(), opt.db(), tb, ix);
+		run.delr(rng, u32::MAX).await?;
+		Ok(())
 	}
 }
 
