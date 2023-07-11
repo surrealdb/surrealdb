@@ -87,6 +87,7 @@ where
 	}
 
 	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<u32, Error> {
+		self.keys_mut().compile();
 		let val = self.try_to_val()?;
 		let size = val.len();
 		tx.set(key, val).await?;
@@ -677,7 +678,8 @@ mod tests {
 
 	#[test]
 	fn test_node_serde_internal() {
-		let node = Node::Internal(FstKeys::default(), vec![]);
+		let mut node = Node::Internal(FstKeys::default(), vec![]);
+		node.keys_mut().compile();
 		let val = node.try_to_val().unwrap();
 		let _: Node<FstKeys> = Node::try_from_val(val).unwrap();
 	}

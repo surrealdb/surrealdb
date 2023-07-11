@@ -136,11 +136,10 @@ where
 		self.keys.load_node::<BK>(tx, node_id).await
 	}
 
-	fn set_node(&mut self, mut node: StoredNode<BK>, updated: bool) -> Result<(), Error> {
+	fn set_node(&mut self, node: StoredNode<BK>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		self.out.remove(&node.id);
 		if updated {
-			node.node.keys_mut().compile();
 			self.updated.insert(node.id);
 		}
 		if self.removed.contains_key(&node.id) {
