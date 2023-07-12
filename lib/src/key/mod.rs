@@ -92,7 +92,7 @@ pub mod scope; // Stores the key prefix for all keys under a scope
 pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores a record id
+pub mod thing; // Stores the key prefix for all keys under a record
 
 const CHAR_PATH: u8 = 0xb1; // ±
 const CHAR_INDEX: u8 = 0xa4; // ¤
