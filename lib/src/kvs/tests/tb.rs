@@ -3,7 +3,6 @@ use crate::key::tb::Tb;
 use crate::sql::statements::DefineTableStatement;
 
 #[tokio::test]
-#[rustfmt::skip]
 #[serial]
 async fn table_definitions_can_be_scanned() {
 	// Setup

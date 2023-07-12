@@ -27,13 +27,13 @@ impl Cl {
 
 	pub fn prefix() -> Vec<u8> {
 		let mut k = super::kv::new().encode().unwrap();
-		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
+		k.extend_from_slice(&[b'!', b'c', b'l', 0x00]);
 		k
 	}
 
 	pub fn suffix() -> Vec<u8> {
 		let mut k = super::kv::new().encode().unwrap();
-		k.extend_from_slice(&[b'!', b'h', b'b', 0xff]);
+		k.extend_from_slice(&[b'!', b'c', b'l', 0xff]);
 		k
 	}
 }
@@ -43,12 +43,21 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		#[rustfmt::skip]
-            let val = Cl::new(
-            Uuid::default(),
-        );
+		let val = Cl::new(Uuid::default());
 		let enc = Cl::encode(&val).unwrap();
 		let dec = Cl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::Cl::prefix();
+		assert_eq!(val, b"/!cl\0")
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::Cl::suffix();
+		assert_eq!(val, b"/!cl\xff")
 	}
 }
