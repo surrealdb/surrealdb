@@ -448,6 +448,7 @@ impl Datastore {
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive.
+	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
@@ -457,6 +458,8 @@ impl Datastore {
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive. Intended for testing.
+	// This includes all dependencies that are hard to control and is done in such a way for testing.
+	// Inside the database, try to use the heartbeat() function instead.
 	pub async fn heartbeat_full(
 		&self,
 		tx: &mut Transaction,

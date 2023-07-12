@@ -2,10 +2,10 @@
 ///
 /// KV              /
 ///
-/// ND              /!nd{nd}
-/// LQ              /!nd{nd}*{ns}*{db}!lq{lq}
-///
 /// HB              /!hb{ts}/{nd}
+///
+/// ND              /!nd{nd}
+/// NQ              /!nd{nd}*{ns}*{db}!lq{lq}
 ///
 /// NS              /!ns{ns}
 ///
@@ -16,7 +16,7 @@
 ///
 /// Database        /*{ns}*{db}
 /// AZ              /*{ns}*{db}!az{az}
-/// CF /*{ns}*{db}!cf{ts}
+/// CF              /*{ns}*{db}!cf{ts}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// PA              /*{ns}*{db}!pa{pa}
