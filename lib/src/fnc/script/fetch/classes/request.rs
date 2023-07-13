@@ -330,7 +330,7 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex")? {
 			if x != "half" {
 				return Err(Exception::throw_type(
-					&ctx,
+					ctx,
 					&format!("unexpected request duplex `{}` expected `half`", x),
 				));
 			}
