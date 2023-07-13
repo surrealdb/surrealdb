@@ -13,8 +13,13 @@ mod mem {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
+	include!("helper.rs");
+	include!("cluster_init.rs");
+	include!("lq.rs");
+	include!("lv.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
+	include!("tb.rs");
 	include!("multireader.rs");
 }
 
@@ -35,8 +40,13 @@ mod rocksdb {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
+	include!("helper.rs");
+	include!("cluster_init.rs");
+	include!("lq.rs");
+	include!("lv.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
+	include!("tb.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -59,8 +69,13 @@ mod speedb {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
+	include!("helper.rs");
+	include!("cluster_init.rs");
+	include!("lq.rs");
+	include!("lv.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
+	include!("tb.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -87,8 +102,13 @@ mod tikv {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
+	include!("cluster_init.rs");
+	include!("helper.rs");
+	include!("lq.rs");
+	include!("lv.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
+	include!("tb.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -115,8 +135,13 @@ mod fdb {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
+	include!("cluster_init.rs");
+	include!("helper.rs");
+	include!("lq.rs");
+	include!("lv.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
+	include!("tb.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_allow.rs");

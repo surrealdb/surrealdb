@@ -1,6 +1,7 @@
-use crate::sql::Value;
+use crate::sql::{Object, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Debug;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,11 +13,13 @@ pub struct Notification {
 
 impl fmt::Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"Notification {{ id: {}, action: {}, result: {} }}",
-			self.id, self.action, self.result
-		)
+		let obj: Object = map! {
+			"id".to_string() => self.id.to_string().into(),
+			"action".to_string() => self.action.to_string().into(),
+			"result".to_string() => self.result.clone(),
+		}
+		.into();
+		write!(f, "{}", obj)
 	}
 }
 

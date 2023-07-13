@@ -1,5 +1,5 @@
-use super::tx::Transaction;
 use crate::ctx::Context;
+use crate::dbs::cl::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -8,6 +8,9 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
+use crate::key::hb::Hb;
+use crate::key::lq;
+use crate::key::lv::Lv;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -18,7 +21,21 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::instrument;
+use tracing::trace;
 use uuid::Uuid;
+
+use super::tx::Transaction;
+
+/// Used for cluster logic to move LQ data to LQ cleanup code
+/// Not a stored struct; Used only in this module
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LqValue {
+	pub cl: Uuid,
+	pub ns: String,
+	pub db: String,
+	pub tb: String,
+	pub lq: Uuid,
+}
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -114,6 +131,13 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		let id = Uuid::new_v4();
+		Self::new_full(path, id).await
+	}
+
+	// For testing
+	pub async fn new_full(path: &str, node_id: Uuid) -> Result<Datastore, Error> {
+		// Initiate the desired datastore
 		let inner = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
@@ -218,7 +242,7 @@ impl Datastore {
 		};
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
-			id: Uuid::default(),
+			id: node_id,
 			inner,
 			strict: false,
 			query_timeout: None,
@@ -251,23 +275,203 @@ impl Datastore {
 		self
 	}
 
-	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self) -> Result<(), Error> {
+	/// Creates a new datastore instance
+	///
+	/// Use this for clustered environments.
+	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
+		let ds = Datastore::new(path).await?;
+		ds.bootstrap().await?;
+		Ok(ds)
+	}
+
+	// Initialise bootstrap with implicit values intended for runtime
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		self.bootstrap_full(&self.id).await
+	}
+
+	// Initialise bootstrap with artificial values, intended for testing
+	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
+		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_cl(self.id).await?;
-		tx.set_hb(self.id).await?;
+		let now = tx.clock();
+		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
 		tx.commit().await?;
+
+		let mut tx = self.transaction(true, false).await?;
+		self.remove_archived(&mut tx, archived).await?;
+		tx.commit().await
+	}
+
+	// Node registration + "mark" stage of mark-and-sweep gc
+	pub async fn register_remove_and_archive(
+		&self,
+		tx: &mut Transaction,
+		node_id: &Uuid,
+		timestamp: Timestamp,
+	) -> Result<Vec<LqValue>, Error> {
+		trace!("Registering node {}", node_id);
+		self.register_membership(tx, node_id, &timestamp).await?;
+		// Determine the timeout for when a cluster node is expired
+		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
+		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
+		self.archive_dead_lqs(tx, &dead, node_id).await
+	}
+
+	// Adds entries to the KV store indicating membership information
+	pub async fn register_membership(
+		&self,
+		tx: &mut Transaction,
+		node_id: &Uuid,
+		timestamp: &Timestamp,
+	) -> Result<(), Error> {
+		tx.set_cl(*node_id).await?;
+		tx.set_hb(timestamp.clone(), *node_id).await?;
 		Ok(())
 	}
 
-	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive
-	pub async fn heartbeat(&self) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
-		tx.set_hb(self.id).await?;
-		tx.commit().await?;
+	/// Delete dead heartbeats and nodes
+	/// Returns node IDs
+	pub async fn remove_dead_nodes(
+		&self,
+		tx: &mut Transaction,
+		ts: &Timestamp,
+	) -> Result<Vec<Uuid>, Error> {
+		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
+		let mut nodes = vec![];
+		for hb in hbs {
+			trace!("Deleting node {}", &hb.nd);
+			tx.del_cl(hb.nd).await?;
+			nodes.push(hb.nd);
+		}
+		Ok(nodes)
+	}
+
+	/// Accepts cluster IDs
+	/// Archives related live queries
+	/// Returns live query keys that can be used for deletes
+	///
+	/// The reason we archive first is to stop other nodes from picking it up for further updates
+	/// This means it will be easier to wipe the range in a subsequent transaction
+	pub async fn archive_dead_lqs(
+		&self,
+		tx: &mut Transaction,
+		nodes: &[Uuid],
+		this_node_id: &Uuid,
+	) -> Result<Vec<LqValue>, Error> {
+		let mut archived = vec![];
+		for nd in nodes.iter() {
+			trace!("Archiving node {}", &nd);
+			// Scan on node prefix for LQ space
+			let node_lqs = tx.scan_lq(nd, 1000).await?;
+			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
+			for lq in node_lqs {
+				trace!("Archiving query {:?}", &lq);
+				let node_archived_lqs = self.archive_lv_for_node(tx, &lq.cl, this_node_id).await?;
+				for lq_value in node_archived_lqs {
+					archived.push(lq_value);
+				}
+			}
+		}
+		Ok(archived)
+	}
+
+	pub async fn remove_archived(
+		&self,
+		tx: &mut Transaction,
+		archived: Vec<LqValue>,
+	) -> Result<(), Error> {
+		for lq in archived {
+			// Delete the cluster key, used for finding LQ associated with a node
+			tx.del(lq::new(lq.cl, lq.ns.as_str(), lq.db.as_str(), lq.lq)).await?;
+			// Delete the table key, used for finding LQ associated with a table
+			tx.del(Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq)).await?;
+		}
 		Ok(())
 	}
+
+	pub async fn _garbage_collect(
+		// TODO not invoked
+		// But this is garbage collection outside of bootstrap
+		&self,
+		tx: &mut Transaction,
+		watermark: &Timestamp,
+		this_node_id: &Uuid,
+	) -> Result<(), Error> {
+		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
+		trace!("Found dead hbs: {:?}", dead_heartbeats);
+		let mut archived: Vec<LqValue> = vec![];
+		for hb in dead_heartbeats {
+			let new_archived = self.archive_lv_for_node(tx, &hb.nd, this_node_id).await?;
+			tx.del_cl(hb.nd).await?;
+			trace!("Deleted node {}", hb.nd);
+			for lq_value in new_archived {
+				archived.push(lq_value);
+			}
+		}
+		Ok(())
+	}
+
+	// Returns a list of live query IDs
+	pub async fn archive_lv_for_node(
+		&self,
+		tx: &mut Transaction,
+		nd: &Uuid,
+		this_node_id: &Uuid,
+	) -> Result<Vec<LqValue>, Error> {
+		let lqs = tx.all_lq(nd).await?;
+		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
+		let mut ret = vec![];
+		for lq in lqs {
+			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
+			let archived_lvs = lvs.clone().archive(*this_node_id);
+			tx.putc_lv(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
+			ret.push(lq);
+		}
+		Ok(ret)
+	}
+
+	/// Given a timestamp, delete all the heartbeats that have expired
+	/// Return the removed heartbeats as they will contain node information
+	pub async fn delete_dead_heartbeats(
+		&self,
+		tx: &mut Transaction,
+		ts: &Timestamp,
+	) -> Result<Vec<Hb>, Error> {
+		let limit = 1000;
+		let dead = tx.scan_hb(ts, limit).await?;
+		tx.delr_hb(dead.clone(), 1000).await?;
+		for dead_node in dead.clone() {
+			tx.del_cl(dead_node.nd).await?;
+		}
+		Ok::<Vec<Hb>, Error>(dead)
+	}
+
+	// Creates a heartbeat entry for the member indicating to the cluster
+	// that the node is alive.
+	// This is the preferred way of creating heartbeats inside the database, so try to use this.
+	pub async fn heartbeat(&self) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		let timestamp = tx.clock();
+		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
+		tx.commit().await
+	}
+
+	// Creates a heartbeat entry for the member indicating to the cluster
+	// that the node is alive. Intended for testing.
+	// This includes all dependencies that are hard to control and is done in such a way for testing.
+	// Inside the database, try to use the heartbeat() function instead.
+	pub async fn heartbeat_full(
+		&self,
+		tx: &mut Transaction,
+		timestamp: Timestamp,
+		node_id: Uuid,
+	) -> Result<(), Error> {
+		tx.set_hb(timestamp, node_id).await
+	}
+
+	// -----
+	// End cluster helpers, storage functions here
+	// -----
 
 	/// Create a new transaction on this datastore
 	///

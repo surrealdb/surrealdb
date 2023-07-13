@@ -24,11 +24,16 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
-	pub node: Uuid,
+	pub node: uuid::Uuid,
 	pub expr: Fields,
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
+
+	// Non-query properties that are necessary for storage or otherwise carrying information
+
+	// When a live query is archived, this should be the node ID that archived the query.
+	pub archived: Option<uuid::Uuid>,
 }
 
 impl LiveStatement {
@@ -54,7 +59,10 @@ impl LiveStatement {
 				// Clone the current statement
 				let mut stm = self.clone();
 				// Store the current Node ID
-				stm.node = Uuid(opt.id()?);
+				if let Err(e) = opt.id() {
+					trace!("No ID for live query {:?}, error={:?}", stm, e)
+				}
+				stm.node = opt.id()?;
 				// Insert the node live query
 				let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 				run.putc(key, tb.as_str(), None).await?;
@@ -70,6 +78,11 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(self.id.clone().into())
+	}
+
+	pub(crate) fn archive(mut self, node_id: uuid::Uuid) -> LiveStatement {
+		self.archived = Some(node_id);
+		self
 	}
 }
 
@@ -100,11 +113,12 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 		i,
 		LiveStatement {
 			id: Uuid::new_v4(),
-			node: Uuid::default(),
+			node: uuid::Uuid::new_v4(),
 			expr,
 			what,
 			cond,
 			fetch,
+			archived: None,
 		},
 	))
 }
