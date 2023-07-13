@@ -24,7 +24,7 @@ impl Headers {
 
 	#[qjs(constructor)]
 	pub fn new<'js>(ctx: Ctx<'js>, init: Value<'js>) -> Result<Self> {
-		Headers::new_inner(ctx, init)
+		Headers::new_inner(&ctx, init)
 	}
 
 	// ------------------------------
@@ -39,14 +39,14 @@ impl Headers {
 
 	// Adds or appends a new value to a header
 	pub fn append(&mut self, ctx: Ctx<'_>, key: String, val: String) -> Result<()> {
-		self.append_inner(ctx, &key, &val)
+		self.append_inner(&ctx, &key, &val)
 	}
 
 	// Deletes a header from the header set
 	pub fn delete(&mut self, ctx: Ctx<'_>, key: String) -> Result<()> {
 		// Process and check the header name is valid
 		let key =
-			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(ctx, &format!("{e}")))?;
+			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(&ctx, &format!("{e}")))?;
 		// Remove the header entry from the map
 		self.inner.remove(&key);
 		// Everything ok
@@ -77,7 +77,7 @@ impl Headers {
 	pub fn get(&self, ctx: Ctx<'_>, key: String) -> Result<Option<String>> {
 		// Process and check the header name is valid
 		let key =
-			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(ctx, &format!("{e}")))?;
+			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(&ctx, &format!("{e}")))?;
 		// Convert the header values to strings
 		let all = self.inner.get_all(&key);
 
@@ -109,7 +109,7 @@ impl Headers {
 	pub fn has(&self, ctx: Ctx<'_>, key: String) -> Result<bool> {
 		// Process and check the header name is valid
 		let key =
-			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(ctx, &format!("{e}")))?;
+			HeaderName::from_str(&key).map_err(|e| Exception::throw_type(&ctx, &format!("{e}")))?;
 		// Check if the header entry exists
 		Ok(self.inner.contains_key(&key))
 	}
@@ -124,10 +124,10 @@ impl Headers {
 	pub fn set(&mut self, ctx: Ctx<'_>, key: String, val: String) -> Result<()> {
 		// Process and check the header name is valid
 		let key = HeaderName::from_str(&key)
-			.map_err(|e| Exception::throw_type(ctx, &format!("Invalid header name: {e}")))?;
+			.map_err(|e| Exception::throw_type(&ctx, &format!("Invalid header name: {e}")))?;
 		// Process and check the header name is valid
 		let val = HeaderValue::from_str(&val)
-			.map_err(|e| Exception::throw_type(ctx, &format!("Invalid header value: {e}")))?;
+			.map_err(|e| Exception::throw_type(&ctx, &format!("Invalid header value: {e}")))?;
 		// Insert and overwrite the header entry
 		self.inner.insert(key, val);
 		// Everything ok
@@ -165,7 +165,7 @@ impl Headers {
 		Self::from_map(HeaderMap::new())
 	}
 
-	pub fn new_inner<'js>(ctx: Ctx<'js>, val: Value<'js>) -> Result<Self> {
+	pub fn new_inner<'js>(ctx: &Ctx<'js>, val: Value<'js>) -> Result<Self> {
 		static INVALID_ERROR: &str = "Headers constructor: init was neither sequence<sequence<ByteString>> or record<ByteString, ByteString>";
 		let mut res = Self::new_empty();
 
@@ -223,7 +223,7 @@ impl Headers {
 		Ok(res)
 	}
 
-	fn append_inner(&mut self, ctx: Ctx<'_>, key: &str, val: &str) -> Result<()> {
+	fn append_inner(&mut self, ctx: &Ctx<'_>, key: &str, val: &str) -> Result<()> {
 		// Unsure what to do exactly here.
 		// Spec dictates normalizing string before adding it as a header value, i.e. removing
 		// any leading and trailing whitespace:
@@ -313,7 +313,7 @@ mod test {
 				});
 				assert.seq(headers.get("f"), "g");
 				assert.seq(headers.get("h"), "j");
-			"#).catch(ctx).unwrap();
+			"#).catch(&ctx).unwrap();
 		})
 		.await
 	}

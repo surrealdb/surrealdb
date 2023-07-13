@@ -23,7 +23,7 @@ pub async fn fetch<'js>(
 	init: Opt<RequestInit<'js>>,
 ) -> Result<Response<'js>> {
 	// Create a request from the input.
-	let js_req = Request::new(ctx, input, init)?;
+	let js_req = Request::new(ctx.clone(), input, init)?;
 
 	let url = js_req.url;
 
@@ -54,7 +54,7 @@ pub async fn fetch<'js>(
 	});
 
 	let client = reqwest::Client::builder().redirect(policy).build().map_err(|e| {
-		Exception::throw_internal(ctx, &format!("Could not initialize http client: {e}"))
+		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
 	// Set the body for the request.
@@ -69,7 +69,7 @@ pub async fn fetch<'js>(
 				let body = ReqBody::from(x);
 				req_builder = req_builder.body(body);
 			}
-			BodyData::Used => return Err(Exception::throw_type(ctx, "Body unusable")),
+			BodyData::Used => return Err(Exception::throw_type(&ctx, "Body unusable")),
 		};
 		match body.kind {
 			BodyKind::Buffer => {}
@@ -93,7 +93,7 @@ pub async fn fetch<'js>(
 		.headers(headers)
 		.send()
 		.await
-		.map_err(|e| Exception::throw_type(ctx, &e.to_string()))?;
+		.map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
 
 	// Extract the headers
 	let headers = Headers::from_map(response.headers().clone());

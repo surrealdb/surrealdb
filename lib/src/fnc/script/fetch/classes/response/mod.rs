@@ -54,13 +54,13 @@ impl<'js> Response<'js> {
 	) -> Result<Self> {
 		let init = match init.into_inner() {
 			Some(x) => x,
-			None => ResponseInit::default(ctx)?,
+			None => ResponseInit::default(ctx.clone())?,
 		};
 		let body = body.into_inner().and_then(|x| x);
 		if body.is_some() && util::is_null_body_status(init.status) {
 			// Null body statuses are not allowed to have a body.
 			return Err(Exception::throw_type(
-				ctx,
+				&ctx,
 				&format!("Response with status `{}` is not allowed to have a body", init.status),
 			));
 		}
@@ -157,7 +157,7 @@ impl<'js> Response<'js> {
 	}
 
 	#[qjs(skip)]
-	async fn take_buffer(&self, ctx: Ctx<'js>) -> Result<Bytes> {
+	async fn take_buffer(&self, ctx: &Ctx<'js>) -> Result<Bytes> {
 		match self.body.to_buffer().await {
 			Ok(Some(x)) => Ok(x),
 			Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
@@ -185,7 +185,7 @@ impl<'js> Response<'js> {
 				.to_owned()
 		};
 
-		let data = self.take_buffer(ctx).await?;
+		let data = self.take_buffer(&ctx).await?;
 		Ok(Blob {
 			mime,
 			data,
@@ -195,18 +195,18 @@ impl<'js> Response<'js> {
 	// Returns a promise with the response body as FormData
 	#[qjs(rename = "formData")]
 	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		Err(Exception::throw_internal(ctx, "Not yet implemented"))
+		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}
 
 	// Returns a promise with the response body as JSON
 	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		let text = self.text(ctx).await?;
+		let text = self.text(ctx.clone()).await?;
 		ctx.json_parse(text)
 	}
 
 	// Returns a promise with the response body as text
 	pub async fn text(&self, ctx: Ctx<'js>) -> Result<String> {
-		let data = self.take_buffer(ctx).await?;
+		let data = self.take_buffer(&ctx).await?;
 
 		// Skip UTF-BOM
 		if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -219,7 +219,7 @@ impl<'js> Response<'js> {
 	// Returns a promise with the response body as text
 	#[qjs(rename = "arrayBuffer")]
 	pub async fn array_buffer(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
-		let data = self.take_buffer(ctx).await?;
+		let data = self.take_buffer(&ctx).await?;
 		ArrayBuffer::new(ctx, data)
 	}
 
@@ -235,7 +235,7 @@ impl<'js> Response<'js> {
 	) -> Result<Self> {
 		let json = ctx.json_stringify(data)?;
 		let json =
-			json.ok_or_else(|| Exception::throw_type(ctx, "Value is not JSON serializable"))?;
+			json.ok_or_else(|| Exception::throw_type(&ctx, "Value is not JSON serializable"))?;
 		let json = json.to_string()?;
 
 		let init = if let Some(init) = init.into_inner() {
@@ -275,11 +275,11 @@ impl<'js> Response<'js> {
 	pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response> {
 		let url = url
 			.parse::<Url>()
-			.map_err(|e| Exception::throw_type(ctx, &format!("Invalid url: {e}")))?;
+			.map_err(|e| Exception::throw_type(&ctx, &format!("Invalid url: {e}")))?;
 
 		let status = status.into_inner().unwrap_or(302) as u16;
 		if !util::is_redirect_status(status) {
-			return Err(Exception::throw_range(ctx, "Status code is not a redirect status"));
+			return Err(Exception::throw_range(&ctx, "Status code is not a redirect status"));
 		}
 
 		let headers = Class::instance(ctx, Headers::new_empty())?;
@@ -367,7 +367,7 @@ mod test {
 
 
 				})()
-			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

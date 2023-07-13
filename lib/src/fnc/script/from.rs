@@ -21,7 +21,7 @@ fn check_nul(s: &str) -> Result<(), Error> {
 }
 
 impl<'js> FromJs<'js> for Value {
-	fn from_js(ctx: Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
+	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
 		match val {
 			val if val.type_name() == "null" => Ok(Value::Null),
 			val if val.type_name() == "undefined" => Ok(Value::None),
@@ -50,7 +50,8 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is an error
 				if v.is_error() {
 					let e: String = v.get("message")?;
-					let (Ok(e) | Err(e)) = Exception::from_message(ctx, &e).map(|x| x.throw());
+					let (Ok(e) | Err(e)) =
+						Exception::from_message(ctx.clone(), &e).map(|x| x.throw());
 					return Err(e);
 				}
 				// Check to see if this object is a record

@@ -50,24 +50,24 @@ pub async fn run(
 
 	// Attempt to execute the script
 	async_with!(ctx => |ctx|{
-		let res = async move {
+		let res = async{
 			// register all classes to the runtime.
 			// Get the context global object
 			let global = ctx.globals();
 			// Register the surrealdb module as a global object
 			global.set(
 				"surrealdb",
-				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx, "surrealdb")?
+				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx.clone(), "surrealdb")?
 					.get::<_, js::Value>("default")?,
 			)?;
-			fetch::register(ctx)?;
-			let console = globals::console::console(ctx)?;
+			fetch::register(&ctx)?;
+			let console = globals::console::console(&ctx)?;
 			// Register the console function to the globals
 			global.set("console",console)?;
 			// Register the special SurrealDB types as classes
-			classes::init(ctx)?;
+			classes::init(&ctx)?;
 			// Attempt to compile the script
-			let res = ctx.compile("script", src)?;
+			let res = ctx.clone().compile("script", src)?;
 			// Attempt to fetch the main export
 			let fnc = res.get::<_, Function>("default")?;
 			// Extract the doc if any
@@ -77,7 +77,7 @@ pub async fn run(
 			promise.await
 		}.await;
 
-		res.catch(ctx).map_err(Error::from)
+		res.catch(&ctx).map_err(Error::from)
 	})
 	.await
 }

@@ -14,7 +14,7 @@ pub enum RequestMode {
 }
 
 impl<'js> FromJs<'js> for RequestMode {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
 			match x.as_str() {
 				"navigate" => RequestMode::Navigate,
@@ -50,7 +50,7 @@ pub enum RequestCredentials {
 }
 
 impl<'js> FromJs<'js> for RequestCredentials {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
 			match x.as_str() {
 				"omit" => RequestCredentials::Omit,
@@ -87,7 +87,7 @@ pub enum RequestCache {
 }
 
 impl<'js> FromJs<'js> for RequestCache {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
 			match x.as_str() {
 				"default" => RequestCache::Default,
@@ -127,7 +127,7 @@ pub enum RequestRedirect {
 }
 
 impl<'js> FromJs<'js> for RequestRedirect {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
 			match x.as_str() {
 				"follow" => RequestRedirect::Follow,
@@ -167,7 +167,7 @@ pub enum ReferrerPolicy {
 }
 
 impl<'js> FromJs<'js> for ReferrerPolicy {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let res = if let Some(Coerced(x)) = <Option<Coerced<String>>>::from_js(ctx, value)? {
 			match x.as_str() {
 				"" => ReferrerPolicy::Empty,
@@ -244,7 +244,7 @@ impl<'js> RequestInit<'js> {
 
 	pub fn clone_js(&self, ctx: Ctx<'js>) -> Result<Self> {
 		let headers = self.headers.clone();
-		let headers = Class::instance(ctx, headers.borrow().clone())?;
+		let headers = Class::instance(ctx.clone(), headers.borrow().clone())?;
 
 		let body = self.body.as_ref().map(|x| x.clone_js(ctx));
 
@@ -265,7 +265,7 @@ impl<'js> RequestInit<'js> {
 }
 
 // Normalize method string according to spec.
-fn normalize_method(ctx: Ctx<'_>, m: String) -> Result<Method> {
+fn normalize_method(ctx: &Ctx<'_>, m: String) -> Result<Method> {
 	if m.as_bytes().eq_ignore_ascii_case(b"CONNECT")
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACE")
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACK")
@@ -301,7 +301,7 @@ fn normalize_method(ctx: Ctx<'_>, m: String) -> Result<Method> {
 }
 
 impl<'js> FromJs<'js> for RequestInit<'js> {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
 		let referrer = object
@@ -330,7 +330,7 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex")? {
 			if x != "half" {
 				return Err(Exception::throw_type(
-					ctx,
+					&ctx,
 					&format!("unexpected request duplex `{}` expected `half`", x),
 				));
 			}
@@ -340,10 +340,10 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 			if let Some(cls) = Class::<Headers>::from_object(hdrs.clone()) {
 				cls
 			} else {
-				Class::instance(ctx, Headers::new_inner(ctx, hdrs.into_value())?)?
+				Class::instance(ctx.clone(), Headers::new_inner(ctx, hdrs.into_value())?)?
 			}
 		} else {
-			Class::instance(ctx, Headers::new_empty())?
+			Class::instance(ctx.clone(), Headers::new_empty())?
 		};
 
 		let body = object.get::<_, Option<Body>>("body")?;
@@ -394,16 +394,16 @@ impl<'js> Request<'js> {
 			// url string
 			let url_str = url.to_string()?;
 			let url = Url::parse(&url_str)
-				.map_err(|e| Exception::throw_type(ctx, &format!("failed to parse url: {e}")))?;
+				.map_err(|e| Exception::throw_type(&ctx, &format!("failed to parse url: {e}")))?;
 			if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
 				// url cannot contain non empty username and passwords
-				return Err(Exception::throw_type(ctx, "Url contained credentials."));
+				return Err(Exception::throw_type(&ctx, "Url contained credentials."));
 			}
-			let init = init.into_inner().map_or_else(|| RequestInit::default(ctx), Ok)?;
+			let init = init.into_inner().map_or_else(|| RequestInit::default(ctx.clone()), Ok)?;
 			// HEAD and GET methods can't have a body
 			if init.body.is_some() && init.method == Method::GET || init.method == Method::HEAD {
 				return Err(Exception::throw_type(
-					ctx,
+					&ctx,
 					&format!("Request with method `{}` cannot have a body", init.method),
 				));
 			}
@@ -414,10 +414,10 @@ impl<'js> Request<'js> {
 			})
 		} else if let Some(request) = input.into_object().and_then(Class::<Self>::from_object) {
 			// existing request object, just return it
-			request.try_borrow()?.clone_js(ctx)
+			request.try_borrow()?.clone_js(ctx.clone())
 		} else {
 			Err(Exception::throw_type(
-				ctx,
+				&ctx,
 				"request `init` paramater must either be a request object or a string",
 			))
 		}
@@ -473,7 +473,7 @@ impl<'js> Request<'js> {
 
 	/// Takes the buffer from the body leaving it used.
 	#[qjs(skip)]
-	async fn take_buffer(&self, ctx: Ctx<'js>) -> Result<Bytes> {
+	async fn take_buffer(&self, ctx: &Ctx<'js>) -> Result<Bytes> {
 		let Some(body) = self.init.body.as_ref() else {
 			return Ok(Bytes::new());
 		};
@@ -505,7 +505,7 @@ impl<'js> Request<'js> {
 				.to_owned()
 		};
 
-		let data = self.take_buffer(ctx).await?;
+		let data = self.take_buffer(&ctx).await?;
 		Ok(Blob {
 			mime,
 			data,
@@ -515,18 +515,18 @@ impl<'js> Request<'js> {
 	// Returns a promise with the request body as FormData
 	#[qjs(rename = "formData")]
 	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		Err(Exception::throw_internal(ctx, "Not yet implemented"))
+		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}
 
 	// Returns a promise with the request body as JSON
 	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		let text = self.text(ctx).await?;
+		let text = self.text(ctx.clone()).await?;
 		ctx.json_parse(text)
 	}
 
 	// Returns a promise with the request body as text
 	pub async fn text(&self, ctx: Ctx<'js>) -> Result<String> {
-		let data = self.take_buffer(ctx).await?;
+		let data = self.take_buffer(&ctx).await?;
 
 		// Skip UTF-BOM
 		if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -615,7 +615,7 @@ mod test {
 					assert.seq(await req_2.text(),"some text");
 
 				})()
-			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

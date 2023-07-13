@@ -14,7 +14,7 @@ pub enum EndingType {
 }
 
 fn append_blob_part<'js>(
-	ctx: Ctx<'js>,
+	ctx: &Ctx<'js>,
 	value: Value<'js>,
 	ending: EndingType,
 	data: &mut BytesMut,
@@ -109,7 +109,7 @@ impl Blob {
 					endings = EndingType::Native;
 				} else if x != "transparent" {
 					return Err(Exception::throw_type(
-						ctx,
+						&ctx,
 						",expected endings to be either 'transparent' or 'native'",
 					));
 				}
@@ -119,13 +119,13 @@ impl Blob {
 		let data = if let Some(parts) = parts.into_inner() {
 			let array = parts
 				.into_array()
-				.ok_or_else(|| Exception::throw_type(ctx, "Blob parts are not a sequence"))?;
+				.ok_or_else(|| Exception::throw_type(&ctx, "Blob parts are not a sequence"))?;
 
 			let mut buffer = BytesMut::new();
 
 			for elem in array.iter::<Value>() {
 				let elem = elem?;
-				append_blob_part(ctx, elem, endings, &mut buffer)?;
+				append_blob_part(&ctx, elem, endings, &mut buffer)?;
 			}
 			buffer.freeze()
 		} else {
@@ -231,7 +231,7 @@ mod test {
 					assert.mustThrow(() => new Blob("text"));
 				assert.mustThrow(() => new Blob(["text"], {endings: "invalid value"}));
 			})()
-			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
 		})
 		.await
 	}

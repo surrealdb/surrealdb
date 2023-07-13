@@ -22,7 +22,7 @@ pub enum FormDataValue<'js> {
 
 impl<'js> FormDataValue<'js> {
 	fn from_arguments(
-		ctx: Ctx<'js>,
+		ctx: &Ctx<'js>,
 		value: Value<'js>,
 		filename: Opt<Coerced<String<'js>>>,
 		error: &'static str,
@@ -65,7 +65,7 @@ impl<'js> FormData<'js> {
 	pub fn new(ctx: Ctx<'js>, args: Rest<()>) -> Result<Self> {
 		if args.len() > 0 {
 			return Err(Exception::throw_internal(
-				ctx,
+				&ctx,
 				"Cant call FormData with arguments as the dom elements required are not available",
 			));
 		}
@@ -82,7 +82,7 @@ impl<'js> FormData<'js> {
 		filename: Opt<Coerced<String<'js>>>,
 	) -> Result<()> {
 		let value = FormDataValue::from_arguments(
-			ctx,
+			&ctx,
 			value,
 			filename,
 			"Can't call `append` on `FormData` with a filename when value isn't of type `Blob`",
@@ -101,7 +101,7 @@ impl<'js> FormData<'js> {
 		filename: Opt<Coerced<String<'js>>>,
 	) -> Result<()> {
 		let value = FormDataValue::from_arguments(
-			ctx,
+			&ctx,
 			value,
 			filename,
 			"Can't call `set` on `FormData` with a filename when value isn't of type `Blob`",

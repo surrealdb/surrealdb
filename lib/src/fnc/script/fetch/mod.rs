@@ -30,7 +30,7 @@ impl fmt::Display for RequestError {
 impl Error for RequestError {}
 
 /// Register the fetch types in the context.
-pub fn register(ctx: Ctx<'_>) -> Result<()> {
+pub fn register(ctx: &Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
 	globals.set("fetch", js_fetch)?;
 	Class::<Response>::define(&globals)?;
@@ -54,7 +54,7 @@ mod test {
 				let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
 				js::async_with!(ctx => |$ctx|{
-					crate::fnc::script::fetch::register($ctx).unwrap();
+					crate::fnc::script::fetch::register(&$ctx).unwrap();
 
 					$ctx.eval::<(),_>(r"
 					globalThis.assert = (...arg) => {

@@ -37,7 +37,7 @@ impl<'js> ResponseInit<'js> {
 }
 
 impl<'js> FromJs<'js> for ResponseInit<'js> {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
 		// Extract status.
@@ -66,9 +66,9 @@ impl<'js> FromJs<'js> for ResponseInit<'js> {
 		// Extract headers.
 		let headers = if let Some(headers) = object.get::<_, Option<Value>>("headers")? {
 			let headers = Headers::new_inner(ctx, headers)?;
-			Class::instance(ctx, headers)?
+			Class::instance(ctx.clone(), headers)?
 		} else {
-			Class::instance(ctx, Headers::new_empty())?
+			Class::instance(ctx.clone(), Headers::new_empty())?
 		};
 
 		Ok(ResponseInit {

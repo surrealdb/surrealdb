@@ -129,7 +129,7 @@ impl Body {
 }
 
 impl<'js> FromJs<'js> for Body {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
 			Type::String => {
 				let string = value.as_string().unwrap().to_string()?;
