@@ -39,18 +39,20 @@ async fn script_function_error() -> Result<(), Error> {
 
 #[tokio::test]
 async fn script_function_simple() -> Result<(), Error> {
-	let sql = "
+	let sql = r#"
 		CREATE person:test SET scores = function() {
 			return [6.6, 8.4, 7.3].map(v => v * 10);
+		}, bio = function() {
+			return "Line 1\nLine 2";
 		};
-	";
+	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:test, scores: [66, 84, 73] }]");
+	let val = Value::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
