@@ -11,12 +11,13 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 		CREATE blog:1 SET title = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
-		SELECT id, search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE title @1@ 'Hello' EXPLAIN;
+		SELECT id FROM blog WHERE title @1@ 'Hello' EXPLAIN;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE title @1@ 'Hello';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
@@ -24,13 +25,6 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
-			{
-				id: blog:1,
-				title: '<em>Hello</em> World!'
-			},
-			{
-				explain:
-				[
 					{
 						detail: {
 							plan: {
@@ -42,7 +36,15 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 						},
 						operation: 'Iterate Index'
 					}
-				]
+			]",
+	);
+	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				title: '<em>Hello</em> World!'
 			}
 		]",
 	);
@@ -57,12 +59,13 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 		CREATE blog:2 SET title = 'Foo Bar!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		SELECT id,search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE (title @0@ 'hello' AND identifier > 0) OR (title @1@ 'world' AND identifier < 99) EXPLAIN;
+		SELECT id FROM blog WHERE (title @0@ 'hello' AND identifier > 0) OR (title @1@ 'world' AND identifier < 99) EXPLAIN;
+		SELECT id,search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE (title @0@ 'hello' AND identifier > 0) OR (title @1@ 'world' AND identifier < 99);
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
 	//
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
@@ -71,20 +74,21 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
+				{
+					detail: {
+						table: 'blog',
+					},
+					operation: 'Iterate Table'
+				}
+		]",
+	);
+	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
 			{
 				id: blog:1,
 				title: 'Hello <em>World</em>!'
-			},
-			{
-				explain:
-				[
-					{
-						detail: {
-							table: 'blog',
-						},
-						operation: 'Iterate Table'
-					}
-				]
 			}
 		]",
 	);
@@ -93,41 +97,32 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 }
 
 async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(), Error> {
+	let p = if parallel {
+		"PARALLEL"
+	} else {
+		""
+	};
 	let sql = format!(
 		r"
 		CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
-		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {} EXPLAIN;
-	",
-		if parallel {
-			"PARALLEL"
-		} else {
-			""
-		}
+		SELECT id FROM blog WHERE content @1@ 'Hello Bãr' {p} EXPLAIN;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {p};
+	"
 	);
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
-			{
-				id: blog:1,
-				content: [
-					'<em>Hello</em> World!',
-					'Be Bop',
-					'Foo <em>Bãr</em>'
-				]
-			},
-			{
-				explain:
-				[
 					{
 						detail: {
 							plan: {
@@ -139,6 +134,19 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 						},
 						operation: 'Iterate Index'
 					}
+			]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				content: [
+					'<em>Hello</em> World!',
+					'Be Bop',
+					'Foo <em>Bãr</em>'
 				]
 			}
 		]",
@@ -164,7 +172,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
-		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr' EXPLAIN;
+		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -186,22 +194,6 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 					0: [{s:0, e:5}],
 					2: [{s:4, e:7}]
 				}
-			},
-			{
-				explain:
-				[
-					{
-						detail: {
-							plan: {
-								index: 'blog_content',
-								operator: '@1@',
-								value: 'Hello Bãr'
-							},
-							table: 'blog',
-						},
-						operation: 'Iterate Index'
-					}
-				]
 			}
 		]",
 	);

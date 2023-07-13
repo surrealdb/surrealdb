@@ -89,28 +89,25 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Process any EXPLAIN clause
-		let explanation = self.output_explain(&cancel_ctx, opt, txn, stm)?;
-		// Process prepared values
-		self.iterate(&cancel_ctx, opt, txn, stm).await?;
-		// Return any document errors
-		if let Some(e) = self.error.take() {
-			return Err(e);
-		}
-		// Process any SPLIT clause
-		self.output_split(ctx, opt, txn, stm).await?;
-		// Process any GROUP clause
-		self.output_group(ctx, opt, txn, stm).await?;
-		// Process any ORDER clause
-		self.output_order(ctx, opt, txn, stm).await?;
-		// Process any START clause
-		self.output_start(ctx, opt, txn, stm).await?;
-		// Process any LIMIT clause
-		self.output_limit(ctx, opt, txn, stm).await?;
-		// Process any FETCH clause
-		self.output_fetch(ctx, opt, txn, stm).await?;
-		// Add the EXPLAIN clause to the result
-		if let Some(e) = explanation {
-			self.results.push(e);
+		if !self.output_explain(&cancel_ctx, opt, txn, stm)? {
+			// Process prepared values
+			self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			// Return any document errors
+			if let Some(e) = self.error.take() {
+				return Err(e);
+			}
+			// Process any SPLIT clause
+			self.output_split(ctx, opt, txn, stm).await?;
+			// Process any GROUP clause
+			self.output_group(ctx, opt, txn, stm).await?;
+			// Process any ORDER clause
+			self.output_order(ctx, opt, txn, stm).await?;
+			// Process any START clause
+			self.output_start(ctx, opt, txn, stm).await?;
+			// Process any LIMIT clause
+			self.output_limit(ctx, opt, txn, stm).await?;
+			// Process any FETCH clause
+			self.output_fetch(ctx, opt, txn, stm).await?;
 		}
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
@@ -362,54 +359,49 @@ impl Iterator {
 		_opt: &Options,
 		_txn: &Transaction,
 		stm: &Statement<'_>,
-	) -> Result<Option<Value>, Error> {
-		Ok(if stm.explain() {
-			let mut explains = Vec::with_capacity(self.entries.len());
-			for iter in &self.entries {
-				let (operation, detail) = match iter {
-					Iterable::Value(v) => ("Iterate Value", vec![("value", v.to_owned())]),
-					Iterable::Table(t) => {
-						("Iterate Table", vec![("table", Value::from(t.0.to_owned()))])
-					}
-					Iterable::Thing(t) => {
-						("Iterate Thing", vec![("thing", Value::Thing(t.to_owned()))])
-					}
-					Iterable::Range(r) => {
-						("Iterate Range", vec![("table", Value::from(r.tb.to_owned()))])
-					}
-					Iterable::Edges(e) => {
-						("Iterate Edges", vec![("from", Value::Thing(e.from.to_owned()))])
-					}
-					Iterable::Mergeable(t, v) => (
-						"Iterate Mergeable",
-						vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
-					),
-					Iterable::Relatable(t1, t2, t3) => (
-						"Iterate Relatable",
-						vec![
-							("thing-1", Value::Thing(t1.to_owned())),
-							("thing-2", Value::Thing(t2.to_owned())),
-							("thing-3", Value::Thing(t3.to_owned())),
-						],
-					),
-					Iterable::Index(t, p) => (
-						"Iterate Index",
-						vec![("table", Value::from(t.0.to_owned())), ("plan", p.explain())],
-					),
-				};
-				let explain = Object::from(HashMap::from([
-					("operation", Value::from(operation)),
-					("detail", Value::Object(Object::from(HashMap::from_iter(detail)))),
-				]));
-				explains.push(Value::Object(explain));
-			}
-			Some(Value::Object(Object::from(HashMap::from([(
-				"explain",
-				Value::Array(Array::from(explains)),
-			)]))))
-		} else {
-			None
-		})
+	) -> Result<bool, Error> {
+		if !stm.explain() {
+			return Ok(false);
+		}
+		for iter in &self.entries {
+			let (operation, detail) = match iter {
+				Iterable::Value(v) => ("Iterate Value", vec![("value", v.to_owned())]),
+				Iterable::Table(t) => {
+					("Iterate Table", vec![("table", Value::from(t.0.to_owned()))])
+				}
+				Iterable::Thing(t) => {
+					("Iterate Thing", vec![("thing", Value::Thing(t.to_owned()))])
+				}
+				Iterable::Range(r) => {
+					("Iterate Range", vec![("table", Value::from(r.tb.to_owned()))])
+				}
+				Iterable::Edges(e) => {
+					("Iterate Edges", vec![("from", Value::Thing(e.from.to_owned()))])
+				}
+				Iterable::Mergeable(t, v) => (
+					"Iterate Mergeable",
+					vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
+				),
+				Iterable::Relatable(t1, t2, t3) => (
+					"Iterate Relatable",
+					vec![
+						("thing-1", Value::Thing(t1.to_owned())),
+						("thing-2", Value::Thing(t2.to_owned())),
+						("thing-3", Value::Thing(t3.to_owned())),
+					],
+				),
+				Iterable::Index(t, p) => (
+					"Iterate Index",
+					vec![("table", Value::from(t.0.to_owned())), ("plan", p.explain())],
+				),
+			};
+			let explain = Object::from(HashMap::from([
+				("operation", Value::from(operation)),
+				("detail", Value::Object(Object::from(HashMap::from_iter(detail)))),
+			]));
+			self.results.push(Value::Object(explain));
+		}
+		Ok(true)
 	}
 
 	#[cfg(target_arch = "wasm32")]
