@@ -10,6 +10,7 @@ use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
+use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
@@ -44,7 +45,7 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	pub explain: bool,
+	pub explain: Option<Explain>,
 }
 
 impl SelectStatement {
@@ -197,7 +198,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	let (i, explain) = opt(preceded(shouldbespace, tag_no_case("EXPLAIN")))(i)?;
+	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
 	Ok((
 		i,
 		SelectStatement {
@@ -213,7 +214,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 			version,
 			timeout,
 			parallel: parallel.is_some(),
-			explain: explain.is_some(),
+			explain,
 		},
 	))
 }

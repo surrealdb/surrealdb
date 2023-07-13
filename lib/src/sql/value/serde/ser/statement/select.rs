@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::explain::Explain;
 use crate::sql::statements::SelectStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
@@ -57,7 +58,7 @@ pub struct SerializeSelectStatement {
 	version: Option<Version>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
-	explain: Option<bool>,
+	explain: Option<Explain>,
 }
 
 impl serde::ser::SerializeStruct for SerializeSelectStatement {
@@ -106,7 +107,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
 			"explain" => {
-				self.explain = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+				self.explain = value.serialize(ser::explain::opt::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `SelectStatement::{key}`")));
@@ -116,12 +117,12 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.expr, self.what, self.parallel, self.explain) {
-			(Some(expr), Some(what), Some(parallel), Some(explain)) => Ok(SelectStatement {
+		match (self.expr, self.what, self.parallel) {
+			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
 				expr,
 				what,
 				parallel,
-				explain,
+				explain: self.explain,
 				cond: self.cond,
 				split: self.split,
 				group: self.group,

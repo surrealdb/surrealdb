@@ -4,6 +4,7 @@
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 mod auth;
 mod executor;
+mod explanation;
 mod iterator;
 mod notification;
 mod options;
