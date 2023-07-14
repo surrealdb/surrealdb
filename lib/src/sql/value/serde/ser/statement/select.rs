@@ -238,4 +238,14 @@ mod tests {
 		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
+
+	#[test]
+	fn with_explain() {
+		let stmt = SelectStatement {
+			explain: Some(Default::default()),
+			..Default::default()
+		};
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
 }

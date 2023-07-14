@@ -173,6 +173,9 @@ impl fmt::Display for SelectStatement {
 		if self.parallel {
 			f.write_str(" PARALLEL")?
 		}
+		if let Some(ref v) = self.explain {
+			write!(f, " {v}")?
+		}
 		Ok(())
 	}
 }
