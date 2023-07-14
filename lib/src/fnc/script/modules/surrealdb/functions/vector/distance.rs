@@ -6,5 +6,10 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"vector::distance",
-	"euclidean" => run
+	"chebyshev" => run,
+	"euclidean" => run,
+	"hamming" => run,
+	"mahalanobis" => run,
+	"manhattan" => run,
+	"minkowski" => run
 );

@@ -23,6 +23,12 @@ pub mod distance {
 	use crate::fnc::util::math::euclideandistance::EuclideanDistance;
 	use crate::sql::{Number, Value};
 
+	pub fn chebyshev((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::distance::chebyshev() function",
+		})
+	}
+
 	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		match a.euclidean_distance(&b) {
 			None => Err(Error::InvalidArguments {
@@ -31,6 +37,30 @@ pub mod distance {
 			}),
 			Some(distance) => Ok(distance.into()),
 		}
+	}
+
+	pub fn hamming((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::distance::hamming() function",
+		})
+	}
+
+	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::distance::mahalanobis() function",
+		})
+	}
+
+	pub fn manhattan((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::distance::manhattan() function",
+		})
+	}
+
+	pub fn minkowski((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::distance::minkowski() function",
+		})
 	}
 }
 
@@ -49,5 +79,23 @@ pub mod similarity {
 			}),
 			Some(dot) => Ok((dot / (a.magnitude() * b.magnitude())).into()),
 		}
+	}
+
+	pub fn jaccard((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::similarity::jaccard() function",
+		})
+	}
+
+	pub fn pearson((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::similarity::pearson() function",
+		})
+	}
+
+	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "vector::similarity::spearman() function",
+		})
 	}
 }
