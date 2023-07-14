@@ -288,14 +288,18 @@
 "string"
 "string::concat("
 "string::contains("
+"string::distance::hamming("
+"string::distance::levenshtein("
 "string::endsWith("
-"string::fuzzyScore("
 "string::join("
 "string::len("
 "string::lowercase("
 "string::repeat("
 "string::replace("
 "string::reverse("
+"string::similarity::fuzzy("
+"string::similarity::jaro("
+"string::similarity::smithwaterman("
 "string::slice("
 "string::slug("
 "string::split("
@@ -336,5 +340,17 @@
 "type::string("
 "type::table("
 "type::thing("
+"vector::dotproduct(",
+"vector::magnitude(",
+"vector::distance::chebyshev(",
+"vector::distance::euclidean(",
+"vector::distance::hamming(",
+"vector::distance::mahalanobis(",
+"vector::distance::manhattan(",
+"vector::distance::minkowski(",
+"vector::similarity::cosine(",
+"vector::similarity::jaccard(",
+"vector::similarity::pearson(",
+"vector::similarity::spearman(",
 # TODO: Add Javascript keywords
 
