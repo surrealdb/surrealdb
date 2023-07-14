@@ -77,9 +77,10 @@ impl<'a> TreeBuilder<'a> {
 			Value::Strand(_) => Node::Scalar(v.to_owned()),
 			Value::Number(_) => Node::Scalar(v.to_owned()),
 			Value::Bool(_) => Node::Scalar(v.to_owned()),
+			Value::Thing(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
 			Value::Param(p) => {
-				let v = p.compute(self.ctx, self.opt).await?;
+				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
 				self.eval_value(&v).await?
 			}
 			_ => Node::Unsupported,

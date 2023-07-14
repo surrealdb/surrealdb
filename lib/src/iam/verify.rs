@@ -2,7 +2,6 @@ use crate::dbs::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::Claims;
-use crate::iam::LOG;
 use crate::iam::TOKEN;
 use crate::kvs::Datastore;
 use crate::sql::Algorithm;
@@ -81,7 +80,7 @@ static DUD: Lazy<Validation> = Lazy::new(|| {
 
 pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Result<(), Error> {
 	// Log the authentication type
-	trace!(target: LOG, "Attempting token authentication");
+	trace!("Attempting token authentication");
 	// Retrieve just the auth data
 	let auth = auth.trim_start_matches(TOKEN).trim();
 	// Decode the token without verifying
@@ -91,14 +90,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 	// Check if the auth token can be used
 	if let Some(nbf) = token.claims.nbf {
 		if nbf > Utc::now().timestamp() {
-			trace!(target: LOG, "The 'nbf' field in the authentication token was invalid");
+			trace!("The 'nbf' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token.claims.exp {
 		if exp < Utc::now().timestamp() {
-			trace!(target: LOG, "The 'exp' field in the authentication token was invalid");
+			trace!("The 'exp' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
@@ -114,7 +113,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to scope `{}` with token `{}`", sc, tk);
+			trace!("Authenticating to scope `{}` with token `{}`", sc, tk);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
@@ -128,7 +127,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			debug!(target: LOG, "Authenticated to scope `{}` with token `{}`", sc, tk);
+			debug!("Authenticated to scope `{}` with token `{}`", sc, tk);
 			// Set the session
 			session.sd = Some(id);
 			session.tk = Some(value);
@@ -147,7 +146,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to scope `{}`", sc);
+			trace!("Authenticating to scope `{}`", sc);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
@@ -158,7 +157,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			debug!(target: LOG, "Authenticated to scope `{}`", sc);
+			debug!("Authenticated to scope `{}`", sc);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -176,7 +175,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to database `{}` with token `{}`", db, tk);
+			trace!("Authenticating to database `{}` with token `{}`", db, tk);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the database token
@@ -185,7 +184,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			debug!(target: LOG, "Authenticated to database `{}` with token `{}`", db, tk);
+			debug!("Authenticated to database `{}` with token `{}`", db, tk);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -201,7 +200,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to database `{}` with login `{}`", db, id);
+			trace!("Authenticating to database `{}` with login `{}`", db, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the database login
@@ -210,7 +209,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			debug!(target: LOG, "Authenticated to database `{}` with login `{}`", db, id);
+			debug!("Authenticated to database `{}` with login `{}`", db, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -225,7 +224,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to namespace `{}` with token `{}`", ns, tk);
+			trace!("Authenticating to namespace `{}` with token `{}`", ns, tk);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the namespace token
@@ -234,7 +233,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			trace!(target: LOG, "Authenticated to namespace `{}` with token `{}`", ns, tk);
+			trace!("Authenticated to namespace `{}` with token `{}`", ns, tk);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -248,7 +247,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!(target: LOG, "Authenticating to namespace `{}` with login `{}`", ns, id);
+			trace!("Authenticating to namespace `{}` with login `{}`", ns, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the namespace login
@@ -257,7 +256,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, auth: String) -> Resu
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;
 			// Log the success
-			trace!(target: LOG, "Authenticated to namespace `{}` with login `{}`", ns, id);
+			trace!("Authenticated to namespace `{}` with login `{}`", ns, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());

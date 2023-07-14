@@ -56,21 +56,9 @@ pub async fn init(
 		password: &password,
 	};
 	// Connect to the database engine
-	#[cfg(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	))]
+	#[cfg(feature = "has-storage")]
 	let address = (endpoint, root);
-	#[cfg(not(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	)))]
+	#[cfg(not(feature = "has-storage"))]
 	let address = endpoint;
 	let client = connect(address).await?;
 	// Sign in to the server
@@ -83,44 +71,31 @@ pub async fn init(
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
-	// Keep track of current namespace/database.
-	let (mut ns, mut db) = if let Some(DatabaseSelectionOptionalArguments {
+	// Configure the prompt
+	let mut prompt = "> ".to_owned();
+	// Use namespace / database if specified
+	if let Some(DatabaseSelectionOptionalArguments {
 		namespace,
 		database,
 	}) = sel
 	{
-		(namespace, database)
-	} else {
-		(None, None)
-	};
-	// Configure the prompt
-	let mut prompt = "> ".to_owned();
+		let is_not_empty = |s: &&str| !s.is_empty();
+		let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
+		let database = database.as_deref().map(str::trim).filter(is_not_empty);
+		match (namespace, database) {
+			(Some(namespace), Some(database)) => {
+				client.use_ns(namespace).use_db(database).await?;
+				prompt = format!("{namespace}/{database}> ");
+			}
+			(Some(namespace), None) => {
+				client.use_ns(namespace).await?;
+				prompt = format!("{namespace}> ");
+			}
+			_ => {}
+		}
+	}
 	// Loop over each command-line input
 	loop {
-		// Use namespace / database if specified
-		match (&ns, &db) {
-			(Some(namespace), Some(database)) => {
-				match client.use_ns(namespace).use_db(database).await {
-					Ok(()) => {
-						prompt = format!("{namespace}/{database}> ");
-					}
-					Err(error) => eprintln!("{error}"),
-				}
-			}
-			(Some(namespace), None) => match client.use_ns(namespace).await {
-				Ok(()) => {
-					prompt = format!("{namespace}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, Some(database)) => match client.use_db(database).await {
-				Ok(()) => {
-					prompt = format!("/{database}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, None) => {}
-		}
 		// Prompt the user to input SQL and check the input.
 		let line = match rl.readline(&prompt) {
 			// The user typed a query
@@ -146,32 +121,65 @@ pub async fn init(
 		// Complete the request
 		match sql::parse(&line) {
 			Ok(query) => {
+				let mut namespace = None;
+				let mut database = None;
+				let mut vars = Vec::new();
+				// Capture `use` and `set/let` statements from the query
 				for statement in query.iter() {
 					match statement {
 						Statement::Use(stmt) => {
-							if let Some(namespace) = &stmt.ns {
-								ns = Some(namespace.clone());
+							if let Some(ns) = &stmt.ns {
+								namespace = Some(ns.clone());
 							}
-							if let Some(database) = &stmt.db {
-								db = Some(database.clone());
+							if let Some(db) = &stmt.db {
+								database = Some(db.clone());
 							}
 						}
 						Statement::Set(stmt) => {
-							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
-								eprintln!("{e}\n");
-							}
+							vars.push((stmt.name.clone(), stmt.what.clone()));
 						}
 						_ => {}
 					}
 				}
+				// Extract the namespace and database from the current prompt
+				let (prompt_ns, prompt_db) = split_prompt(&prompt);
+				// The namespace should be set before the database can be set
+				if namespace.is_none() && prompt_ns.is_empty() && database.is_some() {
+					eprintln!(
+						"There was a problem with the database: Specify a namespace to use\n"
+					);
+					continue;
+				}
+				// Run the query provided
 				let res = client.query(query).await;
-				// Get the request response
 				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
 					}
 					Err(e) => {
 						eprintln!("{e}\n");
+						continue;
+					}
+				}
+				// Persist the variables extracted from the query
+				for (key, value) in vars {
+					let _ = client.set(key, value).await;
+				}
+				// Process the last `use` statements, if any
+				if namespace.is_some() || database.is_some() {
+					// Use the namespace provided in the query if any, otherwise use the one in the prompt
+					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
+					// Use the database provided in the query if any, otherwise use the one in the prompt
+					let database = database.as_deref().unwrap_or(prompt_db);
+					// If the database is empty we should only use the namespace
+					if database.is_empty() {
+						if client.use_ns(namespace).await.is_ok() {
+							prompt = format!("{namespace}> ");
+						}
+					}
+					// Otherwise we should use both the namespace and database
+					else if client.use_ns(namespace).use_db(database).await.is_ok() {
+						prompt = format!("{namespace}/{database}> ");
 					}
 				}
 			}
@@ -258,4 +266,9 @@ impl Validator for InputValidator {
 
 fn filter_line_continuations(line: &str) -> String {
 	line.replace("\\\n", "").replace("\\\r\n", "")
+}
+
+fn split_prompt(prompt: &str) -> (&str, &str) {
+	let selection = prompt.split_once('>').unwrap().0;
+	selection.split_once('/').unwrap_or((selection, ""))
 }

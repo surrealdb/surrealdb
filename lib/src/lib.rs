@@ -107,11 +107,11 @@ extern crate tracing;
 mod mac;
 
 mod api;
+mod cf;
 mod ctx;
 mod doc;
 mod exe;
 mod fnc;
-mod key;
 mod vs;
 
 pub mod sql;
@@ -136,6 +136,8 @@ pub mod err;
 pub mod iam;
 #[doc(hidden)]
 pub mod idx;
+#[doc(hidden)]
+pub mod key;
 #[doc(hidden)]
 pub mod kvs;
 

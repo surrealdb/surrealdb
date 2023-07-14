@@ -13,52 +13,22 @@
 #[macro_use]
 extern crate tracing;
 
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 mod dbs;
 mod env;
 mod err;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 mod iam;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 mod net;
 mod o11y;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 mod rpc;
 
 use std::future::Future;

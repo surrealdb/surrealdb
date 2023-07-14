@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::data::Data;
@@ -33,9 +33,10 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
+		// Check tables
 		if !opt.tables {
 			return Ok(());
 		}
@@ -44,7 +45,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Don't run permissions
-		let opt = &opt.perms(false);
+		let opt = &opt.new_with_perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
@@ -55,43 +56,41 @@ impl<'a> Document<'a> {
 		} else {
 			Action::Update
 		};
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Loop through all foreign table statements
-		for ft in self.ft(opt, &txn).await?.iter() {
+		for ft in self.ft(opt, txn).await?.iter() {
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
 			match &tb.group {
 				// There is a GROUP BY clause specified
 				Some(group) => {
-					let mut initial_ctx = Context::new(ctx);
-					initial_ctx.add_cursor_doc(&self.initial);
 					// Set the previous record id
 					let old = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(group.iter().map(|v| v.compute(&initial_ctx, opt)))
-							.await?
-							.into_iter()
-							.collect::<Vec<_>>()
-							.into(),
+						id: try_join_all(
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
+						)
+						.await?
+						.into_iter()
+						.collect::<Vec<_>>()
+						.into(),
 					};
-					let mut current_ctx = Context::new(ctx);
-					current_ctx.add_cursor_doc(&self.current);
 					// Set the current record id
 					let rid = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(group.iter().map(|v| v.compute(&current_ctx, opt)))
-							.await?
-							.into_iter()
-							.collect::<Vec<_>>()
-							.into(),
+						id: try_join_all(
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
+						)
+						.await?
+						.into_iter()
+						.collect::<Vec<_>>()
+						.into(),
 					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(&current_ctx, opt).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									if !opt.force && act != Action::Create {
 										// Delete the old value
@@ -99,11 +98,13 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
-											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
+											data: Some(
+												self.data(ctx, opt, txn, act, &tb.expr).await?,
+											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 									if act != Action::Delete {
 										// Update the new value
@@ -111,11 +112,13 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
-											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
+											data: Some(
+												self.data(ctx, opt, txn, act, &tb.expr).await?,
+											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 								}
 								_ => {
@@ -125,11 +128,13 @@ impl<'a> Document<'a> {
 										// Modify the value in the table
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
-											data: Some(self.data(ctx, opt, act, &tb.expr).await?),
+											data: Some(
+												self.data(ctx, opt, txn, act, &tb.expr).await?,
+											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt).await?;
+										stm.compute(ctx, opt, txn, None).await?;
 									}
 								}
 							}
@@ -142,11 +147,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(old)]),
-									data: Some(self.data(ctx, opt, act, &tb.expr).await?),
+									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt).await?;
+								stm.compute(ctx, opt, txn, None).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value
@@ -154,11 +159,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
-									data: Some(self.data(ctx, opt, act, &tb.expr).await?),
+									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt).await?;
+								stm.compute(ctx, opt, txn, None).await?;
 							}
 						}
 					}
@@ -171,13 +176,11 @@ impl<'a> Document<'a> {
 						id: rid.id.clone(),
 					};
 					// Use the current record data
-					let mut ctx = Context::new(ctx);
-					ctx.add_cursor_doc(&self.current);
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(&ctx, opt).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -190,13 +193,21 @@ impl<'a> Document<'a> {
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(Data::ReplaceExpression(
-												tb.expr.compute(&ctx, opt, false).await?,
+												tb.expr
+													.compute(
+														ctx,
+														opt,
+														txn,
+														Some(&self.current),
+														false,
+													)
+													.await?,
 											)),
 											..UpdateStatement::default()
 										}),
 									};
 									// Execute the statement
-									stm.compute(&ctx, opt).await?;
+									stm.compute(ctx, opt, txn, None).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -205,7 +216,7 @@ impl<'a> Document<'a> {
 										..DeleteStatement::default()
 									};
 									// Execute the statement
-									stm.compute(&ctx, opt).await?;
+									stm.compute(ctx, opt, txn, None).await?;
 								}
 							}
 						}
@@ -222,13 +233,15 @@ impl<'a> Document<'a> {
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
 									data: Some(Data::ReplaceExpression(
-										tb.expr.compute(&ctx, opt, false).await?,
+										tb.expr
+											.compute(ctx, opt, txn, Some(&self.current), false)
+											.await?,
 									)),
 									..UpdateStatement::default()
 								}),
 							};
 							// Execute the statement
-							stm.compute(&ctx, opt).await?;
+							stm.compute(ctx, opt, txn, None).await?;
 						}
 					}
 				}
@@ -242,16 +255,16 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		act: Action,
 		exp: &Fields,
 	) -> Result<Data, Error> {
 		//
 		let mut ops: Ops = vec![];
 		// Create a new context with the initial or the current doc
-		let mut ctx = Context::new(ctx);
-		match act {
-			Action::Delete => ctx.add_cursor_doc(self.initial.as_ref()),
-			Action::Update => ctx.add_cursor_doc(self.current.as_ref()),
+		let doc = match act {
+			Action::Delete => Some(&self.initial),
+			Action::Update => Some(&self.current),
 			_ => unreachable!(),
 		};
 		//
@@ -266,29 +279,29 @@ impl<'a> Document<'a> {
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						"count" => {
-							let val = f.compute(&ctx, opt).await?;
+							let val = f.compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(&ctx, opt).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(&ctx, opt).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.min(&mut ops, &act, idiom, val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(&ctx, opt).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.max(&mut ops, &act, idiom, val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(&ctx, opt).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(&ctx, opt).await?;
+						let val = expr.compute(ctx, opt, txn, doc).await?;
 						self.set(&mut ops, idiom, val);
 					}
 				}

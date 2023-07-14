@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
@@ -59,25 +60,31 @@ impl Subquery {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(2)?;
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(ctx, opt).await,
-			Self::Ifelse(ref v) => v.compute(ctx, opt).await,
-			Self::Output(ref v) => v.compute(ctx, opt).await,
+			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result
@@ -93,13 +100,13 @@ impl Subquery {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result
@@ -115,13 +122,13 @@ impl Subquery {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result
@@ -137,13 +144,13 @@ impl Subquery {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result
@@ -159,13 +166,13 @@ impl Subquery {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result
@@ -181,13 +188,13 @@ impl Subquery {
 				// Is this a single output?
 				let one = v.single();
 				// Duplicate context
-				let mut child_ctx = Context::new(ctx);
+				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if let Some(doc) = ctx.doc() {
-					child_ctx.add_value("parent", doc);
+				if let Some(doc) = doc {
+					ctx.add_value("parent", doc.doc.as_ref());
 				}
 				// Process subquery
-				match v.compute(&child_ctx, opt).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result

@@ -1,4 +1,3 @@
-use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
@@ -45,12 +44,10 @@ async fn handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get a database reference
 	let db = DB.get().unwrap();
-	// Get local copy of options
-	let opt = CF.get().unwrap();
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
+	match db.execute(sql, &session, params.parse().into()).await {
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
@@ -76,10 +73,8 @@ async fn socket(ws: WebSocket, session: Session) {
 			if let Ok(sql) = msg.to_str() {
 				// Get a database reference
 				let db = DB.get().unwrap();
-				// Get local copy of options
-				let opt = CF.get().unwrap();
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None, opt.strict).await {
+				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

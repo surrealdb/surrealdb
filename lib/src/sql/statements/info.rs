@@ -1,6 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -24,7 +25,13 @@ pub enum InfoStatement {
 
 impl InfoStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
 			InfoStatement::Kv => {
@@ -34,8 +41,6 @@ impl InfoStatement {
 				opt.check(Level::Kv)?;
 				// Create the result set
 				let mut res = Object::default();
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -52,8 +57,6 @@ impl InfoStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -84,8 +87,6 @@ impl InfoStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -140,8 +141,6 @@ impl InfoStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -160,8 +159,6 @@ impl InfoStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set

@@ -203,7 +203,7 @@ async fn run_queries(
 > {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None, false).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
 }
 
 fn with_enough_stack(
@@ -221,7 +221,7 @@ fn with_enough_stack(
 	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
-		builder = builder.stack_size(16_000_000);
+		builder = builder.stack_size(24_000_000);
 	}
 
 	builder

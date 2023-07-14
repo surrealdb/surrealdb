@@ -4,7 +4,7 @@
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 mod auth;
 mod executor;
-mod iterate;
+mod explanation;
 mod iterator;
 mod notification;
 mod options;
@@ -26,15 +26,8 @@ pub(crate) use self::statement::*;
 pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod channel;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::channel::*;
-
 pub mod cl;
 
+mod processor;
 #[cfg(test)]
 pub(crate) mod test;
-
-pub(crate) const LOG: &str = "surrealdb::dbs";

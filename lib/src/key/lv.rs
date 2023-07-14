@@ -14,11 +14,12 @@ pub struct Lv<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
+	#[serde(with = "uuid::serde::compact")]
 	pub lv: Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lv: &Uuid) -> Lv<'a> {
-	Lv::new(ns, db, tb, lv.to_owned())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lv: Uuid) -> Lv<'a> {
+	Lv::new(ns, db, tb, lv)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -53,18 +54,34 @@ impl<'a> Lv<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::key::debug;
+
 	#[test]
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Lv::new(
-			"test",
-			"test",
-			"test",
-			Uuid::default(),
-		);
+		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+		let val = Lv::new("testns", "testdb", "testtb", live_query_id);
 		let enc = Lv::encode(&val).unwrap();
+		println!("{:?}", debug::sprint_key(&enc));
+		assert_eq!(
+			enc,
+			b"/*testns\x00*testdb\x00*testtb\x00!lv\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
+		);
+
 		let dec = Lv::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn prefix() {
+		let val = super::prefix("testns", "testdb", "testtb");
+		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lv\x00")
+	}
+
+	#[test]
+	fn suffix() {
+		let val = super::suffix("testns", "testdb", "testtb");
+		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lv\xff")
 	}
 }

@@ -1,6 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
@@ -20,7 +21,7 @@ use crate::sql::idiom::{Idiom, Idioms};
 use crate::sql::index::Index;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
-use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::strand::strand_raw;
 use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
@@ -61,20 +62,26 @@ pub enum DefineStatement {
 
 impl DefineStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt).await,
-			Self::Database(ref v) => v.compute(ctx, opt).await,
-			Self::Function(ref v) => v.compute(ctx, opt).await,
-			Self::Login(ref v) => v.compute(ctx, opt).await,
-			Self::Token(ref v) => v.compute(ctx, opt).await,
-			Self::Scope(ref v) => v.compute(ctx, opt).await,
-			Self::Param(ref v) => v.compute(ctx, opt).await,
-			Self::Table(ref v) => v.compute(ctx, opt).await,
-			Self::Event(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(ctx, opt).await,
-			Self::Index(ref v) => v.compute(ctx, opt).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -126,15 +133,19 @@ pub struct DefineNamespaceStatement {
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Process the statement
 		let key = crate::key::ns::new(&self.name);
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		run.set(key, self).await?;
@@ -175,13 +186,17 @@ pub struct DefineDatabaseStatement {
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected NS?
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -252,13 +267,17 @@ pub struct DefineFunctionStatement {
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -330,13 +349,17 @@ pub struct DefineAnalyzerStatement {
 }
 
 impl DefineAnalyzerStatement {
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -400,15 +423,19 @@ pub struct DefineLoginStatement {
 
 impl DefineLoginStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
 				// Selected DB?
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -423,8 +450,6 @@ impl DefineLoginStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -518,15 +543,19 @@ pub struct DefineTokenStatement {
 
 impl DefineTokenStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match &self.base {
 			Base::Ns => {
 				// Selected DB?
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -541,8 +570,6 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -558,8 +585,6 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -633,13 +658,17 @@ pub struct DefineScopeStatement {
 
 impl DefineScopeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -747,13 +776,17 @@ pub struct DefineParamStatement {
 
 impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -807,13 +840,17 @@ pub struct DefineTableStatement {
 }
 
 impl DefineTableStatement {
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -838,13 +875,13 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.force(true);
+			let opt = &opt.new_with_force(true);
 			// Don't process field queries
-			let opt = &opt.fields(false);
+			let opt = &opt.new_with_fields(false);
 			// Don't process event queries
-			let opt = &opt.events(false);
+			let opt = &opt.new_with_events(false);
 			// Don't process index queries
-			let opt = &opt.indexes(false);
+			let opt = &opt.new_with_indexes(false);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
@@ -852,7 +889,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				stm.compute(ctx, opt).await?;
+				stm.compute(ctx, opt, txn, doc).await?;
 			}
 		}
 		// Ok all good
@@ -1006,13 +1043,17 @@ pub struct DefineEventStatement {
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1086,13 +1127,17 @@ pub struct DefineFieldStatement {
 
 impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1242,13 +1287,17 @@ pub struct DefineIndexStatement {
 
 impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1261,25 +1310,23 @@ impl DefineIndexStatement {
 		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Remove the index data
-		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
-		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
-		run.delr(beg..end, u32::MAX).await?;
+		RemoveIndexStatement::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Release the transaction
 		drop(run);
 		// Force queries to run
-		let opt = &opt.force(true);
+		let opt = &opt.new_with_force(true);
 		// Don't process field queries
-		let opt = &opt.fields(false);
+		let opt = &opt.new_with_fields(false);
 		// Don't process event queries
-		let opt = &opt.events(false);
+		let opt = &opt.new_with_events(false);
 		// Don't process table queries
-		let opt = &opt.tables(false);
+		let opt = &opt.new_with_tables(false);
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
 			..UpdateStatement::default()
 		};
-		stm.compute(ctx, opt).await?;
+		stm.compute(ctx, opt, txn, doc).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

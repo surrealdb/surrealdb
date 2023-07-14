@@ -5,28 +5,32 @@
 /.github/ @tobiemh
 
 # Code for fuzzing configuration
-/lib/fuzz/ @finnbear
+/lib/fuzz/ @surrealdb/security
 
 # Code and tests for the Rust API
-/lib/CARGO.md @rushmorem
-/lib/README.md @rushmorem
-/lib/examples/ @rushmorem
-/lib/src/api/ @rushmorem
-/lib/src/tests/api/ @rushmorem
-/lib/src/tests/api.rs @rushmorem
+/lib/CARGO.md @surrealdb/api
+/lib/README.md @surrealdb/api
+/lib/examples/ @surrealdb/api
+/lib/src/api/ @surrealdb/api
+/lib/src/tests/api/ @surrealdb/api
+/lib/src/tests/api.rs @surrealdb/api
 
 # Code and tests for indexing
-/lib/src/idx/ @emmanuel-keller
+/lib/src/idx/ @surrealdb/indexing
 
 # Code and tests for scripting
-/lib/src/fnc/script/ @DelSkayn
+/lib/src/fnc/script/ @surrealdb/scripting
+
+# Code and tests for the server
+/src/net/ @surrealdb/api
+/src/rpc/ @surrealdb/api
 
 # Code and tests for the command-line
-/src/cli/ @rushmorem @finnbear
-/tests/cli.rs @finnbear
+/src/cli/ @surrealdb/cli
+/tests/cli.rs @surrealdb/cli
 
 # Code and tests for opentelemetry
-/src/o11y/ @sgirones
+/src/o11y/ @surrealdb/monitoring
 
 # Tests related to the key-value store
 /lib/src/kvs/tests/ @tobiemh @phughk

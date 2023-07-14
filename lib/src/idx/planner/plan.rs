@@ -1,5 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
@@ -11,7 +12,6 @@ use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Ident, Idiom, Object, Operator, Thing, Value};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ impl Plan {
 		opt: &Options,
 		txn: &Transaction,
 		exe: &QueryExecutor,
-	) -> Result<Box<dyn ThingIterator>, Error> {
+	) -> Result<ThingIterator, Error> {
 		self.i.new_iterator(opt, txn, exe).await
 	}
 
@@ -128,11 +128,11 @@ impl IndexOption {
 		opt: &Options,
 		txn: &Transaction,
 		exe: &QueryExecutor,
-	) -> Result<Box<dyn ThingIterator>, Error> {
+	) -> Result<ThingIterator, Error> {
 		match &self.ix().index {
 			Index::Idx => {
 				if self.op() == &Operator::Equal {
-					return Ok(Box::new(NonUniqueEqualThingIterator::new(
+					return Ok(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
 						opt,
 						self.ix(),
 						self.value(),
@@ -141,7 +141,7 @@ impl IndexOption {
 			}
 			Index::Uniq => {
 				if self.op() == &Operator::Equal {
-					return Ok(Box::new(UniqueEqualThingIterator::new(
+					return Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
 						opt,
 						self.ix(),
 						self.value(),
@@ -156,7 +156,7 @@ impl IndexOption {
 			} => {
 				if let Operator::Matches(_) = self.op() {
 					let td = exe.pre_match_terms_docs();
-					return Ok(Box::new(
+					return Ok(ThingIterator::Matches(
 						MatchesThingIterator::new(opt, txn, self.ix(), az, *hl, sc, *order, td)
 							.await?,
 					));
@@ -167,36 +167,46 @@ impl IndexOption {
 	}
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-pub(crate) trait ThingIterator: Send {
-	async fn next_batch(
+pub(crate) enum ThingIterator {
+	NonUniqueEqual(NonUniqueEqualThingIterator),
+	UniqueEqual(UniqueEqualThingIterator),
+	Matches(MatchesThingIterator),
+}
+
+impl ThingIterator {
+	pub(crate) async fn next_batch(
 		&mut self,
 		tx: &Transaction,
 		size: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error>;
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		match self {
+			ThingIterator::NonUniqueEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
+		}
+	}
 }
 
-struct NonUniqueEqualThingIterator {
+pub(crate) struct NonUniqueEqualThingIterator {
 	beg: Vec<u8>,
 	end: Vec<u8>,
 }
 
 impl NonUniqueEqualThingIterator {
-	fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
+	fn new(
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		v: &Value,
+	) -> Result<NonUniqueEqualThingIterator, Error> {
 		let v = Array::from(v.clone());
-		let beg = key::index::prefix_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
-		let end = key::index::suffix_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
+		let (beg, end) =
+			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
 		Ok(Self {
 			beg,
 			end,
 		})
 	}
-}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl ThingIterator for NonUniqueEqualThingIterator {
 	async fn next_batch(
 		&mut self,
 		txn: &Transaction,
@@ -214,23 +224,19 @@ impl ThingIterator for NonUniqueEqualThingIterator {
 	}
 }
 
-struct UniqueEqualThingIterator {
+pub(crate) struct UniqueEqualThingIterator {
 	key: Option<Key>,
 }
 
 impl UniqueEqualThingIterator {
 	fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
 		let v = Array::from(v.clone());
-		let key = key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &v, None).into();
+		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, v, None).into();
 		Ok(Self {
 			key: Some(key),
 		})
 	}
-}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl ThingIterator for UniqueEqualThingIterator {
 	async fn next_batch(
 		&mut self,
 		txn: &Transaction,
@@ -245,7 +251,7 @@ impl ThingIterator for UniqueEqualThingIterator {
 	}
 }
 
-struct MatchesThingIterator {
+pub(crate) struct MatchesThingIterator {
 	hits: Option<HitsIterator>,
 }
 
@@ -268,9 +274,9 @@ impl MatchesThingIterator {
 		{
 			let mut run = txn.lock().await;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl).await?;
+			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl, BTreeStoreType::Read).await?;
 			if let Some(terms_docs) = terms_docs {
-				let hits = fti.new_hits_iterator(&mut run, terms_docs).await?;
+				let hits = fti.new_hits_iterator(terms_docs)?;
 				Ok(Self {
 					hits,
 				})
@@ -285,11 +291,7 @@ impl MatchesThingIterator {
 			})
 		}
 	}
-}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl ThingIterator for MatchesThingIterator {
 	async fn next_batch(
 		&mut self,
 		txn: &Transaction,

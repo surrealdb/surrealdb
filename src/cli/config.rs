@@ -1,42 +1,17 @@
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 use crate::net::client_ip::ClientIp;
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 use once_cell::sync::OnceCell;
 use std::{net::SocketAddr, path::PathBuf};
 
-#[cfg(any(
-	feature = "storage-mem",
-	feature = "storage-tikv",
-	feature = "storage-rocksdb",
-	feature = "storage-speedb",
-	feature = "storage-fdb",
-))]
+#[cfg(feature = "has-storage")]
 pub static CF: OnceCell<Config> = OnceCell::new();
 
 #[derive(Clone, Debug)]
 pub struct Config {
-	pub strict: bool,
 	pub bind: SocketAddr,
 	pub path: String,
-	#[cfg(any(
-		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
-		feature = "storage-speedb",
-		feature = "storage-fdb",
-	))]
+	#[cfg(feature = "has-storage")]
 	pub client_ip: ClientIp,
 	pub user: String,
 	pub pass: Option<String>,

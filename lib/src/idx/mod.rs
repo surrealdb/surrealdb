@@ -1,5 +1,5 @@
-mod bkeys;
-pub(crate) mod btree;
+pub mod bkeys;
+pub mod btree;
 pub(crate) mod ft;
 pub(crate) mod planner;
 
@@ -27,7 +27,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct IndexKeyBase {
+pub struct IndexKeyBase {
 	inner: Arc<Inner>,
 }
 

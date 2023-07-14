@@ -6,7 +6,6 @@ use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::session;
-use crate::net::LOG;
 use crate::rpc::args::Take;
 use crate::rpc::paths::{ID, METHOD, PARAMS};
 use crate::rpc::res;
@@ -14,7 +13,6 @@ use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
 use futures::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
-
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +30,7 @@ use uuid::Uuid;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
+// Mapping of WebSocketID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
 // Mapping of LiveQueryID to WebSocketID
 type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
@@ -114,7 +113,7 @@ impl Rpc {
 				// Send the message to the client
 				if let Err(err) = wtx.send(res).await {
 					// Output the WebSocket error to the logs
-					trace!(target: LOG, "WebSocket error: {:?}", err);
+					trace!("WebSocket error: {:?}", err);
 					// It's already failed, so ignore error
 					let _ = wtx.close().await;
 					// Exit out of the loop
@@ -126,36 +125,19 @@ impl Rpc {
 		let moved_rpc = rpc.clone();
 		tokio::task::spawn(async move {
 			let rpc = moved_rpc;
-			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
-				trace!(target: LOG, "Received notification: {:?}", v);
-				// Find which websocket the notification belongs to
-				match LIVE_QUERIES.read().await.get(&v.id) {
-					Some(ws_id) => {
-						// Send the notification to the client
-						let msg_text = res::success(None, v.clone());
-						let ws_write = WEBSOCKETS.write().await;
-						match ws_write.get(ws_id) {
-							None => {
-								error!(
-									target: LOG,
-									"Tracked WebSocket {:?} not found for lq: {:?}", ws_id, &v.id
-								);
-							}
-							Some(ws_sender) => {
-								msg_text
-									.send(rpc.read().await.format.clone(), ws_sender.clone())
-									.await;
-								trace!(
-									target: LOG,
-									"Sent notification to WebSocket {:?} for lq: {:?}",
-									ws_id,
-									&v.id
-								);
-							}
+			if let Some(channel) = DB.get().unwrap().notifications() {
+				while let Ok(notification) = channel.recv().await {
+					// Find which WebSocket the notification belongs to
+					if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+						// Check to see if the WebSocket exists
+						if let Some(websocket) = WEBSOCKETS.read().await.get(ws_id) {
+							// Serialize the message to send
+							let message = res::success(None, notification);
+							// Get the current output format
+							let format = rpc.read().await.format.clone();
+							// Send the notification to the client
+							message.send(format, websocket.clone()).await;
 						}
-					}
-					None => {
-						error!(target: LOG, "Unknown websocket for live query: {:?}", v.id);
 					}
 				}
 			}
@@ -187,7 +169,7 @@ impl Rpc {
 				// There was an error receiving the message
 				Err(err) => {
 					// Output the WebSocket error to the logs
-					trace!(target: LOG, "WebSocket error: {:?}", err);
+					trace!("WebSocket error: {:?}", err);
 					// Exit out of the loop
 					break;
 				}
@@ -201,7 +183,7 @@ impl Rpc {
 		// Fetch the unique id of the WebSocket
 		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has connected
-		trace!(target: LOG, "WebSocket {} connected", id);
+		trace!("WebSocket {} connected", id);
 		// Store this WebSocket in the list of WebSockets
 		WEBSOCKETS.write().await.insert(id, chn);
 	}
@@ -210,21 +192,17 @@ impl Rpc {
 		// Fetch the unique id of the WebSocket
 		let id = rpc.read().await.uuid;
 		// Log that the WebSocket has disconnected
-		trace!(target: LOG, "WebSocket {} disconnected", id);
+		trace!("WebSocket {} disconnected", id);
 		// Remove this WebSocket from the list of WebSockets
 		WEBSOCKETS.write().await.remove(&id);
 		// Remove all live queries
-		let mut locked_lq_map = LIVE_QUERIES.write().await;
-		let mut live_query_to_gc: Vec<Uuid> = vec![];
-		for (key, value) in locked_lq_map.iter() {
+		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &id {
-				trace!(target: LOG, "Removing live query: {}", key);
-				live_query_to_gc.push(*key);
+				trace!("Removing live query: {}", key);
+				return false;
 			}
-		}
-		for key in live_query_to_gc {
-			locked_lq_map.remove(&key);
-		}
+			true
+		});
 	}
 
 	/// Call RPC methods from the WebSocket
@@ -258,7 +236,7 @@ impl Rpc {
 			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
 		};
 		// Log the received request
-		trace!(target: LOG, "RPC Received: {}", req);
+		trace!("RPC Received: {}", req);
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
 			v if v.is_none() => None,
@@ -436,8 +414,7 @@ impl Rpc {
 	#[instrument(skip_all, name = "rpc signup", fields(websocket=self.uuid.to_string()))]
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		let opts = CF.get().unwrap();
-		surrealdb::iam::signup::signup(kvs, opts.strict, &mut self.session, vars)
+		surrealdb::iam::signup::signup(kvs, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -451,7 +428,7 @@ impl Rpc {
 			username: &opts.user,
 			password: pass,
 		});
-		surrealdb::iam::signin::signin(kvs, &root, opts.strict, &mut self.session, vars)
+		surrealdb::iam::signin::signin(kvs, &root, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -477,12 +454,10 @@ impl Rpc {
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, None).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -562,8 +537,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
@@ -572,7 +545,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -592,8 +565,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
@@ -603,7 +574,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -623,8 +594,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
@@ -634,7 +603,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -654,8 +623,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
 		// Specify the query parameters
@@ -665,7 +632,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -685,8 +652,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
@@ -696,7 +661,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -716,8 +681,6 @@ impl Rpc {
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
@@ -726,7 +689,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -734,37 +697,6 @@ impl Rpc {
 		};
 		// Return the result to the client
 		Ok(res)
-	}
-
-	async fn handle_live_query_results(&self, res: &Response) {
-		match &res.query_type {
-			QueryType::Live => {
-				if let Ok(Value::Uuid(lqid)) = &res.result {
-					// Match on Uuid type
-					LIVE_QUERIES.write().await.insert(lqid.0, self.uuid);
-					trace!(
-						target: LOG,
-						"Registered live query {} on websocket {}",
-						lqid,
-						self.uuid
-					);
-				}
-			}
-			QueryType::Kill => {
-				if let Ok(Value::Uuid(lqid)) = &res.result {
-					let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
-					if let Some(ws_id) = ws_id {
-						trace!(
-							target: LOG,
-							"Unregistered live query {} on websocket {}",
-							lqid,
-							ws_id
-						);
-					}
-				}
-			}
-			_ => {}
-		}
 	}
 
 	// ------------------------------
@@ -775,12 +707,10 @@ impl Rpc {
 	async fn query(&self, sql: Strand) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var).await?;
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;
@@ -793,17 +723,40 @@ impl Rpc {
 	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
 		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		let res = kvs.execute(&sql, &self.session, var).await?;
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;
 		}
 		// Return the result to the client
 		Ok(res)
+	}
+
+	// ------------------------------
+	// Private methods
+	// ------------------------------
+
+	async fn handle_live_query_results(&self, res: &Response) {
+		match &res.query_type {
+			QueryType::Live => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
+					// Match on Uuid type
+					LIVE_QUERIES.write().await.insert(lqid.0, self.uuid);
+					trace!("Registered live query {} on websocket {}", lqid, self.uuid);
+				}
+			}
+			QueryType::Kill => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
+					let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
+					if let Some(ws_id) = ws_id {
+						trace!("Unregistered live query {} on websocket {}", lqid, ws_id);
+					}
+				}
+			}
+			_ => {}
+		}
 	}
 }

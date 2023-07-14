@@ -54,7 +54,6 @@ targets = []
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 argon2 = "0.5.0"
 ascii = { version = "0.3.2", package = "any_ascii" }
-async-trait = "0.1.69"
 async-recursion = "1.0.4"
 base64_lib = { version = "0.21.2", package = "base64" }
 bcrypt = "0.14.0"
@@ -79,6 +78,7 @@ indxdb = { version = "0.3.0", optional = true }
 js = { version = "0.3.1" , package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = "8.3.0"
 lexicmp = "0.1.0"
+lru = "0.10.1"
 md-5 = "0.10.5"
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
@@ -105,8 +105,8 @@ sha2 = "0.10.7"
 speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.40"
-tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tikv-client-proto = { version = "0.1.0", optional = true }
+tikv = { version = "0.1.0-surreal.1", package = "surrealdb-tikv-client", optional = true }
+tikv-client-proto = { version = "0.1.0-surreal.1", package = "surrealdb-tikv-client-proto", optional = true }
 tokio-util = { version = "0.7.8", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"
@@ -115,7 +115,7 @@ url = "2.4.0"
 bytes = "1.4.0"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { version="0.4", features= [  "async_futures" ] }
 env_logger = "0.10.0"
 test-log = "0.2.12"
 pprof = { version = "0.11.1", features = [ "flamegraph", "criterion" ] }
@@ -147,4 +147,12 @@ harness = false
 
 [[bench]]
 name = "parser"
+harness = false
+
+[[bench]]
+name = "processor"
+harness = false
+
+[[bench]]
+name = "index_btree"
 harness = false

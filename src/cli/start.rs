@@ -50,10 +50,6 @@ pub struct StartCommandArguments {
 	kvs: Option<StartCommandRemoteTlsOptions>,
 	#[command(flatten)]
 	web: Option<StartCommandWebTlsOptions>,
-	#[arg(help = "Whether strict mode is enabled on this database instance")]
-	#[arg(env = "SURREAL_STRICT", short = 's', long = "strict")]
-	#[arg(default_value_t = false)]
-	strict: bool,
 	#[arg(help = "The logging level for the database server")]
 	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
 	#[arg(default_value = "info")]
@@ -99,7 +95,6 @@ pub async fn init(
 		listen_addresses,
 		dbs,
 		web,
-		strict,
 		log: CustomEnvFilter(log),
 		no_banner,
 		..
@@ -115,7 +110,6 @@ pub async fn init(
 	}
 	// Setup the cli options
 	let _ = config::CF.set(Config {
-		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
 		path,

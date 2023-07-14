@@ -49,10 +49,11 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Nt::new(
-			"test",
-			"test",
+			"testns",
+			"testtk",
 		);
 		let enc = Nt::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0!nttesttk\0");
 		let dec = Nt::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

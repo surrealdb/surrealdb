@@ -22,6 +22,10 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// The database encountered unreachable logic
+	#[error("The database encountered unreachable logic")]
+	Unreachable,
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),
@@ -61,10 +65,6 @@ pub enum Error {
 	/// The transaction writes too much data for the KV store
 	#[error("Transaction is too large")]
 	TxTooLarge,
-
-	/// The context does have any transaction
-	#[error("No transaction")]
-	NoTx,
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -275,6 +275,18 @@ pub enum Error {
 	/// The requested table does not exist
 	#[error("The table '{value}' does not exist")]
 	TbNotFound {
+		value: String,
+	},
+
+	/// The requested live query does not exist
+	#[error("The live query '{value}' does not exist")]
+	LvNotFound {
+		value: String,
+	},
+
+	/// The requested cluster live query does not exist
+	#[error("The cluster live query '{value}' does not exist")]
+	LqNotFound {
 		value: String,
 	},
 
@@ -504,6 +516,20 @@ pub enum Error {
 	DuplicatedMatchRef {
 		mr: MatchRef,
 	},
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Timestamp arithmetic error: {0}")]
+	TimestampOverflow(String),
+
+	/// Internal server error
+	/// This should be used extremely sporadically, since we lose the type of error as a consequence
+	/// There will be times when it is useful, such as with unusual type conversion errors
+	#[error("Internal database error: {0}")]
+	Internal(String),
+
+	/// Unimplemented functionality
+	#[error("Unimplemented functionality: {0}")]
+	Unimplemented(String),
 }
 
 impl From<Error> for String {

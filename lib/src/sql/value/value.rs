@@ -1,8 +1,10 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
@@ -40,8 +42,6 @@ use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
 use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -49,7 +49,6 @@ use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
-use once_cell::sync::Lazy;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -60,8 +59,6 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::Neg;
 use std::str::FromStr;
-
-static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -2321,11 +2318,11 @@ impl Value {
 	pub fn fuzzy(&self, other: &Value) -> bool {
 		match self {
 			Value::Uuid(v) => match other {
-				Value::Strand(w) => MATCHER.fuzzy_match(v.to_raw().as_str(), w.as_str()).is_some(),
+				Value::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
 			Value::Strand(v) => match other {
-				Value::Strand(w) => MATCHER.fuzzy_match(v.as_str(), w.as_str()).is_some(),
+				Value::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
 			_ => self.equal(other),
@@ -2484,21 +2481,27 @@ impl Value {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self {
-			Value::Cast(v) => v.compute(ctx, opt).await,
-			Value::Thing(v) => v.compute(ctx, opt).await,
-			Value::Block(v) => v.compute(ctx, opt).await,
-			Value::Range(v) => v.compute(ctx, opt).await,
-			Value::Param(v) => v.compute(ctx, opt).await,
-			Value::Idiom(v) => v.compute(ctx, opt).await,
-			Value::Array(v) => v.compute(ctx, opt).await,
-			Value::Object(v) => v.compute(ctx, opt).await,
-			Value::Future(v) => v.compute(ctx, opt).await,
-			Value::Constant(v) => v.compute(ctx, opt).await,
-			Value::Function(v) => v.compute(ctx, opt).await,
-			Value::Subquery(v) => v.compute(ctx, opt).await,
-			Value::Expression(v) => v.compute(ctx, opt).await,
+			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}
@@ -2930,7 +2933,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

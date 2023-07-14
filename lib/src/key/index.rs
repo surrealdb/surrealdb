@@ -3,6 +3,7 @@ use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 struct Prefix<'a> {
@@ -15,7 +16,6 @@ struct Prefix<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 }
 
 impl<'a> Prefix<'a> {
@@ -30,7 +30,6 @@ impl<'a> Prefix<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: b'*',
 		}
 	}
 }
@@ -46,9 +45,7 @@ struct PrefixIds<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 	pub fd: Array,
-	_f: u8,
 }
 
 impl<'a> PrefixIds<'a> {
@@ -63,9 +60,7 @@ impl<'a> PrefixIds<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: b'*',
 			fd: fd.to_owned(),
-			_f: b'*',
 		}
 	}
 }
@@ -81,45 +76,8 @@ pub struct Index<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
-	_e: u8,
 	pub fd: Array,
-	_f: u8,
 	pub id: Option<Id>,
-}
-
-pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
-	tb: &'a str,
-	ix: &'a str,
-	fd: &Array,
-	id: Option<&Id>,
-) -> Index<'a> {
-	Index::new(ns, db, tb, ix, fd.to_owned(), id.cloned())
-}
-
-pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	k.extend_from_slice(&[0x00]);
-	k
-}
-
-pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, ix).encode().unwrap();
-	k.extend_from_slice(&[0xff]);
-	k
-}
-
-pub fn prefix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
-	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	k.extend_from_slice(&[0x00]);
-	k
-}
-
-pub fn suffix_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
-	let mut k = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-	k.extend_from_slice(&[0xff]);
-	k
 }
 
 impl<'a> Index<'a> {
@@ -141,11 +99,25 @@ impl<'a> Index<'a> {
 			tb,
 			_d: CHAR_INDEX,
 			ix,
-			_e: 0x2a, // *
 			fd,
-			_f: 0x2a, // *
 			id,
 		}
+	}
+
+	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+		let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
+		beg.extend_from_slice(&[0x00]);
+		let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
+		end.extend_from_slice(&[0xff]);
+		beg..end
+	}
+
+	pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
+		let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+		beg.extend_from_slice(&[0x00]);
+		let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+		end.extend_from_slice(&[0xff]);
+		(beg, end)
 	}
 }
 
@@ -156,14 +128,19 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Index::new(
-			"test",
-			"test",
-			"test",
-			"test",
-			vec!["test"].into(),
-			Some("test".into()),
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			vec!["testfd1", "testfd2"].into(),
+			Some("testid".into()),
 		);
 		let enc = Index::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0\xa4testix\0\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
+		);
+
 		let dec = Index::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

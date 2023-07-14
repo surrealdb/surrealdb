@@ -7,14 +7,17 @@ license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
+# Public features
 default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
-storage-mem = ["surrealdb/kv-mem"]
-storage-rocksdb = ["surrealdb/kv-rocksdb"]
-storage-speedb = ["surrealdb/kv-speedb"]
-storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb-7_1"]
+storage-mem = ["surrealdb/kv-mem", "has-storage"]
+storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
+storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
+storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
+storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
+# Private features
+has-storage = []
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
@@ -35,6 +38,7 @@ base64 = "0.21.2"
 bytes = "1.4.0"
 clap = { version = "4.3.10", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.28"
+glob = "0.3.1"
 http = "0.2.9"
 hyper = "0.14.27"
 ipnet = "2.8.0"
@@ -46,30 +50,31 @@ reqwest = { version = "0.11.18", features = ["blocking"] }
 rustyline = { version = "11.0.0", features = ["derive"] }
 serde = { version = "1.0.164", features = ["derive"] }
 serde_cbor = "0.11.2"
-serde_pack = { version = "1.1.1", package = "rmp-serde" }
 serde_json = "1.0.99"
+serde_pack = { version = "1.1.1", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 tempfile = "3.6.0"
 thiserror = "1.0.40"
 tokio = { version = "1.29.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
-uuid = { version = "1.4.0", features = ["serde", "js", "v4", "v7"] }
 tracing = "0.1"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.2"
+uuid = { version = "1.4.0", features = ["serde", "js", "v4", "v7"] }
 warp = { version = "0.3.5", features = ["compression", "tls", "websocket"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.26.2"
 
 [dev-dependencies]
+assert_fs = "1.0.13"
+opentelemetry-proto = { version = "0.1.0", features = ["gen-tonic", "traces", "build-server"] }
 rcgen = "0.10.0"
-tonic = "0.8.3"
-opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"] }
 serial_test = "2.0.0"
-tokio-stream = { version = "0.1", features = ["net"] }
 temp-env = "0.3.4"
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = "0.8.3"
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"

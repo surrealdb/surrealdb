@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -131,24 +132,28 @@ impl Function {
 	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
 		// Ensure futures are run
-		let opt = &opt.futures(true);
+		let opt = &opt.new_with_futures(true);
 		// Process the function type
 		match self {
 			Self::Normal(s, x) => {
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 				// Run the normal function
-				fnc::run(ctx, s, a).await
+				fnc::run(ctx, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Get the function definition
 				let val = {
-					// Clone transaction
-					let txn = ctx.try_clone_transaction()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
@@ -165,7 +170,7 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
@@ -173,16 +178,16 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(&kind)?);
 				}
 				// Run the custom function
-				val.block.compute(&ctx, opt).await
+				val.block.compute(&ctx, opt, txn, doc).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
 					// Compute the function arguments
-					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt))).await?;
+					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 					// Run the script function
-					fnc::script::run(ctx, opt, s, a).await
+					fnc::script::run(ctx, opt, txn, doc, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
@@ -243,27 +248,27 @@ fn script(i: &str) -> IResult<&str, Function> {
 
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
-		preceded(tag("array::"), function_array),
-		preceded(tag("bytes::"), function_bytes),
-		preceded(tag("crypto::"), function_crypto),
-		preceded(tag("duration::"), function_duration),
-		preceded(tag("encoding::"), function_encoding),
-		preceded(tag("geo::"), function_geo),
-		preceded(tag("http::"), function_http),
-		preceded(tag("is::"), function_is),
-		preceded(tag("math::"), function_math),
-		preceded(tag("meta::"), function_meta),
-		preceded(tag("parse::"), function_parse),
-		preceded(tag("rand::"), function_rand),
-		preceded(tag("search::"), function_search),
-		preceded(tag("session::"), function_session),
-		preceded(tag("string::"), function_string),
-		preceded(tag("time::"), function_time),
-		preceded(tag("type::"), function_type),
-		tag("count"),
-		tag("not"),
-		tag("rand"),
-		tag("sleep"),
+		alt((
+			preceded(tag("array::"), function_array),
+			preceded(tag("bytes::"), function_bytes),
+			preceded(tag("crypto::"), function_crypto),
+			preceded(tag("duration::"), function_duration),
+			preceded(tag("encoding::"), function_encoding),
+			preceded(tag("geo::"), function_geo),
+			preceded(tag("http::"), function_http),
+			preceded(tag("is::"), function_is),
+			preceded(tag("math::"), function_math),
+			preceded(tag("meta::"), function_meta),
+			preceded(tag("parse::"), function_parse),
+			preceded(tag("rand::"), function_rand),
+			preceded(tag("search::"), function_search),
+			preceded(tag("session::"), function_session),
+			preceded(tag("string::"), function_string),
+			preceded(tag("time::"), function_time),
+			preceded(tag("type::"), function_type),
+			preceded(tag("vector::"), function_vector),
+		)),
+		alt((tag("count"), tag("not"), tag("rand"), tag("sleep"))),
 	)))(i)
 }
 
@@ -274,11 +279,18 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("all"),
 			tag("any"),
 			tag("append"),
+			tag("boolean_and"),
+			tag("boolean_not"),
+			tag("boolean_or"),
+			tag("boolean_xor"),
+			tag("clump"),
 			tag("combine"),
 			tag("complement"),
 			tag("concat"),
 			tag("difference"),
 			tag("distinct"),
+			tag("filter_index"),
+			tag("find_index"),
 			tag("flatten"),
 			tag("group"),
 			tag("insert"),
@@ -287,17 +299,24 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("intersect"),
 			tag("join"),
 			tag("len"),
+			tag("logical_and"),
+			tag("logical_or"),
+			tag("logical_xor"),
+			tag("matches"),
 			tag("max"),
 			tag("min"),
 			tag("pop"),
 			tag("prepend"),
 			tag("push"),
+		)),
+		alt((
 			tag("remove"),
 			tag("reverse"),
 			tag("slice"),
 			tag("sort::asc"),
 			tag("sort::desc"),
 			tag("sort"),
+			tag("transpose"),
 			tag("union"),
 		)),
 	))(i)
@@ -489,6 +508,8 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("trim"),
 		tag("uppercase"),
 		tag("words"),
+		preceded(tag("distance::"), alt((tag("hamming"), tag("levenshtein")))),
+		preceded(tag("similarity::"), alt((tag("fuzzy"), tag("jaro"), tag("smithwaterman")))),
 	))(i)
 }
 
@@ -529,6 +550,28 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("string"),
 		tag("table"),
 		tag("thing"),
+	))(i)
+}
+
+fn function_vector(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("dotproduct"),
+		tag("magnitude"),
+		preceded(
+			tag("distance::"),
+			alt((
+				tag("chebyshev"),
+				tag("euclidean"),
+				tag("hamming"),
+				tag("mahalanobis"),
+				tag("manhattan"),
+				tag("minkowski"),
+			)),
+		),
+		preceded(
+			tag("similarity::"),
+			alt((tag("cosine"), tag("jaccard"), tag("pearson"), tag("spearman"))),
+		),
 	))(i)
 }
 
