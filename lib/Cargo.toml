@@ -152,3 +152,7 @@ harness = false
 [[bench]]
 name = "processor"
 harness = false
+
+[[bench]]
+name = "index_btree"
+harness = false
