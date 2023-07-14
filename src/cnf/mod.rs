@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+#[cfg(feature = "has-storage")]
 use std::time::Duration;
 
 pub const LOGO: &str = "
@@ -14,21 +15,22 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 ";
 
 /// The publicly visible name of the server
+#[cfg(feature = "has-storage")]
 pub const PKG_NAME: &str = "surrealdb";
-
-/// The publicly visible name of the server
-pub const SERVER_NAME: &str = "SurrealDB";
 
 /// The publicly visible user-agent of the command-line tool
 pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
 
 /// The public endpoint for the administration interface
+#[cfg(feature = "has-storage")]
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
 /// How many concurrent tasks can be handled in a WebSocket
+#[cfg(feature = "has-storage")]
 pub const MAX_CONCURRENT_CALLS: usize = 24;
 
 /// Specifies the frequency with which ping messages should be sent to the client
+#[cfg(feature = "has-storage")]
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// The version identifier of this build

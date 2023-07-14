@@ -1,12 +1,18 @@
 mod logger;
 mod tracers;
 
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use tracing::Subscriber;
-use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::util::SubscriberInitExt;
+#[cfg(feature = "has-storage")]
+use tracing_subscriber::EnvFilter;
 
 #[derive(Default, Debug, Clone)]
 pub struct Builder {
-	log_level: String,
+	log_level: Option<String>,
+	filter: Option<CustomEnvFilter>,
 }
 
 pub fn builder() -> Builder {
@@ -16,14 +22,31 @@ pub fn builder() -> Builder {
 impl Builder {
 	/// Set the log level on the builder
 	pub fn with_log_level(mut self, log_level: &str) -> Self {
-		self.log_level = log_level.to_string();
+		self.log_level = Some(log_level.to_string());
+		self
+	}
+
+	/// Set the filter on the builder
+	#[cfg(feature = "has-storage")]
+	pub fn with_filter(mut self, filter: EnvFilter) -> Self {
+		self.filter = Some(CustomEnvFilter(filter));
 		self
 	}
 	/// Build a dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
 	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
-		Box::new(
-			tracing_subscriber::registry().with(logger::new(self.log_level)).with(tracers::new()),
-		)
+		let registry = tracing_subscriber::registry();
+		let registry = registry.with(self.filter.map(|filter| {
+			tracing_subscriber::fmt::layer()
+				.compact()
+				.with_ansi(true)
+				.with_span_events(FmtSpan::NONE)
+				.with_writer(std::io::stderr)
+				.with_filter(filter.0)
+				.boxed()
+		}));
+		let registry = registry.with(self.log_level.map(logger::new));
+		let registry = registry.with(tracers::new());
+		Box::new(registry)
 	}
 	/// Build a dispatcher and set it as global
 	pub fn init(self) {

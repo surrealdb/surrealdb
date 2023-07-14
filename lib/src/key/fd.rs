@@ -22,29 +22,29 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Fd<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x66, 0x64, 0x00]);
+	k.extend_from_slice(&[b'!', b'f', b'd', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x66, 0x64, 0xff]);
+	k.extend_from_slice(&[b'!', b'f', b'd', 0xff]);
 	k
 }
 
 impl<'a> Fd<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x66, // f
-			_f: 0x64, // d
+			_d: b'!',
+			_e: b'f',
+			_f: b'd',
 			fd,
 		}
 	}
@@ -57,13 +57,27 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Fd::new(
-			"test",
-			"test",
-			"test",
-			"test",
+			"testns",
+			"testdb",
+			"testtb",
+			"testfd",
 		);
 		let enc = Fd::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!fdtestfd\x00");
+
 		let dec = Fd::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix("testns", "testdb", "testtb");
+		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!fd\0");
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix("testns", "testdb", "testtb");
+		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!fd\xff");
 	}
 }

@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 
@@ -21,10 +20,8 @@ impl<'a> Document<'a> {
 		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data

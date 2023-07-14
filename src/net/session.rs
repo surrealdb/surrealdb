@@ -1,18 +1,18 @@
+use crate::dbs::DB;
 use crate::err::Error;
-use crate::iam::verify::{basic, token};
+use crate::iam::verify::basic;
 use crate::iam::BASIC;
-use crate::iam::TOKEN;
-use std::net::SocketAddr;
+use crate::net::client_ip;
 use surrealdb::dbs::Session;
+use surrealdb::iam::verify::token;
+use surrealdb::iam::TOKEN;
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
 	// Enable on any path
 	let conf = warp::any();
 	// Add remote ip address
-	let conf = conf.and(warp::filters::addr::remote());
-	// Add remote ip address
-	let conf = conf.map(|addr: Option<SocketAddr>| addr.map(|v| v.to_string()));
+	let conf = conf.and(client_ip::build());
 	// Add authorization header
 	let conf = conf.and(warp::header::optional::<String>("authorization"));
 	// Add http origin header
@@ -35,6 +35,7 @@ async fn process(
 	ns: Option<String>,
 	db: Option<String>,
 ) -> Result<Session, warp::Rejection> {
+	let kvs = DB.get().unwrap();
 	// Create session
 	#[rustfmt::skip]
 	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
@@ -43,7 +44,9 @@ async fn process(
 		// Basic authentication data was supplied
 		Some(auth) if auth.starts_with(BASIC) => basic(&mut session, auth).await,
 		// Token authentication data was supplied
-		Some(auth) if auth.starts_with(TOKEN) => token(&mut session, auth).await,
+		Some(auth) if auth.starts_with(TOKEN) => {
+			token(kvs, &mut session, auth).await.map_err(Error::from)
+		}
 		// Wrong authentication data was supplied
 		Some(_) => Err(Error::InvalidAuth),
 		// No authentication data was supplied

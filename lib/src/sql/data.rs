@@ -1,6 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -22,6 +21,7 @@ use std::fmt::{self, Display, Formatter};
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
+	UnsetExpression(Vec<Idiom>),
 	PatchExpression(Value),
 	MergeExpression(Value),
 	ReplaceExpression(Value),
@@ -84,6 +84,11 @@ impl Display for Data {
 					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
 				)
 			),
+			Self::UnsetExpression(v) => write!(
+				f,
+				"UNSET {}",
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |l, f| write!(f, "{l}",))))
+			),
 			Self::PatchExpression(v) => write!(f, "PATCH {v}"),
 			Self::MergeExpression(v) => write!(f, "MERGE {v}"),
 			Self::ReplaceExpression(v) => write!(f, "REPLACE {v}"),
@@ -111,7 +116,7 @@ impl Display for Data {
 }
 
 pub fn data(i: &str) -> IResult<&str, Data> {
-	alt((set, patch, merge, replace, content))(i)
+	alt((set, unset, patch, merge, replace, content))(i)
 }
 
 fn set(i: &str) -> IResult<&str, Data> {
@@ -126,6 +131,13 @@ fn set(i: &str) -> IResult<&str, Data> {
 		Ok((i, (l, o, r)))
 	})(i)?;
 	Ok((i, Data::SetExpression(v)))
+}
+
+fn unset(i: &str) -> IResult<&str, Data> {
+	let (i, _) = tag_no_case("UNSET")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = separated_list1(commas, idiom)(i)?;
+	Ok((i, Data::UnsetExpression(v)))
 }
 
 fn patch(i: &str) -> IResult<&str, Data> {
@@ -220,6 +232,24 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true, other.field = false", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement() {
+		let sql = "UNSET field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement_multiple_fields() {
+		let sql = "UNSET field, other.field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field, other.field", format!("{}", out));
 	}
 
 	#[test]

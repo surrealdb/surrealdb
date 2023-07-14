@@ -18,25 +18,25 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
 
 pub fn prefix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0x00]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0xff]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0xff]);
 	k
 }
 
 impl<'a> Db<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x21, // !
-			_c: 0x64, // d
-			_d: 0x62, // b
+			_b: b'!',
+			_c: b'd',
+			_d: b'b',
 			db,
 		}
 	}
@@ -49,11 +49,25 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
-			"test",
-			"test",
+			"testns",
+			"testdb",
 		);
 		let enc = Db::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
+
 		let dec = Db::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix("testns");
+		assert_eq!(val, b"/*testns\0!db\0")
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix("testns");
+		assert_eq!(val, b"/*testns\0!db\xff")
 	}
 }

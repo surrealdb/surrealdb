@@ -18,6 +18,7 @@ use crate::api::DbResponse;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+#[allow(unused_imports)]
 use crate::error::Db as DbError;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
@@ -103,6 +104,21 @@ impl Connection for Any {
 					.into());
 				}
 
+				"speedb" => {
+					#[cfg(feature = "kv-speedb")]
+					{
+						features.insert(ExtraFeatures::Backup);
+						engine::local::native::router(address, conn_tx, route_rx);
+						conn_rx.into_recv_async().await??
+					}
+
+					#[cfg(not(feature = "kv-speedb"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
 				"tikv" => {
 					#[cfg(feature = "kv-tikv")]
 					{
@@ -120,7 +136,6 @@ impl Connection for Any {
 				"http" | "https" => {
 					#[cfg(feature = "protocol-http")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						features.insert(ExtraFeatures::Backup);
 						let headers = http::default_headers();
 						#[allow(unused_mut)]
@@ -153,7 +168,6 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						let url = address.endpoint.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						let maybe_connector = address.tls_config.map(Connector::from);

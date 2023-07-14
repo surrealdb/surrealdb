@@ -30,7 +30,11 @@ impl FromStr for Regex {
 	type Err = <regex::Regex as FromStr>::Err;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		regex::Regex::new(&s.replace("\\/", "/")).map(Self)
+		if s.contains('\0') {
+			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
+		} else {
+			regex::Regex::new(&s.replace("\\/", "/")).map(Self)
+		}
 	}
 }
 
@@ -86,24 +90,41 @@ impl<'de> Deserialize<'de> for Regex {
 	where
 		D: Deserializer<'de>,
 	{
-		struct RegexVisitor;
+		struct RegexNewtypeVisitor;
 
-		impl<'de> Visitor<'de> for RegexVisitor {
+		impl<'de> Visitor<'de> for RegexNewtypeVisitor {
 			type Value = Regex;
 
 			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-				formatter.write_str("a regex str")
+				formatter.write_str("a regex newtype")
 			}
 
-			fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+			fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
 			where
-				E: de::Error,
+				D: Deserializer<'de>,
 			{
-				Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
+				struct RegexVisitor;
+
+				impl<'de> Visitor<'de> for RegexVisitor {
+					type Value = Regex;
+
+					fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+						formatter.write_str("a regex str")
+					}
+
+					fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+					where
+						E: de::Error,
+					{
+						Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
+					}
+				}
+
+				deserializer.deserialize_str(RegexVisitor)
 			}
 		}
 
-		deserializer.deserialize_str(RegexVisitor)
+		deserializer.deserialize_newtype_struct(TOKEN, RegexNewtypeVisitor)
 	}
 }
 

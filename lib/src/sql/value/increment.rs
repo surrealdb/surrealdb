@@ -1,12 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::number::Number;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
+	/// Asynchronous method for incrementing a field in a `Value`
 	pub(crate) async fn increment(
 		&mut self,
 		ctx: &Context<'_>,
@@ -15,7 +15,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(ctx, opt, txn, path).await? {
+		match self.get(ctx, opt, txn, None, path).await? {
 			Value::Number(v) => match val {
 				Value::Number(x) => self.set(ctx, opt, txn, path, Value::from(v + x)).await,
 				_ => Ok(()),

@@ -1,10 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::data::Data;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -14,7 +12,7 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check fields
 		if !opt.fields {
@@ -22,29 +20,22 @@ impl<'a> Document<'a> {
 		}
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
+		// Get the user applied input
+		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
-			for (k, mut val) in self.current.walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value
-				let old = self.initial.pick(&k);
+				let old = self.initial.doc.pick(&k);
 				// Get the input value
-				let inp = match stm.data() {
-					Some(Data::MergeExpression(v)) => v.pick(&k),
-					Some(Data::ContentExpression(v)) => v.pick(&k),
-					Some(Data::ReplaceExpression(v)) => v.pick(&k),
-					Some(Data::SetExpression(v)) => match v.iter().find(|f| f.0.eq(&k)) {
-						Some((_, _, v)) => v.to_owned(),
-						_ => Value::None,
-					},
-					_ => Value::None,
-				};
+				let inp = inp.pick(&k);
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
 					if !val.is_none() {
-						val = val.convert_to(kind).map_err(|e| match e {
+						val = val.coerce_to(kind).map_err(|e| match e {
 							// There was a conversion error
-							Error::ConvertTo {
+							Error::CoerceTo {
 								from,
 								..
 							} => Error::FieldCheck {
@@ -62,18 +53,18 @@ impl<'a> Document<'a> {
 				if let Some(expr) = &fd.value {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
-					ctx.add_value("input".into(), &inp);
-					ctx.add_value("value".into(), &val);
-					ctx.add_value("after".into(), &val);
-					ctx.add_value("before".into(), &old);
+					ctx.add_value("input", &inp);
+					ctx.add_value("value", &val);
+					ctx.add_value("after", &val);
+					ctx.add_value("before", &old);
 					// Process the VALUE clause
 					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = val.convert_to(kind).map_err(|e| match e {
+					val = val.coerce_to(kind).map_err(|e| match e {
 						// There was a conversion error
-						Error::ConvertTo {
+						Error::CoerceTo {
 							from,
 							..
 						} => Error::FieldCheck {
@@ -90,10 +81,10 @@ impl<'a> Document<'a> {
 				if let Some(expr) = &fd.assert {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
-					ctx.add_value("input".into(), &inp);
-					ctx.add_value("value".into(), &val);
-					ctx.add_value("after".into(), &val);
-					ctx.add_value("before".into(), &old);
+					ctx.add_value("input", &inp);
+					ctx.add_value("value", &val);
+					ctx.add_value("after", &val);
+					ctx.add_value("before", &old);
 					// Process the ASSERT clause
 					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
@@ -118,13 +109,13 @@ impl<'a> Document<'a> {
 						Permission::None => val = old,
 						Permission::Specific(e) => {
 							// Disable permissions
-							let opt = &opt.perms(false);
+							let opt = &opt.new_with_perms(false);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
-							ctx.add_value("input".into(), &inp);
-							ctx.add_value("value".into(), &val);
-							ctx.add_value("after".into(), &val);
-							ctx.add_value("before".into(), &old);
+							ctx.add_value("input", &inp);
+							ctx.add_value("value", &val);
+							ctx.add_value("after", &val);
+							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
 							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 								val = old
@@ -134,8 +125,8 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					_ => self.current.to_mut().set(ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.doc.to_mut().del(ctx, opt, txn, &k).await?,
+					_ => self.current.doc.to_mut().set(ctx, opt, txn, &k, val).await?,
 				};
 			}
 		}

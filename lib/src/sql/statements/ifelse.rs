@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -20,6 +20,7 @@ pub struct IfelseStatement {
 }
 
 impl IfelseStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		for (cond, then) in self.exprs.iter() {
 			if cond.writeable() || then.writeable() {
@@ -28,13 +29,13 @@ impl IfelseStatement {
 		}
 		self.close.as_ref().map_or(false, |v| v.writeable())
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
 			let v = cond.compute(ctx, opt, txn, doc).await?;

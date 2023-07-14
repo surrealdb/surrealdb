@@ -55,6 +55,9 @@ impl ser::Serializer for Serializer {
 			"SetExpression" => {
 				Ok(Data::SetExpression(value.serialize(IdiomOperatorValueVecSerializer.wrap())?))
 			}
+			"UnsetExpression" => {
+				Ok(Data::UnsetExpression(value.serialize(IdiomVecSerializer.wrap())?))
+			}
 			"PatchExpression" => {
 				Ok(Data::PatchExpression(value.serialize(ser::value::Serializer.wrap())?))
 			}
@@ -80,6 +83,46 @@ impl ser::Serializer for Serializer {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
 		}
+	}
+}
+
+struct IdiomVecSerializer;
+
+impl ser::Serializer for IdiomVecSerializer {
+	type Ok = Vec<Idiom>;
+	type Error = Error;
+
+	type SerializeSeq = SerializeIdiomVec;
+	type SerializeTuple = Impossible<Vec<Idiom>, Error>;
+	type SerializeTupleStruct = Impossible<Vec<Idiom>, Error>;
+	type SerializeTupleVariant = Impossible<Vec<Idiom>, Error>;
+	type SerializeMap = Impossible<Vec<Idiom>, Error>;
+	type SerializeStruct = Impossible<Vec<Idiom>, Error>;
+	type SerializeStructVariant = Impossible<Vec<Idiom>, Error>;
+
+	const EXPECTED: &'static str = "an `Vec<Idiom>`";
+
+	fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Error> {
+		Ok(SerializeIdiomVec(Vec::with_capacity(len.unwrap_or_default())))
+	}
+}
+
+struct SerializeIdiomVec(Vec<Idiom>);
+
+impl serde::ser::SerializeSeq for SerializeIdiomVec {
+	type Ok = Vec<Idiom>;
+	type Error = Error;
+
+	fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+	where
+		T: Serialize + ?Sized,
+	{
+		self.0.push(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?));
+		Ok(())
+	}
+
+	fn end(self) -> Result<Self::Ok, Self::Error> {
+		Ok(self.0)
 	}
 }
 
@@ -348,6 +391,13 @@ mod tests {
 	fn set_expression() {
 		let data =
 			Data::SetExpression(vec![(Default::default(), Default::default(), Default::default())]);
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(data, serialized);
+	}
+
+	#[test]
+	fn unset_expression() {
+		let data = Data::UnsetExpression(vec![Default::default()]);
 		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}

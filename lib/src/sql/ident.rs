@@ -1,6 +1,7 @@
 use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
+use crate::sql::strand::no_nul_bytes;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
 use nom::bytes::complete::is_not;
@@ -18,13 +19,13 @@ use std::str;
 
 const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
-const BRACKET_END: &str = r#"⟩"#;
+const BRACKET_END_NUL: &str = "⟩\0";
 
 const BACKTICK: char = '`';
-const BACKTICK_ESC: &str = r#"\`"#;
+const BACKTICK_ESC_NUL: &str = "`\\\0";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub struct Ident(pub String);
+pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Ident {
 	fn from(v: String) -> Self {
@@ -50,9 +51,21 @@ impl Ident {
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
-	/// Returns a yield if an alias is specified
+	/// Checks if this field is the `id` field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.as_str() == "id"
+	}
+	/// Checks if this field is the `type` field
+	pub(crate) fn is_type(&self) -> bool {
+		self.0.as_str() == "type"
+	}
+	/// Checks if this field is the `coordinates` field
+	pub(crate) fn is_coordinates(&self) -> bool {
+		self.0.as_str() == "coordinates"
+	}
+	/// Checks if this field is the `geometries` field
+	pub(crate) fn is_geometries(&self) -> bool {
+		self.0.as_str() == "geometries"
 	}
 }
 
@@ -90,7 +103,7 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 fn ident_backtick(i: &str) -> IResult<&str, String> {
 	let (i, _) = char(BACKTICK)(i)?;
 	let (i, v) = escaped_transform(
-		is_not(BACKTICK_ESC),
+		is_not(BACKTICK_ESC_NUL),
 		'\\',
 		alt((
 			value('\u{5c}', char('\\')),
@@ -108,7 +121,7 @@ fn ident_backtick(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_brackets(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(char(BRACKET_L), is_not(BRACKET_END), char(BRACKET_R))(i)?;
+	let (i, v) = delimited(char(BRACKET_L), is_not(BRACKET_END_NUL), char(BRACKET_R))(i)?;
 	Ok((i, String::from(v)))
 }
 

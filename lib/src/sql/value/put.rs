@@ -3,6 +3,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
+	/// Synchronous method for setting a field on a `Value`
 	pub fn put(&mut self, path: &[Part], val: Value) {
 		match path.first() {
 			// Get the current path part
@@ -23,6 +24,14 @@ impl Value {
 							let mut obj = Value::base();
 							obj.put(path.next(), val);
 							v.insert(f.to_raw(), obj);
+						}
+					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) if v.is_some() => v.put(path.next(), val),
+						_ => {
+							let mut obj = Value::base();
+							obj.put(path.next(), val);
+							v.insert(i.to_string(), obj);
 						}
 					},
 					_ => (),

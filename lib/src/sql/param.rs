@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -43,19 +43,20 @@ impl Deref for Param {
 }
 
 impl Param {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Find the variable by name
 		match self.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.doc.compute(ctx, opt, txn, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
@@ -65,10 +66,8 @@ impl Param {
 				Some(v) => v.compute(ctx, opt, txn, doc).await,
 				// The param has not been set locally
 				None => {
-					// Clone transaction
-					let run = txn.clone();
 					// Claim transaction
-					let mut run = run.lock().await;
+					let mut run = txn.lock().await;
 					// Get the param definition
 					let val = run.get_pa(opt.ns(), opt.db(), v).await;
 					// Check if the param has been set globally

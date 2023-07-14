@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
@@ -41,10 +41,11 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match (&self.from, &self.with) {
 			(v, w) if v.is_object() && w.is_object() => true,
@@ -54,13 +55,13 @@ impl RelateStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -69,7 +70,7 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();

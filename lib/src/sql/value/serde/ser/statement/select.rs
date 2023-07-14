@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::explain::Explain;
 use crate::sql::statements::SelectStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
@@ -57,6 +58,7 @@ pub struct SerializeSelectStatement {
 	version: Option<Version>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
+	explain: Option<Explain>,
 }
 
 impl serde::ser::SerializeStruct for SerializeSelectStatement {
@@ -104,6 +106,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			"parallel" => {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
+			"explain" => {
+				self.explain = value.serialize(ser::explain::opt::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `SelectStatement::{key}`")));
 			}
@@ -117,6 +122,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 				expr,
 				what,
 				parallel,
+				explain: self.explain,
 				cond: self.cond,
 				split: self.split,
 				group: self.group,
@@ -227,6 +233,16 @@ mod tests {
 	fn with_timeout() {
 		let stmt = SelectStatement {
 			timeout: Some(Default::default()),
+			..Default::default()
+		};
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
+
+	#[test]
+	fn with_explain() {
+		let stmt = SelectStatement {
+			explain: Some(Default::default()),
 			..Default::default()
 		};
 		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
