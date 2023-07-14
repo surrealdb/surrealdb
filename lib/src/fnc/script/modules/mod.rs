@@ -54,8 +54,8 @@ macro_rules! impl_module_def {
 				Ok(())
 			}
 
-			fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
-				let default = js::Object::new(ctx.clone())?;
+			fn evaluate<'js>(ctx: js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+				let default = js::Object::new(ctx)?;
 				$(
 					exports.export($name, crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?))?;
 					default.set($name, crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?))?;

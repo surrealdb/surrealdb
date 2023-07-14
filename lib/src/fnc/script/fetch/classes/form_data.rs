@@ -1,36 +1,34 @@
 //! FormData class implementation
 
 use js::{
-	class::{Class, Trace},
-	function::{Opt, Rest},
-	prelude::Coerced,
-	Ctx, Exception, FromJs, Result, String, Value,
+	bind, function::Opt, prelude::Coerced, Class, Ctx, Exception, FromJs, Persistent, Result,
+	String, Value,
 };
-use reqwest::multipart::{Form, Part};
-use std::{collections::HashMap, string::String as StdString};
+use std::string::String as StdString;
 
-use crate::fnc::script::fetch::classes::Blob;
+use crate::fnc::script::fetch::classes::BlobClass;
 
 #[derive(Clone)]
-pub enum FormDataValue<'js> {
-	String(String<'js>),
+pub enum FormDataValue {
+	String(Persistent<String<'static>>),
 	Blob {
-		data: Class<'js, Blob>,
-		filename: Option<String<'js>>,
+		data: Persistent<Class<'static, BlobClass>>,
+		filename: Option<Persistent<String<'static>>>,
 	},
 }
 
-impl<'js> FormDataValue<'js> {
-	fn from_arguments(
-		ctx: &Ctx<'js>,
+impl FormDataValue {
+	fn from_arguments<'js>(
+		ctx: Ctx<'js>,
 		value: Value<'js>,
 		filename: Opt<Coerced<String<'js>>>,
 		error: &'static str,
-	) -> Result<Self> {
+	) -> Result<FormDataValue> {
 		if let Some(blob) =
-			value.as_object().and_then(|value| Class::<Blob>::from_object(value.clone()))
+			value.as_object().and_then(|value| Class::<BlobClass>::from_object(value.clone()).ok())
 		{
-			let filename = filename.into_inner().map(|x| x.0);
+			let blob = Persistent::save(ctx, blob);
+			let filename = filename.into_inner().map(|x| Persistent::save(ctx, x.0));
 
 			Ok(FormDataValue::Blob {
 				data: blob,
@@ -40,109 +38,128 @@ impl<'js> FormDataValue<'js> {
 			return Err(Exception::throw_type(ctx, error));
 		} else {
 			let value = Coerced::<String>::from_js(ctx, value)?;
-			Ok(FormDataValue::String(value.0))
+			let value = Persistent::save(ctx, value.0);
+			Ok(FormDataValue::String(value))
 		}
 	}
 }
 
-#[js::class]
-#[derive(Clone, Trace)]
-pub struct FormData<'js> {
-	#[qjs(skip_trace)]
-	pub(crate) values: HashMap<StdString, Vec<FormDataValue<'js>>>,
-}
+pub use form_data::FormData as FormDataClass;
+#[bind(object, public)]
+#[quickjs(bare)]
+#[allow(non_snake_case)]
+#[allow(unused_variables)]
+#[allow(clippy::module_inception)]
+pub mod form_data {
+	use super::*;
+	use std::{cell::RefCell, collections::HashMap};
 
-#[js::methods]
-impl<'js> FormData<'js> {
-	// ------------------------------
-	// Constructor
-	// ------------------------------
+	use js::{
+		function::Opt,
+		prelude::{Coerced, Rest},
+		Ctx, Result, String, Value,
+	};
+	use reqwest::multipart::{Form, Part};
 
-	// FormData spec states that FormDa takes two html elements as arguments
-	// which does not make sense implementing fetch outside a browser.
-	// So we ignore those arguments.
-	#[qjs(constructor)]
-	pub fn new(ctx: Ctx<'js>, args: Rest<()>) -> Result<Self> {
-		if args.len() > 0 {
-			return Err(Exception::throw_internal(
-				&ctx,
-				"Cant call FormData with arguments as the dom elements required are not available",
-			));
+	#[derive(Clone)]
+	#[quickjs(cloneable)]
+	pub struct FormData {
+		pub(crate) values: RefCell<HashMap<StdString, Vec<FormDataValue>>>,
+	}
+
+	impl FormData {
+		// ------------------------------
+		// Constructor
+		// ------------------------------
+
+		// FormData spec states that FormDa takes two html elements as arguments
+		// which does not make sense implementing fetch outside a browser.
+		// So we ignore those arguments.
+		#[quickjs(constructor)]
+		pub fn new(ctx: Ctx<'_>, args: Rest<()>) -> Result<FormData> {
+			if args.len() > 0 {
+				return Err(Exception::throw_internal(ctx,"Cant call FormData with arguments as the dom elements required are not available"));
+			}
+			Ok(FormData {
+				values: RefCell::new(HashMap::new()),
+			})
 		}
-		Ok(FormData {
-			values: HashMap::new(),
-		})
-	}
 
-	pub fn append(
-		&mut self,
-		ctx: Ctx<'js>,
-		name: Coerced<StdString>,
-		value: Value<'js>,
-		filename: Opt<Coerced<String<'js>>>,
-	) -> Result<()> {
-		let value = FormDataValue::from_arguments(
-			&ctx,
-			value,
-			filename,
-			"Can't call `append` on `FormData` with a filename when value isn't of type `Blob`",
-		)?;
+		pub fn append<'js>(
+			&self,
+			ctx: Ctx<'js>,
+			name: Coerced<StdString>,
+			value: Value<'js>,
+			filename: Opt<Coerced<String<'js>>>,
+		) -> Result<()> {
+			let value = FormDataValue::from_arguments(
+				ctx,
+				value,
+				filename,
+				"Can't call `append` on `FormData` with a filename when value isn't of type `Blob`",
+			)?;
 
-		self.values.entry(name.0).or_insert_with(Vec::new).push(value);
+			self.values.borrow_mut().entry(name.0).or_insert_with(Vec::new).push(value);
 
-		Ok(())
-	}
+			Ok(())
+		}
 
-	pub fn set(
-		&mut self,
-		ctx: Ctx<'js>,
-		name: Coerced<StdString>,
-		value: Value<'js>,
-		filename: Opt<Coerced<String<'js>>>,
-	) -> Result<()> {
-		let value = FormDataValue::from_arguments(
-			&ctx,
-			value,
-			filename,
-			"Can't call `set` on `FormData` with a filename when value isn't of type `Blob`",
-		)?;
+		pub fn set<'js>(
+			&self,
+			ctx: Ctx<'js>,
+			name: Coerced<StdString>,
+			value: Value<'js>,
+			filename: Opt<Coerced<String<'js>>>,
+		) -> Result<()> {
+			let value = FormDataValue::from_arguments(
+				ctx,
+				value,
+				filename,
+				"Can't call `set` on `FormData` with a filename when value isn't of type `Blob`",
+			)?;
 
-		self.values.insert(name.0, vec![value]);
+			self.values.borrow_mut().insert(name.0, vec![value]);
 
-		Ok(())
-	}
+			Ok(())
+		}
 
-	pub fn has(&self, name: Coerced<StdString>) -> bool {
-		self.values.contains_key(&name.0)
-	}
+		pub fn has(&self, ctx: Ctx<'_>, name: Coerced<StdString>) -> bool {
+			self.values.borrow().contains_key(&name.0)
+		}
 
-	pub fn delete(&mut self, name: Coerced<StdString>) {
-		self.values.remove(&name.0);
-	}
+		pub fn delete(&self, ctx: Ctx<'_>, name: Coerced<StdString>) {
+			self.values.borrow_mut().remove(&name.0);
+		}
 
-	#[qjs(skip)]
-	pub fn to_form(&self) -> Result<Form> {
-		let mut res = Form::new();
-		for (k, v) in self.values.iter() {
-			for v in v {
-				match v {
-					FormDataValue::String(x) => {
-						res = res.text(k.clone(), x.to_string()?);
-					}
-					FormDataValue::Blob {
-						data,
-						filename,
-					} => {
-						let mut part = Part::bytes(data.borrow().data.to_vec());
-						if let Some(filename) = filename {
-							let filename = filename.to_string()?;
-							part = part.file_name(filename);
+		#[quickjs(skip)]
+		pub fn to_form(&self, ctx: Ctx<'_>) -> Result<Form> {
+			let lock = self.values.borrow();
+			let mut res = Form::new();
+			for (k, v) in lock.iter() {
+				for v in v {
+					match v {
+						FormDataValue::String(x) => {
+							let x = x.clone().restore(ctx).unwrap();
+							res = res.text(k.clone(), x.to_string()?);
 						}
-						res = res.part(k.clone(), part);
+						FormDataValue::Blob {
+							data,
+							filename,
+						} => {
+							let mut part = Part::bytes(
+								data.clone().restore(ctx).unwrap().borrow().data.to_vec(),
+							);
+							if let Some(filename) = filename {
+								let filename =
+									filename.clone().restore(ctx).unwrap().to_string()?;
+								part = part.file_name(filename);
+							}
+							res = res.part(k.clone(), part);
+						}
 					}
 				}
 			}
+			Ok(res)
 		}
-		Ok(res)
 	}
 }
