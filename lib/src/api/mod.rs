@@ -151,7 +151,11 @@ where
 			match conn.version().await {
 				Ok(version) => {
 					let server_build = &version.build;
-					if !req.matches(&version) {
+					if version.build.contains("dirty") {
+						// don't generate output warnings for dirty builds
+						// Try to write tests that do output checking for "contains"
+						// instead of exact matches.
+					} else if !req.matches(&version) {
 						warn!("server version `{version}` does not match the range supported by the client `{versions}`");
 					} else if !server_build.is_empty() && server_build < &build_meta {
 						warn!("server build `{server_build}` is older than the minimum supported build `{build_meta}`");
