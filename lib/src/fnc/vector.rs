@@ -32,7 +32,7 @@ pub mod distance {
 	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		match a.euclidean_distance(&b) {
 			None => Err(Error::InvalidArguments {
-				name: String::from("vector::euclidean_distance"),
+				name: String::from("vector::distance::euclidean"),
 				message: String::from("The two vectors must be of the same length."),
 			}),
 			Some(distance) => Ok(distance.into()),
