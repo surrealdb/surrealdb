@@ -4576,47 +4576,17 @@ async fn function_type_thing() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_cosine_similarity() -> Result<(), Error> {
+async fn function_vector_distance_euclidean() -> Result<(), Error> {
 	let sql = r#"
-		RETURN vector::cosine_similarity([1, 2, 3], [1, 2, 3]);
-		RETURN vector::cosine_similarity([1, 2, 3], [-1, -2, -3]);
-		RETURN vector::cosine_similarity([1, 2, 3], [4, 5]);
-		RETURN vector::cosine_similarity([1, 2], [4, 5, 5]);
+		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [4, 5]);
+		RETURN vector::distance::euclidean([1, 2], [4, 5, 5]);
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(1.0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(-1.0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_vector_euclidean_distance() -> Result<(), Error> {
-	let sql = r#"
-		RETURN vector::euclidean_distance([1, 2, 3], [1, 2, 3]);
-		RETURN vector::euclidean_distance([1, 2, 3], [-1, -2, -3]);
-		RETURN vector::euclidean_distance([1, 2, 3], [4, 5]);
-		RETURN vector::euclidean_distance([1, 2], [4, 5, 5]);
-	"#;
-
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -4636,17 +4606,17 @@ async fn function_vector_euclidean_distance() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_dot() -> Result<(), Error> {
+async fn function_vector_dotproduct() -> Result<(), Error> {
 	let sql = r#"
-		RETURN vector::dot([1, 2, 3], [1, 2, 3]);
-		RETURN vector::dot([1, 2, 3], [-1, -2, -3]);
-		RETURN vector::dot([1, 2, 3], [4, 5]);
-		RETURN vector::dot([1, 2], [4, 5, 5]);
+		RETURN vector::dotproduct([1, 2, 3], [1, 2, 3]);
+		RETURN vector::dotproduct([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::dotproduct([1, 2, 3], [4, 5]);
+		RETURN vector::dotproduct([1, 2], [4, 5, 5]);
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -4676,7 +4646,7 @@ async fn function_vector_magnitude() -> Result<(), Error> {
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -4694,5 +4664,35 @@ async fn function_vector_magnitude() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::from(8.54400374531753);
 	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_cosine() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
+		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
 	Ok(())
 }

@@ -248,28 +248,27 @@ fn script(i: &str) -> IResult<&str, Function> {
 
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
-		preceded(tag("array::"), function_array),
-		preceded(tag("bytes::"), function_bytes),
-		preceded(tag("crypto::"), function_crypto),
-		preceded(tag("duration::"), function_duration),
-		preceded(tag("encoding::"), function_encoding),
-		preceded(tag("geo::"), function_geo),
-		preceded(tag("http::"), function_http),
-		preceded(tag("is::"), function_is),
-		preceded(tag("math::"), function_math),
-		preceded(tag("meta::"), function_meta),
-		preceded(tag("parse::"), function_parse),
-		preceded(tag("rand::"), function_rand),
-		preceded(tag("search::"), function_search),
-		preceded(tag("session::"), function_session),
-		preceded(tag("string::"), function_string),
-		preceded(tag("time::"), function_time),
-		preceded(tag("type::"), function_type),
-		preceded(tag("vector::"), function_vector),
-		tag("count"),
-		tag("not"),
-		tag("rand"),
-		tag("sleep"),
+		alt((
+			preceded(tag("array::"), function_array),
+			preceded(tag("bytes::"), function_bytes),
+			preceded(tag("crypto::"), function_crypto),
+			preceded(tag("duration::"), function_duration),
+			preceded(tag("encoding::"), function_encoding),
+			preceded(tag("geo::"), function_geo),
+			preceded(tag("http::"), function_http),
+			preceded(tag("is::"), function_is),
+			preceded(tag("math::"), function_math),
+			preceded(tag("meta::"), function_meta),
+			preceded(tag("parse::"), function_parse),
+			preceded(tag("rand::"), function_rand),
+			preceded(tag("search::"), function_search),
+			preceded(tag("session::"), function_session),
+			preceded(tag("string::"), function_string),
+			preceded(tag("time::"), function_time),
+			preceded(tag("type::"), function_type),
+			preceded(tag("vector::"), function_vector),
+		)),
+		alt((tag("count"), tag("not"), tag("rand"), tag("sleep"))),
 	)))(i)
 }
 
@@ -553,7 +552,25 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 }
 
 fn function_vector(i: &str) -> IResult<&str, &str> {
-	alt((tag("cosine_similarity"), tag("dot"), tag("euclidean_distance"), tag("magnitude")))(i)
+	alt((
+		tag("dotproduct"),
+		tag("magnitude"),
+		preceded(
+			tag("distance::"),
+			alt((
+				tag("chebyshev"),
+				tag("euclidean"),
+				tag("hamming"),
+				tag("mahalanobis"),
+				tag("manhattan"),
+				tag("minkowski"),
+			)),
+		),
+		preceded(
+			tag("similarity::"),
+			alt((tag("cosine"), tag("jaccard"), tag("pearson"), tag("spearman"))),
+		),
+	))(i)
 }
 
 #[cfg(test)]
