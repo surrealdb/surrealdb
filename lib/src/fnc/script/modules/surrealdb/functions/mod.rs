@@ -22,6 +22,7 @@ mod session;
 mod string;
 mod time;
 mod r#type;
+mod vector;
 
 pub struct Package;
 
@@ -48,7 +49,8 @@ impl_module_def!(
 	"sleep" => fut Async,
 	"string" => (string::Package),
 	"time" => (time::Package),
-	"type" => (r#type::Package)
+	"type" => (r#type::Package),
+	"vector" => (vector::Package)
 );
 
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
