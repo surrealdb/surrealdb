@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
@@ -41,8 +42,6 @@ use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
 use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -50,7 +49,6 @@ use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
-use once_cell::sync::Lazy;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -61,8 +59,6 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::Neg;
 use std::str::FromStr;
-
-static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -2322,11 +2318,11 @@ impl Value {
 	pub fn fuzzy(&self, other: &Value) -> bool {
 		match self {
 			Value::Uuid(v) => match other {
-				Value::Strand(w) => MATCHER.fuzzy_match(v.to_raw().as_str(), w.as_str()).is_some(),
+				Value::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
 			Value::Strand(v) => match other {
-				Value::Strand(w) => MATCHER.fuzzy_match(v.as_str(), w.as_str()).is_some(),
+				Value::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
 			_ => self.equal(other),
@@ -2937,7 +2933,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

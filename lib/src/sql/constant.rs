@@ -77,7 +77,6 @@ impl Constant {
 			Self::TimeEpoch => ConstantValue::Datetime(Datetime(Utc.timestamp_nanos(0))),
 		}
 	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
