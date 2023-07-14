@@ -14,7 +14,7 @@ impl Explanation {
 				for i in iterables {
 					exp.add_iter(i);
 				}
-				(e.0, Some(Self::default()))
+				(e.0, Some(exp))
 			}
 		}
 	}
@@ -42,7 +42,7 @@ struct ExplainItem {
 impl ExplainItem {
 	fn new_fetch(count: usize) -> Self {
 		Self {
-			name: "fetch".into(),
+			name: "Fetch".into(),
 			details: vec![("count", count.into())],
 		}
 	}
