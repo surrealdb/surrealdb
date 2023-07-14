@@ -72,11 +72,12 @@ async fn select_expression_value() -> Result<(), Error> {
 		CREATE thing:b SET number = -5, boolean = false;
 		SELECT VALUE -number FROM thing;
 		SELECT VALUE !boolean FROM thing;
+		SELECT VALUE !boolean FROM thing EXPLAIN FULL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -116,6 +117,25 @@ async fn select_expression_value() -> Result<(), Error> {
 		"[
 			false,
 			true
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'thing',
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						count: 2,
+					},
+					operation: 'Fetch'
+				}
 		]",
 	);
 	assert_eq!(tmp, val);
@@ -267,11 +287,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 		CREATE post:1 SET author = person:tobie;
 		CREATE post:2 SET author = person:tobie;
 		SELECT * FROM post WHERE author = person:tobie EXPLAIN;
+		SELECT * FROM post WHERE author = person:tobie EXPLAIN FULL;
 		SELECT * FROM post WHERE author = person:tobie;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
@@ -291,6 +312,30 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 						table: 'post',
 					},
 					operation: 'Iterate Index'
+				}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						plan: {
+							index: 'author',
+							operator: '=',
+							value: person:tobie
+						},
+						table: 'post',
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						count: 2,
+					},
+					operation: 'Fetch'
 				}
 		]",
 	);
@@ -453,5 +498,69 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_explain() -> Result<(), Error> {
+	let sql = "
+		CREATE person:tobie SET name = 'Tobie';
+		CREATE person:jaime SET name = 'Jaime';
+		CREATE software:surreal SET name = 'SurrealDB';
+		SELECT * FROM person,software EXPLAIN;
+		SELECT * FROM person,software EXPLAIN FULL;";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'person',
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						table: 'software',
+					},
+					operation: 'Iterate Table'
+				}
+			]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'person',
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						table: 'software',
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						count: 3,
+					},
+					operation: 'Fetch'
+				},
+			]",
+	);
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
