@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::permission::Permission;
@@ -36,7 +35,7 @@ impl<'a> Document<'a> {
 					Permission::Full => return Ok(()),
 					Permission::Specific(e) => {
 						// Disable permissions
-						let opt = &opt.perms(false);
+						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
 						if !e.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 							return Err(Error::Ignore);

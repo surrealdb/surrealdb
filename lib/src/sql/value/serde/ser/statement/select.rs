@@ -57,6 +57,7 @@ pub struct SerializeSelectStatement {
 	version: Option<Version>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
+	explain: Option<bool>,
 }
 
 impl serde::ser::SerializeStruct for SerializeSelectStatement {
@@ -104,6 +105,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			"parallel" => {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
+			"explain" => {
+				self.explain = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `SelectStatement::{key}`")));
 			}
@@ -112,11 +116,12 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.expr, self.what, self.parallel) {
-			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
+		match (self.expr, self.what, self.parallel, self.explain) {
+			(Some(expr), Some(what), Some(parallel), Some(explain)) => Ok(SelectStatement {
 				expr,
 				what,
 				parallel,
+				explain,
 				cond: self.cond,
 				split: self.split,
 				group: self.group,

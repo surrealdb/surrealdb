@@ -5,7 +5,6 @@ use warp::http::StatusCode;
 #[derive(Serialize)]
 struct Message {
 	code: u16,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	details: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	description: Option<String>,

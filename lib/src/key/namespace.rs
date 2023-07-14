@@ -15,8 +15,8 @@ pub fn new(ns: &str) -> Namespace<'_> {
 impl<'a> Namespace<'a> {
 	pub fn new(ns: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
 		}
 	}
@@ -29,9 +29,11 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Namespace::new(
-			"test",
+			"testns",
 		);
 		let enc = Namespace::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0");
+
 		let dec = Namespace::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

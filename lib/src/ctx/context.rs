@@ -1,6 +1,9 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::Notification;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -28,7 +31,11 @@ pub struct Context<'a> {
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: HashMap<String, Cow<'a, Value>>,
+	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
+	// Stores the notification channel if available
+	notifications: Option<Sender<Notification>>,
+	// An optional query executor
+	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -56,6 +63,8 @@ impl<'a> Context<'a> {
 			parent: None,
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
+			query_executors: None,
 		}
 	}
 
@@ -66,7 +75,19 @@ impl<'a> Context<'a> {
 			parent: Some(parent),
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: parent.notifications.clone(),
+			query_executors: parent.query_executors.clone(),
 		}
+	}
+
+	/// Add a value to the context. It overwrites any previously set values
+	/// with the same key.
+	pub fn add_value<K, V>(&mut self, key: K, value: V)
+	where
+		K: Into<Cow<'static, str>>,
+		V: Into<Cow<'a, Value>>,
+	{
+		self.values.insert(key.into(), value.into());
 	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
@@ -91,19 +112,33 @@ impl<'a> Context<'a> {
 		self.add_deadline(Instant::now() + timeout)
 	}
 
-	/// Add a value to the context. It overwrites any previously set values
-	/// with the same key.
-	pub fn add_value<V>(&mut self, key: String, value: V)
-	where
-		V: Into<Cow<'a, Value>>,
-	{
-		self.values.insert(key, value.into());
+	/// Add the LIVE query notification channel to the context, so that we
+	/// can send notifications to any subscribers.
+	pub fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+		self.notifications = chn.cloned()
+	}
+
+	/// Set the query executors
+	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
+		self.query_executors = Some(Arc::new(executors));
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
+	}
+
+	pub fn notifications(&self) -> Option<Sender<Notification>> {
+		self.notifications.clone()
+	}
+
+	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
+		if let Some(qe) = &self.query_executors {
+			qe.get(tb)
+		} else {
+			None
+		}
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

@@ -1,7 +1,7 @@
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
@@ -24,6 +24,7 @@ use ulid::Ulid;
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Id {
 	Number(i64),
+	/// Invariant: Doesn't contain NUL bytes.
 	String(String),
 	Array(Array),
 	Object(Object),
@@ -165,12 +166,13 @@ impl Display for Id {
 }
 
 impl Id {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Id, Error> {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),

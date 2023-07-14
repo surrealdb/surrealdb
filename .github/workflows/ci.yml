@@ -2,11 +2,8 @@ name: Continuous integration
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+  merge_group:
 
 defaults:
   run:
@@ -27,12 +24,18 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check format of code
+        run: cargo fmt --all --check
+
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
 
   check:
     name: Check workspace
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -40,6 +43,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
@@ -62,12 +68,15 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo check
-        run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb --target wasm32-unknown-unknown
+        run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http --target wasm32-unknown-unknown
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -78,17 +87,42 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo clippy
-        run: cargo clippy --no-deps -- -W warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  cli:
+    name: Test command line
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: cargo test --locked --no-default-features --features storage-mem --workspace --test cli
 
   test:
     name: Test workspace
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -97,17 +131,30 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem --workspace -- --skip api_integration
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run cargo test (+coverage)
+        run: cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+            name: code-coverage-report
+            path: target/llvm-cov/html/
+            retention-days: 5
 
   ws-engine:
     name: WebSocket engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -116,20 +163,28 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
     name: HTTP engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -138,15 +193,23 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -160,12 +223,17 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-mem --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
 
   file-engine:
     name: File engine
-    runs-on: ubuntu-20.04-16-cores
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -173,13 +241,18 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test
-        run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
 
-  any-engine:
-    name: Any engine
-    runs-on: ubuntu-20.04-16-cores
+  rocksdb-engine:
+    name: RocksDB engine
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Install stable toolchain
@@ -187,14 +260,115 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo test
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::rocksdb
+
+  speedb-engine:
+    name: SpeeDB engine
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo test
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
+
+  tikv-engine:
+     name: TiKV engine
+     runs-on: ubuntu-20.04
+     steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
+      - name: Install TiKV
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          ~/.tiup/bin/tiup install tikv pd
+          ~/.tiup/bin/tiup -v
+
       - name: Run cargo test
         run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          (&>/dev/null ~/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &)
+          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --test api api_integration::tikv
+
+  fdb-engine:
+    name: FoundationDB engine
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
+      - name: Run cargo test
+        run: |
+          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --lib kvs
+          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --test api api_integration::fdb
+
+  any-engine:
+    name: Any engine
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
+      - name: Run cargo test
+        run: |
+          cargo build --locked --no-default-features --features storage-fdb
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any

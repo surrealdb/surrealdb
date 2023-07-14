@@ -1,6 +1,6 @@
 use base64::DecodeError as Base64Error;
-use jsonwebtoken::errors::Error as JWTError;
 use reqwest::Error as ReqwestError;
+use serde::Serialize;
 use serde_cbor::error::Error as CborError;
 use serde_json::error::Error as JsonError;
 use serde_pack::encode::Error as PackError;
@@ -28,6 +28,9 @@ pub enum Error {
 
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
+
+	#[error("The operation is unsupported")]
+	OperationUnsupported,
 
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
@@ -68,14 +71,17 @@ impl From<Utf8Error> for Error {
 	}
 }
 
-impl From<JWTError> for Error {
-	fn from(_: JWTError) -> Error {
-		Error::InvalidAuth
-	}
-}
-
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
 		Error::Db(error.into())
+	}
+}
+
+impl Serialize for Error {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_str(self.to_string().as_str())
 	}
 }

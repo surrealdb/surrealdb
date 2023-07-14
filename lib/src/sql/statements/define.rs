@@ -1,28 +1,32 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::block::{block, Block};
+use crate::sql::changefeed::{changefeed, ChangeFeed};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
+use crate::sql::filter::{filters, Filter};
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
-use crate::sql::ident;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
+use crate::sql::index::Index;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
-use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::strand::strand_raw;
+use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
+use crate::sql::{ident, index};
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::Argon2;
 use derive::Store;
@@ -41,11 +45,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
+	Analyzer(DefineAnalyzerStatement),
 	Login(DefineLoginStatement),
 	Token(DefineTokenStatement),
 	Scope(DefineScopeStatement),
@@ -57,12 +61,13 @@ pub enum DefineStatement {
 }
 
 impl DefineStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -76,11 +81,12 @@ impl DefineStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
 
-impl fmt::Display for DefineStatement {
+impl Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
@@ -94,6 +100,7 @@ impl fmt::Display for DefineStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
+			Self::Analyzer(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -111,6 +118,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(event, DefineStatement::Event),
 		map(field, DefineStatement::Field),
 		map(index, DefineStatement::Index),
+		map(analyzer, DefineStatement::Analyzer),
 	))(i)
 }
 
@@ -119,18 +127,18 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
 
 impl DefineNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// No need for NS/DB
 		opt.needs(Level::Kv)?;
@@ -138,7 +146,9 @@ impl DefineNamespaceStatement {
 		opt.check(Level::Kv)?;
 		// Process the statement
 		let key = crate::key::ns::new(&self.name);
-		txn.clone().lock().await.set(key, self).await?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -169,27 +179,26 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
+	pub changefeed: Option<ChangeFeed>,
 }
 
 impl DefineDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected NS?
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::db::new(opt.ns(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -199,9 +208,13 @@ impl DefineDatabaseStatement {
 	}
 }
 
-impl fmt::Display for DefineDatabaseStatement {
+impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE {}", self.name)
+		write!(f, "DEFINE DATABASE {}", self.name)?;
+		if let Some(ref cf) = self.changefeed {
+			write!(f, " CHANGEFEED {}", crate::sql::duration::Duration(cf.expiry))?;
+		}
+		Ok(())
 	}
 }
 
@@ -211,12 +224,34 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = ident(i)?;
+	let (i, opts) = many0(database_opts)(i)?;
 	Ok((
 		i,
 		DefineDatabaseStatement {
 			name,
+			changefeed: opts
+				.iter()
+				.map(|x| match x {
+					DefineDatabaseOption::ChangeFeed(ref v) => v.to_owned(),
+				})
+				.next(),
 		},
 	))
+}
+
+fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = changefeed(i)?;
+	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum DefineDatabaseOption {
+	ChangeFeed(ChangeFeed),
+}
+
+fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
+	database_changefeed(i)
 }
 
 // --------------------------------------------------
@@ -224,7 +259,6 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
@@ -232,21 +266,20 @@ pub struct DefineFunctionStatement {
 }
 
 impl DefineFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -309,7 +342,78 @@ fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
+pub struct DefineAnalyzerStatement {
+	pub name: Ident,
+	pub tokenizers: Option<Vec<Tokenizer>>,
+	pub filters: Option<Vec<Filter>>,
+}
+
+impl DefineAnalyzerStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Process the statement
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Release the transaction
+		drop(run); // Do we really need this?
+		   // Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for DefineAnalyzerStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE ANALYZER {}", self.name)?;
+		if let Some(tokenizers) = &self.tokenizers {
+			let tokens: Vec<String> = tokenizers.iter().map(|f| f.to_string()).collect();
+			write!(f, " TOKENIZERS {}", tokens.join(","))?;
+		}
+		if let Some(filters) = &self.filters {
+			let tokens: Vec<String> = filters.iter().map(|f| f.to_string()).collect();
+			write!(f, " FILTERS {}", tokens.join(","))?;
+		}
+		Ok(())
+	}
+}
+
+pub(crate) fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, tokenizers) = opt(tokenizers)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, filters) = opt(filters)(i)?;
+	Ok((
+		i,
+		DefineAnalyzerStatement {
+			name,
+			tokenizers,
+			filters,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -318,12 +422,13 @@ pub struct DefineLoginStatement {
 }
 
 impl DefineLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
@@ -331,10 +436,8 @@ impl DefineLoginStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the statement
 				let key = crate::key::nl::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
@@ -347,10 +450,8 @@ impl DefineLoginStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the statement
 				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
@@ -364,9 +465,9 @@ impl DefineLoginStatement {
 	}
 }
 
-impl fmt::Display for DefineLoginStatement {
+impl Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, quote_str(&self.hash))
 	}
 }
 
@@ -433,7 +534,6 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -442,12 +542,13 @@ pub struct DefineTokenStatement {
 }
 
 impl DefineTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match &self.base {
 			Base::Ns => {
@@ -455,10 +556,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the statement
 				let key = crate::key::nt::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
@@ -471,10 +570,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the statement
 				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
@@ -488,10 +585,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the statement
 				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
@@ -506,7 +601,7 @@ impl DefineTokenStatement {
 	}
 }
 
-impl fmt::Display for DefineTokenStatement {
+impl Display for DefineTokenStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -514,7 +609,7 @@ impl fmt::Display for DefineTokenStatement {
 			self.name,
 			self.base,
 			self.kind,
-			escape_str(&self.code)
+			quote_str(&self.code)
 		)
 	}
 }
@@ -553,7 +648,6 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -563,21 +657,20 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -588,7 +681,7 @@ impl DefineScopeStatement {
 	}
 }
 
-impl fmt::Display for DefineScopeStatement {
+impl Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SCOPE {}", self.name)?;
 		if let Some(ref v) = self.session {
@@ -676,28 +769,26 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
 }
 
 impl DefineParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -708,7 +799,7 @@ impl DefineParamStatement {
 	}
 }
 
-impl fmt::Display for DefineParamStatement {
+impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM ${} VALUE {}", self.name, self.value)
 	}
@@ -739,13 +830,13 @@ fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
+	pub changefeed: Option<ChangeFeed>,
 }
 
 impl DefineTableStatement {
@@ -754,16 +845,14 @@ impl DefineTableStatement {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -786,13 +875,13 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.force(true);
+			let opt = &opt.new_with_force(true);
 			// Don't process field queries
-			let opt = &opt.fields(false);
+			let opt = &opt.new_with_fields(false);
 			// Don't process event queries
-			let opt = &opt.events(false);
+			let opt = &opt.new_with_events(false);
 			// Don't process index queries
-			let opt = &opt.indexes(false);
+			let opt = &opt.new_with_indexes(false);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
@@ -808,7 +897,7 @@ impl DefineTableStatement {
 	}
 }
 
-impl fmt::Display for DefineTableStatement {
+impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
@@ -830,6 +919,9 @@ impl fmt::Display for DefineTableStatement {
 				None
 			};
 			write!(f, "{}", self.permissions)?;
+		}
+		if let Some(ref cf) = self.changefeed {
+			write!(f, " CHANGEFEED {}", crate::sql::duration::Duration(cf.expiry))?;
 		}
 		Ok(())
 	}
@@ -872,6 +964,10 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					_ => None,
 				})
 				.unwrap_or_default(),
+			changefeed: opts.iter().find_map(|x| match x {
+				DefineTableOption::ChangeFeed(ref v) => Some(v.to_owned()),
+				_ => None,
+			}),
 		},
 	))
 }
@@ -883,16 +979,30 @@ pub enum DefineTableOption {
 	Schemaless,
 	Schemafull,
 	Permissions(Permissions),
+	ChangeFeed(ChangeFeed),
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((table_drop, table_view, table_schemaless, table_schemafull, table_permissions))(i)
+	alt((
+		table_drop,
+		table_view,
+		table_schemaless,
+		table_schemafull,
+		table_permissions,
+		table_changefeed,
+	))(i)
 }
 
 fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("DROP")(i)?;
 	Ok((i, DefineTableOption::Drop))
+}
+
+fn table_changefeed(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = changefeed(i)?;
+	Ok((i, DefineTableOption::ChangeFeed(v)))
 }
 
 fn table_view(i: &str) -> IResult<&str, DefineTableOption> {
@@ -924,7 +1034,6 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -933,21 +1042,20 @@ pub struct DefineEventStatement {
 }
 
 impl DefineEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -962,7 +1070,7 @@ impl DefineEventStatement {
 	}
 }
 
-impl fmt::Display for DefineEventStatement {
+impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -1007,7 +1115,6 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -1019,21 +1126,20 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&Value>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let fd = self.name.to_string();
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
@@ -1049,7 +1155,7 @@ impl DefineFieldStatement {
 	}
 }
 
-impl fmt::Display for DefineFieldStatement {
+impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
 		if self.flex {
@@ -1172,30 +1278,28 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub cols: Idioms,
-	pub uniq: bool,
+	pub index: Index,
 }
 
 impl DefineIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -1206,19 +1310,17 @@ impl DefineIndexStatement {
 		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Remove the index data
-		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
-		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
-		run.delr(beg..end, u32::MAX).await?;
+		RemoveIndexStatement::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Release the transaction
 		drop(run);
 		// Force queries to run
-		let opt = &opt.force(true);
+		let opt = &opt.new_with_force(true);
 		// Don't process field queries
-		let opt = &opt.fields(false);
+		let opt = &opt.new_with_fields(false);
 		// Don't process event queries
-		let opt = &opt.events(false);
+		let opt = &opt.new_with_events(false);
 		// Don't process table queries
-		let opt = &opt.tables(false);
+		let opt = &opt.new_with_tables(false);
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
@@ -1233,8 +1335,8 @@ impl DefineIndexStatement {
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
-		if self.uniq {
-			write!(f, " UNIQUE")?
+		if Index::Idx != self.index {
+			write!(f, " {}", self.index)?;
 		}
 		Ok(())
 	}
@@ -1255,28 +1357,137 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = alt((tag_no_case("COLUMNS"), tag_no_case("FIELDS")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cols) = idiom::locals(i)?;
-	let (i, uniq) = opt(tuple((shouldbespace, tag_no_case("UNIQUE"))))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, index) = index::index(i)?;
 	Ok((
 		i,
 		DefineIndexStatement {
 			name,
 			what,
 			cols,
-			uniq: uniq.is_some(),
+			index,
 		},
 	))
 }
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
+	use crate::sql::scoring::Scoring;
+	use crate::sql::Part;
 
 	#[test]
 	fn check_define_serialize() {
 		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
 			name: Ident::from("test"),
 		});
-		assert_eq!(22, stm.to_vec().len());
+		assert_eq!(6, stm.to_vec().len());
+	}
+
+	#[test]
+	fn check_create_non_unique_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Idx,
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
+	}
+
+	#[test]
+	fn check_create_unique_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Uniq,
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
+	}
+
+	#[test]
+	fn check_create_search_index_with_highlights() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Search {
+					az: Ident("my_analyzer".to_string()),
+					hl: true,
+					sc: Scoring::Bm {
+						k1: 1.2,
+						b: 0.75,
+					},
+					order: 1000
+				},
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
+	}
+
+	#[test]
+	fn check_create_search_index() {
+		let sql =
+			"DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Search {
+					az: Ident("my_analyzer".to_string()),
+					hl: false,
+					sc: Scoring::Vs,
+					order: 100
+				},
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
+		);
+	}
+
+	#[test]
+	fn define_database_with_changefeed() {
+		let sql = "DEFINE DATABASE mydatabase CHANGEFEED 1h";
+		let res = database(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+
+		let serialized = out.to_vec();
+		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserializled);
+	}
+
+	#[test]
+	fn define_table_with_changefeed() {
+		let sql = "DEFINE TABLE mytable SCHEMALESS CHANGEFEED 1h";
+		let res = table(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+
+		let serialized = out.to_vec();
+		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserializled);
 	}
 }

@@ -27,10 +27,20 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo test
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run cargo test (+coverage)
         run: |
           (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
-          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
+          cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 5
 
   lint:
     name: Lint
@@ -54,11 +64,14 @@ jobs:
       - name: Run cargo check
         run: cargo check --workspace
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+      - name: Check format of code
+        run: cargo fmt --all --check
 
-      - name: Run cargo clippy
-        run: cargo clippy -- -W warnings
+      - name: Check format of unlinked tests
+        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+
+      - name: Check linting with clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run WebAssembly check
         run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
@@ -71,11 +84,11 @@ jobs:
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-12
+            os: macos-latest-xl
             file: surreal-nightly.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-12
+            os: macos-latest-xl
             file: surreal-nightly.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
@@ -87,7 +100,7 @@ jobs:
             file: surreal-nightly.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
-            os: windows-latest-16-cores
+            os: windows-latest
             file: surreal-nightly.windows-amd64
             opts:
     runs-on: ${{ matrix.os }}
@@ -183,7 +196,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-12
+    runs-on: macos-latest-xl
     steps:
 
       - name: Download amd64 binary

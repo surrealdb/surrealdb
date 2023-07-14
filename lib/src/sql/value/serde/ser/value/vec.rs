@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 	}
 }
 
+#[derive(Default)]
 pub struct SerializeValueVec(pub Vec<Value>);
 
 impl serde::ser::SerializeSeq for SerializeValueVec {

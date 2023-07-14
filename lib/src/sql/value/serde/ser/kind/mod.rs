@@ -260,7 +260,7 @@ mod tests {
 
 	#[test]
 	fn option() {
-		let kind = Kind::Option(Box::new(Default::default()));
+		let kind = Kind::Option(Box::default());
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
@@ -278,22 +278,22 @@ mod tests {
 
 	#[test]
 	fn set() {
-		let kind = Kind::Set(Box::new(Default::default()), None);
+		let kind = Kind::Set(Box::default(), None);
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
-		let kind = Kind::Set(Box::new(Default::default()), Some(Default::default()));
+		let kind = Kind::Set(Box::default(), Some(Default::default()));
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn array() {
-		let kind = Kind::Array(Box::new(Default::default()), None);
+		let kind = Kind::Array(Box::default(), None);
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
-		let kind = Kind::Array(Box::new(Default::default()), Some(Default::default()));
+		let kind = Kind::Array(Box::default(), Some(Default::default()));
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}

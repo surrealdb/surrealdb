@@ -1,10 +1,10 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
-use crate::sql::common::colons;
+use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::create::{create, CreateStatement};
@@ -18,10 +18,9 @@ use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::many0;
-use nom::multi::separated_list1;
+use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -48,16 +47,17 @@ impl From<Value> for Block {
 }
 
 impl Block {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		self.iter().any(Entry::writeable)
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Duplicate context
 		let mut ctx = Context::new(ctx);
@@ -117,6 +117,7 @@ impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
+			(0, _) => f.write_str("{}"),
 			(1, Some(Entry::Value(v))) => {
 				write!(f, "{{ {v} }}")
 			}
@@ -158,12 +159,10 @@ impl Display for Block {
 }
 
 pub fn block(i: &str) -> IResult<&str, Block> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list1(colons, entry)(i)?;
+	let (i, _) = openbraces(i)?;
+	let (i, v) = separated_list0(colons, entry)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
 }
 
@@ -189,6 +188,7 @@ impl PartialOrd for Entry {
 }
 
 impl Entry {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Set(v) => v.writeable(),
@@ -245,6 +245,15 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn block_empty() {
+		let sql = "{}";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
 
 	#[test]
 	fn block_value() {

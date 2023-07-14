@@ -8,8 +8,10 @@ use crate::api::engine::local::Db;
 use crate::api::opt::Endpoint;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Level;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
@@ -46,9 +48,7 @@ impl Connection for Db {
 
 			router(address, conn_tx, route_rx);
 
-			if let Err(error) = conn_rx.into_recv_async().await? {
-				return Err(error);
-			}
+			conn_rx.into_recv_async().await??;
 
 			Ok(Surreal {
 				router: OnceCell::with_value(Arc::new(Router {
@@ -102,12 +102,28 @@ pub(crate) fn router(
 			}
 		};
 
-		let mut session = Session::for_kv();
+		let kvs = kvs.with_strict_mode(address.strict);
+
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
+		let configured_root = match address.auth {
+			Level::Kv => Some(Root {
+				username: &address.username,
+				password: &address.password,
+			}),
+			_ => None,
+		};
+		let mut session = if configured_root.is_some() {
+			// If a root user is specified, lock down the database
+			Session::default()
+		} else {
+			// If no root user is specified, the database should be open
+			Session::for_kv()
+		};
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &mut session, &mut vars, address.strict).await
+			match super::router(route.request, &kvs, &configured_root, &mut session, &mut vars)
+				.await
 			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;

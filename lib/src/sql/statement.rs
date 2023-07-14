@@ -1,12 +1,13 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::fmt::Pretty;
+use crate::sql::statements::analyze::{analyze, AnalyzeStatement};
 use crate::sql::statements::begin::{begin, BeginStatement};
 use crate::sql::statements::cancel::{cancel, CancelStatement};
 use crate::sql::statements::commit::{commit, CommitStatement};
@@ -24,6 +25,7 @@ use crate::sql::statements::relate::{relate, RelateStatement};
 use crate::sql::statements::remove::{remove, RemoveStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::set::{set, SetStatement};
+use crate::sql::statements::show::{show, ShowStatement};
 use crate::sql::statements::sleep::{sleep, SleepStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::statements::yuse::{yuse, UseStatement};
@@ -74,6 +76,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum Statement {
+	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
 	Cancel(CancelStatement),
 	Commit(CommitStatement),
@@ -91,12 +94,14 @@ pub enum Statement {
 	Remove(RemoveStatement),
 	Select(SelectStatement),
 	Set(SetStatement),
+	Show(ShowStatement),
 	Sleep(SleepStatement),
 	Update(UpdateStatement),
 	Use(UseStatement),
 }
 
 impl Statement {
+	/// Get the statement timeout duration, if any
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {
 			Self::Create(v) => v.timeout.as_ref().map(|v| *v.0),
@@ -108,9 +113,10 @@ impl Statement {
 			_ => None,
 		}
 	}
-
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Self::Analyze(_) => false,
 			Self::Create(v) => v.writeable(),
 			Self::Define(_) => true,
 			Self::Delete(v) => v.writeable(),
@@ -125,21 +131,23 @@ impl Statement {
 			Self::Remove(_) => true,
 			Self::Select(v) => v.writeable(),
 			Self::Set(v) => v.writeable(),
+			Self::Show(_) => false,
 			Self::Sleep(_) => false,
 			Self::Update(v) => v.writeable(),
 			Self::Use(_) => false,
 			_ => unreachable!(),
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Analyze(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Create(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Delete(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
@@ -153,7 +161,8 @@ impl Statement {
 			Self::Remove(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Set(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Show(v) => v.compute(ctx, opt, doc).await,
+			Self::Sleep(v) => v.compute(ctx, opt, doc).await,
 			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => unreachable!(),
 		}
@@ -163,6 +172,7 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
+			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Cancel(v) => write!(Pretty::from(f), "{v}"),
 			Self::Commit(v) => write!(Pretty::from(f), "{v}"),
@@ -180,6 +190,7 @@ impl Display for Statement {
 			Self::Remove(v) => write!(Pretty::from(f), "{v}"),
 			Self::Select(v) => write!(Pretty::from(f), "{v}"),
 			Self::Set(v) => write!(Pretty::from(f), "{v}"),
+			Self::Show(v) => write!(Pretty::from(f), "{v}"),
 			Self::Sleep(v) => write!(Pretty::from(f), "{v}"),
 			Self::Update(v) => write!(Pretty::from(f), "{v}"),
 			Self::Use(v) => write!(Pretty::from(f), "{v}"),
@@ -191,6 +202,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 	delimited(
 		mightbespace,
 		alt((
+			map(analyze, Statement::Analyze),
 			map(begin, Statement::Begin),
 			map(cancel, Statement::Cancel),
 			map(commit, Statement::Commit),
@@ -208,9 +220,9 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			map(remove, Statement::Remove),
 			map(select, Statement::Select),
 			map(set, Statement::Set),
+			map(show, Statement::Show),
 			map(sleep, Statement::Sleep),
-			map(update, Statement::Update),
-			map(yuse, Statement::Use),
+			alt((map(update, Statement::Update), map(yuse, Statement::Use))),
 		)),
 		mightbespace,
 	)(i)
@@ -246,5 +258,23 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
+	}
+
+	#[test]
+	fn show_table_changes() {
+		let sql = "SHOW CHANGES FOR TABLE test SINCE 123456";
+		let res = statement(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("SHOW CHANGES FOR TABLE test SINCE 123456", format!("{}", out))
+	}
+
+	#[test]
+	fn show_database_changes() {
+		let sql = "SHOW CHANGES FOR DATABASE SINCE 123456";
+		let res = statement(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("SHOW CHANGES FOR DATABASE SINCE 123456", format!("{}", out))
 	}
 }

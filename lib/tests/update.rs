@@ -6,7 +6,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn update_with_input() -> Result<(), Error> {
+async fn update_simple_with_input() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -31,7 +31,7 @@ async fn update_with_input() -> Result<(), Error> {
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -88,6 +88,44 @@ async fn update_with_input() -> Result<(), Error> {
 			{
 				id: person:test,
 				name: 'Name: Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn update_complex_with_input() -> Result<(), Error> {
+	let sql = "
+		DEFINE FIELD images ON product
+			TYPE array
+			ASSERT array::len($value) > 0
+		;
+		DEFINE FIELD images.* ON product TYPE string
+			VALUE string::trim($input)
+			ASSERT $input AND string::len($value) > 0
+		;
+		CREATE product:test SET images = [' test.png '];
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:test,
+				images: ['test.png'],
 			}
 		]",
 	);

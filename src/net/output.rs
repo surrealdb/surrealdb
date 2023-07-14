@@ -1,6 +1,8 @@
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
+use serde_json::Value as Json;
+use surrealdb::sql;
 
 pub enum Output {
 	None,
@@ -54,10 +56,15 @@ pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
 {
-	match bung::to_vec(val) {
+	match surrealdb::sql::serde::serialize(val) {
 		Ok(v) => Output::Full(v),
 		Err(_) => Output::Fail,
 	}
+}
+
+/// Convert and simplify the value into JSON
+pub fn simplify<T: Serialize>(v: T) -> Json {
+	sql::to_value(v).unwrap().into()
 }
 
 impl warp::Reply for Output {
@@ -89,7 +96,7 @@ impl warp::Reply for Output {
 			}
 			Output::Full(v) => {
 				let mut res = warp::reply::Response::new(v.into());
-				let con = HeaderValue::from_static("application/bung");
+				let con = HeaderValue::from_static("application/surrealdb");
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}

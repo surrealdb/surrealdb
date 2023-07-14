@@ -1,4 +1,5 @@
 use crate::sql::comment::shouldbespace;
+use crate::sql::common::{closebracket, openbracket};
 use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -6,6 +7,7 @@ use crate::sql::graph::{self, Graph};
 use crate::sql::ident::{self, Ident};
 use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
+use crate::sql::strand::no_nul_bytes;
 use crate::sql::value::{self, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -27,7 +29,7 @@ pub enum Part {
 	Where(Value),
 	Graph(Graph),
 	Value(Value),
-	Method(String, Vec<Value>),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 }
 
 impl From<i32> for Part {
@@ -88,6 +90,15 @@ impl From<&str> for Part {
 }
 
 impl Part {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Part::Where(v) => v.writeable(),
+			Part::Value(v) => v.writeable(),
+			Part::Method(_, v) => v.iter().any(Value::writeable),
+			_ => false,
+		}
+	}
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
@@ -149,9 +160,9 @@ pub fn all(i: &str) -> IResult<&str, Part> {
 			Ok((i, ()))
 		},
 		|i| {
-			let (i, _) = char('[')(i)?;
+			let (i, _) = openbracket(i)?;
 			let (i, _) = char('*')(i)?;
-			let (i, _) = char(']')(i)?;
+			let (i, _) = closebracket(i)?;
 			Ok((i, ()))
 		},
 	))(i)?;
@@ -159,16 +170,16 @@ pub fn all(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn last(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, _) = char('$')(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Last))
 }
 
 pub fn index(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = number(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Index(v)))
 }
 
@@ -180,11 +191,11 @@ pub fn field(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn filter(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, _) = alt((tag_no_case("WHERE"), tag("?")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value::value(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Where(v)))
 }
 

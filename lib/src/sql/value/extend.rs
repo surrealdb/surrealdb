@@ -1,6 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::part::Part;
@@ -15,7 +14,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(ctx, opt, txn, path).await? {
+		match self.get(ctx, opt, txn, None, path).await? {
 			Value::Array(v) => match val {
 				Value::Array(x) => self.set(ctx, opt, txn, path, Value::from((v + x).uniq())).await,
 				x => self.set(ctx, opt, txn, path, Value::from((v + x).uniq())).await,

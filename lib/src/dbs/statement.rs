@@ -14,12 +14,14 @@ use crate::sql::statements::insert::InsertStatement;
 use crate::sql::statements::live::LiveStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
+use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
 use std::fmt;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
 	Live(&'a LiveStatement),
+	Show(&'a ShowStatement),
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),
@@ -31,6 +33,12 @@ pub(crate) enum Statement<'a> {
 impl<'a> From<&'a LiveStatement> for Statement<'a> {
 	fn from(v: &'a LiveStatement) -> Self {
 		Statement::Live(v)
+	}
+}
+
+impl<'a> From<&'a ShowStatement> for Statement<'a> {
+	fn from(v: &'a ShowStatement) -> Self {
+		Statement::Show(v)
 	}
 }
 
@@ -74,6 +82,7 @@ impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Statement::Live(v) => write!(f, "{v}"),
+			Statement::Show(v) => write!(f, "{v}"),
 			Statement::Select(v) => write!(f, "{v}"),
 			Statement::Create(v) => write!(f, "{v}"),
 			Statement::Update(v) => write!(f, "{v}"),
@@ -197,6 +206,14 @@ impl<'a> Statement<'a> {
 			Statement::Relate(v) => v.parallel,
 			Statement::Delete(v) => v.parallel,
 			Statement::Insert(v) => v.parallel,
+			_ => false,
+		}
+	}
+	/// Returns any EXPLAIN clause if specified
+	#[inline]
+	pub fn explain(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.explain,
 			_ => false,
 		}
 	}

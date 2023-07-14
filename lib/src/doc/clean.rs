@@ -1,7 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
@@ -26,27 +25,27 @@ impl<'a> Document<'a> {
 				match fd.flex {
 					false => {
 						// Loop over this field in the document
-						for k in self.current.each(&fd.name).into_iter() {
+						for k in self.current.doc.each(&fd.name).into_iter() {
 							keys.push(k);
 						}
 					}
 					true => {
 						// Loop over every field under this field in the document
-						for k in self.current.every(Some(&fd.name), true, true).into_iter() {
+						for k in self.current.doc.every(Some(&fd.name), true, true).into_iter() {
 							keys.push(k);
 						}
 					}
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.every(None, true, true).iter() {
+			for fd in self.current.doc.every(None, true, true).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						fd if fd.is_id() => continue,
 						fd if fd.is_in() => continue,
 						fd if fd.is_out() => continue,
 						fd if fd.is_meta() => continue,
-						fd => self.current.to_mut().del(ctx, opt, txn, fd).await?,
+						fd => self.current.doc.to_mut().del(ctx, opt, txn, fd).await?,
 					}
 				}
 			}

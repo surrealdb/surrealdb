@@ -17,10 +17,10 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
 impl<'a> Database<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/', // /
+			_a: b'*', // *
 			ns,
-			_b: 0x2a, // *
+			_b: b'*', // *
 			db,
 		}
 	}
@@ -33,10 +33,12 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Database::new(
-			"test",
-			"test",
+			"testns",
+			"testdb",
 		);
 		let enc = Database::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0");
+
 		let dec = Database::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

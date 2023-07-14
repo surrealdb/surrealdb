@@ -16,7 +16,7 @@ impl<'a> Document<'a> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// There is no current record
-			if self.current.is_none() {
+			if self.current.doc.is_none() {
 				// Ignore this requested record
 				return Err(Error::Ignore);
 			}

@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -30,10 +30,11 @@ pub struct DeleteStatement {
 }
 
 impl DeleteStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match self.what.len() {
 			1 if self.what[0].is_object() => true,
@@ -41,13 +42,13 @@ impl DeleteStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
@@ -56,7 +57,7 @@ impl DeleteStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.futures(false);
+		let opt = &opt.new_with_futures(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;

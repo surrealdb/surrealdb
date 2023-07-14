@@ -70,7 +70,9 @@ impl Transaction {
 		// Mark this transaction as done
 		self.ok = true;
 		// Cancel this transaction
-		self.tx.rollback().await?;
+		if self.rw {
+			self.tx.rollback().await?;
+		}
 		// Continue
 		Ok(())
 	}
@@ -86,7 +88,7 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		// Commit this transaction
 		self.tx.commit().await?;
 		// Continue
 		Ok(())
@@ -152,8 +154,15 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.tx.insert(key.into(), val.into()).await?;
+		// Get the key
+		let key = key.into();
+		// Get the val
+		let val = val.into();
+		// Set the key if empty
+		match self.tx.key_exists(key.clone()).await? {
+			false => self.tx.put(key, val).await?,
+			_ => return Err(Error::TxKeyAlreadyExists),
+		};
 		// Return result
 		Ok(())
 	}
@@ -250,16 +259,5 @@ impl Transaction {
 		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
 		// Return result
 		Ok(res)
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::kvs::tests::transaction::verify_transaction_isolation;
-	use test_log::test;
-
-	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
-	async fn tikv_transaction() {
-		verify_transaction_isolation("tikv://127.0.0.1:2379").await;
 	}
 }

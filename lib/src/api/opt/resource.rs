@@ -8,13 +8,10 @@ use crate::sql::Object;
 use crate::sql::Table;
 use crate::sql::Thing;
 use crate::sql::Value;
-use serde::Serialize;
 use std::ops;
 use std::ops::Bound;
 
 /// A database resource
-#[derive(Serialize)]
-#[serde(untagged)]
 #[derive(Debug)]
 pub enum Resource {
 	/// Table name

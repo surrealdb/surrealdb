@@ -1,10 +1,12 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
 use crate::sql::strand::Strand;
-use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{
+	DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, SecondsFormat, TimeZone,
+	Utc,
+};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
@@ -22,7 +24,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
-pub struct Datetime(pub DateTime<Utc>);
+pub struct Datetime(#[serde(with = "ts_binary")] pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -89,7 +91,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
+		Display::fmt(&quote_str(&self.to_raw()), f)
 	}
 }
 
@@ -268,6 +270,57 @@ fn sign(i: &str) -> IResult<&str, i32> {
 		'-' => -1,
 		_ => 1,
 	})(i)
+}
+
+/// Lexicographic, relatively size efficient binary serialization
+pub mod ts_binary {
+	use chrono::{offset::TimeZone, DateTime, Utc};
+	use core::fmt;
+	use serde::{
+		de::{self, SeqAccess},
+		ser::{self, SerializeTuple},
+	};
+
+	/// Serialize a UTC datetime into an integer number of nanoseconds since the epoch
+	pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		let mut tuple = serializer.serialize_tuple(2)?;
+		tuple.serialize_element(&dt.timestamp())?;
+		tuple.serialize_element(&dt.timestamp_subsec_nanos())?;
+		tuple.end()
+	}
+
+	/// Deserialize a [`DateTime`] from a nanosecond timestamp
+	pub fn deserialize<'de, D>(d: D) -> Result<DateTime<Utc>, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		d.deserialize_tuple(2, TimestampVisitor)
+	}
+
+	struct TimestampVisitor;
+
+	impl<'de> de::Visitor<'de> for TimestampVisitor {
+		type Value = DateTime<Utc>;
+
+		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			formatter.write_str("a unix timestamp tuple")
+		}
+
+		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+		where
+			A: SeqAccess<'de>,
+		{
+			let secs = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			let nanos =
+				seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
+			Utc.timestamp_opt(secs, nanos)
+				.single()
+				.ok_or_else(|| de::Error::custom("invalid timestamp"))
+		}
+	}
 }
 
 #[cfg(test)]
