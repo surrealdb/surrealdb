@@ -29,6 +29,7 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod vector;
 
 /// Attempts to run any function
 pub async fn run(
@@ -282,6 +283,19 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		//
+		"vector::dotproduct" => vector::dotproduct,
+		"vector::magnitude" => vector::magnitude,
+		"vector::distance::chebyshev" => vector::distance::chebyshev,
+		"vector::distance::euclidean" => vector::distance::euclidean,
+		"vector::distance::hamming" => vector::distance::hamming,
+		"vector::distance::mahalanobis" => vector::distance::mahalanobis,
+		"vector::distance::manhattan" => vector::distance::manhattan,
+		"vector::distance::minkowski" => vector::distance::minkowski,
+		"vector::similarity::cosine" => vector::similarity::cosine,
+		"vector::similarity::jaccard" => vector::similarity::jaccard,
+		"vector::similarity::pearson" => vector::similarity::pearson,
+		"vector::similarity::spearman" => vector::similarity::spearman,
 	)
 }
 
