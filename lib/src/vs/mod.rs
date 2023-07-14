@@ -6,5 +6,7 @@
 pub type Versionstamp = [u8; 10];
 
 pub(crate) mod conv;
+pub(crate) mod oracle;
 
 pub use self::conv::*;
+pub use self::oracle::*;
