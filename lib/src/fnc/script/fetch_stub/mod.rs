@@ -1,4 +1,5 @@
-/// The stub implementations for the fetch API when `http` is not enabled.
+//! stub implementations for the fetch API when `http` is not enabled.
+
 use js::{bind, prelude::*, Ctx, Exception, Result};
 
 #[cfg(test)]

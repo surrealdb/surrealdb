@@ -5,6 +5,7 @@ use crate::sql::object::Object;
 use crate::sql::value::Value;
 use crate::sql::Id;
 use chrono::{TimeZone, Utc};
+use js::prelude::This;
 use js::Ctx;
 use js::Error;
 use js::Exception;
@@ -20,7 +21,7 @@ fn check_nul(s: &str) -> Result<(), Error> {
 }
 
 impl<'js> FromJs<'js> for Value {
-	fn from_js(ctx: Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
+	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
 		match val {
 			val if val.type_name() == "null" => Ok(Value::Null),
 			val if val.type_name() == "undefined" => Ok(Value::None),
@@ -49,14 +50,15 @@ impl<'js> FromJs<'js> for Value {
 				// Check to see if this object is an error
 				if v.is_error() {
 					let e: String = v.get("message")?;
-					let (Ok(e) | Err(e)) = Exception::from_message(ctx, &e).map(|x| x.throw());
+					let (Ok(e) | Err(e)) =
+						Exception::from_message(ctx.clone(), &e).map(|x| x.throw());
 					return Err(e);
 				}
 				// Check to see if this object is a record
-				if (v).instance_of::<classes::record::record::Record>() {
-					let v = v.into_instance::<classes::record::record::Record>().unwrap();
+				if (v).instance_of::<classes::record::Record>() {
+					let v = v.into_class::<classes::record::Record>().unwrap();
 					let borrow = v.borrow();
-					let v: &classes::record::record::Record = &borrow;
+					let v: &classes::record::Record = &borrow;
 					check_nul(&v.value.tb)?;
 					if let Id::String(s) = &v.value.id {
 						check_nul(s)?;
@@ -64,20 +66,20 @@ impl<'js> FromJs<'js> for Value {
 					return Ok(v.value.clone().into());
 				}
 				// Check to see if this object is a duration
-				if (v).instance_of::<classes::duration::duration::Duration>() {
-					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
+				if (v).instance_of::<classes::duration::Duration>() {
+					let v = v.into_class::<classes::duration::Duration>().unwrap();
 					let borrow = v.borrow();
-					let v: &classes::duration::duration::Duration = &borrow;
+					let v: &classes::duration::Duration = &borrow;
 					return match &v.value {
 						Some(v) => Ok(v.clone().into()),
 						None => Ok(Value::None),
 					};
 				}
 				// Check to see if this object is a uuid
-				if (v).instance_of::<classes::uuid::uuid::Uuid>() {
-					let v = v.into_instance::<classes::uuid::uuid::Uuid>().unwrap();
+				if (v).instance_of::<classes::uuid::Uuid>() {
+					let v = v.into_class::<classes::uuid::Uuid>().unwrap();
 					let borrow = v.borrow();
-					let v: &classes::uuid::uuid::Uuid = &borrow;
+					let v: &classes::uuid::Uuid = &borrow;
 					return match &v.value {
 						Some(v) => Ok(v.clone().into()),
 						None => Ok(Value::None),
@@ -87,7 +89,7 @@ impl<'js> FromJs<'js> for Value {
 				let date: js::Object = ctx.globals().get("Date")?;
 				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
-					let m: i64 = f.call((js::prelude::This(v),))?;
+					let m: i64 = f.call((This(v),))?;
 					let d = Utc.timestamp_millis_opt(m).unwrap();
 					return Ok(Datetime::from(d).into());
 				}
