@@ -6,7 +6,7 @@ use crate::sql::{Number, Value};
 pub fn dotproduct((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	match a.dotproduct(&b) {
 		None => Err(Error::InvalidArguments {
-			name: String::from("vector::dot"),
+			name: String::from("vector::dotproduct"),
 			message: String::from("The two vectors must be of the same length."),
 		}),
 		Some(dot) => Ok(dot.into()),
