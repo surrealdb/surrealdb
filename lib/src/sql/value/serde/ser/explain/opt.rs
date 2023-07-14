@@ -30,7 +30,7 @@ impl ser::Serializer for Serializer {
 	where
 		T: ?Sized + Serialize,
 	{
-		Ok(Some(Explain(value.serialize(ser::primitive::bool::Serializer.wrap())?)))
+		value.serialize(self.wrap())
 	}
 
 	#[inline]
@@ -42,7 +42,7 @@ impl ser::Serializer for Serializer {
 	where
 		T: ?Sized + Serialize,
 	{
-		value.serialize(self.wrap())
+		Ok(Some(Explain(value.serialize(ser::primitive::bool::Serializer.wrap())?)))
 	}
 }
 
