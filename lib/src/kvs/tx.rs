@@ -987,7 +987,7 @@ impl Transaction {
 		let mut res: Vec<LqValue> = vec![];
 		for (key, value) in scanned {
 			trace!("scan_lq: key={:?} value={:?}", &key, &value);
-			let lq = crate::key::nd::nq::Lq::decode(key.as_slice())?;
+			let lq = crate::key::nd::nq::Nq::decode(key.as_slice())?;
 			let tb: String = String::from_utf8(value).unwrap();
 			res.push(LqValue {
 				nd: lq.nd,
@@ -1378,7 +1378,7 @@ impl Transaction {
 		let lq_pairs = self.getr(beg..end, u32::MAX).await?;
 		let mut lqs = vec![];
 		for (key, value) in lq_pairs {
-			let lq_key = crate::key::nd::nq::Lq::decode(key.as_slice())?;
+			let lq_key = crate::key::nd::nq::Nq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
 				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
