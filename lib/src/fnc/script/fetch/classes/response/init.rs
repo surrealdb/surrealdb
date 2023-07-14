@@ -1,33 +1,34 @@
 use std::string::String as StdString;
 
 use js::{
-	class::{Trace, Tracer},
+	class::{HasRefs, RefsMarker},
 	prelude::*,
-	Class, Ctx, Exception, FromJs, Object, Result, Value,
+	Class, Ctx, Exception, FromJs, Object, Persistent, Result, Value,
 };
 
-use crate::fnc::script::fetch::{classes::Headers, util};
+use crate::fnc::script::fetch::{classes::HeadersClass, util};
 
 /// Struct containing data from the init argument from the Response constructor.
 #[derive(Clone)]
-pub struct ResponseInit<'js> {
+pub struct ResponseInit {
 	// u16 instead of reqwest::StatusCode since javascript allows non valid status codes in some
 	// circumstances.
 	pub status: u16,
 	pub status_text: StdString,
-	pub headers: Class<'js, Headers>,
+	pub headers: Persistent<Class<'static, HeadersClass>>,
 }
 
-impl<'js> Trace<'js> for ResponseInit<'js> {
-	fn trace<'a>(&self, tracer: Tracer<'a, 'js>) {
-		self.headers.trace(tracer);
+impl HasRefs for ResponseInit {
+	fn mark_refs(&self, marker: &RefsMarker) {
+		self.headers.mark_refs(marker);
 	}
 }
 
-impl<'js> ResponseInit<'js> {
+impl ResponseInit {
 	/// Returns a ResponseInit object with all values as the default value.
-	pub fn default(ctx: Ctx<'js>) -> Result<Self> {
-		let headers = Class::instance(ctx, Headers::new_empty())?;
+	pub fn default(ctx: Ctx<'_>) -> Result<ResponseInit> {
+		let headers = Class::instance(ctx, HeadersClass::new_empty())?;
+		let headers = Persistent::save(ctx, headers);
 		Ok(ResponseInit {
 			status: 200,
 			status_text: StdString::new(),
@@ -36,8 +37,8 @@ impl<'js> ResponseInit<'js> {
 	}
 }
 
-impl<'js> FromJs<'js> for ResponseInit<'js> {
-	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
+impl<'js> FromJs<'js> for ResponseInit {
+	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = Object::from_js(ctx, value)?;
 
 		// Extract status.
@@ -65,11 +66,12 @@ impl<'js> FromJs<'js> for ResponseInit<'js> {
 
 		// Extract headers.
 		let headers = if let Some(headers) = object.get::<_, Option<Value>>("headers")? {
-			let headers = Headers::new_inner(ctx, headers)?;
-			Class::instance(ctx.clone(), headers)?
+			let headers = HeadersClass::new_inner(ctx, headers)?;
+			Class::instance(ctx, headers)?
 		} else {
-			Class::instance(ctx.clone(), Headers::new_empty())?
+			Class::instance(ctx, HeadersClass::new_empty())?
 		};
+		let headers = Persistent::save(ctx, headers);
 
 		Ok(ResponseInit {
 			status,

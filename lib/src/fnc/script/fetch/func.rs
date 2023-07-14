@@ -2,28 +2,29 @@
 
 use crate::fnc::script::fetch::{
 	body::{Body, BodyData, BodyKind},
-	classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
+	classes::{
+		self, HeadersClass, RequestClass, RequestInit, ResponseClass, ResponseInit, ResponseType,
+	},
 	RequestError,
 };
 use futures::TryStreamExt;
-use js::{function::Opt, Class, Ctx, Exception, Result, Value};
+use js::{bind, function::Opt, prelude::*, Class, Ctx, Exception, Persistent, Result, Value};
 use reqwest::{
 	header::{HeaderValue, CONTENT_TYPE},
 	redirect, Body as ReqBody,
 };
 use std::sync::Arc;
 
-use super::classes::Headers;
-
-#[js::function]
+#[bind(object, public)]
 #[allow(unused_variables)]
 pub async fn fetch<'js>(
 	ctx: Ctx<'js>,
 	input: Value<'js>,
-	init: Opt<RequestInit<'js>>,
-) -> Result<Response<'js>> {
+	init: Opt<RequestInit>,
+	args: Rest<()>,
+) -> Result<ResponseClass> {
 	// Create a request from the input.
-	let js_req = Request::new(ctx.clone(), input, init)?;
+	let js_req = RequestClass::new(ctx, input, init, args)?;
 
 	let url = js_req.url;
 
@@ -31,9 +32,9 @@ pub async fn fetch<'js>(
 
 	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
 	// unwrap should never panic.
-	let headers = js_req.init.headers;
+	let headers = js_req.init.headers.restore(ctx).unwrap();
 	let headers = headers.borrow();
-	let mut headers = headers.inner.clone();
+	let mut headers = headers.inner.borrow().clone();
 
 	let redirect = js_req.init.request_redirect;
 
@@ -54,7 +55,7 @@ pub async fn fetch<'js>(
 	});
 
 	let client = reqwest::Client::builder().redirect(policy).build().map_err(|e| {
-		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
+		Exception::throw_internal(ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
 	// Set the body for the request.
@@ -69,7 +70,7 @@ pub async fn fetch<'js>(
 				let body = ReqBody::from(x);
 				req_builder = req_builder.body(body);
 			}
-			BodyData::Used => return Err(Exception::throw_type(&ctx, "Body unusable")),
+			BodyData::Used => return Err(Exception::throw_type(ctx, "Body unusable")),
 		};
 		match body.kind {
 			BodyKind::Buffer => {}
@@ -93,11 +94,12 @@ pub async fn fetch<'js>(
 		.headers(headers)
 		.send()
 		.await
-		.map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
+		.map_err(|e| Exception::throw_type(ctx, &e.to_string()))?;
 
 	// Extract the headers
-	let headers = Headers::from_map(response.headers().clone());
+	let headers = HeadersClass::from_map(response.headers().clone());
 	let headers = Class::instance(ctx, headers)?;
+	let headers = Persistent::save(ctx, headers);
 	let init = ResponseInit {
 		headers,
 		status: response.status().as_u16(),
@@ -109,7 +111,7 @@ pub async fn fetch<'js>(
 		BodyKind::Buffer,
 		response.bytes_stream().map_err(Arc::new).map_err(RequestError::Reqwest),
 	);
-	let response = Response {
+	let response = ResponseClass {
 		body,
 		init,
 		url: Some(url),

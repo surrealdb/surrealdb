@@ -12,9 +12,9 @@ impl_module_def!(
 	"version" => (env!("CARGO_PKG_VERSION"))
 );
 
-fn pkg<'js, D>(ctx: &Ctx<'js>, name: &str) -> Result<Value<'js>>
+fn pkg<'js, D>(ctx: Ctx<'js>, name: &str) -> Result<Value<'js>>
 where
 	D: ModuleDef,
 {
-	Module::evaluate_def::<D, _>(ctx.clone(), name)?.get::<_, js::Value>("default")
+	Module::evaluate_def::<D, _>(ctx, name)?.get::<_, js::Value>("default")
 }
