@@ -3448,70 +3448,6 @@ async fn function_string_ends_with() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_similarity_fuzzy() -> Result<(), Error> {
-	let sql = r#"
-		RETURN string::similarity::fuzzy("", "");
-		RETURN string::similarity::fuzzy("some", "text");
-		RETURN string::similarity::fuzzy("text", "TEXT");
-		RETURN string::similarity::fuzzy("TEXT", "TEXT");
-		RETURN string::similarity::fuzzy("this could be a tricky test", "this test");
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(0));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(0));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(83));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(91));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(174));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
-	let sql = r#"
-		RETURN string::similarity::smithwaterman("", "");
-		RETURN string::similarity::smithwaterman("some", "text");
-		RETURN string::similarity::smithwaterman("text", "TEXT");
-		RETURN string::similarity::smithwaterman("TEXT", "TEXT");
-		RETURN string::similarity::smithwaterman("this could be a tricky test", "this test");
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(0));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(0));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(83));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(91));
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::from(174));
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn function_string_join() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::join("");
@@ -3669,6 +3605,70 @@ async fn function_string_reverse() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::from("gnirts siht tset");
 	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_similarity_fuzzy() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::fuzzy("", "");
+		RETURN string::similarity::fuzzy("some", "text");
+		RETURN string::similarity::fuzzy("text", "TEXT");
+		RETURN string::similarity::fuzzy("TEXT", "TEXT");
+		RETURN string::similarity::fuzzy("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::smithwaterman("", "");
+		RETURN string::similarity::smithwaterman("some", "text");
+		RETURN string::similarity::smithwaterman("text", "TEXT");
+		RETURN string::similarity::smithwaterman("TEXT", "TEXT");
+		RETURN string::similarity::smithwaterman("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
 	//
 	Ok(())
 }
