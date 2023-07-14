@@ -16,6 +16,7 @@ use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
+use crate::sql::Explain;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -211,10 +212,10 @@ impl<'a> Statement<'a> {
 	}
 	/// Returns any EXPLAIN clause if specified
 	#[inline]
-	pub fn explain(&self) -> bool {
+	pub fn explain(&self) -> Option<&Explain> {
 		match self {
-			Statement::Select(v) => v.explain,
-			_ => false,
+			Statement::Select(v) => v.explain.as_ref(),
+			_ => None,
 		}
 	}
 }

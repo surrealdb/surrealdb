@@ -1,4 +1,4 @@
-use crate::fnc::script::fetch::{classes::BlobClass, stream::ReadableStream, RequestError};
+use crate::fnc::script::fetch::{stream::ReadableStream, RequestError};
 use bytes::{Bytes, BytesMut};
 use futures::{future, Stream, TryStreamExt};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
@@ -6,6 +6,8 @@ use std::{
 	cell::{Cell, RefCell},
 	result::Result as StdResult,
 };
+
+use super::classes::Blob;
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
 
@@ -127,7 +129,7 @@ impl Body {
 }
 
 impl<'js> FromJs<'js> for Body {
-	fn from_js(ctx: Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
 			Type::String => {
 				let string = value.as_string().unwrap().to_string()?;
@@ -142,7 +144,7 @@ impl<'js> FromJs<'js> for Body {
 				})
 			}
 		};
-		if let Ok(x) = Class::<BlobClass>::from_object(object.clone()) {
+		if let Some(x) = Class::<Blob>::from_object(object.clone()) {
 			let borrow = x.borrow();
 			return Ok(Body::buffer(BodyKind::Blob(borrow.mime.clone()), borrow.data.clone()));
 		}
@@ -194,7 +196,7 @@ impl<'js> FromJs<'js> for Body {
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
 			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
 		}
-		if let Ok(x) = ArrayBuffer::from_object(object.clone()) {
+		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
 			let bytes = x
 				.as_bytes()
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
