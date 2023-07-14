@@ -1,52 +1,56 @@
-use crate::sql::thing;
-use crate::sql::value::Value;
-use js::class::Trace;
+#[js::bind(object, public)]
+#[quickjs(bare)]
+#[allow(non_snake_case)]
+#[allow(unused_variables)]
+#[allow(clippy::module_inception)]
+pub mod record {
 
-#[derive(Clone, Trace)]
-#[js::class]
-pub struct Record {
-	#[qjs(skip_trace)]
-	pub(crate) value: thing::Thing,
-}
+	use crate::sql::thing;
+	use crate::sql::value::Value;
+	use js::{class::Ref, function::Rest};
 
-#[js::methods]
-impl Record {
-	#[qjs(constructor)]
-	pub fn new(tb: String, id: Value) -> Self {
-		Self {
-			value: thing::Thing {
-				tb,
-				id: match id {
-					Value::Array(v) => v.into(),
-					Value::Object(v) => v.into(),
-					Value::Number(v) => v.into(),
-					v => v.as_string().into(),
+	#[derive(Clone)]
+	#[quickjs(cloneable)]
+	pub struct Record {
+		pub(crate) value: thing::Thing,
+	}
+
+	impl Record {
+		#[quickjs(constructor)]
+		pub fn new(tb: String, id: Value, args: Rest<()>) -> Self {
+			Self {
+				value: thing::Thing {
+					tb,
+					id: match id {
+						Value::Array(v) => v.into(),
+						Value::Object(v) => v.into(),
+						Value::Number(v) => v.into(),
+						v => v.as_string().into(),
+					},
 				},
-			},
+			}
 		}
-	}
 
-	#[qjs(get)]
-	pub fn tb(&self) -> String {
-		self.value.tb.clone()
-	}
+		#[quickjs(get)]
+		pub fn tb(&self) -> String {
+			self.value.tb.clone()
+		}
 
-	#[qjs(get)]
-	pub fn id(&self) -> String {
-		self.value.id.to_raw()
-	}
-	// Compare two Record instances
-	pub fn is(a: &Record, b: &Record) -> bool {
-		a.value == b.value
-	}
-	/// Convert the object to a string
-	#[qjs(rename = "toString")]
-	pub fn js_to_string(&self) -> String {
-		self.value.to_raw()
-	}
-	/// Convert the object to JSON
-	#[qjs(rename = "toJSON")]
-	pub fn to_json(&self) -> String {
-		self.value.to_raw()
+		#[quickjs(get)]
+		pub fn id(&self) -> String {
+			self.value.id.to_raw()
+		}
+		// Compare two Record instances
+		pub fn is<'js>(a: Ref<'js, Record>, b: Ref<'js, Record>, args: Rest<()>) -> bool {
+			a.value == b.value
+		}
+		/// Convert the object to a string
+		pub fn toString(&self, args: Rest<()>) -> String {
+			self.value.to_raw()
+		}
+		/// Convert the object to JSON
+		pub fn toJSON(&self, args: Rest<()>) -> String {
+			self.value.to_raw()
+		}
 	}
 }
