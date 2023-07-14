@@ -74,7 +74,7 @@ pub mod similarity {
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		match a.dotproduct(&b) {
 			None => Err(Error::InvalidArguments {
-				name: String::from("vector::cosine_similarity"),
+				name: String::from("vector::similarity::cosine"),
 				message: String::from("The two vectors must be of the same length."),
 			}),
 			Some(dot) => Ok((dot / (a.magnitude() * b.magnitude())).into()),
