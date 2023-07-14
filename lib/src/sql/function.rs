@@ -508,6 +508,8 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("trim"),
 		tag("uppercase"),
 		tag("words"),
+		preceded(tag("distance::"), alt((tag("hamming"), tag("levenshtein")))),
+		preceded(tag("similarity::"), alt((tag("fuzzy"), tag("jaro"), tag("smithwaterman")))),
 	))(i)
 }
 

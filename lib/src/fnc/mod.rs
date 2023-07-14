@@ -248,6 +248,11 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
+		"string::distance::hamming" => string::distance::hamming,
+		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::similarity::fuzzy" => string::similarity::fuzzy,
+		"string::similarity::jaro" => string::similarity::jaro,
+		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
 		//
 		"time::ceil" => time::ceil,
 		"time::day" => time::day,
