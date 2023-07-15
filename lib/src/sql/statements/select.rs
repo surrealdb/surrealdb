@@ -17,7 +17,6 @@ use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
 use crate::sql::order::{order, Orders};
 use crate::sql::special::check_group_by_fields;
-use crate::sql::special::check_order_by_fields;
 use crate::sql::special::check_split_on_fields;
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
@@ -194,7 +193,6 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, group) = opt(preceded(shouldbespace, group))(i)?;
 	check_group_by_fields(i, &expr, &group)?;
 	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
-	check_order_by_fields(i, &expr, &order)?;
 	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, start) = opt(preceded(shouldbespace, start))(i)?;
 	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
@@ -248,6 +246,15 @@ mod tests {
 	#[test]
 	fn select_statement_thing() {
 		let sql = "SELECT * FROM test:thingy ORDER BY name";
+		let res = select(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
+	fn select_without_including_order_attribute() {
+		let sql = "SELECT field FROM test:thingy ORDER BY name";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;

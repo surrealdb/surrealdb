@@ -1,7 +1,6 @@
 use crate::sql::error::Error;
 use crate::sql::field::{Field, Fields};
 use crate::sql::group::Groups;
-use crate::sql::order::Orders;
 use crate::sql::split::Splits;
 use crate::sql::value::Value;
 use crate::sql::Idiom;
@@ -48,25 +47,6 @@ pub fn check_split_on_fields<'a>(
 			if !contains_idiom(fields, &split.0) {
 				// If the expression isn't specified in the SELECT clause, then error
 				return Err(Failure(Error::Split(i, split.to_string())));
-			}
-		}
-	}
-	// This query is ok to run
-	Ok(())
-}
-
-pub fn check_order_by_fields<'a>(
-	i: &'a str,
-	fields: &Fields,
-	orders: &Option<Orders>,
-) -> Result<(), Err<Error<&'a str>>> {
-	// Check to see if a ORDER BY clause has been defined
-	if let Some(orders) = orders {
-		// Loop over each of the expressions in the ORDER BY clause
-		for order in orders.iter() {
-			if !contains_idiom(fields, order) {
-				// If the expression isn't specified in the SELECT clause, then error
-				return Err(Failure(Error::Order(i, order.to_string())));
 			}
 		}
 	}
