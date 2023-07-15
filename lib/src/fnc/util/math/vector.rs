@@ -166,7 +166,7 @@ impl Magnitude for Vec<Number> {
 }
 
 pub trait Normalize {
-	/// Normalize of a vector
+	/// Normalize a vector
 	fn normalize(&self) -> Vec<Number>;
 }
 
