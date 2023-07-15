@@ -144,6 +144,125 @@ async fn select_expression_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
+	let sql = "
+		LET $lang = 'en';
+		UPDATE documentation:test CONTENT {
+			primarylang: 'en',
+			languages: {
+				'en': 'this is english',
+				'es': 'esto es español',
+				'de': 'das ist Englisch',
+			},
+			tags: [
+				{ type: 'library', value: 'client-side' },
+				{ type: 'library', value: 'server-side' },
+				{ type: 'environment', value: 'frontend' },
+			]
+		};
+		-- An array filter, followed by an array index operation
+		SELECT tags[WHERE type = 'library'][0].value FROM documentation:test;
+		-- Selecting an object value or array index using a string as a key
+		SELECT languages['en'] AS content FROM documentation:test;
+		-- Updating an object value or array index using a string as a key
+		UPDATE documentation:test SET languages['en'] = 'my primary text';
+		-- Selecting an object value or array index using a parameter as a key
+		SELECT languages[$lang] AS content FROM documentation:test;
+		-- Updating an object value or array index using a parameter as a key
+		UPDATE documentation:test SET languages[$lang] = 'my secondary text';
+		-- Selecting an object or array index value using the value of another document field as a key
+		SELECT languages[primarylang] AS content FROM documentation;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 8);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: documentation:test,
+				languages: {
+					de: 'das ist Englisch',
+					en: 'this is english',
+					es: 'esto es español',
+				},
+				primarylang: 'en',
+				tags: [
+					{
+						type: 'library',
+						value: 'client-side',
+					},
+					{
+						type: 'library',
+						value: 'server-side',
+					},
+					{
+						type: 'environment',
+						value: 'frontend',
+					}
+				]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				tags: {
+					value: 'client-side'
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				content: 'this is english'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				content: 'my primary text'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				content: 'my secondary text'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_writeable_subqueries() -> Result<(), Error> {
 	let sql = "
 		LET $id = (UPDATE tester:test);
@@ -282,7 +401,7 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 #[tokio::test]
 async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 	let sql = "
-		CREATE person:tobie SET name = 'Tobie';	
+		CREATE person:tobie SET name = 'Tobie';
 		DEFINE INDEX author ON TABLE post COLUMNS author;
 		CREATE post:1 SET author = person:tobie;
 		CREATE post:2 SET author = person:tobie;

@@ -6,9 +6,9 @@ impl Value {
 	/// Synchronous method for setting a field on a `Value`
 	pub fn put(&mut self, path: &[Part], val: Value) {
 		match path.first() {
-			// Get the current path part
+			// Get the current value at path
 			Some(p) => match self {
-				// Current path part is an object
+				// Current value at path is an object
 				Value::Object(v) => match p {
 					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
 						Some(v) if v.is_some() => v.put(path.next(), val),
@@ -36,7 +36,7 @@ impl Value {
 					},
 					_ => (),
 				},
-				// Current path part is an array
+				// Current value at path is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
@@ -61,12 +61,12 @@ impl Value {
 						v.iter_mut().for_each(|v| v.put(path, val.clone()));
 					}
 				},
-				// Current path part is empty
+				// Current value at path is empty
 				Value::Null => {
 					*self = Value::base();
 					self.put(path, val)
 				}
-				// Current path part is empty
+				// Current value at path is empty
 				Value::None => {
 					*self = Value::base();
 					self.put(path, val)

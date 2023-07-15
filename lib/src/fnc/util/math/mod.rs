@@ -4,7 +4,10 @@
 
 pub mod bottom;
 pub mod deviation;
+pub mod dotproduct;
+pub mod euclideandistance;
 pub mod interquartile;
+pub mod magnitude;
 pub mod mean;
 pub mod median;
 pub mod midhinge;

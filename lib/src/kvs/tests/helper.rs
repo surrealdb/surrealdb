@@ -1,8 +1,5 @@
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
-use std::sync::Once;
-use tracing::Level;
-use tracing_subscriber;
 
 pub struct TestContext {
 	pub(crate) db: Datastore,
@@ -11,8 +8,6 @@ pub struct TestContext {
 	// It is useful for separating test setups when environments are shared.
 	pub(crate) context_id: String,
 }
-
-static INIT: Once = Once::new();
 
 /// TestContext is a container for an initialised test context
 /// Anything stateful (such as storage layer and logging) can be tied with this
@@ -39,11 +34,6 @@ impl TestContext {
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
 pub(crate) async fn init() -> Result<TestContext, Error> {
-	// Set tracing for tests for debug, but only do it once
-	INIT.call_once(|| {
-		let _subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).try_init();
-	});
-
 	let db = new_ds().await;
 	return Ok(TestContext {
 		db,

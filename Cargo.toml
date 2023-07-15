@@ -33,10 +33,10 @@ codegen-units = 1
 strip = false
 
 [dependencies]
-argon2 = "0.5.0"
+argon2 = "0.5.1"
 base64 = "0.21.2"
 bytes = "1.4.0"
-clap = { version = "4.3.10", features = ["env", "derive", "wrap_help", "unicode"] }
+clap = { version = "4.3.12", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.28"
 glob = "0.3.1"
 http = "0.2.9"
@@ -48,13 +48,13 @@ opentelemetry-otlp = "0.11.0"
 rand = "0.8.5"
 reqwest = { version = "0.11.18", features = ["blocking"] }
 rustyline = { version = "11.0.0", features = ["derive"] }
-serde = { version = "1.0.164", features = ["derive"] }
+serde = { version = "1.0.171", features = ["derive"] }
 serde_cbor = "0.11.2"
-serde_json = "1.0.99"
+serde_json = "1.0.102"
 serde_pack = { version = "1.1.1", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 tempfile = "3.6.0"
-thiserror = "1.0.40"
+thiserror = "1.0.43"
 tokio = { version = "1.29.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
 tracing = "0.1"

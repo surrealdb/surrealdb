@@ -110,7 +110,7 @@ pub fn slice((val, beg, lim): (String, Option<isize>, Option<isize>)) -> Result<
 }
 
 pub fn slug((string,): (String,)) -> Result<Value, Error> {
-	Ok(string::slug(string).into())
+	Ok(string::slug::slug(string).into())
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value, Error> {
@@ -131,6 +131,45 @@ pub fn uppercase((string,): (String,)) -> Result<Value, Error> {
 
 pub fn words((string,): (String,)) -> Result<Value, Error> {
 	Ok(string.split_whitespace().collect::<Vec<&str>>().into())
+}
+
+pub mod distance {
+
+	use crate::err::Error;
+	use crate::sql::Value;
+
+	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "string::distance::hamming() function",
+		})
+	}
+
+	pub fn levenshtein((_, _): (String, String)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "string::distance::levenshtein() function",
+		})
+	}
+}
+
+pub mod similarity {
+
+	use crate::err::Error;
+	use crate::fnc::util::string::fuzzy::Fuzzy;
+	use crate::sql::Value;
+
+	pub fn fuzzy((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	}
+
+	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "string::similarity::jaro() function",
+		})
+	}
+
+	pub fn smithwaterman((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	}
 }
 
 #[cfg(test)]

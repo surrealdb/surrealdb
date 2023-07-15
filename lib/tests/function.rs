@@ -3610,6 +3610,70 @@ async fn function_string_reverse() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_similarity_fuzzy() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::fuzzy("", "");
+		RETURN string::similarity::fuzzy("some", "text");
+		RETURN string::similarity::fuzzy("text", "TEXT");
+		RETURN string::similarity::fuzzy("TEXT", "TEXT");
+		RETURN string::similarity::fuzzy("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::smithwaterman("", "");
+		RETURN string::similarity::smithwaterman("some", "text");
+		RETURN string::similarity::smithwaterman("text", "TEXT");
+		RETURN string::similarity::smithwaterman("TEXT", "TEXT");
+		RETURN string::similarity::smithwaterman("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_slice() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.");
@@ -4572,5 +4636,127 @@ async fn function_type_thing() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_euclidean() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [4, 5]);
+		RETURN vector::distance::euclidean([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(7.483314773547883);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_dotproduct() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::dotproduct([1, 2, 3], [1, 2, 3]);
+		RETURN vector::dotproduct([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::dotproduct([1, 2, 3], [4, 5]);
+		RETURN vector::dotproduct([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(14);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-14);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_magnitude() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::magnitude([]);
+		RETURN vector::magnitude([1]);
+		RETURN vector::magnitude([5]);
+		RETURN vector::magnitude([1,2,3,3,3,4,5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(5);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(8.54400374531753);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_cosine() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
+		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
 	Ok(())
 }
