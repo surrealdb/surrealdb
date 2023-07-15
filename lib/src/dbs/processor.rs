@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Operable, Options, Statement, Transaction};
+use crate::dbs::{Iterable, Iterator, Operable, Options, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::Plan;
@@ -8,7 +8,6 @@ use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
-use std::iter::Iterator;
 use std::ops::Bound;
 
 impl Iterable {
@@ -18,7 +17,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		ite: &mut crate::dbs::Iterator,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		Processor::Iterator(ite).process_iterable(ctx, opt, txn, stm, self).await
 	}
@@ -37,7 +36,7 @@ impl Iterable {
 }
 
 enum Processor<'a> {
-	Iterator(&'a mut crate::dbs::Iterator),
+	Iterator(&'a mut Iterator),
 	#[cfg(not(target_arch = "wasm32"))]
 	Channel(Sender<(Option<Thing>, Option<DocId>, Operable)>),
 }
