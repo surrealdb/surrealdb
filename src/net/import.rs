@@ -2,12 +2,12 @@ use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
-use axum::Extension;
-use axum::Router;
-use axum::TypedHeader;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::post;
+use axum::Extension;
+use axum::Router;
+use axum::TypedHeader;
 use bytes::Bytes;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
@@ -19,10 +19,10 @@ const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
+	B: HttpBody + Send + 'static,
 	B::Data: Send,
 	B::Error: std::error::Error + Send + Sync + 'static,
-    S: Clone + Send + Sync + 'static,
+	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/import", post(handler))

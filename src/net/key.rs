@@ -3,17 +3,17 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
-use axum::response::IntoResponse;
-use axum::{Router, Extension, TypedHeader};
 use axum::extract::{DefaultBodyLimit, Path, Query};
+use axum::response::IntoResponse;
 use axum::routing::options;
+use axum::{Extension, Router, TypedHeader};
 use bytes::Bytes;
+use http_body::Body as HttpBody;
 use serde::Deserialize;
-use tower_http::limit::RequestBodyLimitLayer;
 use std::str;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use http_body::Body as HttpBody;
+use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
 
@@ -27,29 +27,37 @@ struct QueryOptions {
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
+	B: HttpBody + Send + 'static,
 	B::Data: Send,
 	B::Error: std::error::Error + Send + Sync + 'static,
-    S: Clone + Send + Sync + 'static,
+	S: Clone + Send + Sync + 'static,
 {
-	Router::new().route("/key/:table",
-		options(|| async {})
-		.get(select_all)
-		.post(create_all)
-		.put(update_all)
-		.patch(modify_all)
-		.delete(delete_all)
-	).route_layer(DefaultBodyLimit::disable()).layer(RequestBodyLimitLayer::new(MAX))
-	.merge(
-		Router::new().route("/key/:table/:key",
+	Router::new()
+		.route(
+			"/key/:table",
 			options(|| async {})
-			.get(select_one)
-			.post(create_one)
-			.put(update_one)
-			.patch(modify_one)
-			.delete(delete_one)
-		).route_layer(DefaultBodyLimit::disable()).layer(RequestBodyLimitLayer::new(MAX))
-	)
+				.get(select_all)
+				.post(create_all)
+				.put(update_all)
+				.patch(modify_all)
+				.delete(delete_all),
+		)
+		.route_layer(DefaultBodyLimit::disable())
+		.layer(RequestBodyLimitLayer::new(MAX))
+		.merge(
+			Router::new()
+				.route(
+					"/key/:table/:key",
+					options(|| async {})
+						.get(select_one)
+						.post(create_one)
+						.put(update_one)
+						.patch(modify_one)
+						.delete(delete_one),
+				)
+				.route_layer(DefaultBodyLimit::disable())
+				.layer(RequestBodyLimitLayer::new(MAX)),
+		)
 }
 
 // ------------------------------

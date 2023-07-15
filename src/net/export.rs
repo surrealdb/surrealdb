@@ -1,21 +1,20 @@
 use crate::dbs::DB;
-use axum::Router;
-use axum::routing::get;
-use axum::{Extension, response::Response};
 use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use axum::{response::Response, Extension};
 use bytes::Bytes;
-use http::{StatusCode};
+use http::StatusCode;
 use http_body::Body as HttpBody;
 use hyper::body::Body;
 use surrealdb::dbs::Session;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
-    S: Clone + Send + Sync + 'static,
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
 {
-	Router::new()
-		.route("/export", get(handler))
+	Router::new().route("/export", get(handler))
 }
 
 async fn handler(
@@ -49,12 +48,9 @@ async fn handler(
 				}
 			});
 			// Return the chunked body
-			return Ok(Response::builder()
-				.status(StatusCode::OK)
-				.body(bdy)
-				.unwrap())
+			Ok(Response::builder().status(StatusCode::OK).body(bdy).unwrap())
 		}
 		// The user does not have the correct permissions
-		_ => return Err((StatusCode::FORBIDDEN, "Invalid permissions")),
+		_ => Err((StatusCode::FORBIDDEN, "Invalid permissions")),
 	}
 }

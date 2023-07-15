@@ -3,19 +3,19 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::CF;
-use axum::Extension;
-use axum::Router;
-use axum::TypedHeader;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::options;
+use axum::Extension;
+use axum::Router;
+use axum::TypedHeader;
 use bytes::Bytes;
+use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
-use http_body::Body as HttpBody;
 
 use super::headers::Accept;
 
@@ -40,13 +40,15 @@ impl Success {
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
+	B: HttpBody + Send + 'static,
 	B::Data: Send,
 	B::Error: std::error::Error + Send + Sync + 'static,
-    S: Clone + Send + Sync + 'static,
+	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/signin", options(|| async {}).post(handler)).route_layer(DefaultBodyLimit::disable()).layer(RequestBodyLimitLayer::new(MAX))
+		.route("/signin", options(|| async {}).post(handler))
+		.route_layer(DefaultBodyLimit::disable())
+		.layer(RequestBodyLimitLayer::new(MAX))
 }
 
 async fn handler(
@@ -88,7 +90,7 @@ async fn handler(
 					_ => Err(Error::InvalidType),
 				},
 				// There was an error with authentication
-				Err(err) => Err(Error::from(err)),
+				Err(err) => Err(err),
 			}
 		}
 		// The provided value was not an object

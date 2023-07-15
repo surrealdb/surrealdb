@@ -16,11 +16,12 @@ where
 }
 
 fn tracer() -> Result<Tracer, TraceError> {
-
 	opentelemetry_otlp::new_pipeline()
 		.tracing()
 		.with_exporter(opentelemetry_otlp::new_exporter().tonic().with_env())
-		.with_trace_config(opentelemetry::sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()))
+		.with_trace_config(
+			opentelemetry::sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()),
+		)
 		.install_batch(opentelemetry::runtime::Tokio)
 }
 

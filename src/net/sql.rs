@@ -3,16 +3,16 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
-use axum::Extension;
-use axum::Router;
-use axum::TypedHeader;
+use axum::extract::ws::Message;
+use axum::extract::ws::WebSocket;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Query;
 use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::Message;
-use axum::extract::ws::WebSocket;
 use axum::response::IntoResponse;
 use axum::routing::options;
+use axum::Extension;
+use axum::Router;
+use axum::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use http_body::Body as HttpBody;
@@ -25,21 +25,16 @@ const MAX: usize = 1024 * 1024; // 1 MiB
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
+	B: HttpBody + Send + 'static,
 	B::Data: Send,
 	B::Error: std::error::Error + Send + Sync + 'static,
-    S: Clone + Send + Sync + 'static,
+	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/sql",
-		options(|| async {})
-			.get(ws_handler)
-			.post(post_handler)
-		)
+		.route("/sql", options(|| async {}).get(ws_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(MAX))
 }
-
 
 async fn post_handler(
 	Extension(session): Extension<Session>,
@@ -69,10 +64,10 @@ async fn post_handler(
 }
 
 async fn ws_handler(
-    ws: WebSocketUpgrade,
+	ws: WebSocketUpgrade,
 	Extension(sess): Extension<Session>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, sess))
+	ws.on_upgrade(move |socket| handle_socket(socket, sess))
 }
 
 async fn handle_socket(ws: WebSocket, session: Session) {

@@ -10,9 +10,9 @@ use crate::rpc::paths::{ID, METHOD, PARAMS};
 use crate::rpc::res;
 use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
+use axum::routing::get;
 use axum::Extension;
 use axum::Router;
-use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use http_body::Body as HttpBody;
 use once_cell::sync::Lazy;
@@ -32,8 +32,8 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
+	extract::ws::{Message, WebSocket, WebSocketUpgrade},
+	response::IntoResponse,
 };
 
 // Mapping of WebSocketID to WebSocket
@@ -46,19 +46,16 @@ static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-    B: HttpBody + Send + 'static,
-    S: Clone + Send + Sync + 'static,
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
 {
 	Router::new().route("/rpc", get(handler))
 }
 
-async fn handler(
-    ws: WebSocketUpgrade,
-	Extension(sess): Extension<Session>,
-) -> impl IntoResponse {
-    // finalize the upgrade process by returning upgrade callback.
-    // we can customize the callback by sending additional info such as address.
-    ws.on_upgrade(move |socket| handle_socket(socket, sess))
+async fn handler(ws: WebSocketUpgrade, Extension(sess): Extension<Session>) -> impl IntoResponse {
+	// finalize the upgrade process by returning upgrade callback.
+	// we can customize the callback by sending additional info such as address.
+	ws.on_upgrade(move |socket| handle_socket(socket, sess))
 }
 
 async fn handle_socket(ws: WebSocket, sess: Session) {

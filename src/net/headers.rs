@@ -17,14 +17,14 @@ pub fn add_version_header() -> SetResponseHeaderLayer<HeaderValue> {
 	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
 	SetResponseHeaderLayer::if_not_present(
 		HeaderName::from_static(VERSION),
-		HeaderValue::try_from(val).unwrap()
+		HeaderValue::try_from(val).unwrap(),
 	)
 }
 
 pub fn add_server_header() -> SetResponseHeaderLayer<HeaderValue> {
 	SetResponseHeaderLayer::if_not_present(
 		HeaderName::from_static(SERVER),
-		HeaderValue::try_from(SERVER_NAME).unwrap()
+		HeaderValue::try_from(SERVER_NAME).unwrap(),
 	)
 }
 
@@ -52,17 +52,15 @@ impl std::fmt::Display for Accept {
 }
 
 impl Header for Accept {
-    fn name() -> &'static HeaderName {
-         &http::header::ACCEPT
-    }
+	fn name() -> &'static HeaderName {
+		&http::header::ACCEPT
+	}
 
-    fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
-    where
-        I: Iterator<Item = &'i HeaderValue>,
-    {
-        let value = values
-            .next()
-            .ok_or_else(headers::Error::invalid)?;
+	fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
+	where
+		I: Iterator<Item = &'i HeaderValue>,
+	{
+		let value = values.next().ok_or_else(headers::Error::invalid)?;
 
 		match value.to_str().map_err(|_| headers::Error::invalid())? {
 			"text/plain" => Ok(Accept::TextPlain),
@@ -72,16 +70,16 @@ impl Header for Accept {
 			"application/octet-stream" => Ok(Accept::ApplicationOctetStream),
 			"application/surrealdb" => Ok(Accept::Surrealdb),
 			// TODO: Support more (all?) mime-types
-			_ => Err(headers::Error::invalid())
+			_ => Err(headers::Error::invalid()),
 		}
-    }
+	}
 
-    fn encode<E>(&self, values: &mut E)
-    where
-        E: Extend<HeaderValue>,
-    {
+	fn encode<E>(&self, values: &mut E)
+	where
+		E: Extend<HeaderValue>,
+	{
 		values.extend(std::iter::once(self.into()));
-    }
+	}
 }
 
 impl From<Accept> for HeaderValue {

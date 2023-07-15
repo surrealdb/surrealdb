@@ -6,7 +6,6 @@ use crate::err::Error;
 
 /// Start a graceful shutdown on the Axum Handle when a shutdown signal is received.
 pub fn graceful_shutdown(handle: Handle, dur: Option<Duration>) {
-
 	tokio::spawn(async move {
 		let result = listen().await.expect("Failed to listen to shutdown signal");
 		info!(target: super::LOG, "{} received. Start graceful shutdown...", result);

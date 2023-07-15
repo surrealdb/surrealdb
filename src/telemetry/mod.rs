@@ -1,14 +1,16 @@
 mod logs;
-mod traces;
 pub mod metrics;
+mod traces;
 
 use std::time::Duration;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
-use opentelemetry::KeyValue;
+use opentelemetry::sdk::resource::{
+	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
+};
 use opentelemetry::sdk::Resource;
-use opentelemetry::sdk::resource::{SdkProvidedResourceDetector, EnvResourceDetector, TelemetryResourceDetector};
+use opentelemetry::KeyValue;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
@@ -123,16 +125,8 @@ mod tests {
 
 		println!("Waiting for request...");
 		let req = req_rx.recv().await.expect("missing export request");
-		let first_span = req
-			.resource_spans
-			.first()
-			.unwrap()
-			.scope_spans
-			.first()
-			.unwrap()
-			.spans
-			.first()
-			.unwrap();
+		let first_span =
+			req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans.first().unwrap();
 		assert_eq!("test-surreal-span", first_span.name);
 		let first_event = first_span.events.first().unwrap();
 		assert_eq!("test-surreal-event", first_event.name);
@@ -177,14 +171,7 @@ mod tests {
 
 		println!("Waiting for request...");
 		let req = req_rx.recv().await.expect("missing export request");
-		let spans = &req
-			.resource_spans
-			.first()
-			.unwrap()
-			.scope_spans
-			.first()
-			.unwrap()
-			.spans;
+		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 
 		assert_eq!(1, spans.len());
 		assert_eq!("debug", spans.first().unwrap().name);

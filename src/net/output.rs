@@ -71,28 +71,23 @@ pub fn simplify<T: Serialize>(v: T) -> Json {
 }
 
 impl IntoResponse for Output {
-	fn into_response(self) -> Response	{
+	fn into_response(self) -> Response {
 		match self {
-			Output::Text(v) => (
-				[(CONTENT_TYPE, HeaderValue::from(Accept::TextPlain))],
-				v
-			).into_response(),
-			Output::Json(v) => (
-				[(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationJson))],
-				v
-			).into_response(),
-			Output::Cbor(v) => (
-				[(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))],
-				v
-			).into_response(),
-			Output::Pack(v) => (
-				[(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationPack))],
-				v
-			).into_response(),
-			Output::Full(v) => (
-				[(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))],
-				v
-			).into_response(),
+			Output::Text(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::TextPlain))], v).into_response()
+			}
+			Output::Json(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationJson))], v).into_response()
+			}
+			Output::Cbor(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
+			}
+			Output::Pack(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationPack))], v).into_response()
+			}
+			Output::Full(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))], v).into_response()
+			}
 			Output::None => StatusCode::OK.into_response(),
 			Output::Fail => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
 		}

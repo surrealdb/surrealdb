@@ -27,9 +27,9 @@ mod err;
 mod iam;
 #[cfg(feature = "has-storage")]
 mod net;
-mod telemetry;
 #[cfg(feature = "has-storage")]
 mod rpc;
+mod telemetry;
 
 use std::future::Future;
 use std::process::ExitCode;
