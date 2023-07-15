@@ -342,6 +342,10 @@ impl Number {
 		}
 	}
 
+	pub fn acos(self) -> Self {
+		self.to_float().acos().into()
+	}
+
 	pub fn ceil(self) -> Self {
 		match self {
 			Number::Int(v) => v.into(),

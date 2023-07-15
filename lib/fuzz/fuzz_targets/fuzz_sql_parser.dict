@@ -278,7 +278,7 @@
 "rand::uuid::v7("
 "search::score("
 "search::highlight("
-"search::offsets"
+"search::offsets("
 "session"
 "session::"
 "session::db("

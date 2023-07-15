@@ -13,16 +13,19 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
 			let desired_value = Value::parse(*desired_response);
-			assert_eq!(
-				v,
-				desired_value,
-				"Received response did not match \
+			// If both values are NaN, they are equal from a test PoV
+			if !desired_value.is_nan() || !v.is_nan() {
+				assert_eq!(
+					v,
+					desired_value,
+					"Received response did not match \
 	expected.
 	Query response #{},
 	Desired response: {desired_value},
 	Actual response: {v}",
-				i + 1
-			);
+					i + 1
+				);
+			}
 		} else {
 			panic!("Response index {i} out of bounds of desired responses.");
 		}
@@ -4719,6 +4722,57 @@ async fn function_vector_add() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_vector_angle() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::angle([1,0,0], [0,1,0]);
+		RETURN vector::angle([5, 10, 15], [10, 5, 20]);
+		RETURN vector::angle([-3, 2, 5], [4, -1, 2]);
+		RETURN vector::angle([NaN, 2, 3], [-1, -2, NaN]);
+	"#,
+		&["1.5707963267948966", "0.36774908225917935", "1.7128722906354115", "NaN"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN vector::angle([1, 2, 3], [4, 5]);
+		RETURN vector::angle([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same length."
+		],
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_crossproduct() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::crossproduct([1, 2, 3], [4, 5, 6]);
+		RETURN vector::crossproduct([1, 2, 3], [-4, -5, -6]);
+		RETURN vector::crossproduct([1, Nan, 3], [Nan, -5, -6]);
+	"#,
+		&["[-3, 6, -3]", "[3, -6, 3]", "[NaN, NaN, NaN]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::crossproduct([1, 2, 3], [4, 5]);
+		RETURN vector::crossproduct([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::crossproduct(). Both vectors must have a length of 3.",
+			"Incorrect arguments for function vector::crossproduct(). Both vectors must have a length of 3."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_vector_dotproduct() -> Result<(), Error> {
 	test_queries(
 		r#"
@@ -4757,6 +4811,20 @@ async fn function_vector_magnitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_vector_normalize() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::normalize([]);
+		RETURN vector::normalize([1]);
+		RETURN vector::normalize([5]);
+		RETURN vector::normalize([4,3]);
+	"#,
+		&["[]", "[1]", "[1]", "[0.8,0.6]"],
+	)
+	.await
+}
+
+#[tokio::test]
 async fn function_vector_multiply() -> Result<(), Error> {
 	test_queries(
 		r#"
@@ -4774,6 +4842,35 @@ async fn function_vector_multiply() -> Result<(), Error> {
 		&[
 			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length.",
 			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_project() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::project([1, 2, 3], [4, 5, 6]);
+		RETURN vector::project([1, -2, 3], [-4, 5, 6]);
+		RETURN vector::project([NaN, -2, 3], [-4, NaN, NaN]);
+	"#,
+		&[
+			"[1.6623376623376624, 2.077922077922078, 2.4935064935064934]",
+			"[-0.2077922077922078, 0.25974025974025977, 0.3116883116883117]",
+			"[NaN, NaN, NaN]",
+		],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::project([1, 2, 3], [4, 5]);
+		RETURN vector::project([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same length."
 		],
 	)
 		.await?;

@@ -1,5 +1,7 @@
 use crate::err::Error;
-use crate::fnc::util::math::vector::{Add, Divide, DotProduct, Magnitude, Multiply, Subtract};
+use crate::fnc::util::math::vector::{
+	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Subtract,
+};
 use crate::sql::{Number, Value};
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
@@ -12,6 +14,16 @@ pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	}
 }
 
+pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	match a.angle(&b) {
+		None => Err(Error::InvalidArguments {
+			name: String::from("vector::angle"),
+			message: String::from("The two vectors must be of the same length."),
+		}),
+		Some(dot) => Ok(dot.into()),
+	}
+}
+
 pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	match a.divide(&b) {
 		None => Err(Error::InvalidArguments {
@@ -19,6 +31,16 @@ pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 			message: String::from("The two vectors must be of the same length."),
 		}),
 		Some(v) => Ok(v.into()),
+	}
+}
+
+pub fn crossproduct((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	match a.crossproduct(&b) {
+		None => Err(Error::InvalidArguments {
+			name: String::from("vector::crossproduct"),
+			message: String::from("Both vectors must have a length of 3."),
+		}),
+		Some(dot) => Ok(dot.into()),
 	}
 }
 
@@ -46,6 +68,20 @@ pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	}
 }
 
+pub fn normalize((a,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(a.normalize().into())
+}
+
+pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	match a.project(&b) {
+		None => Err(Error::InvalidArguments {
+			name: String::from("vector::project"),
+			message: String::from("The two vectors must be of the same length."),
+		}),
+		Some(v) => Ok(v.into()),
+	}
+}
+
 pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	match a.subtract(&b) {
 		None => Err(Error::InvalidArguments {
@@ -54,30 +90,6 @@ pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		}),
 		Some(v) => Ok(v.into()),
 	}
-}
-
-pub fn normalize((_,): (Vec<Number>,)) -> Result<Value, Error> {
-	Err(Error::FeatureNotYetImplemented {
-		feature: "vector::normalize() function",
-	})
-}
-
-pub fn project((_,): (Vec<Number>,)) -> Result<Value, Error> {
-	Err(Error::FeatureNotYetImplemented {
-		feature: "vector::project() function",
-	})
-}
-
-pub fn crossproduct((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	Err(Error::FeatureNotYetImplemented {
-		feature: "vector::crossproduct() function",
-	})
-}
-
-pub fn angle((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	Err(Error::FeatureNotYetImplemented {
-		feature: "vector::angle() function",
-	})
 }
 
 pub mod distance {
