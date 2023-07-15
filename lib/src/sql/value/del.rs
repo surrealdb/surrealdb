@@ -22,9 +22,9 @@ impl Value {
 		path: &[Part],
 	) -> Result<(), Error> {
 		match path.first() {
-			// Get the current path part
+			// Get the current value at path
 			Some(p) => match self {
-				// Current path part is an object
+				// Current value at path is an object
 				Value::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
@@ -46,9 +46,22 @@ impl Value {
 							_ => Ok(()),
 						},
 					},
+					Part::Value(x) => match x.compute(ctx, opt, txn, None).await? {
+						Value::Strand(f) => match path.len() {
+							1 => {
+								v.remove(f.as_str());
+								Ok(())
+							}
+							_ => match v.get_mut(f.as_str()) {
+								Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
+								_ => Ok(()),
+							},
+						},
+						_ => Ok(()),
+					},
 					_ => Ok(()),
 				},
-				// Current path part is an array
+				// Current value at path is an array
 				Value::Array(v) => match p {
 					Part::All => match path.len() {
 						1 => {
@@ -114,16 +127,59 @@ impl Value {
 							v.abolish(|i| m.contains(&i));
 							Ok(())
 						}
-						_ => {
-							let path = path.next();
-							for v in v.iter_mut() {
-								let cur = CursorDoc::new(None, None, v);
-								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
-									v.del(ctx, opt, txn, path).await?;
+						_ => match path.next().first() {
+							Some(Part::Index(_)) => {
+								let mut a = Vec::new();
+								let mut p = Vec::new();
+								// Store the elements and positions to update
+								for (i, o) in v.iter_mut().enumerate() {
+									let cur = CursorDoc::new(None, None, o);
+									if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
+										a.push(o.clone());
+										p.push(i);
+									}
 								}
+								// Convert the matched elements array to a value
+								let mut a = Value::from(a);
+								// Set the new value on the matches elements
+								a.del(ctx, opt, txn, path.next()).await?;
+								// Push the new values into the original array
+								for (i, p) in p.into_iter().enumerate().rev() {
+									match a.pick(&[Part::Index(i.into())]) {
+										Value::None => {
+											v.remove(i);
+										}
+										x => v[p] = x,
+									}
+								}
+								Ok(())
 							}
-							Ok(())
-						}
+							_ => {
+								let path = path.next();
+								for v in v.iter_mut() {
+									let cur = CursorDoc::new(None, None, v);
+									if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
+										v.del(ctx, opt, txn, path).await?;
+									}
+								}
+								Ok(())
+							}
+						},
+					},
+					Part::Value(x) => match x.compute(ctx, opt, txn, None).await? {
+						Value::Number(i) => match path.len() {
+							1 => {
+								if v.len().gt(&i.to_usize()) {
+									v.remove(i.to_usize());
+								}
+								Ok(())
+							}
+							_ => match v.get_mut(i.to_usize()) {
+								Some(v) => v.del(ctx, opt, txn, path.next()).await,
+								None => Ok(()),
+							},
+						},
+						_ => Ok(()),
 					},
 					_ => {
 						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
@@ -264,6 +320,18 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
 		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }] } }");
+		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn del_array_where_fields_array_index() {
+		let (ctx, opt, txn) = mock().await;
+		let idi = Idiom::parse("test.something[WHERE age > 30][0]");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'B', age: 36 }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
