@@ -4,7 +4,7 @@ use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::i64;
 use nom::combinator::{map, opt};
 use nom::number::complete::recognize_float;
@@ -231,6 +231,14 @@ impl Number {
 			Number::Int(v) => v < &0,
 			Number::Float(v) => v < &0.0,
 			Number::Decimal(v) => v < &Decimal::ZERO,
+		}
+	}
+
+	pub fn is_zero(&self) -> bool {
+		match self {
+			Number::Int(v) => v == &0,
+			Number::Float(v) => v == &0.0,
+			Number::Decimal(v) => v == &Decimal::ZERO,
 		}
 	}
 
@@ -637,7 +645,7 @@ impl Sort for Vec<Number> {
 	}
 }
 
-pub fn number(i: &str) -> IResult<&str, Number> {
+fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
@@ -647,6 +655,10 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 		Suffix::Decimal => Number::from(Decimal::from_str(v).map_err(|_| Failure(Parser(i)))?),
 	};
 	Ok((i, number))
+}
+
+pub fn number(i: &str) -> IResult<&str, Number> {
+	alt((map(tag_no_case("NaN"), |_| Number::NAN), not_nan))(i)
 }
 
 #[derive(Debug)]
@@ -689,6 +701,15 @@ mod tests {
 		}
 
 		assert!(!decimal_is_integer(&Decimal::HALF_PI));
+	}
+
+	#[test]
+	fn number_nan() {
+		let sql = "NaN";
+		let res = number(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("NaN", format!("{}", out));
 	}
 
 	#[test]

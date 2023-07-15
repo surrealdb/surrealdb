@@ -4,10 +4,7 @@
 
 pub mod bottom;
 pub mod deviation;
-pub mod dotproduct;
-pub mod euclideandistance;
 pub mod interquartile;
-pub mod magnitude;
 pub mod mean;
 pub mod median;
 pub mod midhinge;
@@ -19,3 +16,4 @@ pub mod spread;
 pub mod top;
 pub mod trimean;
 pub mod variance;
+pub mod vector;

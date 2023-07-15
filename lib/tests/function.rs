@@ -16,15 +16,40 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 			assert_eq!(
 				v,
 				desired_value,
-				"Recieved responce did not match \
+				"Received response did not match \
 	expected.
-	Query responce #{},
-	Desired responce: {desired_value},
+	Query response #{},
+	Desired response: {desired_value},
 	Actual response: {v}",
 				i + 1
 			);
 		} else {
 			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
+
+async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), Error> {
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let response = db.execute(sql, &session, None).await?;
+	if response.len() != expected_errors.len() {
+		panic!(
+			"Wrong number of responses {} - expected {}.",
+			response.len(),
+			expected_errors.len()
+		);
+	}
+	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
+		if let Some(expected_error) = expected_errors.get(i) {
+			if let Err(e) = r {
+				assert_eq!(e.to_string().as_str(), *expected_error)
+			} else {
+				panic!("Response index {i} is not an error.");
+			}
+		} else {
+			panic!("Response index {i} out of bounds of expected responses.");
 		}
 	}
 	Ok(())
@@ -4670,93 +4695,157 @@ async fn function_vector_distance_euclidean() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_vector_add() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::add([1, 2, 3], [1, 2, 3]);
+		RETURN vector::add([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[2, 4, 6]", "[0, 0, 0]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::add([1, 2, 3], [4, 5]);
+		RETURN vector::add([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same length."
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_vector_dotproduct() -> Result<(), Error> {
-	let sql = r#"
+	test_queries(
+		r#"
 		RETURN vector::dotproduct([1, 2, 3], [1, 2, 3]);
 		RETURN vector::dotproduct([1, 2, 3], [-1, -2, -3]);
+		"#,
+		&["14", "-14"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
 		RETURN vector::dotproduct([1, 2, 3], [4, 5]);
 		RETURN vector::dotproduct([1, 2], [4, 5, 5]);
-	"#;
-
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(14);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(-14);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
+	"#,
+		&[
+			"Incorrect arguments for function vector::dotproduct(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::dotproduct(). The two vectors must be of the same length."
+		],
+	).await?;
 	Ok(())
 }
 
 #[tokio::test]
 async fn function_vector_magnitude() -> Result<(), Error> {
-	let sql = r#"
+	test_queries(
+		r#"
 		RETURN vector::magnitude([]);
 		RETURN vector::magnitude([1]);
 		RETURN vector::magnitude([5]);
 		RETURN vector::magnitude([1,2,3,3,3,4,5]);
-	"#;
+	"#,
+		&["0", "1", "5", "8.54400374531753"],
+	)
+	.await
+}
 
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(1);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(5);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(8.54400374531753);
-	assert_eq!(tmp, val);
+#[tokio::test]
+async fn function_vector_multiply() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::multiply([1, 2, 3], [1, 2, 3]);
+		RETURN vector::multiply([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[1, 4, 9]", "[-1, -4, -9]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::multiply([1, 2, 3], [4, 5]);
+		RETURN vector::multiply([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_divide() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::divide([10, NaN, 20, 30, 0], [0, 1, 2, 0, 4]);
+		RETURN vector::divide([10, -20, 30, 0], [0, -1, 2, -3]);
+	"#,
+		&["[NaN, NaN, 10, NaN, 0]", "[NaN, 20, 15, 0]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::divide([1, 2, 3], [4, 5]);
+		RETURN vector::divide([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same length."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_subtract() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::subtract([1, 2, 3], [1, 2, 3]);
+		RETURN vector::subtract([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[0, 0, 0]", "[2, 4, 6]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::subtract([1, 2, 3], [4, 5]);
+		RETURN vector::subtract([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same length.",
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same length."
+		],
+	)
+		.await?;
 	Ok(())
 }
 
 #[tokio::test]
 async fn function_vector_similarity_cosine() -> Result<(), Error> {
-	let sql = r#"
+	test_queries(
+		r#"
 		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
 		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
-		RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
-		RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);
-	"#;
 
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(1.0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(-1.0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
+	"#,
+		&["1.0", "-1.0"],
+	)
+	.await?;
+
+	check_test_is_error(
+	r"RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
+	RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);",
+	&[
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same length.",
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same length."
+	]).await?;
 	Ok(())
 }
