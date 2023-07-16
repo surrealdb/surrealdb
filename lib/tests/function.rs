@@ -5012,3 +5012,25 @@ async fn function_vector_distance_minkowski() -> Result<(), Error> {
 		]).await?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn function_vector_distance_chebyshev() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::chebyshev([1, 2, 3], [4, 5, 6]);
+		RETURN vector::distance::chebyshev([-1, -2, -3], [-4, -5, -6]);
+		RETURN vector::distance::chebyshev([1.1, 2.2, 3], [4, 5.5, 6.6]);
+	"#,
+		&["3.0", "3.0", "3.5999999999999996"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::chebyshev([1, 2, 3], [4, 5]);
+	RETURN vector::distance::chebyshev([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::chebyshev(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::chebyshev(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}

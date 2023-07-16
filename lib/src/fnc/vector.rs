@@ -48,14 +48,12 @@ pub mod distance {
 
 	use crate::err::Error;
 	use crate::fnc::util::math::vector::{
-		EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
+		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
 	use crate::sql::{Number, Value};
 
-	pub fn chebyshev((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::chebyshev() function",
-		})
+	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Ok(a.chebyshev_distance(&b)?.into())
 	}
 
 	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {

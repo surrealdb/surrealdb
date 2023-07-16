@@ -19,7 +19,7 @@ fn check_same_dimension(fnc: &str, a: &Vec<Number>, b: &Vec<Number>) -> Result<(
 
 impl Add for Vec<Number> {
 	fn add(&self, other: &Self) -> Result<Vec<Number>, Error> {
-		check_same_dimension("vector::add", &self, other)?;
+		check_same_dimension("vector::add", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| a + b).collect())
 	}
 }
@@ -31,8 +31,8 @@ pub trait Angle {
 
 impl Angle for Vec<Number> {
 	fn angle(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::angle", &self, other)?;
-		let dp = dot(&self, other);
+		check_same_dimension("vector::angle", self, other)?;
+		let dp = dot(self, other);
 		let m = self.magnitude() * other.magnitude();
 		let d = vector_div(&dp, &m);
 		Ok(d.acos())
@@ -45,8 +45,8 @@ pub trait CosineSimilarity {
 
 impl CosineSimilarity for Vec<Number> {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::similarity::cosine", &self, other)?;
-		let d = dot(&self, other);
+		check_same_dimension("vector::similarity::cosine", self, other)?;
+		let d = dot(self, other);
 		Ok(d / (self.magnitude() * other.magnitude()))
 	}
 }
@@ -66,7 +66,7 @@ fn vector_div(a: &Number, b: &Number) -> Number {
 
 impl Divide for Vec<Number> {
 	fn divide(&self, other: &Self) -> Result<Vec<Number>, Error> {
-		check_same_dimension("vector::divide", &self, other)?;
+		check_same_dimension("vector::divide", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| vector_div(a, b)).collect())
 	}
 }
@@ -77,7 +77,7 @@ pub trait HammingDistance {
 
 impl HammingDistance for Vec<Number> {
 	fn hamming_distance(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::distance::hamming", &self, other)?;
+		check_same_dimension("vector::distance::hamming", self, other)?;
 		Ok(self.iter().zip(other.iter()).filter(|&(a, b)| a != b).count().into())
 	}
 }
@@ -88,7 +88,7 @@ pub trait ManhattanDistance {
 
 impl ManhattanDistance for Vec<Number> {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::distance::manhattan", &self, other)?;
+		check_same_dimension("vector::distance::manhattan", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| (a - b).abs()).sum())
 	}
 }
@@ -99,7 +99,7 @@ pub trait MinkowskiDistance {
 
 impl MinkowskiDistance for Vec<Number> {
 	fn minkowski_distance(&self, other: &Self, order: Number) -> Result<Number, Error> {
-		check_same_dimension("vector::distance::minkowski", &self, other)?;
+		check_same_dimension("vector::distance::minkowski", self, other)?;
 		let p = order.to_float();
 		let dist: f64 = self
 			.iter()
@@ -117,7 +117,7 @@ pub trait Multiply {
 
 impl Multiply for Vec<Number> {
 	fn multiply(&self, other: &Self) -> Result<Vec<Number>, Error> {
-		check_same_dimension("vector::multiply", &self, other)?;
+		check_same_dimension("vector::multiply", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| a * b).collect())
 	}
 }
@@ -129,11 +129,27 @@ pub trait Project {
 
 impl Project for Vec<Number> {
 	fn project(&self, other: &Self) -> Result<Vec<Number>, Error> {
-		check_same_dimension("vector::project", &self, other)?;
-		let d = dot(&self, other);
+		check_same_dimension("vector::project", self, other)?;
+		let d = dot(self, other);
 		let m = magnitude_squared(other).into();
 		let s = vector_div(&d, &m);
 		Ok(other.iter().map(|x| &s * x).collect())
+	}
+}
+
+pub trait ChebyshevDistance {
+	fn chebyshev_distance(&self, other: &Self) -> Result<Number, Error>;
+}
+
+impl ChebyshevDistance for Vec<Number> {
+	fn chebyshev_distance(&self, other: &Self) -> Result<Number, Error> {
+		check_same_dimension("vector::distance::chebyshev", self, other)?;
+		Ok(self
+			.iter()
+			.zip(other.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
+			.fold(f64::MIN, f64::max)
+			.into())
 	}
 }
 
@@ -144,7 +160,7 @@ pub trait Subtract {
 
 impl Subtract for Vec<Number> {
 	fn subtract(&self, other: &Self) -> Result<Vec<Number>, Error> {
-		check_same_dimension("vector::subtract", &self, other)?;
+		check_same_dimension("vector::subtract", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| a - b).collect())
 	}
 }
@@ -180,12 +196,12 @@ pub trait DotProduct {
 
 impl DotProduct for Vec<Number> {
 	fn dot(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::dot", &self, other)?;
-		Ok(dot(&self, other))
+		check_same_dimension("vector::dot", self, other)?;
+		Ok(dot(self, other))
 	}
 }
 
-fn dot(a: &Vec<Number>, b: &Vec<Number>) -> Number {
+fn dot(a: &[Number], b: &[Number]) -> Number {
 	a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
 }
 
@@ -196,7 +212,7 @@ pub trait EuclideanDistance {
 
 impl EuclideanDistance for Vec<Number> {
 	fn euclidean_distance(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::distance::euclidean", &self, other)?;
+		check_same_dimension("vector::distance::euclidean", self, other)?;
 		Ok(self
 			.iter()
 			.zip(other.iter())
