@@ -4931,19 +4931,63 @@ async fn function_vector_similarity_cosine() -> Result<(), Error> {
 		r#"
 		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
 		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
-
+		RETURN vector::similarity::cosine([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
 	"#,
-		&["1.0", "-1.0"],
+		&["1.0", "-1.0", "NaN"],
 	)
 	.await?;
 
 	check_test_is_error(
 	r"RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
-	RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);",
+		RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);",
 	&[
 		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension.",
 		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension."
 	]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_jaccard() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::similarity::jaccard([1, 2, 3], [3, 2, 1]);
+		RETURN vector::similarity::jaccard([1, 2, 3], [-3, -2, -1]);
+		RETURN vector::similarity::jaccard([1, -2, 3, -4], [4, 3, 2, 1]);
+		RETURN vector::similarity::jaccard([NaN, 1, 2, 3], [NaN, 2, 3, 4]);
+	"#,
+		&["1.0", "0", "0.3333333333333333", "0.6"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::similarity::jaccard([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::jaccard([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_pearson() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::similarity::pearson([1, 2, 3, 4, 5], [1, 2.5, 3.5, 4.2, 5.1]);
+		RETURN vector::similarity::pearson([NaN, 1, 2, 3, 4, 5], [NaN, 1, 2.5, 3.5, 4.2, 5.1]);
+	"#,
+		&["0.9894065340659606", "NaN"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::similarity::pearson([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::pearson([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::similarity::pearson(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::similarity::pearson(). The two vectors must be of the same dimension."
+		]).await?;
 	Ok(())
 }
 
@@ -4954,14 +4998,15 @@ async fn function_vector_distance_manhattan() -> Result<(), Error> {
 		RETURN vector::distance::manhattan([1, 2, 3], [4, 5, 6]);
 		RETURN vector::distance::manhattan([1, 2, 3], [-4, -5, -6]);
 		RETURN vector::distance::manhattan([1.1, 2, 3.3], [4, 5.5, 6.6]);
+		RETURN vector::distance::manhattan([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
 	"#,
-		&["9", "21", "9.7"],
+		&["9", "21", "9.7", "NaN"],
 	)
 	.await?;
 
 	check_test_is_error(
 		r"RETURN vector::distance::manhattan([1, 2, 3], [4, 5]);
-	RETURN vector::distance::manhattan([1, 2], [4, 5, 5]);",
+			RETURN vector::distance::manhattan([1, 2], [4, 5, 5]);",
 		&[
 			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension.",
 			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension."
@@ -4976,14 +5021,15 @@ async fn function_vector_distance_hamming() -> Result<(), Error> {
 		RETURN vector::distance::hamming([1, 2, 2], [1, 2, 3]);
 		RETURN vector::distance::hamming([-1, -2, -3], [-2, -2, -2]);
 		RETURN vector::distance::hamming([1.1, 2.2, -3.3], [1.1, 2, -3.3]);
+		RETURN vector::distance::hamming([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
 	"#,
-		&["1", "2", "1"],
+		&["1", "2", "1", "0"],
 	)
 	.await?;
 
 	check_test_is_error(
 		r"RETURN vector::distance::hamming([1, 2, 3], [4, 5]);
-	RETURN vector::distance::hamming([1, 2], [4, 5, 5]);",
+			RETURN vector::distance::hamming([1, 2], [4, 5, 5]);",
 		&[
 			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension.",
 			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension."
@@ -4998,8 +5044,9 @@ async fn function_vector_distance_minkowski() -> Result<(), Error> {
 		RETURN vector::distance::minkowski([1, 2, 3], [4, 5, 6], 3);
 		RETURN vector::distance::minkowski([-1, -2, -3], [-4, -5, -6], 3);
 		RETURN vector::distance::minkowski([1.1, 2.2, 3], [4, 5.5, 6.6], 3);
+		RETURN vector::distance::minkowski([NaN, 1, 2, 3], [NaN, 4, 5, 6], 3);
 	"#,
-		&["4.3267487109222245", "4.3267487109222245", "4.747193170917638"],
+		&["4.3267487109222245", "4.3267487109222245", "4.747193170917638", "NaN"],
 	)
 	.await?;
 
@@ -5020,8 +5067,9 @@ async fn function_vector_distance_chebyshev() -> Result<(), Error> {
 		RETURN vector::distance::chebyshev([1, 2, 3], [4, 5, 6]);
 		RETURN vector::distance::chebyshev([-1, -2, -3], [-4, -5, -6]);
 		RETURN vector::distance::chebyshev([1.1, 2.2, 3], [4, 5.5, 6.6]);
+		RETURN vector::distance::chebyshev([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
 	"#,
-		&["3.0", "3.0", "3.5999999999999996"],
+		&["3.0", "3.0", "3.5999999999999996", "3.0"],
 	)
 	.await?;
 

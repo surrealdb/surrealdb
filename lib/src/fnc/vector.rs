@@ -82,23 +82,19 @@ pub mod distance {
 pub mod similarity {
 
 	use crate::err::Error;
-	use crate::fnc::util::math::vector::CosineSimilarity;
+	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 	use crate::sql::{Number, Value};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.cosine_similarity(&b)?.into())
 	}
 
-	pub fn jaccard((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::similarity::jaccard() function",
-		})
+	pub fn jaccard((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Ok(a.jaccard_similarity(&b)?.into())
 	}
 
-	pub fn pearson((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::similarity::pearson() function",
-		})
+	pub fn pearson((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Ok(a.pearson_similarity(&b)?.into())
 	}
 
 	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {

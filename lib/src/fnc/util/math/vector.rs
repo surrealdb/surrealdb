@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::Number;
+use std::collections::HashSet;
 
 pub trait Add {
 	/// Addition of two vectors
@@ -80,6 +81,60 @@ impl HammingDistance for Vec<Number> {
 		check_same_dimension("vector::distance::hamming", self, other)?;
 		Ok(self.iter().zip(other.iter()).filter(|&(a, b)| a != b).count().into())
 	}
+}
+
+pub trait JaccardSimilarity {
+	fn jaccard_similarity(&self, other: &Self) -> Result<Number, Error>;
+}
+
+impl JaccardSimilarity for Vec<Number> {
+	fn jaccard_similarity(&self, other: &Self) -> Result<Number, Error> {
+		check_same_dimension("vector::similarity::jaccard", self, other)?;
+		let set_a: HashSet<_> = HashSet::from_iter(self.iter());
+		let set_b: HashSet<_> = HashSet::from_iter(other.iter());
+		let intersection_size = set_a.intersection(&set_b).count() as f64;
+		let union_size = set_a.union(&set_b).count() as f64;
+		Ok((intersection_size / union_size).into())
+	}
+}
+
+pub trait PearsonSimilarity {
+	fn pearson_similarity(&self, other: &Self) -> Result<Number, Error>;
+}
+
+impl PearsonSimilarity for Vec<Number> {
+	fn pearson_similarity(&self, other: &Self) -> Result<Number, Error> {
+		check_same_dimension("vector::similarity::pearson", self, other)?;
+
+		let m1 = mean(self);
+		let m2 = mean(other);
+		let covar: f64 = self
+			.iter()
+			.zip(other.iter())
+			.map(|(x, y)| (x.to_float() - m1) * (y.to_float() - m2))
+			.sum();
+		let covar = covar / self.len() as f64;
+		let std_dev1 = std_dev(m1, self);
+		let std_dev2 = std_dev(m2, other);
+		Ok((covar / (std_dev1 * std_dev2)).into())
+	}
+}
+
+fn mean(v: &[Number]) -> f64 {
+	if v.is_empty() {
+		return 0.0;
+	}
+	let sum: f64 = v.iter().map(|x| x.to_float()).sum();
+	sum / v.len() as f64
+}
+
+fn std_dev(m: f64, v: &[Number]) -> f64 {
+	if v.is_empty() {
+		return 0.0;
+	}
+	let variance: f64 =
+		v.iter().map(|x| (x.to_float() - m).powf(2.0)).sum::<f64>() / v.len() as f64;
+	variance.sqrt()
 }
 
 pub trait ManhattanDistance {
