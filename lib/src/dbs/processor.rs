@@ -3,7 +3,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::Plan;
-use crate::key::ns::{graph, thing};
+use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]

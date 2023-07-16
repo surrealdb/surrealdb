@@ -8,9 +8,7 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::key::hb::Hb;
-use crate::key::nd::nq;
-use crate::key::ns::lv::Lv;
+use crate::key::cluster::hb::Hb;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -382,9 +380,11 @@ impl Datastore {
 	) -> Result<(), Error> {
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
-			tx.del(nq::new(lq.nd, lq.ns.as_str(), lq.db.as_str(), lq.lq)).await?;
+			let key = crate::key::cluster::lq::new(lq.nd, &lq.ns, &lq.db, lq.lq);
+			tx.del(key).await?;
 			// Delete the table key, used for finding LQ associated with a table
-			tx.del(Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq)).await?;
+			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq);
+			tx.del(key).await?;
 		}
 		Ok(())
 	}

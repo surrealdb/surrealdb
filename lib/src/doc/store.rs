@@ -25,7 +25,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
-		let key = crate::key::ns::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
+		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
 		run.set(key, self).await?;
 		// Carry on
 		Ok(())

@@ -145,7 +145,7 @@ impl DefineNamespaceStatement {
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Process the statement
-		let key = crate::key::ns::new(&self.name);
+		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
 		let mut run = txn.lock().await;
 		run.set(key, self).await?;
@@ -200,7 +200,7 @@ impl DefineDatabaseStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::db::new(opt.ns(), &self.name);
+		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.set(key, self).await?;
 		// Ok all good
@@ -281,7 +281,7 @@ impl DefineFunctionStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::fc::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
@@ -363,7 +363,7 @@ impl DefineAnalyzerStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::az::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
@@ -439,7 +439,7 @@ impl DefineLoginStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
-				let key = crate::key::ns::nl::new(opt.ns(), &self.name);
+				let key = crate::key::namespace::lg::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
@@ -453,7 +453,7 @@ impl DefineLoginStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
-				let key = crate::key::ns::dl::new(opt.ns(), opt.db(), &self.name);
+				let key = crate::key::database::lg::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.set(key, self).await?;
@@ -559,7 +559,7 @@ impl DefineTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
-				let key = crate::key::ns::nt::new(opt.ns(), &self.name);
+				let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
@@ -573,7 +573,7 @@ impl DefineTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
-				let key = crate::key::ns::dt::new(opt.ns(), opt.db(), &self.name);
+				let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.set(key, self).await?;
@@ -588,7 +588,7 @@ impl DefineTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
-				let key = crate::key::ns::st::new(opt.ns(), opt.db(), sc, &self.name);
+				let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.add_sc(opt.ns(), opt.db(), sc, opt.strict).await?;
@@ -672,7 +672,7 @@ impl DefineScopeStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::sc::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
@@ -790,7 +790,7 @@ impl DefineParamStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::pa::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
@@ -854,22 +854,22 @@ impl DefineTableStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::tb::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
-			let key = crate::key::ns::table::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
 			run.delp(key, u32::MAX).await?;
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Save the view config
-				let key = crate::key::ns::ft::new(opt.ns(), opt.db(), v, &self.name);
+				let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
 				run.set(key, self).await?;
 				// Clear the cache
-				let key = crate::key::ns::ft::prefix(opt.ns(), opt.db(), v);
+				let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), v);
 				run.clr(key).await?;
 			}
 			// Release the transaction
@@ -1057,13 +1057,13 @@ impl DefineEventStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Clear the cache
-		let key = crate::key::ns::ev::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -1142,13 +1142,13 @@ impl DefineFieldStatement {
 		let mut run = txn.lock().await;
 		// Process the statement
 		let fd = self.name.to_string();
-		let key = crate::key::ns::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Clear the cache
-		let key = crate::key::ns::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -1301,13 +1301,13 @@ impl DefineIndexStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
-		let key = crate::key::ns::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Clear the cache
-		let key = crate::key::ns::ix::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Remove the index data
 		RemoveIndexStatement::delete_resources(&mut run, opt, &self.what, &self.name).await?;

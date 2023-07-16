@@ -118,8 +118,8 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_non_unique_index_key(&self, v: &Array) -> key::ns::index::Index {
-		key::ns::index::Index::new(
+	fn get_non_unique_index_key(&self, v: &Array) -> key::index::Index {
+		key::index::Index::new(
 			self.opt.ns(),
 			self.opt.db(),
 			&self.ix.what,
@@ -145,8 +145,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn get_unique_index_key(&self, v: &Array) -> key::ns::index::Index {
-		key::ns::index::Index::new(
+	fn get_unique_index_key(&self, v: &Array) -> key::index::Index {
+		key::index::Index::new(
 			self.opt.ns(),
 			self.opt.db(),
 			&self.ix.what,
