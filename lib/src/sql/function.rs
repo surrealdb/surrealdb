@@ -555,8 +555,16 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 
 fn function_vector(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("dotproduct"),
+		tag("add"),
+		tag("angle"),
+		tag("divide"),
+		tag("cross"),
+		tag("dot"),
 		tag("magnitude"),
+		tag("multiply"),
+		tag("normalize"),
+		tag("project"),
+		tag("subtract"),
 		preceded(
 			tag("distance::"),
 			alt((

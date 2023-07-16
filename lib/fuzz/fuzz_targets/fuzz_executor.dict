@@ -276,6 +276,9 @@
 "uuid"
 "rand::uuid::v4("
 "rand::uuid::v7("
+"search::score("
+"search::highlight("
+"search::offsets("
 "session"
 "session::"
 "session::db("
@@ -343,17 +346,25 @@
 "type::string("
 "type::table("
 "type::thing("
-"vector::dotproduct(",
-"vector::magnitude(",
-"vector::distance::chebyshev(",
-"vector::distance::euclidean(",
-"vector::distance::hamming(",
-"vector::distance::mahalanobis(",
-"vector::distance::manhattan(",
-"vector::distance::minkowski(",
-"vector::similarity::cosine(",
-"vector::similarity::jaccard(",
-"vector::similarity::pearson(",
-"vector::similarity::spearman(",
+"vector::add("
+"vector::angle("
+"vector::cross("
+"vector::divide("
+"vector::dot("
+"vector::magnitude("
+"vector::multiply("
+"vector::normalize("
+"vector::project("
+"vector::subtract("
+"vector::distance::chebyshev("
+"vector::distance::euclidean("
+"vector::distance::hamming("
+"vector::distance::mahalanobis("
+"vector::distance::manhattan("
+"vector::distance::minkowski("
+"vector::similarity::cosine("
+"vector::similarity::jaccard("
+"vector::similarity::pearson("
+"vector::similarity::spearman("
 # TODO: Add Javascript keywords
 
