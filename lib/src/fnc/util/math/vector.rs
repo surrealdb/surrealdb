@@ -1,4 +1,6 @@
 use crate::err::Error;
+use crate::fnc::util::math::deviation::deviation;
+use crate::fnc::util::math::mean::Mean;
 use crate::sql::Number;
 use std::collections::HashSet;
 
@@ -105,36 +107,18 @@ pub trait PearsonSimilarity {
 impl PearsonSimilarity for Vec<Number> {
 	fn pearson_similarity(&self, other: &Self) -> Result<Number, Error> {
 		check_same_dimension("vector::similarity::pearson", self, other)?;
-
-		let m1 = mean(self);
-		let m2 = mean(other);
+		let m1 = self.mean();
+		let m2 = other.mean();
 		let covar: f64 = self
 			.iter()
 			.zip(other.iter())
 			.map(|(x, y)| (x.to_float() - m1) * (y.to_float() - m2))
 			.sum();
 		let covar = covar / self.len() as f64;
-		let std_dev1 = std_dev(m1, self);
-		let std_dev2 = std_dev(m2, other);
+		let std_dev1 = deviation(self, m1, false);
+		let std_dev2 = deviation(other, m2, false);
 		Ok((covar / (std_dev1 * std_dev2)).into())
 	}
-}
-
-fn mean(v: &[Number]) -> f64 {
-	if v.is_empty() {
-		return 0.0;
-	}
-	let sum: f64 = v.iter().map(|x| x.to_float()).sum();
-	sum / v.len() as f64
-}
-
-fn std_dev(m: f64, v: &[Number]) -> f64 {
-	if v.is_empty() {
-		return 0.0;
-	}
-	let variance: f64 =
-		v.iter().map(|x| (x.to_float() - m).powf(2.0)).sum::<f64>() / v.len() as f64;
-	variance.sqrt()
 }
 
 pub trait ManhattanDistance {

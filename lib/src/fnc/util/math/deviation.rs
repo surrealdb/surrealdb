@@ -1,4 +1,5 @@
-use super::variance::Variance;
+use crate::fnc::util::math::mean::Mean;
+use crate::fnc::util::math::variance::variance;
 use crate::sql::number::Number;
 
 pub trait Deviation {
@@ -8,6 +9,10 @@ pub trait Deviation {
 
 impl Deviation for Vec<Number> {
 	fn deviation(self, sample: bool) -> f64 {
-		self.variance(sample).sqrt()
+		deviation(&self, self.mean(), sample)
 	}
+}
+
+pub(super) fn deviation(v: &[Number], mean: f64, sample: bool) -> f64 {
+	variance(v, mean, sample).sqrt()
 }
