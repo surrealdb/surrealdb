@@ -91,7 +91,6 @@ pub trait JaccardSimilarity {
 
 impl JaccardSimilarity for Vec<Number> {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::similarity::jaccard", self, other)?;
 		let set_a: HashSet<_> = HashSet::from_iter(self.iter());
 		let set_b: HashSet<_> = HashSet::from_iter(other.iter());
 		let intersection_size = set_a.intersection(&set_b).count() as f64;

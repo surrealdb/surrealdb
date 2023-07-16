@@ -4668,36 +4668,6 @@ async fn function_type_thing() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_euclidean() -> Result<(), Error> {
-	let sql = r#"
-		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
-		RETURN vector::distance::euclidean([1, 2, 3], [-1, -2, -3]);
-		RETURN vector::distance::euclidean([1, 2, 3], [4, 5]);
-		RETURN vector::distance::euclidean([1, 2], [4, 5, 5]);
-	"#;
-
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(0);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::from(7.483314773547883);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	Ok(())
-}
-
-#[tokio::test]
 async fn function_vector_add() -> Result<(), Error> {
 	test_queries(
 		r#"
@@ -4932,8 +4902,9 @@ async fn function_vector_similarity_cosine() -> Result<(), Error> {
 		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
 		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
 		RETURN vector::similarity::cosine([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
+		RETURN vector::similarity::cosine([10, 50, 200], [400, 100, 20]);
 	"#,
-		&["1.0", "-1.0", "NaN"],
+		&["1.0", "-1.0", "NaN", "0.15258215962441316"],
 	)
 	.await?;
 
@@ -4955,18 +4926,11 @@ async fn function_vector_similarity_jaccard() -> Result<(), Error> {
 		RETURN vector::similarity::jaccard([1, 2, 3], [-3, -2, -1]);
 		RETURN vector::similarity::jaccard([1, -2, 3, -4], [4, 3, 2, 1]);
 		RETURN vector::similarity::jaccard([NaN, 1, 2, 3], [NaN, 2, 3, 4]);
+		RETURN vector::similarity::jaccard([0,1,2,5,6], [0,2,3,4,5,7,9]);
 	"#,
-		&["1.0", "0", "0.3333333333333333", "0.6"],
+		&["1.0", "0", "0.3333333333333333", "0.6", "0.3333333333333333"],
 	)
 	.await?;
-
-	check_test_is_error(
-		r"RETURN vector::similarity::jaccard([1, 2, 3], [4, 5]);
-		RETURN vector::similarity::jaccard([1, 2], [4, 5, 5]);",
-		&[
-			"Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension.",
-			"Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension."
-		]).await?;
 	Ok(())
 }
 
@@ -4976,8 +4940,9 @@ async fn function_vector_similarity_pearson() -> Result<(), Error> {
 		r#"
 		RETURN vector::similarity::pearson([1, 2, 3, 4, 5], [1, 2.5, 3.5, 4.2, 5.1]);
 		RETURN vector::similarity::pearson([NaN, 1, 2, 3, 4, 5], [NaN, 1, 2.5, 3.5, 4.2, 5.1]);
+		RETURN vector::similarity::pearson([1,2,3], [1,5,7]);
 	"#,
-		&["0.9894065340659606", "NaN"],
+		&["0.9894065340659606", "NaN", "0.9819805060619659"],
 	)
 	.await?;
 
@@ -4992,6 +4957,29 @@ async fn function_vector_similarity_pearson() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_vector_distance_euclidean() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
+		RETURN vector::distance::euclidean([NaN, 2, 3], [-1, NaN, -3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::distance::euclidean([10, 50, 200], [400, 100, 20]);
+		RETURN vector::distance::euclidean([10, 20, 15, 10, 5], [12, 24, 18, 8, 7]);
+	"#,
+		&["0", "NaN", "7.483314773547883", "432.43496620879307", "6.082762530298219"],
+	)
+	.await?;
+	check_test_is_error(
+		r"RETURN vector::distance::euclidean([1, 2, 3], [4, 5]);
+			RETURN vector::distance::euclidean([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::euclidean(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::euclidean(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_vector_distance_manhattan() -> Result<(), Error> {
 	test_queries(
 		r#"
@@ -4999,8 +4987,9 @@ async fn function_vector_distance_manhattan() -> Result<(), Error> {
 		RETURN vector::distance::manhattan([1, 2, 3], [-4, -5, -6]);
 		RETURN vector::distance::manhattan([1.1, 2, 3.3], [4, 5.5, 6.6]);
 		RETURN vector::distance::manhattan([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
+		RETURN vector::distance::manhattan([10, 20, 15, 10, 5], [12, 24, 18, 8, 7]);
 	"#,
-		&["9", "21", "9.7", "NaN"],
+		&["9", "21", "9.7", "NaN", "13"],
 	)
 	.await?;
 
@@ -5022,8 +5011,9 @@ async fn function_vector_distance_hamming() -> Result<(), Error> {
 		RETURN vector::distance::hamming([-1, -2, -3], [-2, -2, -2]);
 		RETURN vector::distance::hamming([1.1, 2.2, -3.3], [1.1, 2, -3.3]);
 		RETURN vector::distance::hamming([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
+		RETURN vector::distance::hamming([0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]);
 	"#,
-		&["1", "2", "1", "0"],
+		&["1", "2", "1", "0", "2"],
 	)
 	.await?;
 
@@ -5045,8 +5035,17 @@ async fn function_vector_distance_minkowski() -> Result<(), Error> {
 		RETURN vector::distance::minkowski([-1, -2, -3], [-4, -5, -6], 3);
 		RETURN vector::distance::minkowski([1.1, 2.2, 3], [4, 5.5, 6.6], 3);
 		RETURN vector::distance::minkowski([NaN, 1, 2, 3], [NaN, 4, 5, 6], 3);
+		RETURN vector::distance::minkowski([10, 20, 15, 10, 5], [12, 24, 18, 8, 7], 1);
+		RETURN vector::distance::minkowski([10, 20, 15, 10, 5], [12, 24, 18, 8, 7], 2);
 	"#,
-		&["4.3267487109222245", "4.3267487109222245", "4.747193170917638", "NaN"],
+		&[
+			"4.3267487109222245",
+			"4.3267487109222245",
+			"4.747193170917638",
+			"NaN",
+			"13.0",
+			"6.082762530298219",
+		],
 	)
 	.await?;
 
@@ -5068,8 +5067,9 @@ async fn function_vector_distance_chebyshev() -> Result<(), Error> {
 		RETURN vector::distance::chebyshev([-1, -2, -3], [-4, -5, -6]);
 		RETURN vector::distance::chebyshev([1.1, 2.2, 3], [4, 5.5, 6.6]);
 		RETURN vector::distance::chebyshev([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
+		RETURN vector::distance::chebyshev([2, 4, 5, 3, 8, 2], [3, 1, 5, -3, 7, 2]);
 	"#,
-		&["3.0", "3.0", "3.5999999999999996", "3.0"],
+		&["3.0", "3.0", "3.5999999999999996", "3.0", "6.0"],
 	)
 	.await?;
 
