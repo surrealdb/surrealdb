@@ -4713,8 +4713,8 @@ async fn function_vector_add() -> Result<(), Error> {
 		RETURN vector::add([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::add(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::add(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension."
 		],
 	)
 	.await?;
@@ -4740,32 +4740,32 @@ async fn function_vector_angle() -> Result<(), Error> {
 		RETURN vector::angle([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::angle(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::angle(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same dimension."
 		],
 	).await?;
 	Ok(())
 }
 
 #[tokio::test]
-async fn function_vector_crossproduct() -> Result<(), Error> {
+async fn function_vector_cross() -> Result<(), Error> {
 	test_queries(
 		r#"
-		RETURN vector::crossproduct([1, 2, 3], [4, 5, 6]);
-		RETURN vector::crossproduct([1, 2, 3], [-4, -5, -6]);
-		RETURN vector::crossproduct([1, Nan, 3], [Nan, -5, -6]);
+		RETURN vector::cross([1, 2, 3], [4, 5, 6]);
+		RETURN vector::cross([1, 2, 3], [-4, -5, -6]);
+		RETURN vector::cross([1, NaN, 3], [NaN, -5, -6]);
 	"#,
 		&["[-3, 6, -3]", "[3, -6, 3]", "[NaN, NaN, NaN]"],
 	)
 	.await?;
 	check_test_is_error(
 		r#"
-		RETURN vector::crossproduct([1, 2, 3], [4, 5]);
-		RETURN vector::crossproduct([1, 2], [4, 5, 5]);
+		RETURN vector::cross([1, 2, 3], [4, 5]);
+		RETURN vector::cross([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::crossproduct(). Both vectors must have a length of 3.",
-			"Incorrect arguments for function vector::crossproduct(). Both vectors must have a length of 3."
+			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3.",
+			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3."
 		],
 	)
 		.await?;
@@ -4773,11 +4773,11 @@ async fn function_vector_crossproduct() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_dotproduct() -> Result<(), Error> {
+async fn function_vector_dot() -> Result<(), Error> {
 	test_queries(
 		r#"
-		RETURN vector::dotproduct([1, 2, 3], [1, 2, 3]);
-		RETURN vector::dotproduct([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::dot([1, 2, 3], [1, 2, 3]);
+		RETURN vector::dot([1, 2, 3], [-1, -2, -3]);
 		"#,
 		&["14", "-14"],
 	)
@@ -4785,12 +4785,12 @@ async fn function_vector_dotproduct() -> Result<(), Error> {
 
 	check_test_is_error(
 		r#"
-		RETURN vector::dotproduct([1, 2, 3], [4, 5]);
-		RETURN vector::dotproduct([1, 2], [4, 5, 5]);
+		RETURN vector::dot([1, 2, 3], [4, 5]);
+		RETURN vector::dot([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::dotproduct(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::dotproduct(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension."
 		],
 	).await?;
 	Ok(())
@@ -4840,8 +4840,8 @@ async fn function_vector_multiply() -> Result<(), Error> {
 		RETURN vector::multiply([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same dimension."
 		],
 	)
 		.await?;
@@ -4869,8 +4869,8 @@ async fn function_vector_project() -> Result<(), Error> {
 		RETURN vector::project([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::project(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::project(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same dimension."
 		],
 	)
 		.await?;
@@ -4893,8 +4893,8 @@ async fn function_vector_divide() -> Result<(), Error> {
 		RETURN vector::divide([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::divide(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::divide(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension."
 		],
 	)
 		.await?;
@@ -4917,8 +4917,8 @@ async fn function_vector_subtract() -> Result<(), Error> {
 		RETURN vector::subtract([1, 2], [4, 5, 5]);
 	"#,
 		&[
-			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same length.",
-			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same length."
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same dimension."
 		],
 	)
 		.await?;
@@ -4941,8 +4941,74 @@ async fn function_vector_similarity_cosine() -> Result<(), Error> {
 	r"RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
 	RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);",
 	&[
-		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same length.",
-		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same length."
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension.",
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension."
 	]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_manhattan() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::manhattan([1, 2, 3], [4, 5, 6]);
+		RETURN vector::distance::manhattan([1, 2, 3], [-4, -5, -6]);
+		RETURN vector::distance::manhattan([1.1, 2, 3.3], [4, 5.5, 6.6]);
+	"#,
+		&["9", "21", "9.7"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::manhattan([1, 2, 3], [4, 5]);
+	RETURN vector::distance::manhattan([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_hamming() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::hamming([1, 2, 2], [1, 2, 3]);
+		RETURN vector::distance::hamming([-1, -2, -3], [-2, -2, -2]);
+		RETURN vector::distance::hamming([1.1, 2.2, -3.3], [1.1, 2, -3.3]);
+	"#,
+		&["1", "2", "1"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::hamming([1, 2, 3], [4, 5]);
+	RETURN vector::distance::hamming([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_minkowski() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::minkowski([1, 2, 3], [4, 5, 6], 3);
+		RETURN vector::distance::minkowski([-1, -2, -3], [-4, -5, -6], 3);
+		RETURN vector::distance::minkowski([1.1, 2.2, 3], [4, 5.5, 6.6], 3);
+	"#,
+		&["4.3267487109222245", "4.3267487109222245", "4.747193170917638"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::minkowski([1, 2, 3], [4, 5], 3);
+	RETURN vector::distance::minkowski([1, 2], [4, 5, 5], 3);",
+		&[
+			"Incorrect arguments for function vector::distance::minkowski(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::minkowski(). The two vectors must be of the same dimension."
+		]).await?;
 	Ok(())
 }

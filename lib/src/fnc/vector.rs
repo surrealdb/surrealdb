@@ -5,53 +5,23 @@ use crate::fnc::util::math::vector::{
 use crate::sql::{Number, Value};
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.add(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::add"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(v) => Ok(v.into()),
-	}
+	Ok(a.add(&b)?.into())
 }
 
 pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.angle(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::angle"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(dot) => Ok(dot.into()),
-	}
+	Ok(a.angle(&b)?.into())
 }
 
 pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.divide(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::divide"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(v) => Ok(v.into()),
-	}
+	Ok(a.divide(&b)?.into())
 }
 
-pub fn crossproduct((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.crossproduct(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::crossproduct"),
-			message: String::from("Both vectors must have a length of 3."),
-		}),
-		Some(dot) => Ok(dot.into()),
-	}
+pub fn cross((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	Ok(a.cross(&b)?.into())
 }
 
-pub fn dotproduct((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.dotproduct(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::dotproduct"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(dot) => Ok(dot.into()),
-	}
+pub fn dot((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	Ok(a.dot(&b)?.into())
 }
 
 pub fn magnitude((a,): (Vec<Number>,)) -> Result<Value, Error> {
@@ -59,13 +29,7 @@ pub fn magnitude((a,): (Vec<Number>,)) -> Result<Value, Error> {
 }
 
 pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.multiply(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::multiply"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(v) => Ok(v.into()),
-	}
+	Ok(a.multiply(&b)?.into())
 }
 
 pub fn normalize((a,): (Vec<Number>,)) -> Result<Value, Error> {
@@ -73,29 +37,19 @@ pub fn normalize((a,): (Vec<Number>,)) -> Result<Value, Error> {
 }
 
 pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.project(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::project"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(v) => Ok(v.into()),
-	}
+	Ok(a.project(&b)?.into())
 }
 
 pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-	match a.subtract(&b) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("vector::subtract"),
-			message: String::from("The two vectors must be of the same length."),
-		}),
-		Some(v) => Ok(v.into()),
-	}
+	Ok(a.subtract(&b)?.into())
 }
 
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::fnc::util::math::vector::EuclideanDistance;
+	use crate::fnc::util::math::vector::{
+		EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
+	};
 	use crate::sql::{Number, Value};
 
 	pub fn chebyshev((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
@@ -105,19 +59,11 @@ pub mod distance {
 	}
 
 	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		match a.euclidean_distance(&b) {
-			None => Err(Error::InvalidArguments {
-				name: String::from("vector::distance::euclidean"),
-				message: String::from("The two vectors must be of the same length."),
-			}),
-			Some(distance) => Ok(distance.into()),
-		}
+		Ok(a.euclidean_distance(&b)?.into())
 	}
 
-	pub fn hamming((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::hamming() function",
-		})
+	pub fn hamming((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Ok(a.hamming_distance(&b)?.into())
 	}
 
 	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
@@ -126,33 +72,23 @@ pub mod distance {
 		})
 	}
 
-	pub fn manhattan((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::manhattan() function",
-		})
+	pub fn manhattan((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+		Ok(a.manhattan_distance(&b)?.into())
 	}
 
-	pub fn minkowski((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::minkowski() function",
-		})
+	pub fn minkowski((a, b, o): (Vec<Number>, Vec<Number>, Number)) -> Result<Value, Error> {
+		Ok(a.minkowski_distance(&b, o)?.into())
 	}
 }
 
 pub mod similarity {
 
 	use crate::err::Error;
-	use crate::fnc::util::math::vector::{DotProduct, Magnitude};
+	use crate::fnc::util::math::vector::CosineSimilarity;
 	use crate::sql::{Number, Value};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		match a.dotproduct(&b) {
-			None => Err(Error::InvalidArguments {
-				name: String::from("vector::similarity::cosine"),
-				message: String::from("The two vectors must be of the same length."),
-			}),
-			Some(dot) => Ok((dot / (a.magnitude() * b.magnitude())).into()),
-		}
+		Ok(a.cosine_similarity(&b)?.into())
 	}
 
 	pub fn jaccard((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {

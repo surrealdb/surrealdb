@@ -4,7 +4,7 @@ use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::tag;
 use nom::character::complete::i64;
 use nom::combinator::{map, opt};
 use nom::number::complete::recognize_float;
@@ -662,7 +662,7 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(tag_no_case("NaN"), |_| Number::NAN), not_nan))(i)
+	alt((map(tag("NaN"), |_| Number::NAN), not_nan))(i)
 }
 
 #[derive(Debug)]

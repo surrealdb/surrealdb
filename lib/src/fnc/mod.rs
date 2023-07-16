@@ -291,8 +291,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
-		"vector::crossproduct" => vector::crossproduct,
-		"vector::dotproduct" => vector::dotproduct,
+		"vector::cross" => vector::cross,
+		"vector::dot" => vector::dot,
 		"vector::divide" => vector::divide,
 		"vector::magnitude" => vector::magnitude,
 		"vector::multiply" => vector::multiply,
