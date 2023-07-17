@@ -18,12 +18,6 @@ use super::{HTTP_METER, HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION};
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
 
-impl HttpMetricsLayer {
-	pub fn new() -> Self {
-		Self::default()
-	}
-}
-
 impl<S> Layer<S> for HttpMetricsLayer {
 	type Service = HttpMetrics<S>;
 

@@ -79,12 +79,12 @@ pub async fn init() -> Result<(), Error> {
 		.layer(SetSensitiveRequestHeadersLayer::from_shared(Arc::clone(&headers)))
 		.layer(
 			TraceLayer::new_for_http()
-				.make_span_with(tracer::HttpTraceLayerHooks::default())
-				.on_request(tracer::HttpTraceLayerHooks::default())
-				.on_response(tracer::HttpTraceLayerHooks::default())
-				.on_failure(tracer::HttpTraceLayerHooks::default()),
+				.make_span_with(tracer::HttpTraceLayerHooks)
+				.on_request(tracer::HttpTraceLayerHooks)
+				.on_response(tracer::HttpTraceLayerHooks)
+				.on_failure(tracer::HttpTraceLayerHooks),
 		)
-		.layer(HttpMetricsLayer::new())
+		.layer(HttpMetricsLayer)
 		.layer(SetSensitiveResponseHeadersLayer::from_shared(headers))
 		.layer(AsyncRequireAuthorizationLayer::new(auth::SurrealAuth))
 		.layer(headers::add_server_header())
