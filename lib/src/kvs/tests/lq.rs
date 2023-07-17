@@ -15,7 +15,7 @@ async fn scan_node_lq() {
 		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
 		0x1F,
 	]);
-	let key = crate::key::cluster::lq::new(node_id, namespace, database, live_query_id);
+	let key = crate::key::node::lq::new(node_id, namespace, database, live_query_id);
 	trace!(
 		"Inserting key: {}",
 		key.encode()

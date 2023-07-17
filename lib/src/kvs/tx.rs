@@ -795,7 +795,7 @@ impl Transaction {
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
 	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::cluster::nd::Nd::new(id);
+		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
@@ -813,7 +813,7 @@ impl Transaction {
 
 	// Retrieve cluster information
 	pub async fn get_nd(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
-		let key = crate::key::cluster::nd::Nd::new(id);
+		let key = crate::key::root::nd::Nd::new(id);
 		let val = self.get(key).await?;
 		match val {
 			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
@@ -831,7 +831,7 @@ impl Transaction {
 
 	// Set heartbeat
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::cluster::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
@@ -846,7 +846,7 @@ impl Transaction {
 
 	// Delete a cluster registration entry
 	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
-		let key = crate::key::cluster::nd::Nd::new(node);
+		let key = crate::key::root::nd::Nd::new(node);
 		self.del(key).await
 	}
 
@@ -865,14 +865,14 @@ impl Transaction {
 		&mut self,
 		time_to: &Timestamp,
 		limit: u32,
-	) -> Result<Vec<crate::key::cluster::hb::Hb>, Error> {
-		let beg = crate::key::cluster::hb::Hb::prefix();
-		let end = crate::key::cluster::hb::Hb::suffix(time_to);
+	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
+		let beg = crate::key::root::hb::Hb::prefix();
+		let end = crate::key::root::hb::Hb::suffix(time_to);
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
 		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
-		let mut out: Vec<crate::key::cluster::hb::Hb> = vec![];
+		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
 		while num > 0 {
 			// Get records batch
@@ -903,7 +903,7 @@ impl Transaction {
 				if n == i + 1 {
 					nxt = Some(k.clone());
 				}
-				out.push(crate::key::cluster::hb::Hb::decode(k.as_slice())?);
+				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
 				// Count
 				num -= 1;
 			}
@@ -913,8 +913,8 @@ impl Transaction {
 	}
 
 	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
-		let beg = crate::key::cluster::nd::Nd::prefix();
-		let end = crate::key::cluster::nd::Nd::suffix();
+		let beg = crate::key::root::nd::Nd::prefix();
+		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
 		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut nxt: Option<Key> = None;
@@ -961,7 +961,7 @@ impl Transaction {
 
 	pub async fn delr_hb(
 		&mut self,
-		ts: Vec<crate::key::cluster::hb::Hb>,
+		ts: Vec<crate::key::root::hb::Hb>,
 		limit: u32,
 	) -> Result<(), Error> {
 		trace!("delr_hb: ts={:?} limit={:?}", ts, limit);
@@ -979,8 +979,8 @@ impl Transaction {
 	}
 
 	pub async fn scan_lq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::cluster::lq::prefix_nd(node);
-		let suff = crate::key::cluster::lq::suffix_nd(node);
+		let pref = crate::key::node::lq::prefix_nd(node);
+		let suff = crate::key::node::lq::suffix_nd(node);
 		trace!(
 			"Scanning range from pref={}, suff={}",
 			crate::key::debug::sprint_key(&pref),
@@ -991,7 +991,7 @@ impl Transaction {
 		let mut res: Vec<LqValue> = vec![];
 		for (key, value) in scanned {
 			trace!("scan_lq: key={:?} value={:?}", &key, &value);
-			let lq = crate::key::cluster::lq::Lq::decode(key.as_slice())?;
+			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			let tb: String = String::from_utf8(value).unwrap();
 			res.push(LqValue {
 				nd: lq.nd,
@@ -1377,12 +1377,12 @@ impl Transaction {
 	}
 
 	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
-		let beg = crate::key::cluster::lq::prefix_nd(nd);
-		let end = crate::key::cluster::lq::suffix_nd(nd);
+		let beg = crate::key::node::lq::prefix_nd(nd);
+		let end = crate::key::node::lq::suffix_nd(nd);
 		let lq_pairs = self.getr(beg..end, u32::MAX).await?;
 		let mut lqs = vec![];
 		for (key, value) in lq_pairs {
-			let lq_key = crate::key::cluster::lq::Lq::decode(key.as_slice())?;
+			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
 				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
@@ -1537,7 +1537,7 @@ impl Transaction {
 		db: &str,
 		lq: Uuid,
 	) -> Result<Strand, Error> {
-		let key = crate::key::cluster::lq::new(nd, ns, db, lq);
+		let key = crate::key::node::lq::new(nd, ns, db, lq);
 		let val = self.get(key).await?.ok_or(Error::LqNotFound {
 			value: lq.to_string(),
 		})?;

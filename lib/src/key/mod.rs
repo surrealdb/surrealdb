@@ -3,8 +3,10 @@
 /// crate::key::root::all                /
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
-/// crate::key::root::lq                 /!nd{nd}*{ns}*{db}!lq{lq}
 /// crate::key::root::ns                 /!ns{ns}
+///
+/// crate::key::node::all                /${nd}
+/// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
 /// crate::key::namespace::all           /*{ns}
 /// crate::key::namespace::db            /*{ns}!db{db}
@@ -53,12 +55,12 @@
 /// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
 ///
 pub mod change;
-pub mod cluster;
 pub mod database;
 pub mod debug;
 pub mod graph;
 pub mod index;
 pub mod namespace;
+pub mod node;
 pub mod root;
 pub mod scope;
 pub mod table;

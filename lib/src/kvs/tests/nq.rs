@@ -19,7 +19,7 @@ async fn archive_lv_for_node_archives() {
 		0x1F,
 	]);
 
-	let key = crate::key::cluster::lq::new(node_id, namespace, database, lv_id);
+	let key = crate::key::node::lq::new(node_id, namespace, database, lv_id);
 	tx.putc(key, table, None).await.unwrap();
 
 	let (_, mut stm) = live(format!("LIVE SELECT * FROM {}", table).as_str()).unwrap();
