@@ -14,20 +14,17 @@ use uuid;
 #[tokio::test]
 #[serial]
 async fn expired_nodes_are_garbage_collected() {
-	let test = match init().await {
-		Ok(test) => test,
-		Err(e) => panic!("{}", e),
-	};
+	let old_node = Uuid::parse_str("2ea6d33f-4c0a-417a-ab04-1fa9869f9a65").unwrap();
+	let new_node = Uuid::parse_str("fbfb3487-71fe-4749-b3aa-1cc0a5380cdd").unwrap();
+	let test = init(new_node).await.unwrap();
 
 	// Set up the first node at an early timestamp
-	let old_node = uuid::Uuid::new_v4();
 	let old_time = Timestamp {
 		value: 123,
 	};
 	test.bootstrap_at_time(&old_node, old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
-	let new_node = uuid::Uuid::new_v4();
 	let new_time = Timestamp {
 		value: 456,
 	};
@@ -54,13 +51,10 @@ async fn expired_nodes_are_garbage_collected() {
 #[tokio::test]
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
-	let test = match init().await {
-		Ok(test) => test,
-		Err(e) => panic!("{}", e),
-	};
+	let old_node = Uuid::parse_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
+	let test = init(old_node).await.unwrap();
 
 	// Set up the first node at an early timestamp
-	let old_node = uuid::Uuid::from_fields(0, 1, 2, &[3, 4, 5, 6, 7, 8, 9, 10]);
 	let old_time = Timestamp {
 		value: 123,
 	};
@@ -72,8 +66,8 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_db(test.test_str("testdb").as_str());
 	let table = "my_table";
 	let lq = LiveStatement {
-		id: sql::Uuid(uuid::Uuid::new_v4()),
-		node: Uuid::new_v4(),
+		id: sql::Uuid(Uuid::parse_str("da60fa34-902d-4110-b810-7d435267a9f8").unwrap()),
+		node: old_node,
 		expr: Fields(vec![sql::Field::All], false),
 		what: Table(sql::Table::from(table)),
 		cond: None,
@@ -100,7 +94,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	tx.lock().await.commit().await.unwrap();
 
 	// Set up second node at a later timestamp
-	let new_node = uuid::Uuid::from_fields(16, 17, 18, &[19, 20, 21, 22, 23, 24, 25, 26]);
+	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
 		value: 456,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
@@ -118,20 +112,21 @@ async fn expired_nodes_get_live_queries_archived() {
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
-	let test = init().await.unwrap();
-	let node_id = uuid::Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
+	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
+	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
 		value: 123,
 	};
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
-	trace!("Logging works");
 
 	// We do standard cluster init
+	trace!("Bootstrapping node {}", node_id);
 	test.bootstrap_at_time(&node_id, time).await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
+	trace!("Setting up live queries");
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_query_to_keep = Uuid::parse_str("adea762a-17db-4810-a4a2-c54babfdaf23").unwrap();
@@ -139,10 +134,17 @@ async fn single_live_queries_are_garbage_collected() {
 	a_live_query(&mut tx, node_id, namespace, database, table, live_query_to_keep).await.unwrap();
 	tx.commit().await.unwrap();
 
+	trace!("Debug scan");
+	let mut tx = test.db.transaction(true, false).await.unwrap();
+	_debug_scan(&mut tx, "Before GC").await;
+	tx.commit().await.unwrap();
+
 	// Subject: Perform the action we are testing
+	trace!("Garbage collecting dead sessions");
 	test.db.garbage_collect_dead_session(&[live_query_to_delete.clone()]).await.unwrap();
 
 	// Validate
+	trace!("Validating live queries");
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let scanned = tx.all_lv(namespace, database, table).await.unwrap();
 	assert_eq!(scanned.len(), 1);
