@@ -1,6 +1,6 @@
 //! stub implementations for the fetch API when `http` is not enabled.
 
-use js::{class::Trace, Class, Ctx, Exception, Result};
+use js::{class::Trace, Class, Ctx, Exception, Function, Result};
 
 #[cfg(test)]
 mod test;
@@ -13,8 +13,7 @@ pub fn register(ctx: &Ctx<'_>) -> Result<()> {
 	Class::<blob::Blob>::define(&globals)?;
 	Class::<form_data::FormData>::define(&globals)?;
 	Class::<headers::Headers>::define(&globals)?;
-	globals.set("fetch", Function::new(ctx, js_fetch).with_name("fetch"));
-	Ok(())
+	globals.set("fetch", Function::new(ctx.clone(), js_fetch)?.with_name("fetch")?)
 }
 
 #[js::function]
