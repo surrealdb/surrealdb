@@ -39,7 +39,7 @@ pub struct Datastore {
 
 impl fmt::Debug for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str("Datastore { .. }")
+		f.debug_struct("Datastore").finish_non_exhaustive()
 	}
 }
 
