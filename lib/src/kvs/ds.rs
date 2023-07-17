@@ -18,6 +18,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::instrument;
@@ -35,6 +36,11 @@ pub struct LqValue {
 	pub db: String,
 	pub tb: String,
 	pub lq: Uuid,
+}
+
+/// Retriable transaction config
+pub struct Config {
+	pub retries: u32,
 }
 
 /// The underlying datastore instance which stores the dataset.
@@ -472,6 +478,38 @@ impl Datastore {
 	// -----
 	// End cluster helpers, storage functions here
 	// -----
+
+	/// Use for internal database operations so they are retriable.
+	/// This is so that we have a centralised implementation for handling retries
+	/// for potentially conflicting operations.
+	///
+	/// This also handles transactions always being closed by forgetting to commit.
+	///
+	/// Do not use for user operations such as queries or status requests.
+	pub async fn configured_transaction<F, G, T>(
+		&self,
+		config: Config,
+		write: bool,
+		lock: bool,
+		retriable: F,
+	) -> Result<G, Error>
+	where
+		F: Fn(&mut Transaction) -> Future<Output = T> + Send + 'static,
+		T: Send + 'static,
+	{
+		let mut last_err = None;
+		for _ in 0..config.retries {
+			let mut tx = self.transaction(write, lock).await?;
+			let res = retriable(&mut tx);
+			if res.is_ok() {
+				tx.commit().await?;
+				return Ok(res);
+			}
+			tx.cancel().await?;
+			last_err = Some(res.unwrap_err());
+		}
+		Err(last_err.unwrap())
+	}
 
 	/// Create a new transaction on this datastore
 	///

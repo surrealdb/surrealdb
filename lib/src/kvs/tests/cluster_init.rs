@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
+use crate::kvs::Config;
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -33,21 +34,31 @@ async fn expired_nodes_are_garbage_collected() {
 	test.bootstrap_at_time(&new_node, new_time.clone()).await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
-	let mut tx = test.db.transaction(true, false).await.unwrap();
-	let scanned = tx.scan_hb(&new_time, 100).await.unwrap();
-	assert_eq!(scanned.len(), 1);
-	for hb in scanned.iter() {
-		assert_eq!(&hb.nd, &new_node);
-	}
+	test.db
+		.configured_transaction(
+			Config {
+				retries: 10,
+			},
+			true,
+			false,
+			|tx| {
+				let scanned = tx.scan_hb(&new_time, 100).await.unwrap();
+				assert_eq!(scanned.len(), 1);
+				for hb in scanned.iter() {
+					assert_eq!(&hb.nd, &new_node);
+				}
 
-	// And scan the nodes to verify its just the latest also
-	let scanned = tx.scan_cl(100).await.unwrap();
-	assert_eq!(scanned.len(), 1);
-	for cl in scanned.iter() {
-		assert_eq!(&cl.name, &new_node.to_string());
-	}
-
-	tx.commit().await.unwrap();
+				// And scan the nodes to verify its just the latest also
+				let scanned = tx.scan_cl(100).await.unwrap();
+				assert_eq!(scanned.len(), 1);
+				for cl in scanned.iter() {
+					assert_eq!(&cl.name, &new_node.to_string());
+				}
+				Ok(())
+			},
+		)
+		.await
+		.unwrap();
 }
 
 #[tokio::test]
