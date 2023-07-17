@@ -32,8 +32,8 @@ pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
 	);
 
 	// If no external service.name is set, set it to surrealdb
-	if res.get("service.name".into()).unwrap_or("".into()).as_str().is_empty() {
-		debug!("No service.name set, setting to surrealdb");
+	if res.get("service.name".into()).unwrap_or("".into()).as_str() == "unknown_service" {
+		debug!("No service.name detected, use 'surrealdb'");
 		res.merge(&Resource::new([KeyValue::new("service.name", "surrealdb")]))
 	} else {
 		res
