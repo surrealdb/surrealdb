@@ -1,8 +1,8 @@
 use crate::fnc::script::modules::impl_module_def;
-use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, Value};
+use js::{module::ModuleDef, Ctx, Module, Result, Value};
 
 mod functions;
-pub mod query;
+mod query;
 
 pub struct Package;
 
@@ -27,6 +27,7 @@ impl ModuleDef for Package {
 		default.set("version", version)?;
 
 		let query_func = Function::new(ctx.clone(), query::js_query)?.with_name("query")?;
+
 		exports.export("query", query_func.clone())?;
 		default.set("query", query_func)?;
 
