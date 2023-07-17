@@ -248,27 +248,27 @@ fn script(i: &str) -> IResult<&str, Function> {
 
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
-		preceded(tag("array::"), function_array),
-		preceded(tag("bytes::"), function_bytes),
-		preceded(tag("crypto::"), function_crypto),
-		preceded(tag("duration::"), function_duration),
-		preceded(tag("encoding::"), function_encoding),
-		preceded(tag("geo::"), function_geo),
-		preceded(tag("http::"), function_http),
-		preceded(tag("is::"), function_is),
-		preceded(tag("math::"), function_math),
-		preceded(tag("meta::"), function_meta),
-		preceded(tag("parse::"), function_parse),
-		preceded(tag("rand::"), function_rand),
-		preceded(tag("search::"), function_search),
-		preceded(tag("session::"), function_session),
-		preceded(tag("string::"), function_string),
-		preceded(tag("time::"), function_time),
-		preceded(tag("type::"), function_type),
-		tag("count"),
-		tag("not"),
-		tag("rand"),
-		tag("sleep"),
+		alt((
+			preceded(tag("array::"), function_array),
+			preceded(tag("bytes::"), function_bytes),
+			preceded(tag("crypto::"), function_crypto),
+			preceded(tag("duration::"), function_duration),
+			preceded(tag("encoding::"), function_encoding),
+			preceded(tag("geo::"), function_geo),
+			preceded(tag("http::"), function_http),
+			preceded(tag("is::"), function_is),
+			preceded(tag("math::"), function_math),
+			preceded(tag("meta::"), function_meta),
+			preceded(tag("parse::"), function_parse),
+			preceded(tag("rand::"), function_rand),
+			preceded(tag("search::"), function_search),
+			preceded(tag("session::"), function_session),
+			preceded(tag("string::"), function_string),
+			preceded(tag("time::"), function_time),
+			preceded(tag("type::"), function_type),
+			preceded(tag("vector::"), function_vector),
+		)),
+		alt((tag("count"), tag("not"), tag("rand"), tag("sleep"))),
 	)))(i)
 }
 
@@ -279,11 +279,18 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("all"),
 			tag("any"),
 			tag("append"),
+			tag("boolean_and"),
+			tag("boolean_not"),
+			tag("boolean_or"),
+			tag("boolean_xor"),
+			tag("clump"),
 			tag("combine"),
 			tag("complement"),
 			tag("concat"),
 			tag("difference"),
 			tag("distinct"),
+			tag("filter_index"),
+			tag("find_index"),
 			tag("flatten"),
 			tag("group"),
 			tag("insert"),
@@ -292,17 +299,24 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("intersect"),
 			tag("join"),
 			tag("len"),
+			tag("logical_and"),
+			tag("logical_or"),
+			tag("logical_xor"),
+			tag("matches"),
 			tag("max"),
 			tag("min"),
 			tag("pop"),
 			tag("prepend"),
 			tag("push"),
+		)),
+		alt((
 			tag("remove"),
 			tag("reverse"),
 			tag("slice"),
 			tag("sort::asc"),
 			tag("sort::desc"),
 			tag("sort"),
+			tag("transpose"),
 			tag("union"),
 		)),
 	))(i)
@@ -494,6 +508,8 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("trim"),
 		tag("uppercase"),
 		tag("words"),
+		preceded(tag("distance::"), alt((tag("hamming"), tag("levenshtein")))),
+		preceded(tag("similarity::"), alt((tag("fuzzy"), tag("jaro"), tag("smithwaterman")))),
 	))(i)
 }
 
@@ -534,6 +550,36 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("string"),
 		tag("table"),
 		tag("thing"),
+	))(i)
+}
+
+fn function_vector(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("add"),
+		tag("angle"),
+		tag("divide"),
+		tag("cross"),
+		tag("dot"),
+		tag("magnitude"),
+		tag("multiply"),
+		tag("normalize"),
+		tag("project"),
+		tag("subtract"),
+		preceded(
+			tag("distance::"),
+			alt((
+				tag("chebyshev"),
+				tag("euclidean"),
+				tag("hamming"),
+				tag("mahalanobis"),
+				tag("manhattan"),
+				tag("minkowski"),
+			)),
+		),
+		preceded(
+			tag("similarity::"),
+			alt((tag("cosine"), tag("jaccard"), tag("pearson"), tag("spearman"))),
+		),
 	))(i)
 }
 

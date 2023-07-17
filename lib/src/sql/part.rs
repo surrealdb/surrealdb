@@ -5,16 +5,16 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::graph::{self, Graph};
 use crate::sql::ident::{self, Ident};
-use crate::sql::idiom::Idiom;
+use crate::sql::idiom::{self, Idiom};
 use crate::sql::number::{number, Number};
-use crate::sql::strand::no_nul_bytes;
+use crate::sql::param::{self};
+use crate::sql::strand::{self, no_nul_bytes};
 use crate::sql::value::{self, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::not;
-use nom::combinator::peek;
+use nom::combinator::{map, not, peek};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -29,6 +29,7 @@ pub enum Part {
 	Where(Value),
 	Graph(Graph),
 	Value(Value),
+	Start(Value),
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 }
 
@@ -68,12 +69,6 @@ impl From<Ident> for Part {
 	}
 }
 
-impl From<Value> for Part {
-	fn from(v: Value) -> Self {
-		Self::Where(v)
-	}
-}
-
 impl From<Graph> for Part {
 	fn from(v: Graph) -> Self {
 		Self::Graph(v)
@@ -93,6 +88,7 @@ impl Part {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Part::Start(v) => v.writeable(),
 			Part::Where(v) => v.writeable(),
 			Part::Value(v) => v.writeable(),
 			Part::Method(_, v) => v.iter().any(Value::writeable),
@@ -114,11 +110,12 @@ impl fmt::Display for Part {
 			Part::All => f.write_str("[*]"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
+			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{v}"),
 			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
-			Part::Value(v) => write!(f, "{v}"),
+			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
 		}
 	}
@@ -142,7 +139,7 @@ impl<'a> Next<'a> for &'a [Part] {
 // ------------------------------
 
 pub fn part(i: &str) -> IResult<&str, Part> {
-	alt((all, last, index, field, graph, filter))(i)
+	alt((all, last, index, field, value, graph, filter))(i)
 }
 
 pub fn first(i: &str) -> IResult<&str, Part> {
@@ -200,8 +197,19 @@ pub fn filter(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn value(i: &str) -> IResult<&str, Part> {
-	let (i, v) = value::start(i)?;
+	let (i, _) = openbracket(i)?;
+	let (i, v) = alt((
+		map(strand::strand, Value::Strand),
+		map(param::param, Value::Param),
+		map(idiom::basic, Value::Idiom),
+	))(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Value(v)))
+}
+
+pub fn start(i: &str) -> IResult<&str, Part> {
+	let (i, v) = value::start(i)?;
+	Ok((i, Part::Start(v)))
 }
 
 pub fn graph(i: &str) -> IResult<&str, Part> {

@@ -6,9 +6,9 @@ impl Value {
 	/// Synchronous method for deleting a field from a `Value`
 	pub(crate) fn cut(&mut self, path: &[Part]) {
 		if let Some(p) = path.first() {
-			// Get the current path part
+			// Get the current value at path
 			match self {
-				// Current path part is an object
+				// Current value at path is an object
 				Value::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
@@ -32,7 +32,7 @@ impl Value {
 					},
 					_ => {}
 				},
-				// Current path part is an array
+				// Current value at path is an array
 				Value::Array(v) => match p {
 					Part::All => match path.len() {
 						1 => {
@@ -96,127 +96,93 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::dbs::test::mock;
 	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
 
 	#[tokio::test]
-	async fn del_none() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_none() {
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_reset() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_reset() {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_basic() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_basic() {
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_wrong() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_wrong() {
 		let idi = Idiom::parse("test.something.wrong");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_other() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_other() {
 		let idi = Idiom::parse("test.other.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_array() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_array() {
 		let idi = Idiom::parse("test.something[1]");
 		let mut val = Value::parse("{ test: { something: [123, 456, 789] } }");
 		let res = Value::parse("{ test: { something: [123, 789] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_array_field() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_array_field() {
 		let idi = Idiom::parse("test.something[1].age");
 		let mut val = Value::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
 		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_array_fields() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_array_fields() {
 		let idi = Idiom::parse("test.something[*].age");
 		let mut val = Value::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
 		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn del_array_fields_flat() {
-		let (ctx, opt, txn) = mock().await;
+	async fn cut_array_fields_flat() {
 		let idi = Idiom::parse("test.something.age");
 		let mut val = Value::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
 		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
-		assert_eq!(res, val);
-	}
-
-	#[tokio::test]
-	async fn del_array_where_field() {
-		let (ctx, opt, txn) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 35].age");
-		let mut val = Value::parse(
-			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
-		);
-		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
-		assert_eq!(res, val);
-	}
-
-	#[tokio::test]
-	async fn del_array_where_fields() {
-		let (ctx, opt, txn) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 35]");
-		let mut val = Value::parse(
-			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
-		);
-		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }] } }");
-		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		val.cut(&idi);
 		assert_eq!(res, val);
 	}
 }

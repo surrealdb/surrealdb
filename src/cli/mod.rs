@@ -8,10 +8,10 @@ mod sql;
 #[cfg(feature = "has-storage")]
 mod start;
 mod upgrade;
+mod validate;
 pub(crate) mod validator;
 mod version;
 
-use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -24,6 +24,8 @@ use sql::SqlCommandArguments;
 #[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
 use std::process::ExitCode;
+use upgrade::UpgradeCommandArguments;
+use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
 
 const INFO: &str = "
@@ -71,6 +73,8 @@ enum Commands {
 		visible_alias = "isready"
 	)]
 	IsReady(IsReadyCommandArguments),
+	#[command(about = "Validate SurrealQL query files")]
+	Validate(ValidateCommandArguments),
 }
 
 pub async fn init() -> ExitCode {
@@ -85,6 +89,7 @@ pub async fn init() -> ExitCode {
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
+		Commands::Validate(args) => validate::init(args).await,
 	};
 	if let Err(e) = output {
 		error!("{}", e);

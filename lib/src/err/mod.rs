@@ -278,6 +278,18 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested live query does not exist
+	#[error("The live query '{value}' does not exist")]
+	LvNotFound {
+		value: String,
+	},
+
+	/// The requested cluster live query does not exist
+	#[error("The cluster live query '{value}' does not exist")]
+	LqNotFound {
+		value: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The analyzer '{value}' does not exist")]
 	AzNotFound {
@@ -504,6 +516,20 @@ pub enum Error {
 	DuplicatedMatchRef {
 		mr: MatchRef,
 	},
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Timestamp arithmetic error: {0}")]
+	TimestampOverflow(String),
+
+	/// Internal server error
+	/// This should be used extremely sporadically, since we lose the type of error as a consequence
+	/// There will be times when it is useful, such as with unusual type conversion errors
+	#[error("Internal database error: {0}")]
+	Internal(String),
+
+	/// Unimplemented functionality
+	#[error("Unimplemented functionality: {0}")]
+	Unimplemented(String),
 }
 
 impl From<Error> for String {

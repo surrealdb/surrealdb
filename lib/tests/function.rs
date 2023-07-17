@@ -5,6 +5,59 @@ use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::{Number, Value};
 
+async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let response = db.execute(sql, &session, None).await?;
+	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
+		let v = r?;
+		if let Some(desired_response) = desired_responses.get(i) {
+			let desired_value = Value::parse(*desired_response);
+			// If both values are NaN, they are equal from a test PoV
+			if !desired_value.is_nan() || !v.is_nan() {
+				assert_eq!(
+					v,
+					desired_value,
+					"Received response did not match \
+	expected.
+	Query response #{},
+	Desired response: {desired_value},
+	Actual response: {v}",
+					i + 1
+				);
+			}
+		} else {
+			panic!("Response index {i} out of bounds of desired responses.");
+		}
+	}
+	Ok(())
+}
+
+async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), Error> {
+	let db = Datastore::new("memory").await?;
+	let session = Session::for_kv().with_ns("test").with_db("test");
+	let response = db.execute(sql, &session, None).await?;
+	if response.len() != expected_errors.len() {
+		panic!(
+			"Wrong number of responses {} - expected {}.",
+			response.len(),
+			expected_errors.len()
+		);
+	}
+	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
+		if let Some(expected_error) = expected_errors.get(i) {
+			if let Err(e) = r {
+				assert_eq!(e.to_string().as_str(), *expected_error)
+			} else {
+				panic!("Response index {i} is not an error.");
+			}
+		} else {
+			panic!("Response index {i} out of bounds of expected responses.");
+		}
+	}
+	Ok(())
+}
+
 // --------------------------------------------------
 // array
 // --------------------------------------------------
@@ -148,6 +201,62 @@ async fn function_array_append() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_boolean_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_and([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_and([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_and([true, false], [false]);
+RETURN array::boolean_and([true, true], [false]);"#,
+		&[
+			"[false, false, false, true]",
+			"[false, false, false, true]",
+			"[false, false]",
+			"[false, false]",
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_not() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_not([false, true, 0, 1]);"#,
+		&["[true, false, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_or([false, true, false, true], [false, false, true, true]);
+RETURN array::boolean_or([0, 1, 0, 1], [0, 0, 1, 1]);
+RETURN array::boolean_or([true, false], [false]);
+RETURN array::boolean_or([true, true], [false]);"#,
+		&[
+			"[false, true, true, true]",
+			"[false, true, true, true]",
+			"[true, false]",
+			"[true, true]",
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_boolean_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::boolean_xor([false, true, false, true], [false, false, true, true]);"#,
+		&["[false, true, true, false]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_combine() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::combine([], []);
@@ -176,6 +285,20 @@ async fn function_array_combine() -> Result<(), Error> {
 	let val = Value::parse("[ [1,2], [1,3], [2,2], [2,3] ]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_clump() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::clump([0, 1, 2, 3], 2);
+		RETURN array::clump([0, 1, 2], 2);
+		RETURN array::clump([0, 1, 2], 3);
+		RETURN array::clump([0, 1, 2, 3, 4, 5], 3);
+	"#;
+	let desired_responses =
+		["[[0, 1], [2, 3]]", "[[0, 1], [2]]", "[[0, 1, 2]]", "[[0, 1, 2], [3, 4, 5]]"];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -303,6 +426,27 @@ async fn function_array_distinct() -> Result<(), Error> {
 	let val = Value::parse("[1,2,3,4]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_filter_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
+RETURN array::filter_index([0, 0, 2], 0);
+RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
+RETURN array::filter_index(["nothing here"], 0);"#;
+	let desired_responses = ["[1]", "[0, 1]", "[1, 3]", "[]"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_find_index() -> Result<(), Error> {
+	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
+RETURN array::find_index(["hello world", null, true], null);
+RETURN array::find_index([0, 1, 2], 3);"#;
+	let desired_responses = ["2", "1", "null"];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -500,6 +644,54 @@ async fn function_array_len() -> Result<(), Error> {
 	let val = Value::from(6);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_and() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_and([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_and([0, 1], []);"#,
+		&["[true, false, false, false]", r#"[1, 0, "false", 0]"#, "[0, null]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_or() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_or([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_or([0, 1], []);"#,
+		&["[true, true, true, false]", r#"[1, "true", 1, 0]"#, "[0, 1]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_logical_xor() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
+RETURN array::logical_xor([1, 0, 1, 0], ["true", "true", "false", "false"]);
+RETURN array::logical_xor([0, 1], []);"#,
+		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_matches() -> Result<(), Error> {
+	test_queries(
+		r#"RETURN array::matches([0, 1, 2], 1);
+RETURN array::matches([[], [0]], []);
+RETURN array::matches([{id: "ohno:0"}, {id: "ohno:1"}], {id: "ohno:1"});"#,
+		&["[false, true, false]", "[true, false]", "[false, true]"],
+	)
+	.await?;
 	Ok(())
 }
 
@@ -892,6 +1084,26 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	let val = Value::parse("['text',4,4,3,2,1]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_transpose() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::transpose([[0, 1], [2, 3]]);
+		RETURN array::transpose([[0, 1, 2], [3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3, 4]]);
+		RETURN array::transpose([[0, 1], [2, 3], [4, 5]]);
+		RETURN array::transpose([[0, 1, 2], "oops", [null, "sorry"]]);
+	"#;
+	let desired_responses = [
+		"[[0, 2], [1, 3]]",
+		"[[0, 3], [1, 4], [2]]",
+		"[[0, 2], [1, 3], [4]]",
+		"[[0, 2, 4], [1, 3, 5]]",
+		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
+	];
+	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
@@ -3426,6 +3638,70 @@ async fn function_string_reverse() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_similarity_fuzzy() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::fuzzy("", "");
+		RETURN string::similarity::fuzzy("some", "text");
+		RETURN string::similarity::fuzzy("text", "TEXT");
+		RETURN string::similarity::fuzzy("TEXT", "TEXT");
+		RETURN string::similarity::fuzzy("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::smithwaterman("", "");
+		RETURN string::similarity::smithwaterman("some", "text");
+		RETURN string::similarity::smithwaterman("text", "TEXT");
+		RETURN string::similarity::smithwaterman("TEXT", "TEXT");
+		RETURN string::similarity::smithwaterman("this could be a tricky test", "this test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(0));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(83));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(91));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_slice() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.");
@@ -4388,5 +4664,421 @@ async fn function_type_thing() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_add() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::add([1, 2, 3], [1, 2, 3]);
+		RETURN vector::add([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[2, 4, 6]", "[0, 0, 0]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::add([1, 2, 3], [4, 5]);
+		RETURN vector::add([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension."
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_angle() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::angle([1,0,0], [0,1,0]);
+		RETURN vector::angle([5, 10, 15], [10, 5, 20]);
+		RETURN vector::angle([-3, 2, 5], [4, -1, 2]);
+		RETURN vector::angle([NaN, 2, 3], [-1, -2, NaN]);
+	"#,
+		&["1.5707963267948966", "0.36774908225917935", "1.7128722906354115", "NaN"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN vector::angle([1, 2, 3], [4, 5]);
+		RETURN vector::angle([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::angle(). The two vectors must be of the same dimension."
+		],
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_cross() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::cross([1, 2, 3], [4, 5, 6]);
+		RETURN vector::cross([1, 2, 3], [-4, -5, -6]);
+		RETURN vector::cross([1, NaN, 3], [NaN, -5, -6]);
+	"#,
+		&["[-3, 6, -3]", "[3, -6, 3]", "[NaN, NaN, NaN]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::cross([1, 2, 3], [4, 5]);
+		RETURN vector::cross([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3.",
+			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_dot() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::dot([1, 2, 3], [1, 2, 3]);
+		RETURN vector::dot([1, 2, 3], [-1, -2, -3]);
+		"#,
+		&["14", "-14"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN vector::dot([1, 2, 3], [4, 5]);
+		RETURN vector::dot([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension."
+		],
+	).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_magnitude() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::magnitude([]);
+		RETURN vector::magnitude([1]);
+		RETURN vector::magnitude([5]);
+		RETURN vector::magnitude([1,2,3,3,3,4,5]);
+	"#,
+		&["0", "1", "5", "8.54400374531753"],
+	)
+	.await
+}
+
+#[tokio::test]
+async fn function_vector_normalize() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::normalize([]);
+		RETURN vector::normalize([1]);
+		RETURN vector::normalize([5]);
+		RETURN vector::normalize([4,3]);
+	"#,
+		&["[]", "[1]", "[1]", "[0.8,0.6]"],
+	)
+	.await
+}
+
+#[tokio::test]
+async fn function_vector_multiply() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::multiply([1, 2, 3], [1, 2, 3]);
+		RETURN vector::multiply([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[1, 4, 9]", "[-1, -4, -9]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::multiply([1, 2, 3], [4, 5]);
+		RETURN vector::multiply([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::multiply(). The two vectors must be of the same dimension."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_project() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::project([1, 2, 3], [4, 5, 6]);
+		RETURN vector::project([1, -2, 3], [-4, 5, 6]);
+		RETURN vector::project([NaN, -2, 3], [-4, NaN, NaN]);
+	"#,
+		&[
+			"[1.6623376623376624, 2.077922077922078, 2.4935064935064934]",
+			"[-0.2077922077922078, 0.25974025974025977, 0.3116883116883117]",
+			"[NaN, NaN, NaN]",
+		],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::project([1, 2, 3], [4, 5]);
+		RETURN vector::project([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::project(). The two vectors must be of the same dimension."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_divide() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::divide([10, NaN, 20, 30, 0], [0, 1, 2, 0, 4]);
+		RETURN vector::divide([10, -20, 30, 0], [0, -1, 2, -3]);
+	"#,
+		&["[NaN, NaN, 10, NaN, 0]", "[NaN, 20, 15, 0]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::divide([1, 2, 3], [4, 5]);
+		RETURN vector::divide([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_subtract() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::subtract([1, 2, 3], [1, 2, 3]);
+		RETURN vector::subtract([1, 2, 3], [-1, -2, -3]);
+	"#,
+		&["[0, 0, 0]", "[2, 4, 6]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::subtract([1, 2, 3], [4, 5]);
+		RETURN vector::subtract([1, 2], [4, 5, 5]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::subtract(). The two vectors must be of the same dimension."
+		],
+	)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_cosine() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
+		RETURN vector::similarity::cosine([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::similarity::cosine([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
+		RETURN vector::similarity::cosine([10, 50, 200], [400, 100, 20]);
+	"#,
+		&["1.0", "-1.0", "NaN", "0.15258215962441316"],
+	)
+	.await?;
+
+	check_test_is_error(
+	r"RETURN vector::similarity::cosine([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::cosine([1, 2], [4, 5, 5]);",
+	&[
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension.",
+		"Incorrect arguments for function vector::similarity::cosine(). The two vectors must be of the same dimension."
+	]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_jaccard() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::similarity::jaccard([1, 2, 3], [3, 2, 1]);
+		RETURN vector::similarity::jaccard([1, 2, 3], [-3, -2, -1]);
+		RETURN vector::similarity::jaccard([1, -2, 3, -4], [4, 3, 2, 1]);
+		RETURN vector::similarity::jaccard([NaN, 1, 2, 3], [NaN, 2, 3, 4]);
+		RETURN vector::similarity::jaccard([0,1,2,5,6], [0,2,3,4,5,7,9]);
+	"#,
+		&["1.0", "0", "0.3333333333333333", "0.6", "0.3333333333333333"],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_similarity_pearson() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::similarity::pearson([1, 2, 3, 4, 5], [1, 2.5, 3.5, 4.2, 5.1]);
+		RETURN vector::similarity::pearson([NaN, 1, 2, 3, 4, 5], [NaN, 1, 2.5, 3.5, 4.2, 5.1]);
+		RETURN vector::similarity::pearson([1,2,3], [1,5,7]);
+	"#,
+		&["0.9894065340659606", "NaN", "0.9819805060619659"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::similarity::pearson([1, 2, 3], [4, 5]);
+		RETURN vector::similarity::pearson([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::similarity::pearson(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::similarity::pearson(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_euclidean() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
+		RETURN vector::distance::euclidean([NaN, 2, 3], [-1, NaN, -3]);
+		RETURN vector::distance::euclidean([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::distance::euclidean([10, 50, 200], [400, 100, 20]);
+		RETURN vector::distance::euclidean([10, 20, 15, 10, 5], [12, 24, 18, 8, 7]);
+	"#,
+		&["0", "NaN", "7.483314773547883", "432.43496620879307", "6.082762530298219"],
+	)
+	.await?;
+	check_test_is_error(
+		r"RETURN vector::distance::euclidean([1, 2, 3], [4, 5]);
+			RETURN vector::distance::euclidean([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::euclidean(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::euclidean(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_manhattan() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::manhattan([1, 2, 3], [4, 5, 6]);
+		RETURN vector::distance::manhattan([1, 2, 3], [-4, -5, -6]);
+		RETURN vector::distance::manhattan([1.1, 2, 3.3], [4, 5.5, 6.6]);
+		RETURN vector::distance::manhattan([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
+		RETURN vector::distance::manhattan([10, 20, 15, 10, 5], [12, 24, 18, 8, 7]);
+	"#,
+		&["9", "21", "9.7", "NaN", "13"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::manhattan([1, 2, 3], [4, 5]);
+			RETURN vector::distance::manhattan([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::manhattan(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_hamming() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::hamming([1, 2, 2], [1, 2, 3]);
+		RETURN vector::distance::hamming([-1, -2, -3], [-2, -2, -2]);
+		RETURN vector::distance::hamming([1.1, 2.2, -3.3], [1.1, 2, -3.3]);
+		RETURN vector::distance::hamming([NaN, 1, 2, 3], [NaN, 1, 2, 3]);
+		RETURN vector::distance::hamming([0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]);
+	"#,
+		&["1", "2", "1", "0", "2"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::hamming([1, 2, 3], [4, 5]);
+			RETURN vector::distance::hamming([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::hamming(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_minkowski() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::minkowski([1, 2, 3], [4, 5, 6], 3);
+		RETURN vector::distance::minkowski([-1, -2, -3], [-4, -5, -6], 3);
+		RETURN vector::distance::minkowski([1.1, 2.2, 3], [4, 5.5, 6.6], 3);
+		RETURN vector::distance::minkowski([NaN, 1, 2, 3], [NaN, 4, 5, 6], 3);
+		RETURN vector::distance::minkowski([10, 20, 15, 10, 5], [12, 24, 18, 8, 7], 1);
+		RETURN vector::distance::minkowski([10, 20, 15, 10, 5], [12, 24, 18, 8, 7], 2);
+	"#,
+		&[
+			"4.3267487109222245",
+			"4.3267487109222245",
+			"4.747193170917638",
+			"NaN",
+			"13.0",
+			"6.082762530298219",
+		],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::minkowski([1, 2, 3], [4, 5], 3);
+	RETURN vector::distance::minkowski([1, 2], [4, 5, 5], 3);",
+		&[
+			"Incorrect arguments for function vector::distance::minkowski(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::minkowski(). The two vectors must be of the same dimension."
+		]).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_distance_chebyshev() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN vector::distance::chebyshev([1, 2, 3], [4, 5, 6]);
+		RETURN vector::distance::chebyshev([-1, -2, -3], [-4, -5, -6]);
+		RETURN vector::distance::chebyshev([1.1, 2.2, 3], [4, 5.5, 6.6]);
+		RETURN vector::distance::chebyshev([NaN, 1, 2, 3], [NaN, 4, 5, 6]);
+		RETURN vector::distance::chebyshev([2, 4, 5, 3, 8, 2], [3, 1, 5, -3, 7, 2]);
+	"#,
+		&["3.0", "3.0", "3.5999999999999996", "3.0", "6.0"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r"RETURN vector::distance::chebyshev([1, 2, 3], [4, 5]);
+	RETURN vector::distance::chebyshev([1, 2], [4, 5, 5]);",
+		&[
+			"Incorrect arguments for function vector::distance::chebyshev(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::distance::chebyshev(). The two vectors must be of the same dimension."
+		]).await?;
 	Ok(())
 }

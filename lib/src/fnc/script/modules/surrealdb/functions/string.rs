@@ -1,6 +1,8 @@
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
+mod distance;
+mod similarity;
 pub struct Package;
 
 impl_module_def!(
@@ -8,6 +10,7 @@ impl_module_def!(
 	"string",
 	"concat" => run,
 	"contains" => run,
+	"distance" => (distance::Package),
 	"endsWith" => run,
 	"join" => run,
 	"len" => run,
@@ -15,6 +18,7 @@ impl_module_def!(
 	"repeat" => run,
 	"replace" => run,
 	"reverse" => run,
+	"similarity" => (similarity::Package),
 	"slice" => run,
 	"slug" => run,
 	"split" => run,

@@ -234,6 +234,14 @@ impl Number {
 		}
 	}
 
+	pub fn is_zero(&self) -> bool {
+		match self {
+			Number::Int(v) => v == &0,
+			Number::Float(v) => v == &0.0,
+			Number::Decimal(v) => v == &Decimal::ZERO,
+		}
+	}
+
 	pub fn is_zero_or_positive(&self) -> bool {
 		match self {
 			Number::Int(v) => v >= &0,
@@ -332,6 +340,10 @@ impl Number {
 			Number::Float(v) => v.abs().into(),
 			Number::Decimal(v) => v.abs().into(),
 		}
+	}
+
+	pub fn acos(self) -> Self {
+		self.to_float().acos().into()
 	}
 
 	pub fn ceil(self) -> Self {
@@ -637,7 +649,7 @@ impl Sort for Vec<Number> {
 	}
 }
 
-pub fn number(i: &str) -> IResult<&str, Number> {
+fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
@@ -647,6 +659,10 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 		Suffix::Decimal => Number::from(Decimal::from_str(v).map_err(|_| Failure(Parser(i)))?),
 	};
 	Ok((i, number))
+}
+
+pub fn number(i: &str) -> IResult<&str, Number> {
+	alt((map(tag("NaN"), |_| Number::NAN), not_nan))(i)
 }
 
 #[derive(Debug)]
@@ -689,6 +705,15 @@ mod tests {
 		}
 
 		assert!(!decimal_is_integer(&Decimal::HALF_PI));
+	}
+
+	#[test]
+	fn number_nan() {
+		let sql = "NaN";
+		let res = number(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("NaN", format!("{}", out));
 	}
 
 	#[test]
