@@ -13,7 +13,7 @@ use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use tower::{Layer, Service};
 
-use super::{HTTP_METER, HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION};
+use super::{HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION, HTTP_SERVER_REQUEST_SIZE, HTTP_SERVER_RESPONSE_SIZE, HTTP_DURATION_METER};
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -36,6 +36,8 @@ pub struct HttpMetrics<S> {
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HttpMetrics<S>
 where
 	S: Service<Request<ReqBody>, Response = Response<ResBody>>,
+	ReqBody: http_body::Body,
+	ResBody: http_body::Body,
 	S::Error: fmt::Display + 'static,
 {
 	type Response = Response<ResBody>;
@@ -73,6 +75,7 @@ impl<F> HttpCallMetricsFuture<F> {
 impl<Fut, ResBody, E> Future for HttpCallMetricsFuture<Fut>
 where
 	Fut: Future<Output = Result<Response<ResBody>, E>>,
+	ResBody: http_body::Body,
 	E: std::fmt::Display + 'static,
 {
 	type Output = Result<Response<ResBody>, E>;
@@ -92,7 +95,7 @@ where
 
 		let result = match response {
 			Ok(reply) => {
-				this.tracker.set_state(ResultState::Result(reply.status(), reply.version()));
+				this.tracker.set_state(ResultState::Result(reply.status(), reply.version(), reply.body().size_hint().exact()));
 				Ok(reply)
 			}
 			Err(e) => {
@@ -112,6 +115,8 @@ pub struct HttpCallMetricTracker {
 	route: Option<String>,
 	state: Cell<ResultState>,
 	status_code: Option<StatusCode>,
+	request_size: Option<u64>,
+	response_size: Option<u64>,
 	start: Instant,
 	finish: Option<Instant>,
 }
@@ -124,11 +129,14 @@ pub enum ResultState {
 	/// The result failed with an error.
 	Failed,
 	/// The result is an actual HTTP response.
-	Result(StatusCode, Version),
+	Result(StatusCode, Version, Option<u64>),
 }
 
 impl HttpCallMetricTracker {
-	fn new<B>(request: &Request<B>) -> Self {
+	fn new<B>(request: &Request<B>) -> Self
+	where
+		B: http_body::Body,
+	{
 		Self {
 			version: format!("{:?}", request.version()),
 			method: request.method().clone(),
@@ -137,6 +145,8 @@ impl HttpCallMetricTracker {
 			route: request.extensions().get::<MatchedPath>().map(|v| v.as_str().to_string()),
 			state: Cell::new(ResultState::None),
 			status_code: None,
+			request_size: request.body().size_hint().exact(),
+			response_size: None,
 			start: Instant::now(),
 			finish: None,
 		}
@@ -150,7 +160,7 @@ impl HttpCallMetricTracker {
 		self.finish.unwrap_or(Instant::now()) - self.start
 	}
 
-	// Follows the OpenTelemetry semantic conventions for HTTP metrics define here: https://github.com/open-telemetry/semantic-conventions/blob/main/specification/http/http-metrics.md
+	// Follows the OpenTelemetry semantic conventions for HTTP metrics define here: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/metrics/semantic_conventions/http-metrics.md
 	fn olel_common_attrs(&self) -> Vec<KeyValue> {
 		let mut res = vec![
 			KeyValue::new("http.request.method", self.method.as_str().to_owned()),
@@ -190,6 +200,14 @@ impl HttpCallMetricTracker {
 
 		res
 	}
+
+	pub(super) fn request_size_attrs(&self) -> Vec<KeyValue> {
+		self.request_duration_attrs()
+	}
+
+	pub(super) fn response_size_attrs(&self) -> Vec<KeyValue> {
+		self.request_duration_attrs()
+	}
 }
 
 impl Drop for HttpCallMetricTracker {
@@ -205,9 +223,10 @@ impl Drop for HttpCallMetricTracker {
 			ResultState::Failed => {
 				// If there's an error processing the request and we don't have a response, we can't get a valid status code
 			}
-			ResultState::Result(s, v) => {
+			ResultState::Result(s, v, size) => {
 				self.status_code = Some(s);
 				self.version = format!("{:?}", v);
+				self.response_size = size;
 			}
 		};
 
@@ -231,19 +250,29 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsE
 	// Record the duration of the request.
 	record_request_duration(tracker);
 
+	// Record the request size if known
+	if let Some(size) = tracker.request_size {
+		record_request_size(tracker, size)
+	}
+
+	// Record the response size if known
+	if let Some(size) = tracker.response_size {
+		record_response_size(tracker, size)
+	}
+
 	Ok(())
 }
 
 fn observe_active_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 	// Setup the callback to observe the active requests.
-	HTTP_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, 1, &attrs))
+	HTTP_DURATION_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, 1, &attrs))
 }
 
 fn observe_active_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 	// Setup the callback to observe the active requests.
-	HTTP_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, -1, &attrs))
+	HTTP_DURATION_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, -1, &attrs))
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {
@@ -252,5 +281,21 @@ fn record_request_duration(tracker: &HttpCallMetricTracker) {
 		&TelemetryContext::current(),
 		tracker.duration().as_millis() as u64,
 		&tracker.request_duration_attrs(),
+	);
+}
+
+pub fn record_request_size(tracker: &HttpCallMetricTracker, size: u64) {
+	HTTP_SERVER_REQUEST_SIZE.record(
+		&TelemetryContext::current(),
+		size,
+		&tracker.request_size_attrs(),
+	);
+}
+
+pub fn record_response_size(tracker: &HttpCallMetricTracker, size: u64) {
+	HTTP_SERVER_RESPONSE_SIZE.record(
+		&TelemetryContext::current(),
+		size,
+		&tracker.response_size_attrs(),
 	);
 }

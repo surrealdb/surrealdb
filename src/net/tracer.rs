@@ -134,7 +134,7 @@ pub(crate) struct HttpTraceLayerHooks;
 
 impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 	fn make_span(&mut self, req: &Request<B>) -> Span {
-		// The fields follow the OTEL semantic conventions: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.22.0/specification/trace/semantic_conventions/http.md
+		// The fields follow the OTEL semantic conventions: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/trace/semantic_conventions/http.md
 		let span = tracing::info_span!(
 			target: "surreal::http",
 			"request",
