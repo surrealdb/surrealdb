@@ -8,6 +8,7 @@ use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
+use test_log::test;
 use uuid;
 
 #[tokio::test]
@@ -113,7 +114,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	tx.commit().await.unwrap();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
@@ -125,6 +126,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
+	trace!("Logging works");
 
 	// We do standard cluster init
 	test.bootstrap_at_time(&node_id, time).await.unwrap();
