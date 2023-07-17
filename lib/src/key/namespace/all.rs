@@ -3,17 +3,17 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Namespace<'a> {
+pub struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
 }
 
-pub fn new(ns: &str) -> Namespace<'_> {
-	Namespace::new(ns)
+pub fn new(ns: &str) -> All<'_> {
+	All::new(ns)
 }
 
-impl<'a> Namespace<'a> {
+impl<'a> All<'a> {
 	pub fn new(ns: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -29,13 +29,13 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Namespace::new(
+		let val = All::new(
 			"testns",
 		);
-		let enc = Namespace::encode(&val).unwrap();
+		let enc = All::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0");
 
-		let dec = Namespace::decode(&enc).unwrap();
+		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

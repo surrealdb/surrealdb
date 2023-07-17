@@ -3,26 +3,34 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Database<'a> {
+pub struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
 	_b: u8,
 	pub db: &'a str,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub ix: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
-	Database::new(ns, db)
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> All<'a> {
+	All::new(ns, db, tb, ix)
 }
 
-impl<'a> Database<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl<'a> All<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
-			__: b'/', // /
-			_a: b'*', // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: b'*', // *
+			_b: b'*',
 			db,
+			_c: b'*',
+			tb,
+			_d: b'+',
+			ix,
 		}
 	}
 }
@@ -33,14 +41,16 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Database::new(
+		let val = All::new(
 			"testns",
 			"testdb",
+			"testtb",
+			"testix",
 		);
-		let enc = Database::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0");
+		let enc = All::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
 
-		let dec = Database::decode(&enc).unwrap();
+		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

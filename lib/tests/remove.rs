@@ -1,20 +1,11 @@
 mod parse;
 
+#[macro_use]
+mod util;
+
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::key::index::bc::Bc;
-use surrealdb::key::index::bd::Bd;
-use surrealdb::key::index::bf::Bf;
-use surrealdb::key::index::bi::Bi;
-use surrealdb::key::index::bk::Bk;
-use surrealdb::key::index::bl::Bl;
-use surrealdb::key::index::bo::Bo;
-use surrealdb::key::index::bp::Bp;
-use surrealdb::key::index::bs::Bs;
-use surrealdb::key::index::bt::Bt;
-use surrealdb::key::index::bu::Bu;
-use surrealdb::key::index::Index;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
@@ -86,20 +77,6 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	Ok(())
 }
 
-macro_rules! check_empty_range {
-	($tx:expr, $rng:expr) => {{
-		let r = $tx.getr($rng, 1).await?;
-		assert!(r.is_empty());
-	}};
-}
-
-macro_rules! check_none_val {
-	($tx:expr, $key:expr) => {{
-		let r = $tx.get($key).await?;
-		assert!(r.is_none());
-	}};
-}
-
 #[tokio::test]
 async fn remove_statement_index() -> Result<(), Error> {
 	let sql = "
@@ -135,18 +112,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 
 	let mut tx = dbs.transaction(false, false).await?;
 	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		check_empty_range!(&mut tx, Bc::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bd::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bf::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bi::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bk::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bl::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bo::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bp::range("test", "test", "book", ix));
-		check_none_val!(&mut tx, Bs::new("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bt::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Bu::range("test", "test", "book", ix));
-		check_empty_range!(&mut tx, Index::range("test", "test", "book", ix));
+		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
 	}
 	Ok(())
 }

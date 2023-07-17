@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::kvs;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
@@ -791,47 +790,14 @@ impl RemoveIndexStatement {
 		// Delete the definition
 		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Remove the index data
+		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delp(key, u32::MAX).await?;
 		// Clear the cache
 		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
-		// Delete resource
-		Self::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	// Remove the resource data (whatever the type of the index)
-	pub(crate) async fn delete_resources(
-		run: &mut kvs::Transaction,
-		opt: &Options,
-		tb: &str,
-		ix: &str,
-	) -> Result<(), Error> {
-		let rng = crate::key::index::Index::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bc::Bc::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bd::Bd::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bf::Bf::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bi::Bi::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bk::Bk::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bl::Bl::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bo::Bo::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bp::Bp::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let key = crate::key::index::bs::Bs::new(opt.ns(), opt.db(), tb, ix);
-		run.del(key).await?;
-		let rng = crate::key::index::bt::Bt::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::index::bu::Bu::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		Ok(())
 	}
 }
 

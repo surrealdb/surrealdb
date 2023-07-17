@@ -21,7 +21,7 @@ use crate::sql::idiom::{Idiom, Idioms};
 use crate::sql::index::Index;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
-use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
+use crate::sql::statements::UpdateStatement;
 use crate::sql::strand::strand_raw;
 use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
@@ -1306,11 +1306,12 @@ impl DefineIndexStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Remove the index data
+		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delp(key, u32::MAX).await?;
 		// Clear the cache
 		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
-		// Remove the index data
-		RemoveIndexStatement::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Release the transaction
 		drop(run);
 		// Force queries to run

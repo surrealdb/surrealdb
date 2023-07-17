@@ -34,19 +34,19 @@
 /// crate::key::table::ix                /*{ns}*{db}*{tb}!ix{ix}
 /// crate::key::table::lv                /*{ns}*{db}*{tb}!lv{lv}
 ///
-/// crate::key::index::all               /*{ns}*{db}*{tb}¤{ix}
-/// crate::key::index::bc                /*{ns}*{db}*{tb}¤{ix}!bc*{id}
-/// crate::key::index::bd                /*{ns}*{db}*{tb}¤{ix}!bd*{id}
-/// crate::key::index::bf                /*{ns}*{db}*{tb}¤{ix}!bf*{id}
-/// crate::key::index::bi                /*{ns}*{db}*{tb}¤{ix}!bi*{id}
-/// crate::key::index::bk                /*{ns}*{db}*{tb}¤{ix}!bk*{id}
-/// crate::key::index::bl                /*{ns}*{db}*{tb}¤{ix}!bl*{id}
-/// crate::key::index::bo                /*{ns}*{db}*{tb}¤{ix}!bo*{id}
-/// crate::key::index::bp                /*{ns}*{db}*{tb}¤{ix}!bp*{id}
-/// crate::key::index::bs                /*{ns}*{db}*{tb}¤{ix}!bs
-/// crate::key::index::bt                /*{ns}*{db}*{tb}¤{ix}!bt*{id}
-/// crate::key::index::bu                /*{ns}*{db}*{tb}¤{ix}!bu*{id}
-/// crate::key::index                    /*{ns}*{db}*{tb}¤{ix}*{fd}{id}
+/// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
+/// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}
+/// crate::key::index::bd                /*{ns}*{db}*{tb}+{ix}!bd{id}
+/// crate::key::index::bf                /*{ns}*{db}*{tb}+{ix}!bf{id}
+/// crate::key::index::bi                /*{ns}*{db}*{tb}+{ix}!bi{id}
+/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}
+/// crate::key::index::bl                /*{ns}*{db}*{tb}+{ix}!bl{id}
+/// crate::key::index::bo                /*{ns}*{db}*{tb}+{ix}!bo{id}
+/// crate::key::index::bp                /*{ns}*{db}*{tb}+{ix}!bp{id}
+/// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
+/// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
+/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
+/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 ///
 /// crate::key::change                   /*{ns}*{db}#{ts}
 ///

@@ -12,8 +12,6 @@ pub mod bs;
 pub mod bt;
 pub mod bu;
 
-pub(self) const CHAR: u8 = 0xa4; // ¤
-
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
@@ -31,6 +29,7 @@ struct Prefix<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
+	_e: u8,
 }
 
 impl<'a> Prefix<'a> {
@@ -43,8 +42,9 @@ impl<'a> Prefix<'a> {
 			db,
 			_c: b'*',
 			tb,
-			_d: CHAR,
+			_d: b'+',
 			ix,
+			_e: b'*',
 		}
 	}
 }
@@ -60,6 +60,7 @@ struct PrefixIds<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
+	_e: u8,
 	pub fd: Array,
 }
 
@@ -73,8 +74,9 @@ impl<'a> PrefixIds<'a> {
 			db,
 			_c: b'*',
 			tb,
-			_d: CHAR,
+			_d: b'+',
 			ix,
+			_e: b'*',
 			fd: fd.to_owned(),
 		}
 	}
@@ -91,6 +93,7 @@ pub struct Index<'a> {
 	pub tb: &'a str,
 	_d: u8,
 	pub ix: &'a str,
+	_e: u8,
 	pub fd: Array,
 	pub id: Option<Id>,
 }
@@ -112,8 +115,9 @@ impl<'a> Index<'a> {
 			db,
 			_c: b'*',
 			tb,
-			_d: CHAR,
+			_d: b'+',
 			ix,
+			_e: b'*',
 			fd,
 			id,
 		}
@@ -153,7 +157,7 @@ mod tests {
 		let enc = Index::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0\xa4testix\0\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
+			b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
 		);
 
 		let dec = Index::decode(&enc).unwrap();

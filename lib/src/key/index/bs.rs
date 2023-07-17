@@ -1,4 +1,4 @@
-/// Stores FullText index states
+//! Stores FullText index states
 use derive::Key;
 use serde::{Deserialize, Serialize};
 

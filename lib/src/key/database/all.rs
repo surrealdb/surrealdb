@@ -3,7 +3,7 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Database<'a> {
+pub struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -11,11 +11,11 @@ pub struct Database<'a> {
 	pub db: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
-	Database::new(ns, db)
+pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
+	All::new(ns, db)
 }
 
-impl<'a> Database<'a> {
+impl<'a> All<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
 			__: b'/', // /
@@ -33,14 +33,14 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Database::new(
+		let val = All::new(
 			"testns",
 			"testdb",
 		);
-		let enc = Database::encode(&val).unwrap();
+		let enc = All::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0");
 
-		let dec = Database::decode(&enc).unwrap();
+		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }
