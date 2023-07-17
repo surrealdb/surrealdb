@@ -112,3 +112,41 @@ async fn expired_nodes_get_live_queries_archived() {
 	assert_eq!(scanned.len(), 0);
 	tx.commit().await.unwrap();
 }
+
+#[tokio::test]
+#[serial]
+async fn single_live_queries_are_garbage_collected() {
+	// Test parameters
+	let test = init().await.unwrap();
+	let node_id = uuid::Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
+	let time = Timestamp {
+		value: 123,
+	};
+	let namespace = "test_namespace";
+	let database = "test_db";
+	let table = "test_table";
+
+	// We do standard cluster init
+	test.bootstrap_at_time(&node_id, time).await.unwrap();
+
+	// We set up 2 live queries, one of which we want to garbage collect
+	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
+	let live_query_to_keep = Uuid::parse_str("adea762a-17db-4810-a4a2-c54babfdaf23").unwrap();
+	a_live_query(&mut tx, node_id, namespace, database, table, live_query_to_delete).await.unwrap();
+	a_live_query(&mut tx, node_id, namespace, database, table, live_query_to_keep).await.unwrap();
+	tx.commit().await.unwrap();
+
+	// Subject: Perform the action we are testing
+	test.db.garbage_collect_dead_session(&[live_query_to_delete.clone()]).await.unwrap();
+
+	// Validate
+	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let scanned = tx.all_lv(namespace, database, table).await.unwrap();
+	assert_eq!(scanned.len(), 1);
+	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
+	let scanned = tx.all_lq(&node_id).await.unwrap();
+	assert_eq!(scanned.len(), 1);
+	assert_eq!(&scanned[0].lq, &live_query_to_keep);
+	tx.commit().await.unwrap();
+}

@@ -1,6 +1,7 @@
 use crate::key::lq::Lq;
 use crate::key::lv::Lv;
 
+/// Create a live query in the database that is tied with all required entries
 async fn a_live_query(
 	tx: &mut Transaction,
 	cl: Uuid,

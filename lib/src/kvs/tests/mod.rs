@@ -13,8 +13,9 @@ mod mem {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
 	include!("cluster_init.rs");
+	include!("fixture.rs");
+	include!("helper.rs");
 	include!("lq.rs");
 	include!("lv.rs");
 	include!("raw.rs");
@@ -40,8 +41,9 @@ mod rocksdb {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
 	include!("cluster_init.rs");
+	include!("fixture.rs");
+	include!("helper.rs");
 	include!("lq.rs");
 	include!("lv.rs");
 	include!("raw.rs");
@@ -69,8 +71,9 @@ mod speedb {
 		new_ds().await.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
 	include!("cluster_init.rs");
+	include!("fixture.rs");
+	include!("helper.rs");
 	include!("lq.rs");
 	include!("lv.rs");
 	include!("raw.rs");
@@ -103,6 +106,7 @@ mod tikv {
 	}
 
 	include!("cluster_init.rs");
+	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("lv.rs");
@@ -136,6 +140,7 @@ mod fdb {
 	}
 
 	include!("cluster_init.rs");
+	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("lv.rs");
