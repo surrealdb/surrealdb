@@ -6,7 +6,10 @@ use opentelemetry::{
 	runtime,
 	sdk::{
 		export::metrics::aggregation,
-		metrics::{controllers::{BasicController, self}, selectors, processors},
+		metrics::{
+			controllers::{self, BasicController},
+			processors, selectors,
+		},
 	},
 	Context,
 };
@@ -24,16 +27,16 @@ const KB: f64 = 1024.0;
 const MB: f64 = 1024.0 * KB;
 
 const HTTP_SIZE_HISTOGRAM_BUCKETS: &[f64] = &[
-    1.0 * KB,   // 1 KB
-    2.0 * KB,   // 2 KB
-    5.0 * KB,   // 5 KB
-    10.0 * KB,  // 10 KB
-    100.0 * KB, // 100 KB
-    500.0 * KB, // 500 KB
-    1.0 * MB,   // 1 MB
-    2.5 * MB,   // 2 MB
-    5.0 * MB,   // 5 MB
-    10.0 * MB,  // 10 MB
+	1.0 * KB,   // 1 KB
+	2.0 * KB,   // 2 KB
+	5.0 * KB,   // 5 KB
+	10.0 * KB,  // 10 KB
+	100.0 * KB, // 100 KB
+	500.0 * KB, // 500 KB
+	1.0 * MB,   // 1 MB
+	2.5 * MB,   // 2 MB
+	5.0 * MB,   // 5 MB
+	10.0 * MB,  // 10 MB
 	25.0 * MB,  // 25 MB
 	50.0 * MB,  // 50 MB
 	100.0 * MB, // 100 MB
@@ -47,7 +50,9 @@ static METER_PROVIDER_HTTP_DURATION: Lazy<BasicController> = Lazy::new(|| {
 	let builder = controllers::basic(processors::factory(
 		selectors::simple::histogram(HTTP_DURATION_MS_HISTOGRAM_BUCKETS),
 		aggregation::cumulative_temporality_selector(),
-	)).with_exporter(exporter).with_resource(OTEL_DEFAULT_RESOURCE.clone());
+	))
+	.with_exporter(exporter)
+	.with_resource(OTEL_DEFAULT_RESOURCE.clone());
 
 	let controller = builder.build();
 	controller.start(&Context::current(), runtime::Tokio).unwrap();
@@ -62,14 +67,17 @@ static METER_PROVIDER_HTTP_SIZE: Lazy<BasicController> = Lazy::new(|| {
 	let builder = controllers::basic(processors::factory(
 		selectors::simple::histogram(HTTP_SIZE_HISTOGRAM_BUCKETS),
 		aggregation::cumulative_temporality_selector(),
-	)).with_exporter(exporter).with_resource(OTEL_DEFAULT_RESOURCE.clone());
+	))
+	.with_exporter(exporter)
+	.with_resource(OTEL_DEFAULT_RESOURCE.clone());
 
 	let controller = builder.build();
 	controller.start(&Context::current(), runtime::Tokio).unwrap();
 	controller
 });
 
-static HTTP_DURATION_METER: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_HTTP_DURATION.meter("http_duration"));
+static HTTP_DURATION_METER: Lazy<Meter> =
+	Lazy::new(|| METER_PROVIDER_HTTP_DURATION.meter("http_duration"));
 static HTTP_SIZE_METER: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_HTTP_SIZE.meter("http_size"));
 
 pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {

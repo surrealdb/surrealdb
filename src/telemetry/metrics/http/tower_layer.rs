@@ -13,7 +13,10 @@ use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use tower::{Layer, Service};
 
-use super::{HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION, HTTP_SERVER_REQUEST_SIZE, HTTP_SERVER_RESPONSE_SIZE, HTTP_DURATION_METER};
+use super::{
+	HTTP_DURATION_METER, HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION,
+	HTTP_SERVER_REQUEST_SIZE, HTTP_SERVER_RESPONSE_SIZE,
+};
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -95,7 +98,11 @@ where
 
 		let result = match response {
 			Ok(reply) => {
-				this.tracker.set_state(ResultState::Result(reply.status(), reply.version(), reply.body().size_hint().exact()));
+				this.tracker.set_state(ResultState::Result(
+					reply.status(),
+					reply.version(),
+					reply.body().size_hint().exact(),
+				));
 				Ok(reply)
 			}
 			Err(e) => {
@@ -266,13 +273,15 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsE
 fn observe_active_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 	// Setup the callback to observe the active requests.
-	HTTP_DURATION_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, 1, &attrs))
+	HTTP_DURATION_METER
+		.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, 1, &attrs))
 }
 
 fn observe_active_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 	// Setup the callback to observe the active requests.
-	HTTP_DURATION_METER.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, -1, &attrs))
+	HTTP_DURATION_METER
+		.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, -1, &attrs))
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {
