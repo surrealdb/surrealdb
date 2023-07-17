@@ -1,27 +1,24 @@
-/// The stub implementations for the fetch API when `http` is not enabled.
-use js::{bind, prelude::*, Ctx, Exception, Result};
+//! stub implementations for the fetch API when `http` is not enabled.
+
+use js::{class::Trace, Class, Ctx, Exception, Function, Result};
 
 #[cfg(test)]
 mod test;
 
 /// Register the fetch types in the context.
-pub fn register(ctx: Ctx<'_>) -> Result<()> {
+pub fn register(ctx: &Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
-	globals.init_def::<Fetch>()?;
-
-	globals.init_def::<Response>()?;
-	globals.init_def::<Request>()?;
-	globals.init_def::<Blob>()?;
-	globals.init_def::<FormData>()?;
-	globals.init_def::<Headers>()?;
-
-	Ok(())
+	Class::<response::Response>::define(&globals)?;
+	Class::<request::Request>::define(&globals)?;
+	Class::<blob::Blob>::define(&globals)?;
+	Class::<form_data::FormData>::define(&globals)?;
+	Class::<headers::Headers>::define(&globals)?;
+	globals.set("fetch", Function::new(ctx.clone(), js_fetch)?.with_name("fetch")?)
 }
 
-#[bind(object, public)]
-#[allow(unused_variables)]
-fn fetch<'js>(ctx: Ctx<'js>, args: Rest<()>) -> Result<()> {
-	Err(Exception::throw_internal(ctx,"The 'fetch' function is not available in this build of SurrealDB. In order to use 'fetch', enable the 'http' feature."))
+#[js::function]
+fn fetch<'js>(ctx: Ctx<'js>) -> Result<()> {
+	Err(Exception::throw_internal(&ctx,"The 'fetch' function is not available in this build of SurrealDB. In order to use 'fetch', enable the 'http' feature."))
 }
 
 macro_rules! impl_stub_class {
@@ -29,31 +26,29 @@ macro_rules! impl_stub_class {
 
 		$(
 
-			#[js::bind(object, public)]
-			#[quickjs(bare)]
-			#[allow(non_snake_case)]
-			#[allow(unused_variables)]
-			#[allow(clippy::module_inception)]
-			pub mod $module{
-				use js::{function::Rest, Ctx, Exception, Result};
+			mod $module{
+				use super::*;
 
+				#[js::class]
+				#[derive(Trace)]
 				pub struct $name;
+
+				#[js::methods]
 				impl $name {
-					#[quickjs(constructor)]
-					pub fn new(ctx: Ctx, _arg: Rest<()>) -> Result<Self> {
+					#[qjs(constructor)]
+					pub fn new(ctx: Ctx<'_>) -> Result<Self> {
 						Err(Exception::throw_internal(
-								ctx,
-								concat!(
-									"The '",
-									stringify!($name),
-									"' class is not available in this build of SurrealDB. In order to use '",
-									stringify!($name),
-									"', enable the 'http' feature."
-								),
-								))
+							&ctx,
+							concat!(
+								"The '",
+								stringify!($name),
+								"' class is not available in this build of SurrealDB. In order to use '",
+								stringify!($name),
+								"', enable the 'http' feature."
+							),
+						))
 					}
 				}
-
 			}
 		)*
 	};
