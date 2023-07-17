@@ -89,10 +89,12 @@ where
 			// Get the IP from the corresponding header
 			var if var.is_header() => {
 				if let Some(ip) = parts.headers.get(var.to_string()) {
-					ip.to_str().map(|s| ExtractClientIP(Some(s.to_string()))).unwrap_or_else(|err| {
-						debug!("Invalid header value for {}: {}", var, err);
-						ExtractClientIP(None)
-					})
+					ip.to_str().map(|s| ExtractClientIP(Some(s.to_string()))).unwrap_or_else(
+						|err| {
+							debug!("Invalid header value for {}: {}", var, err);
+							ExtractClientIP(None)
+						},
+					)
 				} else {
 					ExtractClientIP(None)
 				}
@@ -100,7 +102,7 @@ where
 			_ => {
 				warn!("Unexpected ClientIp variant: {:?}", app_state.client_ip);
 				ExtractClientIP(None)
-			},
+			}
 		};
 
 		Ok(res)
