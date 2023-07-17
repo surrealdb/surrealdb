@@ -90,7 +90,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	// Create session
 	#[rustfmt::skip]
-    let mut session = Session { ip, or, id, ns, db, ..Default::default() };
+	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {

@@ -36,15 +36,31 @@ pub enum ClientIp {
 	XRealIp,
 }
 
-///
-/// ClientIP extracts the client IP address from the request.
-///
-/// Example:
-///
-/// ```rust
-/// use surrealdb::net::client_ip::ClientIP;
-/// use surrealdb::net::AppState;
-///
+impl std::fmt::Display for ClientIp {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ClientIp::None => write!(f, "None"),
+			ClientIp::Socket => write!(f, "Socket"),
+			ClientIp::CfConectingIp => write!(f, "CF-Connecting-IP"),
+			ClientIp::FlyClientIp => write!(f, "Fly-Client-IP"),
+			ClientIp::TrueClientIP => write!(f, "True-Client-IP"),
+			ClientIp::XRealIp => write!(f, "X-Real-IP"),
+		}
+	}
+}
+
+impl ClientIp {
+	fn is_header(&self) -> bool {
+		match self {
+			ClientIp::None => false,
+			ClientIp::Socket => false,
+			ClientIp::CfConectingIp => true,
+			ClientIp::FlyClientIp => true,
+			ClientIp::TrueClientIP => true,
+			ClientIp::XRealIp => true,
+		}
+	}
+}
 
 pub(super) struct ExtractClientIP(pub Option<String>);
 
@@ -70,34 +86,21 @@ where
 					ExtractClientIP(None)
 				}
 			}
-			ClientIp::CfConectingIp => {
-				if let Some(ip) = parts.headers.get("Cf-Connecting-IP") {
-					ExtractClientIP(Some(ip.to_str().unwrap().to_string()))
+			// Get the IP from the corresponding header
+			var if var.is_header() => {
+				if let Some(ip) = parts.headers.get(var.to_string()) {
+					ip.to_str().map(|s| ExtractClientIP(Some(s.to_string()))).unwrap_or_else(|err| {
+						debug!("Invalid header value for {}: {}", var, err);
+						ExtractClientIP(None)
+					})
 				} else {
 					ExtractClientIP(None)
 				}
 			}
-			ClientIp::FlyClientIp => {
-				if let Some(ip) = parts.headers.get("Fly-Client-IP") {
-					ExtractClientIP(Some(ip.to_str().unwrap().to_string()))
-				} else {
-					ExtractClientIP(None)
-				}
-			}
-			ClientIp::TrueClientIP => {
-				if let Some(ip) = parts.headers.get("True-Client-IP") {
-					ExtractClientIP(Some(ip.to_str().unwrap().to_string()))
-				} else {
-					ExtractClientIP(None)
-				}
-			}
-			ClientIp::XRealIp => {
-				if let Some(ip) = parts.headers.get("X-Real-IP") {
-					ExtractClientIP(Some(ip.to_str().unwrap().to_string()))
-				} else {
-					ExtractClientIP(None)
-				}
-			}
+			_ => {
+				warn!("Unexpected ClientIp variant: {:?}", app_state.client_ip);
+				ExtractClientIP(None)
+			},
 		};
 
 		Ok(res)
