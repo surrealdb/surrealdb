@@ -157,8 +157,9 @@ pub async fn init() -> Result<(), Error> {
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
 			.await?;
 
-		info!(target: LOG, "Web server stopped. Bye!");
 	};
+
+	info!(target: LOG, "Web server stopped. Bye!");
 
 	Ok(())
 }
