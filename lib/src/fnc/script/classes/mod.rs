@@ -1,13 +1,13 @@
-use js::{Ctx, Result};
+use js::{Class, Ctx, Result};
 
 pub mod duration;
 pub mod record;
 pub mod uuid;
 
-pub fn init(ctx: Ctx<'_>) -> Result<()> {
+pub fn init(ctx: &Ctx<'_>) -> Result<()> {
 	let globals = ctx.globals();
-	globals.init_def::<duration::Duration>()?;
-	globals.init_def::<record::Record>()?;
-	globals.init_def::<uuid::Uuid>()?;
+	Class::<duration::Duration>::define(&globals)?;
+	Class::<record::Record>::define(&globals)?;
+	Class::<uuid::Uuid>::define(&globals)?;
 	Ok(())
 }

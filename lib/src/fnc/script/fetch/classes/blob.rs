@@ -1,9 +1,11 @@
 //! Blob class implementation
 
-use bytes::BytesMut;
-use js::{bind, prelude::Coerced, ArrayBuffer, Class, Ctx, Exception, FromJs, Result, Value};
-
-pub use blob::Blob as BlobClass;
+use bytes::{Bytes, BytesMut};
+use js::{
+	class::Trace,
+	prelude::{Coerced, Opt},
+	ArrayBuffer, Class, Ctx, Exception, FromJs, Object, Result, Value,
+};
 
 #[derive(Clone, Copy)]
 pub enum EndingType {
@@ -12,7 +14,7 @@ pub enum EndingType {
 }
 
 fn append_blob_part<'js>(
-	ctx: Ctx<'js>,
+	ctx: &Ctx<'js>,
 	value: Value<'js>,
 	ending: EndingType,
 	data: &mut BytesMut,
@@ -23,11 +25,11 @@ fn append_blob_part<'js>(
 	const LINE_ENDING: &[u8] = b"\n";
 
 	if let Some(object) = value.as_object() {
-		if let Ok(x) = Class::<BlobClass>::from_object(object.clone()) {
+		if let Some(x) = Class::<Blob>::from_object(object.clone()) {
 			data.extend_from_slice(&x.borrow().data);
 			return Ok(());
 		}
-		if let Ok(x) = ArrayBuffer::from_object(object.clone()) {
+		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
 			data.extend_from_slice(x.as_bytes().ok_or_else(|| {
 				Exception::throw_type(ctx, "Tried to construct blob with detached buffer")
 			})?);
@@ -74,144 +76,121 @@ fn normalize_type(mut ty: String) -> String {
 	}
 }
 
-#[bind(object, public)]
-#[quickjs(bare)]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-#[allow(clippy::module_inception)]
-mod blob {
-	use super::*;
+#[derive(Clone, Trace)]
+#[js::class]
+pub struct Blob {
+	pub(crate) mime: String,
+	// TODO: make bytes?
+	#[qjs(skip_trace)]
+	pub(crate) data: Bytes,
+}
 
-	use bytes::{Bytes, BytesMut};
-	use js::{
-		function::{Opt, Rest},
-		ArrayBuffer, Ctx, Exception, Object, Result, Value,
-	};
+#[js::methods]
+impl Blob {
+	// ------------------------------
+	// Constructor
+	// ------------------------------
 
-	#[derive(Clone)]
-	#[quickjs(cloneable)]
-	pub struct Blob {
-		pub(crate) mime: String,
-		// TODO: make bytes?
-		pub(crate) data: Bytes,
+	#[qjs(constructor)]
+	pub fn new<'js>(
+		ctx: Ctx<'js>,
+		parts: Opt<Value<'js>>,
+		options: Opt<Object<'js>>,
+	) -> Result<Self> {
+		let mut r#type = String::new();
+		let mut endings = EndingType::Transparent;
+
+		if let Some(obj) = options.into_inner() {
+			if let Some(x) = obj.get::<_, Option<Coerced<String>>>("type")? {
+				r#type = normalize_type(x.to_string());
+			}
+			if let Some(Coerced(x)) = obj.get::<_, Option<Coerced<String>>>("endings")? {
+				if x == "native" {
+					endings = EndingType::Native;
+				} else if x != "transparent" {
+					return Err(Exception::throw_type(
+						&ctx,
+						",expected endings to be either 'transparent' or 'native'",
+					));
+				}
+			}
+		}
+
+		let data = if let Some(parts) = parts.into_inner() {
+			let array = parts
+				.into_array()
+				.ok_or_else(|| Exception::throw_type(&ctx, "Blob parts are not a sequence"))?;
+
+			let mut buffer = BytesMut::new();
+
+			for elem in array.iter::<Value>() {
+				let elem = elem?;
+				append_blob_part(&ctx, elem, endings, &mut buffer)?;
+			}
+			buffer.freeze()
+		} else {
+			Bytes::new()
+		};
+		Ok(Self {
+			mime: r#type,
+			data,
+		})
 	}
 
-	impl Blob {
-		// ------------------------------
-		// Constructor
-		// ------------------------------
+	// ------------------------------
+	// Instance properties
+	// ------------------------------
 
-		#[quickjs(constructor)]
-		pub fn new<'js>(
-			ctx: Ctx<'js>,
-			parts: Opt<Value<'js>>,
-			options: Opt<Object<'js>>,
-			_rest: Rest<()>,
-		) -> Result<Self> {
-			let mut r#type = String::new();
-			let mut endings = EndingType::Transparent;
+	#[qjs(get)]
+	pub fn size(&self) -> usize {
+		self.data.len()
+	}
 
-			if let Some(obj) = options.into_inner() {
-				if let Some(x) = obj.get::<_, Option<Coerced<String>>>("type")? {
-					r#type = normalize_type(x.to_string());
-				}
-				if let Some(Coerced(x)) = obj.get::<_, Option<Coerced<String>>>("endings")? {
-					if x == "native" {
-						endings = EndingType::Native;
-					} else if x != "transparent" {
-						return Err(Exception::throw_type(
-							ctx,
-							",expected endings to be either 'transparent' or 'native'",
-						));
-					}
-				}
-			}
+	#[qjs(get, rename = "type")]
+	pub fn r#type(&self) -> String {
+		self.mime.clone()
+	}
 
-			let data = if let Some(parts) = parts.into_inner() {
-				let array = parts
-					.into_array()
-					.ok_or_else(|| Exception::throw_type(ctx, "Blob parts are not a sequence"))?;
-
-				let mut buffer = BytesMut::new();
-
-				for elem in array.iter::<Value>() {
-					let elem = elem?;
-					append_blob_part(ctx, elem, endings, &mut buffer)?;
-				}
-				buffer.freeze()
-			} else {
-				Bytes::new()
-			};
-			Ok(Self {
-				mime: r#type,
-				data,
-			})
+	pub fn slice(&self, start: Opt<isize>, end: Opt<isize>, content_type: Opt<String>) -> Blob {
+		// see https://w3c.github.io/FileAPI/#slice-blob
+		let start = start.into_inner().unwrap_or_default();
+		let start = if start < 0 {
+			(self.data.len() as isize + start).max(0) as usize
+		} else {
+			start as usize
+		};
+		let end = end.into_inner().unwrap_or_default();
+		let end = if end < 0 {
+			(self.data.len() as isize + end).max(0) as usize
+		} else {
+			end as usize
+		};
+		let data = self.data.slice(start..end);
+		let content_type = content_type.into_inner().map(normalize_type).unwrap_or_default();
+		Blob {
+			mime: content_type,
+			data,
 		}
+	}
 
-		// ------------------------------
-		// Instance properties
-		// ------------------------------
+	pub async fn text(&self) -> Result<String> {
+		let text = String::from_utf8(self.data.to_vec())?;
+		Ok(text)
+	}
 
-		#[quickjs(get)]
-		pub fn size(&self) -> usize {
-			self.data.len()
-		}
+	#[qjs(rename = "arrayBuffer")]
+	pub async fn array_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
+		ArrayBuffer::new(ctx, self.data.to_vec())
+	}
 
-		#[quickjs(get)]
-		#[quickjs(rename = "type")]
-		pub fn r#type(&self) -> String {
-			self.mime.clone()
-		}
+	// ------------------------------
+	// Instance methods
+	// ------------------------------
 
-		pub fn slice(
-			&self,
-			start: Opt<isize>,
-			end: Opt<isize>,
-			content_type: Opt<String>,
-			_rest: Rest<()>,
-		) -> Blob {
-			// see https://w3c.github.io/FileAPI/#slice-blob
-			let start = start.into_inner().unwrap_or_default();
-			let start = if start < 0 {
-				(self.data.len() as isize + start).max(0) as usize
-			} else {
-				start as usize
-			};
-			let end = end.into_inner().unwrap_or_default();
-			let end = if end < 0 {
-				(self.data.len() as isize + end).max(0) as usize
-			} else {
-				end as usize
-			};
-			let data = self.data.slice(start..end);
-			let content_type = content_type.into_inner().map(normalize_type).unwrap_or_default();
-			Blob {
-				mime: content_type,
-				data,
-			}
-		}
-
-		pub async fn text(&self, _rest: Rest<()>) -> Result<String> {
-			let text = String::from_utf8(self.data.to_vec())?;
-			Ok(text)
-		}
-
-		pub async fn arrayBuffer<'js>(
-			&self,
-			ctx: Ctx<'js>,
-			_rest: Rest<()>,
-		) -> Result<ArrayBuffer<'js>> {
-			ArrayBuffer::new(ctx, self.data.to_vec())
-		}
-
-		// ------------------------------
-		// Instance methods
-		// ------------------------------
-
-		// Convert the object to a string
-		pub fn toString(&self, _rest: Rest<()>) -> String {
-			String::from("[object Blob]")
-		}
+	// Convert the object to a string
+	#[qjs(rename = "toString")]
+	pub fn js_to_string(&self) -> String {
+		String::from("[object Blob]")
 	}
 }
 
@@ -242,17 +221,17 @@ mod test {
 
 				blob = new Blob(["\n\r\n \n\r"],{endings: "transparent"});
 				assert.eq(blob.size,6)
-				assert.eq(await blob.text(),"\n\r\n \n\r");
+					assert.eq(await blob.text(),"\n\r\n \n\r");
 				blob = new Blob(["\n\r\n \n\r"],{endings: "native"});
 				// \n \r\n and the \n from \n\r are converted.
 				// the part of the string which isn't converted is the space and the \r
 				assert.eq(await blob.text(),`${NATIVE_LINE_ENDING}${NATIVE_LINE_ENDING} ${NATIVE_LINE_ENDING}\r`);
 				assert.eq(blob.size,NATIVE_LINE_ENDING.length*3 + 2)
 
-				assert.mustThrow(() => new Blob("text"));
+					assert.mustThrow(() => new Blob("text"));
 				assert.mustThrow(() => new Blob(["text"], {endings: "invalid value"}));
 			})()
-			"#).catch(ctx).unwrap().await.catch(ctx).unwrap();
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
 		})
 		.await
 	}
