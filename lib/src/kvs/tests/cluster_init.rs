@@ -147,7 +147,7 @@ async fn single_live_queries_are_garbage_collected() {
 	trace!("Validating live queries");
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let scanned = tx.all_lv(namespace, database, table).await.unwrap();
-	assert_eq!(scanned.len(), 1);
+	assert_eq!(scanned.len(), 1, "The scanned values are {:?}", scanned);
 	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
 	let scanned = tx.all_lq(&node_id).await.unwrap();
 	assert_eq!(scanned.len(), 1);
