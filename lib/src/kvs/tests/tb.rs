@@ -1,5 +1,5 @@
-use crate::key::tb;
-use crate::key::tb::Tb;
+use crate::key::database::tb;
+use crate::key::database::tb::Tb;
 use crate::sql::statements::DefineTableStatement;
 
 #[tokio::test]
