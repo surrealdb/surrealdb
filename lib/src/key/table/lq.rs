@@ -16,11 +16,11 @@ pub struct Lq<'a> {
 	_e: u8,
 	_f: u8,
 	#[serde(with = "uuid::serde::compact")]
-	pub lv: Uuid,
+	pub lq: Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lv: Uuid) -> Lq<'a> {
-	Lq::new(ns, db, tb, lv)
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
+	Lq::new(ns, db, tb, lq)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -36,7 +36,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl<'a> Lq<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, lv: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -48,7 +48,7 @@ impl<'a> Lq<'a> {
 			_d: b'!',
 			_e: b'l',
 			_f: b'q',
-			lv,
+			lq,
 		}
 	}
 }
