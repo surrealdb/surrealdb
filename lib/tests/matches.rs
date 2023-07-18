@@ -242,15 +242,19 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 #[tokio::test]
 async fn select_where_matches_without_using_index_and_score() -> Result<(), Error> {
 	let sql = r"
-		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';
-		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog';
-		CREATE blog:3 SET title = 'the other animals sat there watching';
-		CREATE blog:4 SET title = 'the dog sat there and did nothing';
+		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog', label = 'test';
+		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog', label = 'test';
+		CREATE blog:3 SET title = 'the other animals sat there watching', label = 'test';
+		CREATE blog:4 SET title = 'the dog sat there and did nothing', label = 'test';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		LET $keywords = 'animals';
- 		SELECT id,search::score(1) AS score FROM blog WHERE (title @1@ $keywords AND id>0) OR (title @1@ $keywords AND id<99);
-		SELECT id,search::score(1) + search::score(2) AS score FROM blog WHERE title @1@ 'dummy1' OR title @2@ 'dummy2';
+ 		SELECT id,search::score(1) AS score FROM blog
+ 			WHERE (title @1@ $keywords AND label = 'test')
+ 			OR (title @1@ $keywords AND label = 'test');
+		SELECT id,search::score(1) + search::score(2) AS score FROM blog
+			WHERE (title @1@ 'dummy1' AND label = 'test')
+			OR (title @2@ 'dummy2' AND label = 'test');
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");

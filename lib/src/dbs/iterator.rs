@@ -7,7 +7,7 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
-use crate::idx::planner::plan::Plan;
+use crate::idx::planner::plan::IndexOption;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -29,7 +29,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, Plan),
+	Index(Table, IndexOption),
 }
 
 pub(crate) enum Operable {

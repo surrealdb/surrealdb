@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
-use crate::idx::planner::plan::Plan;
+use crate::idx::planner::plan::IndexOption;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
@@ -80,7 +80,7 @@ impl<'a> Processor<'a> {
 				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, p) => self.process_index(ctx, opt, txn, stm, t, p).await?,
+				Iterable::Index(t, io) => self.process_index(ctx, opt, txn, stm, t, io).await?,
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
 				}
@@ -483,13 +483,13 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: Table,
-		plan: Plan,
+		io: IndexOption,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		let exe = ctx.get_query_executor(&table.0);
 		if let Some(exe) = exe {
-			let mut iterator = plan.new_iterator(opt, txn, exe).await?;
+			let mut iterator = io.new_iterator(opt, txn, exe).await?;
 			let mut things = iterator.next_batch(txn, 1000).await?;
 			while !things.is_empty() {
 				// Check if the context is finished
