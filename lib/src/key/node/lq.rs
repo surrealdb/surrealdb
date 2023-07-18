@@ -53,7 +53,7 @@ impl<'a> Lq<'a> {
 			_e: b'*',
 			db,
 			_f: b'!',
-			_g: b'n',
+			_g: b'l',
 			_h: b'q',
 			lq,
 		}
@@ -72,7 +72,7 @@ mod tests {
 		let lv = Uuid::from_bytes([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20]);
 		let val = Lq::new(nd, "testns", "testdb", lv);
 		let enc = Lq::encode(&val).unwrap();
-		assert_eq!(enc, b"/!nd\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10*testns\x00*testdb\x00!nq\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20" );
+		assert_eq!(enc, b"/!nd\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10*testns\x00*testdb\x00!lq\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20" );
 
 		let dec = Lq::decode(&enc).unwrap();
 		assert_eq!(val, dec);
