@@ -1,8 +1,7 @@
-use crate::sql::{Object, Value};
+use crate::sql::{Object, Uuid, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Debug;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Notification {

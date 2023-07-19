@@ -10,8 +10,8 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::key::root::hb::Hb;
 use crate::sql;
-use crate::sql::Query;
 use crate::sql::Value;
+use crate::sql::{Query, Uuid};
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::instrument;
 use tracing::trace;
-use uuid::Uuid;
 
 use super::tx::Transaction;
 
@@ -322,8 +321,8 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(*node_id).await?;
-		tx.set_hb(timestamp.clone(), *node_id).await?;
+		tx.set_nd(node_id.0.clone()).await?;
+		tx.set_hb(timestamp.clone(), node_id.0.clone()).await?;
 		Ok(())
 	}
 
@@ -339,7 +338,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			tx.del_nd(hb.nd).await?;
-			nodes.push(hb.nd);
+			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
 	}
@@ -364,7 +363,8 @@ impl Datastore {
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs = self.archive_lv_for_node(tx, &lq.nd, this_node_id).await?;
+				let node_archived_lqs =
+					self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await?;
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
@@ -380,10 +380,10 @@ impl Datastore {
 	) -> Result<(), Error> {
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd, &lq.ns, &lq.db, lq.lq);
+			let key = crate::key::node::lq::new(lq.nd.0, &lq.ns, &lq.db, lq.lq.clone().0);
 			tx.del(key).await?;
 			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq);
+			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.clone().0);
 			tx.del(key).await?;
 		}
 		Ok(())
@@ -401,7 +401,9 @@ impl Datastore {
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
 		let mut archived: Vec<LqValue> = vec![];
 		for hb in dead_heartbeats {
-			let new_archived = self.archive_lv_for_node(tx, &hb.nd, this_node_id).await?;
+			let new_archived = self
+				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
+				.await?;
 			tx.del_nd(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
 			for lq_value in new_archived {
@@ -416,14 +418,14 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		nd: &Uuid,
-		this_node_id: &Uuid,
+		this_node_id: Uuid,
 	) -> Result<Vec<LqValue>, Error> {
 		let lqs = tx.all_lq(nd).await?;
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
 		let mut ret = vec![];
 		for lq in lqs {
 			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
-			let archived_lvs = lvs.clone().archive(*this_node_id);
+			let archived_lvs = lvs.clone().archive(this_node_id.clone());
 			tx.putc_lv(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);
 		}
@@ -452,7 +454,7 @@ impl Datastore {
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
-		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
+		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
 		tx.commit().await
 	}
 
@@ -466,7 +468,7 @@ impl Datastore {
 		timestamp: Timestamp,
 		node_id: Uuid,
 	) -> Result<(), Error> {
-		tx.set_hb(timestamp, node_id).await
+		tx.set_hb(timestamp, node_id.0).await
 	}
 
 	// -----
@@ -586,7 +588,7 @@ impl Datastore {
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id)
+			.with_id(self.id.clone())
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -639,7 +641,7 @@ impl Datastore {
 	) -> Result<Value, Error> {
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id)
+			.with_id(self.id.clone())
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
