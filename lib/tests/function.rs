@@ -5180,25 +5180,24 @@ async fn function_vector_distance_chebyshev() -> Result<(), Error> {
 	Ok(())
 }
 
-
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_head() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("HEAD"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
+		.and(header("user-agent", "SurrealDB"))
 		.respond_with(ResponseTemplate::new(200))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	test_queries(
-		&format!("RETURN http::head('{}/some/path')",server.uri()),
-		&["NONE"]
-	).await?;
+	test_queries(&format!("RETURN http::head('{}/some/path')", server.uri()), &["NONE"]).await?;
 
 	server.verify().await;
 
@@ -5208,26 +5207,26 @@ pub async fn function_http_head() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_get() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
-		.and(header("a-test-header","with-a-test-value"))
-		.respond_with(
-			ResponseTemplate::new(200)
-			.set_body_string("some text result")
-		)
+		.and(header("user-agent", "SurrealDB"))
+		.and(header("a-test-header", "with-a-test-value"))
+		.respond_with(ResponseTemplate::new(200).set_body_string("some text result"))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	let query = format!(r#"RETURN http::get("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,server.uri());
-	test_queries(
-		&query,
-		&["'some text result'"]
-	).await?;
+	let query = format!(
+		r#"RETURN http::get("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,
+		server.uri()
+	);
+	test_queries(&query, &["'some text result'"]).await?;
 
 	server.verify().await;
 
@@ -5237,27 +5236,25 @@ pub async fn function_http_get() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_put() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PUT"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
-		.respond_with(
-			ResponseTemplate::new(200)
-			.set_body_json(serde_json::json!({
-				"some-response": "some-value"
-			}))
-		)
+		.and(header("user-agent", "SurrealDB"))
+		.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+			"some-response": "some-value"
+		})))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	let query = format!(r#"RETURN http::put("{}/some/path",{{ 'some-key': 'some-value' }})"#,server.uri());
-	test_queries(
-		&query,
-		&[r#"{ "some-response": 'some-value' }"#]
-	).await?;
+	let query =
+		format!(r#"RETURN http::put("{}/some/path",{{ 'some-key': 'some-value' }})"#, server.uri());
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
 
 	server.verify().await;
 
@@ -5267,27 +5264,27 @@ pub async fn function_http_put() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_post() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("POST"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
-		.respond_with(
-			ResponseTemplate::new(200)
-			.set_body_json(serde_json::json!({
-				"some-response": "some-value"
-			}))
-		)
+		.and(header("user-agent", "SurrealDB"))
+		.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+			"some-response": "some-value"
+		})))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	let query = format!(r#"RETURN http::post("{}/some/path",{{ 'some-key': 'some-value' }})"#,server.uri());
-	test_queries(
-		&query,
-		&[r#"{ "some-response": 'some-value' }"#]
-	).await?;
+	let query = format!(
+		r#"RETURN http::post("{}/some/path",{{ 'some-key': 'some-value' }})"#,
+		server.uri()
+	);
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
 
 	server.verify().await;
 
@@ -5297,27 +5294,27 @@ pub async fn function_http_post() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_patch() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PATCH"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
-		.respond_with(
-			ResponseTemplate::new(200)
-			.set_body_json(serde_json::json!({
-				"some-response": "some-value"
-			}))
-		)
+		.and(header("user-agent", "SurrealDB"))
+		.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+			"some-response": "some-value"
+		})))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	let query = format!(r#"RETURN http::patch("{}/some/path",{{ 'some-key': 'some-value' }})"#,server.uri());
-	test_queries(
-		&query,
-		&[r#"{ "some-response": 'some-value' }"#]
-	).await?;
+	let query = format!(
+		r#"RETURN http::patch("{}/some/path",{{ 'some-key': 'some-value' }})"#,
+		server.uri()
+	);
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
 
 	server.verify().await;
 
@@ -5327,26 +5324,26 @@ pub async fn function_http_patch() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_delete() -> Result<(), Error> {
-	use wiremock::{Mock, ResponseTemplate, matchers::{method,path,header}};
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("DELETE"))
 		.and(path("/some/path"))
-		.and(header("user-agent","SurrealDB"))
-		.and(header("a-test-header","with-a-test-value"))
-		.respond_with(
-			ResponseTemplate::new(200)
-			.set_body_string("some text result")
-		)
+		.and(header("user-agent", "SurrealDB"))
+		.and(header("a-test-header", "with-a-test-value"))
+		.respond_with(ResponseTemplate::new(200).set_body_string("some text result"))
 		.expect(1)
 		.mount(&server)
 		.await;
 
-	let query = format!(r#"RETURN http::delete("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,server.uri());
-	test_queries(
-		&query,
-		&["'some text result'"]
-	).await?;
+	let query = format!(
+		r#"RETURN http::delete("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,
+		server.uri()
+	);
+	test_queries(&query, &["'some text result'"]).await?;
 
 	server.verify().await;
 
@@ -5356,31 +5353,16 @@ pub async fn function_http_delete() -> Result<(), Error> {
 #[cfg(not(feature = "http"))]
 #[tokio::test]
 pub async fn function_http_disabled() -> Result<(), Error> {
-	let res = test_queries(
-		"RETURN http::head({})",
-		&["todo"]
-	).await;
-	assert!(matches!(res,Err(Error::HttpDisabled)));
-	let res = test_queries(
-		"RETURN http::put({})",
-		&["todo"]
-	).await;
-	assert!(matches!(res,Err(Error::HttpDisabled)));
-	let res = test_queries(
-		"RETURN http::post({})",
-		&["todo"]
-	).await;
-	assert!(matches!(res,Err(Error::HttpDisabled)));
-	let res = test_queries(
-		"RETURN http::patch({})",
-		&["todo"]
-	).await;
-	assert!(matches!(res,Err(Error::HttpDisabled)));
-	let res = test_queries(
-		"RETURN http::delete({})",
-		&["todo"]
-	).await;
-	assert!(matches!(res,Err(Error::HttpDisabled)));
+	let res = test_queries("RETURN http::head({})", &["NONE"]).await;
+	assert!(matches!(res, Err(Error::HttpDisabled)));
+	let res = test_queries("RETURN http::put({})", &["NONE"]).await;
+	assert!(matches!(res, Err(Error::HttpDisabled)));
+	let res = test_queries("RETURN http::post({})", &["NONE"]).await;
+	assert!(matches!(res, Err(Error::HttpDisabled)));
+	let res = test_queries("RETURN http::patch({})", &["NONE"]).await;
+	assert!(matches!(res, Err(Error::HttpDisabled)));
+	let res = test_queries("RETURN http::delete({})", &["NONE"]).await;
+	assert!(matches!(res, Err(Error::HttpDisabled)));
 
 	Ok(())
 }
