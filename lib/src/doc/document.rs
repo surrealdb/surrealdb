@@ -31,15 +31,6 @@ pub struct CursorDoc<'a> {
 }
 
 impl<'a> CursorDoc<'a> {
-	pub(crate) fn from_doc(doc: &'a Value) -> Self {
-		Self {
-			ir: None,
-			rid: None,
-			doc: Cow::Borrowed(doc),
-			doc_id: None,
-		}
-	}
-
 	pub(crate) fn new(
 		ir: Option<IteratorRef>,
 		rid: Option<&'a Thing>,
@@ -51,6 +42,28 @@ impl<'a> CursorDoc<'a> {
 			rid,
 			doc: Cow::Borrowed(doc),
 			doc_id,
+		}
+	}
+}
+
+impl<'a> From<&'a Value> for CursorDoc<'a> {
+	fn from(doc: &'a Value) -> Self {
+		Self {
+			ir: None,
+			rid: None,
+			doc: Cow::Borrowed(doc),
+			doc_id: None,
+		}
+	}
+}
+
+impl<'a> From<&'a mut Value> for CursorDoc<'a> {
+	fn from(doc: &'a mut Value) -> Self {
+		Self {
+			ir: None,
+			rid: None,
+			doc: Cow::Borrowed(doc),
+			doc_id: None,
 		}
 	}
 }

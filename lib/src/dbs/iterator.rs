@@ -3,7 +3,6 @@ use crate::ctx::Context;
 use crate::dbs::explanation::Explanation;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
-use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
@@ -269,10 +268,10 @@ impl Iterator {
 								_ => {
 									let x = vals.first();
 									let x = if let Some(alias) = alias {
-										let cur = CursorDoc::from_doc(&x);
+										let cur = (&x).into();
 										alias.compute(ctx, opt, txn, Some(&cur)).await?
 									} else {
-										let cur = CursorDoc::from_doc(&x);
+										let cur = (&x).into();
 										expr.compute(ctx, opt, txn, Some(&cur)).await?
 									};
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
