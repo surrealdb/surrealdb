@@ -1,4 +1,4 @@
-use crate::dbs::cl::Timestamp;
+use crate::dbs::node::Timestamp;
 use crate::err::Error;
 
 pub struct TestContext {

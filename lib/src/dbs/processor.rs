@@ -236,8 +236,8 @@ impl<'a> Processor<'a> {
 						nxt = Some(k.clone());
 					}
 					// Parse the data from the store
-					let key: crate::key::thing::Thing = (&k).into();
-					let val: crate::sql::value::Value = (&v).into();
+					let key: thing::Thing = (&k).into();
+					let val: Value = (&v).into();
 					let rid = Thing::from((key.tb, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
@@ -319,8 +319,8 @@ impl<'a> Processor<'a> {
 						nxt = Some(k.clone());
 					}
 					// Parse the data from the store
-					let key: crate::key::thing::Thing = (&k).into();
-					let val: crate::sql::value::Value = (&v).into();
+					let key: thing::Thing = (&k).into();
+					let val: Value = (&v).into();
 					let rid = Thing::from((key.tb, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
@@ -454,7 +454,7 @@ impl<'a> Processor<'a> {
 							nxt = Some(k.clone());
 						}
 						// Parse the data from the store
-						let gra: crate::key::graph::Graph = (&k).into();
+						let gra: graph::Graph = (&k).into();
 						// Fetch the data from the store
 						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
 						let val = txn.lock().await.get(key).await?;

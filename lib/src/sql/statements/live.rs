@@ -3,8 +3,6 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::key::lq::Lq;
-use crate::key::lv::Lv;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
@@ -66,13 +64,11 @@ impl LiveStatement {
 				}
 				stm.node = opt.id()?;
 				// Insert the node live query
-				let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
-				let key_enc = Lq::encode(&key)?;
-				run.putc(key_enc, tb.as_str(), None).await?;
+				let key = crate::key::node::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
+				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, self.id.0);
-				let key_enc = Lv::encode(&key)?;
-				run.putc(key_enc, stm, None).await?;
+				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self.id.0);
+				run.putc(key, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {

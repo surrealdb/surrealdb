@@ -1,6 +1,3 @@
-use crate::key::lq::Lq;
-use crate::key::lv::Lv;
-
 /// Create a live query in the database that is tied with all required entries
 async fn a_live_query(
 	tx: &mut Transaction,
@@ -10,10 +7,10 @@ async fn a_live_query(
 	table: &str,
 	lq: Uuid,
 ) -> Result<(), Error> {
-	let lq_key = Lq::new(cl, namespace, database, lq);
+	let lq_key = crate::key::node::lq::new(cl, namespace, database, lq);
 	tx.put(&lq_key, table).await?;
 
-	let lv_key = Lv::new(namespace, database, table, lq);
+	let lv_key = crate::key::table::lq::new(namespace, database, table, lq);
 	let lv_val = LiveStatement {
 		id: sql::Uuid::from(lq),
 		node: cl,

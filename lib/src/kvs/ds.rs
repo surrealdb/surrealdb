@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::cl::Timestamp;
+use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -8,10 +8,7 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::key::hb::Hb;
-use crate::key::lq;
-use crate::key::lq::Lq;
-use crate::key::lv::Lv;
+use crate::key::root::hb::Hb;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -31,7 +28,7 @@ use super::tx::Transaction;
 /// Not a stored struct; Used only in this module
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LqValue {
-	pub cl: Uuid,
+	pub nd: Uuid,
 	pub ns: String,
 	pub db: String,
 	pub tb: String,
@@ -325,7 +322,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_cl(*node_id).await?;
+		tx.set_nd(*node_id).await?;
 		tx.set_hb(timestamp.clone(), *node_id).await?;
 		Ok(())
 	}
@@ -341,7 +338,7 @@ impl Datastore {
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
-			tx.del_cl(hb.nd).await?;
+			tx.del_nd(hb.nd).await?;
 			nodes.push(hb.nd);
 		}
 		Ok(nodes)
@@ -363,11 +360,11 @@ impl Datastore {
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_lq(nd, 1000).await?;
+			let node_lqs = tx.scan_ndlq(nd, 1000).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs = self.archive_lv_for_node(tx, &lq.cl, this_node_id).await?;
+				let node_archived_lqs = self.archive_lv_for_node(tx, &lq.nd, this_node_id).await?;
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
@@ -383,9 +380,11 @@ impl Datastore {
 	) -> Result<(), Error> {
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
-			tx.del(lq::new(lq.cl, lq.ns.as_str(), lq.db.as_str(), lq.lq)).await?;
+			let key = crate::key::node::lq::new(lq.nd, &lq.ns, &lq.db, lq.lq);
+			tx.del(key).await?;
 			// Delete the table key, used for finding LQ associated with a table
-			tx.del(Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq)).await?;
+			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq);
+			tx.del(key).await?;
 		}
 		Ok(())
 	}
@@ -403,7 +402,7 @@ impl Datastore {
 		let mut archived: Vec<LqValue> = vec![];
 		for hb in dead_heartbeats {
 			let new_archived = self.archive_lv_for_node(tx, &hb.nd, this_node_id).await?;
-			tx.del_cl(hb.nd).await?;
+			tx.del_nd(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
 			for lq_value in new_archived {
 				archived.push(lq_value);
@@ -420,13 +419,13 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_lq(&self.id, 1000).await?;
+		let lqs = tx.scan_ndlq(&self.id, 1000).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
 				hits.push(lq_value.clone());
-				let lq = Lq::new(
-					lq_value.cl.clone(),
+				let lq = crate::key::node::lq::Lq::new(
+					lq_value.nd.clone(),
 					lq_value.ns.as_str(),
 					lq_value.db.as_str(),
 					lq_value.lq.clone(),
@@ -438,7 +437,8 @@ impl Datastore {
 
 		// Now delete the table entries for the live queries
 		for lq in hits {
-			let lv = Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), self.id);
+			let lv =
+				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), self.id);
 			tx.del(lv.clone()).await?;
 			trace!("Deleted lv {:?} as part of session garbage collection", lv);
 		}
@@ -458,7 +458,7 @@ impl Datastore {
 		for lq in lqs {
 			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
 			let archived_lvs = lvs.clone().archive(*this_node_id);
-			tx.putc_lv(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
+			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);
 		}
 		Ok(ret)
@@ -475,7 +475,7 @@ impl Datastore {
 		let dead = tx.scan_hb(ts, limit).await?;
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_cl(dead_node.nd).await?;
+			tx.del_nd(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}
