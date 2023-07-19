@@ -321,8 +321,8 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(node_id.0.clone()).await?;
-		tx.set_hb(timestamp.clone(), node_id.0.clone()).await?;
+		tx.set_nd(node_id.0).await?;
+		tx.set_hb(timestamp.clone(), node_id.0).await?;
 		Ok(())
 	}
 
