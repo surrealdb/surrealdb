@@ -1,14 +1,18 @@
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
-use warp::http;
-use warp::Filter;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use http_body::Body as HttpBody;
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	warp::path("version").and(warp::path::end()).and(warp::get()).and_then(handler)
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	Router::new().route("/version", get(handler))
 }
 
-pub async fn handler() -> Result<impl warp::Reply, warp::Rejection> {
-	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
-	Ok(warp::reply::with_status(val, http::StatusCode::OK))
+async fn handler() -> impl IntoResponse {
+	format!("{PKG_NAME}-{}", *PKG_VERSION)
 }

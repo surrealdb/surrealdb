@@ -101,7 +101,7 @@ pub async fn init(
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::o11y::builder().with_filter(log).init();
+	crate::telemetry::builder().with_filter(log).init();
 
 	// Check if a banner should be outputted
 	if !no_banner {

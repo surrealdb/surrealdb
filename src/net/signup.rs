@@ -2,14 +2,20 @@ use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
-use crate::net::session;
+use axum::extract::DefaultBodyLimit;
+use axum::response::IntoResponse;
+use axum::routing::options;
+use axum::{Extension, Router, TypedHeader};
 use bytes::Bytes;
+use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use warp::Filter;
+use tower_http::limit::RequestBodyLimitLayer;
 
-const MAX: u64 = 1024; // 1 KiB
+use super::headers::Accept;
+
+const MAX: usize = 1024; // 1 KiB
 
 #[derive(Serialize)]
 struct Success {
@@ -28,29 +34,24 @@ impl Success {
 	}
 }
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	// Set base path
-	let base = warp::path("signup").and(warp::path::end());
-	// Set opts method
-	let opts = base.and(warp::options()).map(warp::reply);
-	// Set post method
-	let post = base
-		.and(warp::post())
-		.and(warp::header::optional::<String>(http::header::ACCEPT.as_str()))
-		.and(warp::body::content_length_limit(MAX))
-		.and(warp::body::bytes())
-		.and(session::build())
-		.and_then(handler);
-	// Specify route
-	opts.or(post)
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+	B: HttpBody + Send + 'static,
+	B::Data: Send,
+	B::Error: std::error::Error + Send + Sync + 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	Router::new()
+		.route("/signup", options(|| async {}).post(handler))
+		.route_layer(DefaultBodyLimit::disable())
+		.layer(RequestBodyLimitLayer::new(MAX))
 }
 
 async fn handler(
-	output: Option<String>,
+	Extension(mut session): Extension<Session>,
+	maybe_output: Option<TypedHeader<Accept>>,
 	body: Bytes,
-	mut session: Session,
-) -> Result<impl warp::Reply, warp::Rejection> {
+) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Convert the HTTP body into text
@@ -62,25 +63,25 @@ async fn handler(
 			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
-				Ok(v) => match output.as_deref() {
+				Ok(v) => match maybe_output.as_deref() {
+					// Simple serialization
+					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(v))),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
+					// Internal serialization
+					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
+					// Text serialization
+					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
 					// Return nothing
 					None => Ok(output::none()),
-					// Text serialization
-					Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
-					// Simple serialization
-					Some("application/json") => Ok(output::json(&Success::new(v))),
-					Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
-					Some("application/pack") => Ok(output::pack(&Success::new(v))),
-					// Internal serialization
-					Some("application/surrealdb") => Ok(output::full(&Success::new(v))),
 					// An incorrect content-type was requested
-					_ => Err(warp::reject::custom(Error::InvalidType)),
+					_ => Err(Error::InvalidType),
 				},
 				// There was an error with authentication
-				Err(e) => Err(warp::reject::custom(e)),
+				Err(err) => Err(err),
 			}
 		}
 		// The provided value was not an object
-		_ => Err(warp::reject::custom(Error::Request)),
+		_ => Err(Error::Request),
 	}
 }
