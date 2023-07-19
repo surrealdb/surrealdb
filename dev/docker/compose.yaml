@@ -1,0 +1,69 @@
+---
+version: "3"
+services:
+  grafana:
+    image: "grafana/grafana-oss:latest"
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - "grafana:/var/lib/grafana"
+      - "./grafana.ini:/etc/grafana/grafana.ini"
+      - "./grafana-datasource.yaml:/etc/grafana/provisioning/datasources/grafana-datasource.yaml"
+      - "./grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/grafana-dashboards.yaml"
+      - "./dashboards:/dashboards"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $$?;'
+      interval: 1s
+      timeout: 5s
+      retries: 5
+  prometheus:
+    image: "prom/prometheus:latest"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yaml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.listen-address=0.0.0.0:9090"
+      - "--web.enable-remote-write-receiver"
+      - "--storage.tsdb.retention.time=1d"
+    expose:
+      - "9090"
+    ports:
+      - "9090:9090"
+    volumes:
+      - "prometheus:/prometheus"
+      - "./prometheus.yaml:/etc/prometheus/prometheus.yaml"
+
+  tempo:
+    image: grafana/tempo:latest
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo:/tmp/tempo
+    ports:
+      - "3200"   # tempo
+      - "4317"  # otlp grpc
+
+
+  otel-collector:
+    image: "otel/opentelemetry-collector-contrib"
+    command:
+      - "--config=/etc/otel-collector.yaml"
+    expose:
+      - "4317"
+    ports:
+      - "4317:4317"  # otlp grpc
+      - "9090"  # for prometheus
+    volumes: ["./otel-collector.yaml:/etc/otel-collector.yaml"]
+
+volumes:
+  grafana:
+    external: false
+  prometheus:
+    external: false
+  tempo:
+    external: false

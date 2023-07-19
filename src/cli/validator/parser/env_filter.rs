@@ -31,6 +31,10 @@ impl TypedValueParser for CustomEnvFilterParser {
 		arg: Option<&clap::Arg>,
 		value: &std::ffi::OsStr,
 	) -> Result<Self::Value, clap::Error> {
+		if let Ok(dirs) = std::env::var("RUST_LOG") {
+			return Ok(CustomEnvFilter(EnvFilter::builder().parse_lossy(dirs)));
+		}
+
 		let inner = NonEmptyStringValueParser::new();
 		let v = inner.parse_ref(cmd, arg, value)?;
 		let filter = (match v.as_str() {

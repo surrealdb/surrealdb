@@ -104,7 +104,9 @@ impl Function {
 	pub fn is_aggregate(&self) -> bool {
 		match self {
 			Self::Normal(f, _) if f == "array::distinct" => true,
+			Self::Normal(f, _) if f == "array::first" => true,
 			Self::Normal(f, _) if f == "array::group" => true,
+			Self::Normal(f, _) if f == "array::last" => true,
 			Self::Normal(f, _) if f == "count" => true,
 			Self::Normal(f, _) if f == "math::bottom" => true,
 			Self::Normal(f, _) if f == "math::interquartile" => true,
@@ -291,6 +293,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("distinct"),
 			tag("filter_index"),
 			tag("find_index"),
+			tag("first"),
 			tag("flatten"),
 			tag("group"),
 			tag("insert"),
@@ -298,6 +301,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		alt((
 			tag("intersect"),
 			tag("join"),
+			tag("last"),
 			tag("len"),
 			tag("logical_and"),
 			tag("logical_or"),

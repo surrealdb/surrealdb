@@ -3,8 +3,6 @@ pub mod verify;
 use crate::cli::CF;
 use crate::err::Error;
 
-pub const BASIC: &str = "Basic ";
-
 pub async fn init() -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
