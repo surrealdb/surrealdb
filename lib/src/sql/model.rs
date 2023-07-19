@@ -32,7 +32,10 @@ impl Iterator for IntoIter {
 				}
 			}
 			Model::Range(tb, b, e) => {
-				if self.index + b <= *e {
+				if self.index == 0 {
+					self.index = *b - 1;
+				}
+				if self.index < *e {
 					self.index += 1;
 					Some(Thing {
 						tb: tb.to_string(),
