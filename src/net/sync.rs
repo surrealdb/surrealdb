@@ -1,22 +1,20 @@
-use warp::http;
-use warp::Filter;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use http_body::Body as HttpBody;
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	// Set base path
-	let base = warp::path("sync").and(warp::path::end());
-	// Set save method
-	let save = base.and(warp::get()).and_then(save);
-	// Set load method
-	let load = base.and(warp::post()).and_then(load);
-	// Specify route
-	save.or(load)
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	Router::new().route("/sync", get(save).post(load))
 }
 
-pub async fn load() -> Result<impl warp::Reply, warp::Rejection> {
-	Ok(warp::reply::with_status("Load", http::StatusCode::OK))
+async fn load() -> impl IntoResponse {
+	"Load"
 }
 
-pub async fn save() -> Result<impl warp::Reply, warp::Rejection> {
-	Ok(warp::reply::with_status("Save", http::StatusCode::OK))
+async fn save() -> impl IntoResponse {
+	"Save"
 }

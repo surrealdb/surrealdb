@@ -1,25 +1,31 @@
 use crate::dbs::DB;
 use crate::err::Error;
-use warp::Filter;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use http_body::Body as HttpBody;
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	warp::path("health").and(warp::path::end()).and(warp::get()).and_then(handler)
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	Router::new().route("/health", get(handler))
 }
 
-async fn handler() -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler() -> impl IntoResponse {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Attempt to open a transaction
 	match db.transaction(false, false).await {
 		// The transaction failed to start
-		Err(_) => Err(warp::reject::custom(Error::InvalidStorage)),
+		Err(_) => Err(Error::InvalidStorage),
 		// The transaction was successful
 		Ok(mut tx) => {
 			// Cancel the transaction
 			let _ = tx.cancel().await;
 			// Return the response
-			Ok(warp::reply())
+			Ok(())
 		}
 	}
 }

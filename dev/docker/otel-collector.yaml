@@ -1,0 +1,36 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+exporters:
+  otlp:
+    endpoint: 'tempo:4317'
+    tls:
+      insecure: true
+
+  prometheus:
+    endpoint:  ':9090'
+    send_timestamps: true
+    metric_expiration: 60m
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  logging: # add to a pipeline for debugging
+    loglevel: debug
+
+# processors:
+#   batch:
+#     timeout: 1s
+#   span:
+#     name:
+#       from_attributes: ["name"]
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp, logging]
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheus]

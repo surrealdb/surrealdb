@@ -5,13 +5,16 @@ use crate::cnf::PKG_VERSION;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
-use crate::net::session;
 use crate::rpc::args::Take;
 use crate::rpc::paths::{ID, METHOD, PARAMS};
 use crate::rpc::res;
 use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
+use axum::routing::get;
+use axum::Extension;
+use axum::Router;
 use futures::{SinkExt, StreamExt};
+use http_body::Body as HttpBody;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -27,8 +30,11 @@ use surrealdb::sql::Value;
 use tokio::sync::RwLock;
 use tracing::instrument;
 use uuid::Uuid;
-use warp::ws::{Message, WebSocket, Ws};
-use warp::Filter;
+
+use axum::{
+	extract::ws::{Message, WebSocket, WebSocketUpgrade},
+	response::IntoResponse,
+};
 
 // Mapping of WebSocketID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
@@ -38,17 +44,22 @@ type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
 static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
 static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
 
-#[allow(opaque_hidden_inferred_bound)]
-pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	warp::path("rpc")
-		.and(warp::path::end())
-		.and(warp::ws())
-		.and(session::build())
-		.map(|ws: Ws, session: Session| ws.on_upgrade(move |ws| socket(ws, session)))
+pub(super) fn router<S, B>() -> Router<S, B>
+where
+	B: HttpBody + Send + 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	Router::new().route("/rpc", get(handler))
 }
 
-async fn socket(ws: WebSocket, session: Session) {
-	let rpc = Rpc::new(session);
+async fn handler(ws: WebSocketUpgrade, Extension(sess): Extension<Session>) -> impl IntoResponse {
+	// finalize the upgrade process by returning upgrade callback.
+	// we can customize the callback by sending additional info such as address.
+	ws.on_upgrade(move |socket| handle_socket(socket, sess))
+}
+
+async fn handle_socket(ws: WebSocket, sess: Session) {
+	let rpc = Rpc::new(sess);
 	Rpc::serve(rpc, ws).await
 }
 
@@ -89,7 +100,7 @@ impl Rpc {
 		let png = chn.clone();
 		// The WebSocket has connected
 		Rpc::connected(rpc.clone(), chn.clone()).await;
-		// Send messages to the client
+		// Send Ping messages to the client
 		tokio::task::spawn(async move {
 			// Create the interval ticker
 			let mut interval = tokio::time::interval(WEBSOCKET_PING_FREQUENCY);
@@ -98,7 +109,7 @@ impl Rpc {
 				// Wait for the timer
 				interval.tick().await;
 				// Create the ping message
-				let msg = Message::ping(vec![]);
+				let msg = Message::Ping(vec![]);
 				// Send the message to the client
 				if png.send(msg).await.is_err() {
 					// Exit out of the loop
@@ -146,20 +157,18 @@ impl Rpc {
 		while let Some(msg) = wrx.next().await {
 			match msg {
 				// We've received a message from the client
+				// Ping is automatically handled by the WebSocket library
 				Ok(msg) => match msg {
-					msg if msg.is_ping() => {
-						let _ = chn.send(Message::pong(vec![])).await;
-					}
-					msg if msg.is_text() => {
+					Message::Text(_) => {
 						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
 					}
-					msg if msg.is_binary() => {
+					Message::Binary(_) => {
 						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
 					}
-					msg if msg.is_close() => {
+					Message::Close(_) => {
 						break;
 					}
-					msg if msg.is_pong() => {
+					Message::Pong(_) => {
 						continue;
 					}
 					_ => {
@@ -222,16 +231,14 @@ impl Rpc {
 		// Parse the request
 		let req = match msg {
 			// This is a binary message
-			m if m.is_binary() => {
+			Message::Binary(val) => {
 				// Use binary output
 				out = Output::Full;
 				// Deserialize the input
-				Value::from(m.into_bytes())
+				Value::from(val)
 			}
 			// This is a text message
-			m if m.is_text() => {
-				// This won't panic due to the check above
-				let val = m.to_str().unwrap();
+			Message::Text(ref val) => {
 				// Parse the SurrealQL object
 				match surrealdb::sql::value(val) {
 					// The SurrealQL message parsed ok
