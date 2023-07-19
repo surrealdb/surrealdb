@@ -136,6 +136,14 @@ pub fn find_index((array, value): (Array, Value)) -> Result<Value, Error> {
 		.map_or(Value::Null, |(i, _v)| i.into()))
 }
 
+pub fn first((array,): (Array,)) -> Result<Value, Error> {
+	if let [first, ..] = &array[0..] {
+		Ok(first.to_owned())
+	} else {
+		Ok(Value::None)
+	}
+}
+
 pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().into())
 }
@@ -173,6 +181,14 @@ pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
 	Ok(arr.into_iter().map(Value::as_raw_string).collect::<Vec<_>>().join(&sep).into())
+}
+
+pub fn last((array,): (Array,)) -> Result<Value, Error> {
+	if let [.., last] = &array[0..] {
+		Ok(last.to_owned())
+	} else {
+		Ok(Value::None)
+	}
 }
 
 pub fn len((array,): (Array,)) -> Result<Value, Error> {
@@ -375,7 +391,7 @@ pub mod sort {
 
 #[cfg(test)]
 mod tests {
-	use super::{join, slice};
+	use super::{first, join, last, slice};
 	use crate::sql::{Array, Value};
 
 	#[test]
@@ -418,5 +434,25 @@ mod tests {
 			" is not ",
 			"3.56f is not 2.72f is not 1.61f",
 		);
+	}
+
+	#[test]
+	fn array_first() {
+		fn test(arr: Array, expected: Value) {
+			assert_eq!(first((arr,)).unwrap(), expected);
+		}
+
+		test(vec!["hello", "world"].into(), "hello".into());
+		test(Array::new(), Value::None);
+	}
+
+	#[test]
+	fn array_last() {
+		fn test(arr: Array, expected: Value) {
+			assert_eq!(last((arr,)).unwrap(), expected);
+		}
+
+		test(vec!["hello", "world"].into(), "world".into());
+		test(Array::new(), Value::None);
 	}
 }

@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: 'surrealdb-grafana'
+    orgId: 1
+    folder: ''
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 1
+    allowUiUpdates: true
+    options:
+      path: /dashboards
+      foldersFromFilesStructure: false
+    
