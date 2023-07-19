@@ -5,7 +5,7 @@ use crate::idx::ft::docids::DocId;
 use crate::idx::planner::plan::IndexOption;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
-use crate::sql::{Edges, Range, Table, Thing, Value};
+use crate::sql::{Edges, Expression, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use std::ops::Bound;
@@ -80,7 +80,9 @@ impl<'a> Processor<'a> {
 				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, io) => self.process_index(ctx, opt, txn, stm, t, io).await?,
+				Iterable::Index(t, exp, io) => {
+					self.process_index(ctx, opt, txn, stm, t, exp, io).await?
+				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
 				}
@@ -476,6 +478,7 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn process_index(
 		&mut self,
 		ctx: &Context<'_>,
@@ -483,14 +486,17 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: Table,
+		exp: Expression,
 		io: IndexOption,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		let exe = ctx.get_query_executor(&table.0);
 		if let Some(exe) = exe {
-			let mut iterator = io.new_iterator(opt, txn, exe).await?;
+			let mut iterator = exe.new_iterator(opt, &exp, io).await?;
 			let mut things = iterator.next_batch(txn, 1000).await?;
+			let mut ite_ctx = Context::new(ctx);
+			ite_ctx.add_pre_match(&exp);
 			while !things.is_empty() {
 				// Check if the context is finished
 				if ctx.is_done() {
@@ -518,7 +524,7 @@ impl<'a> Processor<'a> {
 						None => Value::None,
 					});
 					// Process the document record
-					self.process(ctx, opt, txn, stm, Some(rid), Some(doc_id), val).await?;
+					self.process(&ite_ctx, opt, txn, stm, Some(rid), Some(doc_id), val).await?;
 				}
 
 				// Collect the next batch of ids

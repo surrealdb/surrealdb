@@ -81,7 +81,7 @@ impl ExplainItem {
 					("thing-3", Value::Thing(t3.to_owned())),
 				],
 			},
-			Iterable::Index(t, io) => Self {
+			Iterable::Index(t, _, io) => Self {
 				name: "Iterate Index".into(),
 				details: vec![("table", Value::from(t.0.to_owned())), ("plan", io.explain())],
 			},

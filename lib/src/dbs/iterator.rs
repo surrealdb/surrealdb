@@ -15,6 +15,7 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Expression;
 use async_recursion::async_recursion;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -29,7 +30,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, IndexOption),
+	Index(Table, Expression, IndexOption),
 }
 
 pub(crate) enum Operable {

@@ -171,13 +171,21 @@ pub(crate) async fn matches(
 	ctx: &Context<'_>,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
-	e: &Expression,
+	exp: &Expression,
 ) -> Result<Value, Error> {
 	if let Some(doc) = doc {
 		if let Some(thg) = doc.rid {
 			if let Some(exe) = ctx.get_query_executor(&thg.tb) {
-				// Check the matches
-				return exe.matches(txn, thg, e).await;
+				// If we find the expression in `pre_match`,
+				// it means that we are using an Iterator::Index
+				// and we are iterating over documents that already matches the expression.
+				if let Some(e) = ctx.pre_match() {
+					if e.eq(exp) {
+						return Ok(Value::Bool(true));
+					}
+				}
+				// Evaluate the matches
+				return exe.matches(txn, thg, exp).await;
 			}
 		}
 	}

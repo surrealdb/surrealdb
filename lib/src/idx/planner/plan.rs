@@ -1,19 +1,9 @@
-use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::btree::store::BTreeStoreType;
-use crate::idx::ft::docids::{DocId, NO_DOC_ID};
-use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::{FtIndex, HitsIterator, MatchRef};
-use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::Node;
-use crate::idx::IndexKeyBase;
-use crate::key;
-use crate::kvs::Key;
-use crate::sql::index::Index;
-use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Object;
-use crate::sql::{Array, Expression, Ident, Idiom, Operator, Thing, Value};
+use crate::sql::{Expression, Idiom, Operator, Value};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -64,10 +54,8 @@ impl PlanBuilder {
 				let is_bool = self.check_boolean_operator(exp.operator());
 				if let Some(io) = io {
 					self.add_index_option(exp, io);
-				} else {
-					if self.all_exp_with_index && !is_bool {
-						self.all_exp_with_index = false;
-					}
+				} else if self.all_exp_with_index && !is_bool {
+					self.all_exp_with_index = false;
 				}
 				self.eval_expression(*left, *right)
 			}
@@ -161,201 +149,12 @@ impl IndexOption {
 		self.0.mr.as_ref()
 	}
 
-	pub(crate) async fn new_iterator(
-		&self,
-		opt: &Options,
-		txn: &Transaction,
-		exe: &QueryExecutor,
-	) -> Result<ThingIterator, Error> {
-		match &self.ix().index {
-			Index::Idx => {
-				if self.op() == &Operator::Equal {
-					return Ok(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
-						opt,
-						self.ix(),
-						self.value(),
-					)?));
-				}
-			}
-			Index::Uniq => {
-				if self.op() == &Operator::Equal {
-					return Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-						opt,
-						self.ix(),
-						self.value(),
-					)?));
-				}
-			}
-			Index::Search {
-				az,
-				hl,
-				sc,
-				order,
-			} => {
-				if let Operator::Matches(_) = self.op() {
-					let td = exe.pre_match_terms_docs();
-					return Ok(ThingIterator::Matches(
-						MatchesThingIterator::new(opt, txn, self.ix(), az, *hl, sc, *order, td)
-							.await?,
-					));
-				}
-			}
-		}
-		Err(Error::BypassQueryPlanner)
-	}
-
 	pub(crate) fn explain(&self) -> Value {
 		Value::Object(Object::from(HashMap::from([
 			("index", Value::from(self.ix().name.0.to_owned())),
 			("operator", Value::from(self.op().to_string())),
 			("value", self.value().clone()),
 		])))
-	}
-}
-
-pub(crate) enum ThingIterator {
-	NonUniqueEqual(NonUniqueEqualThingIterator),
-	UniqueEqual(UniqueEqualThingIterator),
-	Matches(MatchesThingIterator),
-}
-
-impl ThingIterator {
-	pub(crate) async fn next_batch(
-		&mut self,
-		tx: &Transaction,
-		size: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
-		match self {
-			ThingIterator::NonUniqueEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
-		}
-	}
-}
-
-pub(crate) struct NonUniqueEqualThingIterator {
-	beg: Vec<u8>,
-	end: Vec<u8>,
-}
-
-impl NonUniqueEqualThingIterator {
-	fn new(
-		opt: &Options,
-		ix: &DefineIndexStatement,
-		v: &Value,
-	) -> Result<NonUniqueEqualThingIterator, Error> {
-		let v = Array::from(v.clone());
-		let (beg, end) =
-			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
-		Ok(Self {
-			beg,
-			end,
-		})
-	}
-
-	async fn next_batch(
-		&mut self,
-		txn: &Transaction,
-		limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
-		let min = self.beg.clone();
-		let max = self.end.clone();
-		let res = txn.lock().await.scan(min..max, limit).await?;
-		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
-			self.beg.push(0x00);
-		}
-		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
-		Ok(res)
-	}
-}
-
-pub(crate) struct UniqueEqualThingIterator {
-	key: Option<Key>,
-}
-
-impl UniqueEqualThingIterator {
-	fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
-		let v = Array::from(v.clone());
-		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, v, None).into();
-		Ok(Self {
-			key: Some(key),
-		})
-	}
-
-	async fn next_batch(
-		&mut self,
-		txn: &Transaction,
-		_limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
-		if let Some(key) = self.key.take() {
-			if let Some(val) = txn.lock().await.get(key).await? {
-				return Ok(vec![(val.into(), NO_DOC_ID)]);
-			}
-		}
-		Ok(vec![])
-	}
-}
-
-pub(crate) struct MatchesThingIterator {
-	hits: Option<HitsIterator>,
-}
-
-impl MatchesThingIterator {
-	#[allow(clippy::too_many_arguments)]
-	async fn new(
-		opt: &Options,
-		txn: &Transaction,
-		ix: &DefineIndexStatement,
-		az: &Ident,
-		hl: bool,
-		sc: &Scoring,
-		order: u32,
-		terms_docs: Option<TermsDocs>,
-	) -> Result<Self, Error> {
-		let ikb = IndexKeyBase::new(opt, ix);
-		if let Scoring::Bm {
-			..
-		} = sc
-		{
-			let mut run = txn.lock().await;
-			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-			let fti = FtIndex::new(&mut run, az, ikb, order, sc, hl, BTreeStoreType::Read).await?;
-			if let Some(terms_docs) = terms_docs {
-				let hits = fti.new_hits_iterator(terms_docs)?;
-				Ok(Self {
-					hits,
-				})
-			} else {
-				Ok(Self {
-					hits: None,
-				})
-			}
-		} else {
-			Err(Error::FeatureNotYetImplemented {
-				feature: "Vector Search",
-			})
-		}
-	}
-
-	async fn next_batch(
-		&mut self,
-		txn: &Transaction,
-		mut limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
-		let mut res = vec![];
-		if let Some(hits) = &mut self.hits {
-			let mut run = txn.lock().await;
-			while limit > 0 {
-				if let Some(hit) = hits.next(&mut run).await? {
-					res.push(hit);
-				} else {
-					break;
-				}
-				limit -= 1;
-			}
-		}
-		Ok(res)
 	}
 }
 

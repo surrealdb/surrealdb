@@ -1,4 +1,5 @@
 pub(crate) mod executor;
+pub(crate) mod iterators;
 pub(crate) mod plan;
 mod tree;
 
@@ -36,23 +37,24 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let res = Tree::build(ctx, self.opt, txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
+			let exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
+			self.executors.insert(t.0.clone(), exe);
 			match PlanBuilder::build(node) {
 				Ok(plan) => match plan {
-					Plan::SingleIndex(e, io) => {
-						let exe = QueryExecutor::new(self.opt, txn, &t, im, Some(e)).await?;
-						self.executors.insert(t.0.clone(), exe);
-						it.ingest(Iterable::Index(t, io));
+					Plan::SingleIndex(exp, io) => {
+						it.ingest(Iterable::Index(t, exp, io));
 						return Ok(());
 					}
-					Plan::MultiIndex(_) => {
-						todo!()
+					Plan::MultiIndex(v) => {
+						for (exp, io) in v {
+							it.ingest(Iterable::Index(t.clone(), exp, io));
+						}
+						return Ok(());
 					}
 				},
 				Err(Error::BypassQueryPlanner) => {}
 				Err(e) => return Err(e),
 			}
-			let e = QueryExecutor::new(self.opt, txn, &t, im, None).await?;
-			self.executors.insert(t.0.clone(), e);
 		}
 		it.ingest(Iterable::Table(t));
 		Ok(())
