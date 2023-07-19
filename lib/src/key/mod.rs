@@ -1,98 +1,67 @@
 //! How the keys are structured in the key value store
 ///
-/// KV              /
+/// crate::key::root::all                /
+/// crate::key::root::hb                 /!hb{ts}/{nd}
+/// crate::key::root::nd                 /!nd{nd}
+/// crate::key::root::ns                 /!ns{ns}
 ///
-/// HB              /!hb{ts}/{nd}
+/// crate::key::node::all                /${nd}
+/// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
-/// ND              /!nd{nd}
-/// NQ              /!nd{nd}*{ns}*{db}!lq{lq}
+/// crate::key::namespace::all           /*{ns}
+/// crate::key::namespace::db            /*{ns}!db{db}
+/// crate::key::namespace::lg            /*{ns}!lg{lg}
+/// crate::key::namespace::tk            /*{ns}!tk{tk}
 ///
-/// NS              /!ns{ns}
+/// crate::key::database::all            /*{ns}*{db}
+/// crate::key::database::az             /*{ns}*{db}!az{az}
+/// crate::key::database::cf             /*{ns}*{db}!cf{ts}
+/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
+/// crate::key::database::lg             /*{ns}*{db}!lg{lg}
+/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
+/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
+/// crate::key::database::tb             /*{ns}*{db}!tb{tb}
+/// crate::key::database::tk             /*{ns}*{db}!tk{tk}
+/// crate::key::database::vs             /*{ns}*{db}!vs
 ///
-/// Namespace       /*{ns}
-/// NL              /*{ns}!nl{us}
-/// NT              /*{ns}!nt{tk}
-/// DB              /*{ns}!db{db}
+/// crate::key::scope::all               /*{ns}*{db}±{sc}
+/// crate::key::scope::tk                /*{ns}*{db}±{sc}!tk{tk}
 ///
-/// Database        /*{ns}*{db}
-/// AZ              /*{ns}*{db}!az{az}
-/// CF              /*{ns}*{db}!cf{ts}
-/// DL              /*{ns}*{db}!dl{us}
-/// DT              /*{ns}*{db}!dt{tk}
-/// PA              /*{ns}*{db}!pa{pa}
-/// SC              /*{ns}*{db}!sc{sc}
-/// TB              /*{ns}*{db}!tb{tb}
+/// crate::key::table::all               /*{ns}*{db}*{tb}
+/// crate::key::table::ev                /*{ns}*{db}*{tb}!ev{ev}
+/// crate::key::table::fd                /*{ns}*{db}*{tb}!fd{fd}
+/// crate::key::table::ft                /*{ns}*{db}*{tb}!ft{ft}
+/// crate::key::table::ix                /*{ns}*{db}*{tb}!ix{ix}
+/// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
 ///
-/// Scope           /*{ns}*{db}±{sc}
-/// ST              /*{ns}*{db}±{sc}!st{tk}
+/// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
+/// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}
+/// crate::key::index::bd                /*{ns}*{db}*{tb}+{ix}!bd{id}
+/// crate::key::index::bf                /*{ns}*{db}*{tb}+{ix}!bf{id}
+/// crate::key::index::bi                /*{ns}*{db}*{tb}+{ix}!bi{id}
+/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}
+/// crate::key::index::bl                /*{ns}*{db}*{tb}+{ix}!bl{id}
+/// crate::key::index::bo                /*{ns}*{db}*{tb}+{ix}!bo{id}
+/// crate::key::index::bp                /*{ns}*{db}*{tb}+{ix}!bp{id}
+/// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
+/// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
+/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
+/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 ///
-/// AZ              /*{ns}*{db}!az{az}
+/// crate::key::change                   /*{ns}*{db}#{ts}
 ///
-/// Table           /*{ns}*{db}*{tb}
-/// EV              /*{ns}*{db}*{tb}!ev{ev}
-/// FD              /*{ns}*{db}*{tb}!fd{fd}
-/// FT              /*{ns}*{db}*{tb}!ft{ft}
-/// IX              /*{ns}*{db}*{tb}!ix{ix}
-/// LV              /*{ns}*{db}*{tb}!lv{lv}
+/// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 ///
-/// Thing           /*{ns}*{db}*{tb}*{id}
+/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
 ///
-/// Graph           /*{ns}*{db}*{tb}~{id}{eg}{fk}
-///
-/// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
-///
-/// BC              /*{ns}*{db}*{tb}!bc{ix}*{id}
-/// BD              /*{ns}*{db}*{tb}!bd{ix}*{id}
-/// BF              /*{ns}*{db}*{tb}!bf{ix}*{id}
-/// BI              /*{ns}*{db}*{tb}!bi{ix}*{id}
-/// BK              /*{ns}*{db}*{tb}!bk{ix}*{id}
-/// BL              /*{ns}*{db}*{tb}!bl{ix}*{id}
-/// BP              /*{ns}*{db}*{tb}!bp{ix}*{id}
-/// BS              /*{ns}*{db}*{tb}!bs{ix}
-/// BT              /*{ns}*{db}*{tb}!bt{ix}*{id}
-/// BU              /*{ns}*{db}*{tb}!bu{ix}*{id}
-pub mod az; // Stores a DEFINE ANALYZER config definition
-pub mod bc; // Stores Doc list for each term
-pub mod bd; // Stores BTree nodes for doc ids
-pub mod bf; // Stores Term/Doc frequency
-pub mod bi; // Stores doc keys for doc_ids
-pub mod bk; // Stores the term list for doc_ids
-pub mod bl; // Stores BTree nodes for doc lengths
-pub mod bo; // Stores the offsets
-pub mod bp; // Stores BTree nodes for postings
-pub mod bs; // Stores FullText index states
-pub mod bt; // Stores BTree nodes for terms
-pub mod bu; // Stores terms for term_ids
-pub mod cf; // Stores change feeds
-pub mod cl; // Stores cluster membership information
-pub mod database; // Stores the key prefix for all keys under a database
-pub mod db; // Stores a DEFINE DATABASE config definition
-pub mod debug; // Debug purposes only. It may be used in logs. Not for key handling in implementation code.
-pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
-pub mod dt; // Stores a DEFINE LOGIN ON DATABASE config definition
-pub mod dv; // Stores database versionstamps
-pub mod ev; // Stores a DEFINE EVENT config definition
-pub mod fc; // Stores a DEFINE FUNCTION config definition
-pub mod fd; // Stores a DEFINE FIELD config definition
-pub mod ft; // Stores a DEFINE TABLE AS config definition
-pub mod graph; // Stores a graph edge pointer
-pub mod hb; // Stores a heartbeat per registered cluster node
-pub mod index; // Stores an index entry
-pub mod ix; // Stores a DEFINE INDEX config definition
-pub mod kv; // Stores the key prefix for all keys
-pub mod lq; // Stores a LIVE SELECT query definition on the database
-pub mod lv; // Stores a LIVE SELECT query definition on the table
-pub mod namespace; // Stores the key prefix for all keys under a namespace
-pub mod nl; // Stores a DEFINE LOGIN ON NAMESPACE config definition
-pub mod ns; // Stores a DEFINE NAMESPACE config definition
-pub mod nt; // Stores a DEFINE TOKEN ON NAMESPACE config definition
-pub mod pa; // Stores a DEFINE PARAM config definition
-pub mod sc; // Stores a DEFINE SCOPE config definition
-pub mod scope; // Stores the key prefix for all keys under a scope
-pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
-pub mod table; // Stores the key prefix for all keys under a table
-pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores a record id
-
-const CHAR_PATH: u8 = 0xb1; // ±
-const CHAR_INDEX: u8 = 0xa4; // ¤
+pub mod change;
+pub mod database;
+pub mod debug;
+pub mod graph;
+pub mod index;
+pub mod namespace;
+pub mod node;
+pub mod root;
+pub mod scope;
+pub mod table;
+pub mod thing;

@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::kvs;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
@@ -124,10 +123,10 @@ impl RemoveNamespaceStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::ns::new(&self.name);
+		let key = crate::key::root::ns::new(&self.name);
 		run.del(key).await?;
 		// Delete the resource data
-		let key = crate::key::namespace::new(&self.name);
+		let key = crate::key::namespace::all::new(&self.name);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -178,10 +177,10 @@ impl RemoveDatabaseStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::db::new(opt.ns(), &self.name);
+		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
 		run.del(key).await?;
 		// Delete the resource data
-		let key = crate::key::database::new(opt.ns(), &self.name);
+		let key = crate::key::database::all::new(opt.ns(), &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -232,7 +231,7 @@ impl RemoveFunctionStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -290,7 +289,7 @@ impl RemoveAnalyzerStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
 		// TODO Check that the analyzer is not used in any schema
 		// Ok all good
@@ -345,7 +344,7 @@ impl RemoveLoginStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
-				let key = crate::key::nl::new(opt.ns(), &self.name);
+				let key = crate::key::namespace::lg::new(opt.ns(), &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -358,7 +357,7 @@ impl RemoveLoginStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
-				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
+				let key = crate::key::database::lg::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -420,7 +419,7 @@ impl RemoveTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
-				let key = crate::key::nt::new(opt.ns(), &self.name);
+				let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -433,7 +432,7 @@ impl RemoveTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
-				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
+				let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -446,7 +445,7 @@ impl RemoveTokenStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
-				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
+				let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -505,10 +504,10 @@ impl RemoveScopeStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
 		// Remove the resource data
-		let key = crate::key::scope::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::scope::all::new(opt.ns(), opt.db(), &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -559,7 +558,7 @@ impl RemoveParamStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -611,10 +610,10 @@ impl RemoveTableStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
 		// Remove the resource data
-		let key = crate::key::table::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -666,10 +665,10 @@ impl RemoveEventStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
 		// Clear the cache
-		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -728,10 +727,10 @@ impl RemoveFieldStatement {
 		let mut run = txn.lock().await;
 		// Delete the definition
 		let fd = self.name.to_string();
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.del(key).await?;
 		// Clear the cache
-		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -789,49 +788,16 @@ impl RemoveIndexStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
-		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Remove the index data
+		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delp(key, u32::MAX).await?;
 		// Clear the cache
-		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
-		// Delete resource
-		Self::delete_resources(&mut run, opt, &self.what, &self.name).await?;
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	// Remove the resource data (whatever the type of the index)
-	pub(crate) async fn delete_resources(
-		run: &mut kvs::Transaction,
-		opt: &Options,
-		tb: &str,
-		ix: &str,
-	) -> Result<(), Error> {
-		let rng = crate::key::index::Index::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bc::Bc::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bd::Bd::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bf::Bf::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bi::Bi::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bk::Bk::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bl::Bl::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bo::Bo::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bp::Bp::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let key = crate::key::bs::Bs::new(opt.ns(), opt.db(), tb, ix);
-		run.del(key).await?;
-		let rng = crate::key::bt::Bt::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		let rng = crate::key::bu::Bu::range(opt.ns(), opt.db(), tb, ix);
-		run.delr(rng, u32::MAX).await?;
-		Ok(())
 	}
 }
 

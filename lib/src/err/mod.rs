@@ -256,7 +256,7 @@ pub enum Error {
 
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
-	ClNotFound {
+	NdNotFound {
 		value: String,
 	},
 
