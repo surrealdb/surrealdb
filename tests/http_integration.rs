@@ -393,7 +393,7 @@ async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-		assert!(body["token"].as_str().unwrap().to_string().len() > 0, "body: {}", body);
+		assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 	}
 
 	Ok(())
@@ -749,7 +749,7 @@ async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 		.default_headers(headers)
 		.build()?;
 
-	seed_table(&client, &addr, &table_name, num_records).await?;
+	seed_table(&client, &addr, table_name, num_records).await?;
 
 	// Update all records
 	{
@@ -819,7 +819,7 @@ async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 		.default_headers(headers)
 		.build()?;
 
-	seed_table(&client, &addr, &table_name, num_records).await?;
+	seed_table(&client, &addr, table_name, num_records).await?;
 
 	// Modify all records
 	{
@@ -891,7 +891,7 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Delete all records
 	{
-		seed_table(&client, &addr, &table_name, num_records).await?;
+		seed_table(&client, &addr, table_name, num_records).await?;
 
 		// Verify there are records
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
@@ -910,7 +910,7 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Delete all records without authentication
 	{
-		seed_table(&client, &addr, &table_name, num_records).await?;
+		seed_table(&client, &addr, table_name, num_records).await?;
 
 		// Try to delete the records
 		let res = client.delete(url).send().await?;
@@ -1040,7 +1040,7 @@ async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 		.default_headers(headers)
 		.build()?;
 
-	seed_table(&client, &addr, &table_name, 1).await?;
+	seed_table(&client, &addr, table_name, 1).await?;
 
 	// Update one record
 	{
@@ -1113,7 +1113,7 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 		.default_headers(headers)
 		.build()?;
 
-	seed_table(&client, &addr, &table_name, 1).await?;
+	seed_table(&client, &addr, table_name, 1).await?;
 
 	// Modify one record
 	{
@@ -1193,7 +1193,7 @@ async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Delete all records
 	{
-		seed_table(&client, &addr, &table_name, 2).await?;
+		seed_table(&client, &addr, table_name, 2).await?;
 
 		// Verify there are records
 		let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
