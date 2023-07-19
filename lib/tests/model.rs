@@ -33,7 +33,7 @@ async fn model_count() -> Result<(), Error> {
 #[tokio::test]
 async fn model_range() -> Result<(), Error> {
 	let sql = "
-		CREATE |test:1..1000| SET time = time::now();
+		CREATE |test:100..1100| SET time = time::now();
 		SELECT count() FROM test GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
