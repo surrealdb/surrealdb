@@ -304,9 +304,9 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Setup a live query on a specific table
-			"live" => match params.needs_one() {
-				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
-				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
+			"live" => match params.needs_one_or_two() {
+				Ok((v, d)) if v.is_table() => rpc.read().await.live(v, d).await,
+				Ok((v, d)) if v.is_strand() => rpc.read().await.live(v, d).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify a connection-wide parameter
@@ -516,9 +516,12 @@ impl Rpc {
 	}
 
 	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_string()))]
-	async fn live(&self, tb: Value) -> Result<Value, Error> {
+	async fn live(&self, tb: Value, diff: Value) -> Result<Value, Error> {
 		// Specify the SQL query string
-		let sql = "LIVE SELECT * FROM $tb";
+		let sql = match diff.is_true() {
+			true => "LIVE SELECT DIFF FROM $tb",
+			false => "LIVE SELECT * FROM $tb",
+		};
 		// Specify the query parameters
 		let var = map! {
 			String::from("tb") => tb.could_be_table(),
