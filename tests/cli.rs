@@ -1,6 +1,7 @@
 mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
+	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use rand::{thread_rng, Rng};
 	use serial_test::serial;
 	use std::fs;
@@ -50,8 +51,7 @@ mod cli_integration {
 		}
 	}
 
-	/// Run the CLI with the given args
-	fn run(args: &str) -> Child {
+	fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child {
 		let mut path = std::env::current_exe().unwrap();
 		assert!(path.pop());
 		if path.ends_with("deps") {
@@ -62,6 +62,9 @@ mod cli_integration {
 		path.push(format!("{}{}", env!("CARGO_PKG_NAME"), std::env::consts::EXE_SUFFIX));
 
 		let mut cmd = Command::new(path);
+		if let Some(dir) = current_dir {
+			cmd.current_dir(&dir);
+		}
 		cmd.stdin(Stdio::piped());
 		cmd.stdout(Stdio::piped());
 		cmd.stderr(Stdio::piped());
@@ -69,6 +72,16 @@ mod cli_integration {
 		Child {
 			inner: Some(cmd.spawn().unwrap()),
 		}
+	}
+
+	/// Run the CLI with the given args
+	fn run(args: &str) -> Child {
+		run_internal::<String>(args, None)
+	}
+
+	/// Run the CLI with the given args inside a temporary directory
+	fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
+		run_internal(args, Some(current_dir))
 	}
 
 	fn tmp_file(name: &str) -> String {
@@ -289,5 +302,53 @@ mod cli_integration {
 
 		let output = server.kill().output().unwrap_err();
 		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
+	}
+
+	#[test]
+	#[serial]
+	fn validate_found_no_files() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+
+		temp_dir.child("file.txt").touch().unwrap();
+
+		assert!(run_in_dir("validate", &temp_dir).output().is_err());
+	}
+
+	#[test]
+	#[serial]
+	fn validate_succeed_for_valid_surql_files() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+
+		let statement_file = temp_dir.child("statement.surql");
+
+		statement_file.touch().unwrap();
+		statement_file.write_str("CREATE thing:success;").unwrap();
+
+		assert!(run_in_dir("validate", &temp_dir).output().is_ok());
+	}
+
+	#[test]
+	#[serial]
+	fn validate_failed_due_to_invalid_glob_pattern() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+
+		const WRONG_GLOB_PATTERN: &str = "**/*{.txt";
+
+		let args = format!("validate \"{}\"", WRONG_GLOB_PATTERN);
+
+		assert!(run_in_dir(&args, &temp_dir).output().is_err());
+	}
+
+	#[test]
+	#[serial]
+	fn validate_failed_due_to_invalid_surql_files_syntax() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+
+		let statement_file = temp_dir.child("statement.surql");
+
+		statement_file.touch().unwrap();
+		statement_file.write_str("CREATE $thing WHERE value = '';").unwrap();
+
+		assert!(run_in_dir("validate", &temp_dir).output().is_err());
 	}
 }

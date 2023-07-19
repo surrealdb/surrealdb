@@ -49,6 +49,7 @@ pub async fn init(
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout);
+	dbs.bootstrap().await?;
 	// Store database instance
 	let _ = DB.set(dbs);
 	// All ok

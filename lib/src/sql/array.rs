@@ -1,5 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebracket, commas, openbracket};
@@ -117,10 +118,16 @@ impl Array {
 
 impl Array {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt).await {
+			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};
@@ -205,6 +212,22 @@ impl<T> Abolish<T> for Vec<T> {
 			i += 1;
 			retain
 		});
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait Clump<T> {
+	fn clump(self, clump_size: usize) -> T;
+}
+
+impl Clump<Array> for Array {
+	fn clump(self, clump_size: usize) -> Array {
+		self.0
+			.chunks(clump_size)
+			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.collect::<Vec<_>>()
+			.into()
 	}
 }
 
@@ -318,6 +341,93 @@ impl Intersect<Self> for Array {
 
 // ------------------------------
 
+// Documented with the assumption that it is just for arrays.
+pub(crate) trait Matches<T> {
+	/// Returns an array complimenting the origional where each value is true or false
+	/// depending on whether it is == to the compared value.
+	///
+	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
+	/// to count the number of times an element appears in an array but it's nice to have
+	/// this in addition.
+	fn matches(self, compare_val: Value) -> T;
+}
+
+impl Matches<Array> for Array {
+	fn matches(self, compare_val: Value) -> Array {
+		self.iter().map(|arr_val| (arr_val == &compare_val).into()).collect::<Vec<Value>>().into()
+	}
+}
+
+// ------------------------------
+
+// Documented with the assumption that it is just for arrays.
+pub(crate) trait Transpose<T> {
+	/// Stacks arrays on top of each other. This can serve as 2d array transposition.
+	///
+	/// The input array can contain regular values which are treated as arrays with
+	/// a single element.
+	///
+	/// It's best to think of the function as creating a layered structure of the arrays
+	/// rather than transposing them when the input is not a 2d array. See the examples
+	/// for what happense when the input arrays are not all the same size.
+	///
+	/// Here's a diagram:
+	/// [0, 1, 2, 3], [4, 5, 6]
+	/// ->
+	/// [0    | 1    | 2   |  3]
+	/// [4    | 5    | 6   ]
+	///  ^      ^      ^      ^
+	/// [0, 4] [1, 5] [2, 6] [3]
+	///
+	/// # Examples
+	///
+	/// ```ignore
+	/// fn array(sql: &str) -> Array {
+	///     unimplemented!();
+	/// }
+	///
+	/// // Example of `transpose` doing what it says on the tin.
+	/// assert_eq!(array("[[0, 1], [2, 3]]").transpose(), array("[[0, 2], [1, 3]]"));
+	/// // `transpose` can be thought of layering arrays on top of each other so when
+	/// // one array runs out, it stops appearing in the output.
+	/// assert_eq!(array("[[0, 1], [2]]").transpose(), array("[[0, 2], [1]]"));
+	/// assert_eq!(array("[0, 1, 2]").transpose(), array("[[0, 1, 2]]"));
+	/// ```
+	fn transpose(self) -> T;
+}
+
+impl Transpose<Array> for Array {
+	fn transpose(self) -> Array {
+		if self.len() == 0 {
+			return self;
+		}
+		// I'm sure there's a way more efficient way to do this that I don't know about.
+		// The new array will be at *least* this large so we can start there;
+		let mut transposed_vec = Vec::<Value>::with_capacity(self.len());
+		let mut iters = self
+			.iter()
+			.map(|v| {
+				if let Value::Array(arr) = v {
+					Box::new(arr.iter().cloned()) as Box<dyn ExactSizeIterator<Item = Value>>
+				} else {
+					Box::new(std::iter::once(v).cloned())
+						as Box<dyn ExactSizeIterator<Item = Value>>
+				}
+			})
+			.collect::<Vec<_>>();
+		// We know there is at least one element in the array therefore iters is not empty.
+		// This is safe.
+		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
+		for _ in 0..longest_length {
+			transposed_vec
+				.push(iters.iter_mut().filter_map(|i| i.next()).collect::<Vec<_>>().into());
+		}
+		transposed_vec.into()
+	}
+}
+
+// ------------------------------
+
 pub(crate) trait Union<T> {
 	fn union(self, other: T) -> T;
 }
@@ -405,6 +515,38 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
+	}
+
+	#[test]
+	fn array_fnc_clump() {
+		fn test(input_sql: &str, clump_size: usize, expected_result: &str) {
+			let arr_result = array(input_sql);
+			assert!(arr_result.is_ok());
+			let arr = arr_result.unwrap().1;
+			let clumped_arr = arr.clump(clump_size);
+			assert_eq!(format!("{}", clumped_arr), expected_result);
+		}
+
+		test("[0, 1, 2, 3]", 2, "[[0, 1], [2, 3]]");
+		test("[0, 1, 2, 3, 4, 5]", 3, "[[0, 1, 2], [3, 4, 5]]");
+		test("[0, 1, 2]", 2, "[[0, 1], [2]]");
+		test("[]", 2, "[]");
+	}
+
+	#[test]
+	fn array_fnc_transpose() {
+		fn test(input_sql: &str, expected_result: &str) {
+			let arr_result = array(input_sql);
+			assert!(arr_result.is_ok());
+			let arr = arr_result.unwrap().1;
+			let transposed_arr = arr.transpose();
+			assert_eq!(format!("{}", transposed_arr), expected_result);
+		}
+
+		test("[[0, 1], [2, 3]]", "[[0, 2], [1, 3]]");
+		test("[[0, 1], [2]]", "[[0, 2], [1]]");
+		test("[[0, 1, 2], [true, false]]", "[[0, true], [1, false], [2]]");
+		test("[[0, 1], [2, 3], [4, 5]]", "[[0, 2, 4], [1, 3, 5]]");
 	}
 
 	#[test]

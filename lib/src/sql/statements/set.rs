@@ -1,5 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -25,8 +27,14 @@ impl SetStatement {
 		self.what.writeable()
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
-		self.what.compute(ctx, opt).await
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		self.what.compute(ctx, opt, txn, doc).await
 	}
 }
 

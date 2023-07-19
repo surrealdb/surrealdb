@@ -7,13 +7,14 @@ use crate::idx::ft::Bm25Params;
 use crate::kvs::Transaction;
 use roaring::RoaringTreemap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub(super) type Score = f32;
 
 pub(crate) struct BM25Scorer {
-	postings: Postings,
+	postings: Arc<RwLock<Postings>>,
 	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
-	doc_lengths: DocLengths,
+	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
 	bm25: Bm25Params,
@@ -21,9 +22,9 @@ pub(crate) struct BM25Scorer {
 
 impl BM25Scorer {
 	pub(super) fn new(
-		postings: Postings,
+		postings: Arc<RwLock<Postings>>,
 		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
-		doc_lengths: DocLengths,
+		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,
 		bm25: Bm25Params,
@@ -45,7 +46,8 @@ impl BM25Scorer {
 		term_doc_count: DocLength,
 		term_frequency: TermFrequency,
 	) -> Result<Score, Error> {
-		let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+		let doc_length =
+			self.doc_lengths.read().await.get_doc_length(tx, doc_id).await?.unwrap_or(0);
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
@@ -58,7 +60,7 @@ impl BM25Scorer {
 		for (term_id, docs) in self.terms_docs.iter().flatten() {
 			if docs.contains(doc_id) {
 				if let Some(term_freq) =
-					self.postings.get_term_frequency(tx, *term_id, doc_id).await?
+					self.postings.read().await.get_term_frequency(tx, *term_id, doc_id).await?
 				{
 					sc += self.term_score(tx, doc_id, docs.len(), term_freq).await?;
 				}

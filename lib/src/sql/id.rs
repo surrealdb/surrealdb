@@ -1,6 +1,7 @@
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
@@ -166,15 +167,21 @@ impl Display for Id {
 
 impl Id {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Id, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Id, Error> {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
-			Id::Object(v) => match v.compute(ctx, opt).await? {
+			Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
 				Value::Object(v) => Ok(Id::Object(v)),
 				_ => unreachable!(),
 			},
-			Id::Array(v) => match v.compute(ctx, opt).await? {
+			Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
 				Value::Array(v) => Ok(Id::Array(v)),
 				_ => unreachable!(),
 			},

@@ -1,51 +1,48 @@
-#[js::bind(object, public)]
-#[quickjs(bare)]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-#[allow(clippy::module_inception)]
-pub mod duration {
+use js::class::Trace;
 
-	use crate::sql::duration;
-	use crate::sql::value::Value;
-	use js::{class::Ref, function::Rest};
+use crate::sql::duration;
 
-	#[derive(Clone)]
-	#[quickjs(cloneable)]
-	pub struct Duration {
-		pub(crate) value: Option<duration::Duration>,
+#[derive(Clone, Trace)]
+#[js::class]
+pub struct Duration {
+	#[qjs(skip_trace)]
+	pub(crate) value: Option<duration::Duration>,
+}
+
+#[js::methods]
+impl Duration {
+	#[qjs(constructor)]
+	pub fn new(value: String) -> Self {
+		Self {
+			value: duration::Duration::try_from(value).ok(),
+		}
 	}
 
-	impl Duration {
-		#[quickjs(constructor)]
-		pub fn new(value: String, args: Rest<Value>) -> Self {
-			Self {
-				value: duration::Duration::try_from(value).ok(),
-			}
+	#[qjs(get)]
+	pub fn value(&self) -> String {
+		match &self.value {
+			Some(v) => v.to_raw(),
+			None => String::from("Invalid Duration"),
 		}
-		#[quickjs(get)]
-		pub fn value(&self) -> String {
-			match &self.value {
-				Some(v) => v.to_raw(),
-				None => String::from("Invalid Duration"),
-			}
+	}
+	// Compare two Duration instances
+	pub fn is(a: &Duration, b: &Duration) -> bool {
+		a.value.is_some() && b.value.is_some() && a.value == b.value
+	}
+	/// Convert the object to a string
+	#[qjs(rename = "toString")]
+	pub fn js_to_string(&self) -> String {
+		match &self.value {
+			Some(v) => v.to_raw(),
+			None => String::from("Invalid Duration"),
 		}
-		// Compare two Duration instances
-		pub fn is(a: Ref<Duration>, b: Ref<Duration>, args: Rest<()>) -> bool {
-			a.value.is_some() && b.value.is_some() && a.value == b.value
-		}
-		/// Convert the object to a string
-		pub fn toString(&self, args: Rest<()>) -> String {
-			match &self.value {
-				Some(v) => v.to_raw(),
-				None => String::from("Invalid Duration"),
-			}
-		}
-		/// Convert the object to JSON
-		pub fn toJSON(&self, args: Rest<()>) -> String {
-			match &self.value {
-				Some(v) => v.to_raw(),
-				None => String::from("Invalid Duration"),
-			}
+	}
+	/// Convert the object to JSON
+	#[qjs(rename = "toJSON")]
+	pub fn to_json(&self) -> String {
+		match &self.value {
+			Some(v) => v.to_raw(),
+			None => String::from("Invalid Duration"),
 		}
 	}
 }

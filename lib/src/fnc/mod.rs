@@ -1,5 +1,7 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
+use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -27,9 +29,16 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod vector;
 
 /// Attempts to run any function
-pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(
+	ctx: &Context<'_>,
+	txn: &Transaction,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	if name.eq("sleep")
 		|| name.starts_with("search")
 		|| name.starts_with("http")
@@ -38,7 +47,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, name, args).await
+		asynchronous(ctx, Some(txn), doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -73,17 +82,28 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::all" => array::all,
 		"array::any" => array::any,
 		"array::append" => array::append,
+		"array::boolean_and" => array::boolean_and,
+		"array::boolean_not" => array::boolean_not,
+		"array::boolean_or" => array::boolean_or,
+		"array::boolean_xor" => array::boolean_xor,
+		"array::clump" => array::clump,
 		"array::combine" => array::combine,
 		"array::complement" => array::complement,
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::filter_index" => array::filter_index,
+		"array::find_index" => array::find_index,
 		"array::flatten" => array::flatten,
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
 		"array::join" => array::join,
 		"array::len" => array::len,
+		"array::logical_and" => array::logical_and,
+		"array::logical_or" => array::logical_or,
+		"array::logical_xor" => array::logical_xor,
+		"array::matches" => array::matches,
 		"array::max" => array::max,
 		"array::min" => array::min,
 		"array::pop" => array::pop,
@@ -93,6 +113,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::reverse" => array::reverse,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
+		"array::transpose" => array::transpose,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
@@ -227,6 +248,11 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
+		"string::distance::hamming" => string::distance::hamming,
+		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::similarity::fuzzy" => string::similarity::fuzzy,
+		"string::similarity::jaro" => string::similarity::jaro,
+		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
 		//
 		"time::ceil" => time::ceil,
 		"time::day" => time::day,
@@ -262,11 +288,38 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		//
+		"vector::add" => vector::add,
+		"vector::angle" => vector::angle,
+		"vector::cross" => vector::cross,
+		"vector::dot" => vector::dot,
+		"vector::divide" => vector::divide,
+		"vector::magnitude" => vector::magnitude,
+		"vector::multiply" => vector::multiply,
+		"vector::normalize" => vector::normalize,
+		"vector::project" => vector::project,
+		"vector::subtract" => vector::subtract,
+		"vector::distance::chebyshev" => vector::distance::chebyshev,
+		"vector::distance::euclidean" => vector::distance::euclidean,
+		"vector::distance::hamming" => vector::distance::hamming,
+		"vector::distance::mahalanobis" => vector::distance::mahalanobis,
+		"vector::distance::manhattan" => vector::distance::manhattan,
+		"vector::distance::minkowski" => vector::distance::minkowski,
+		"vector::similarity::cosine" => vector::similarity::cosine,
+		"vector::similarity::jaccard" => vector::similarity::jaccard,
+		"vector::similarity::pearson" => vector::similarity::pearson,
+		"vector::similarity::spearman" => vector::similarity::spearman,
 	)
 }
 
 /// Attempts to run any asynchronous function.
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn asynchronous(
+	ctx: &Context<'_>,
+	txn: Option<&Transaction>,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_arch = "wasm32"))]
@@ -302,9 +355,9 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::score" => search::score(ctx).await,
-		"search::highlight" => search::highlight(ctx).await,
-		"search::offsets" => search::offsets(ctx).await,
+		"search::score" => search::score((ctx, txn, doc)).await,
+		"search::highlight" => search::highlight((ctx,txn, doc)).await,
+		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)

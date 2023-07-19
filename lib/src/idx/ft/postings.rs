@@ -1,17 +1,21 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
+use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
-	btree: BTree<PostingsKeyProvider>,
+	btree: BTree<TrieKeys>,
+	store: Arc<Mutex<BTreeNodeStore<TrieKeys>>>,
 }
 
 impl Postings {
@@ -19,20 +23,21 @@ impl Postings {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
+		store_type: BTreeStoreType,
 	) -> Result<Self, Error> {
-		let keys = PostingsKeyProvider {
-			index_key_base: index_key_base.clone(),
-		};
-		let state_key: Key = keys.get_state_key();
+		let state_key: Key = index_key_base.new_bp_key(None);
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
 			btree::State::try_from_val(val)?
 		} else {
 			btree::State::new(order)
 		};
+		let store =
+			BTreeNodeStore::new(KeyProvider::Postings(index_key_base.clone()), store_type, 20);
 		Ok(Self {
 			state_key,
 			index_key_base,
-			btree: BTree::new(keys, state),
+			btree: BTree::new(state),
+			store,
 		})
 	}
 
@@ -44,7 +49,8 @@ impl Postings {
 		term_freq: TermFrequency,
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
+		let mut store = self.store.lock().await;
+		self.btree.insert(tx, &mut store, key, term_freq).await
 	}
 
 	pub(super) async fn get_term_frequency(
@@ -54,7 +60,8 @@ impl Postings {
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.search::<TrieKeys>(tx, &key).await
+		let mut store = self.store.lock().await;
+		self.btree.search(tx, &mut store, &key).await
 	}
 
 	pub(super) async fn remove_posting(
@@ -64,37 +71,27 @@ impl Postings {
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
-		self.btree.delete::<TrieKeys>(tx, key).await
+		let mut store = self.store.lock().await;
+		self.btree.delete(tx, &mut store, key).await
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		self.btree.statistics::<TrieKeys>(tx).await
+		let mut store = self.store.lock().await;
+		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.btree.is_updated() {
-			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
+	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
+		let updated = self.store.lock().await.finish(tx).await?;
+		if self.btree.is_updated() || updated {
+			tx.set(self.state_key.clone(), self.btree.get_state().try_to_val()?).await?;
 		}
 		Ok(())
 	}
 }
 
-#[derive(Clone)]
-pub(super) struct PostingsKeyProvider {
-	index_key_base: IndexKeyBase,
-}
-
-impl KeyProvider for PostingsKeyProvider {
-	fn get_node_key(&self, node_id: NodeId) -> Key {
-		self.index_key_base.new_bp_key(Some(node_id))
-	}
-	fn get_state_key(&self) -> Key {
-		self.index_key_base.new_bp_key(None)
-	}
-}
-
 #[cfg(test)]
 mod tests {
+	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
@@ -106,10 +103,15 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-
 		// Check empty state
-		let mut p =
-			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
+		let mut p = Postings::new(
+			&mut tx,
+			IndexKeyBase::default(),
+			DEFAULT_BTREE_ORDER,
+			BTreeStoreType::Write,
+		)
+		.await
+		.unwrap();
 
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 
@@ -120,8 +122,14 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut p =
-			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
+		let mut p = Postings::new(
+			&mut tx,
+			IndexKeyBase::default(),
+			DEFAULT_BTREE_ORDER,
+			BTreeStoreType::Write,
+		)
+		.await
+		.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
 		assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));

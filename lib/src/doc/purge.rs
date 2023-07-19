@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
@@ -17,16 +17,15 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Clone transaction
-		let txn = ctx.try_clone_transaction()?;
 		// Check if the table is a view
-		if self.tb(opt, &txn).await?.drop {
+		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
 		// Clone transaction
@@ -39,7 +38,11 @@ impl<'a> Document<'a> {
 			let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
 			run.del(key).await?;
 			// Purge the record edges
-			match (self.initial.pick(&*EDGE), self.initial.pick(&*IN), self.initial.pick(&*OUT)) {
+			match (
+				self.initial.doc.pick(&*EDGE),
+				self.initial.doc.pick(&*IN),
+				self.initial.doc.pick(&*OUT),
+			) {
 				(Value::Bool(true), Value::Thing(ref l), Value::Thing(ref r)) => {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
@@ -69,7 +72,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(ctx, opt).await?;
+					stm.compute(ctx, opt, txn, None).await?;
 				}
 			}
 		}

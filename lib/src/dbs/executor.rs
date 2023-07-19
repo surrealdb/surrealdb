@@ -34,6 +34,10 @@ impl<'a> Executor<'a> {
 		}
 	}
 
+	fn txn(&self) -> Transaction {
+		self.txn.clone().expect("unreachable: txn was None after successful begin")
+	}
+
 	/// # Return
 	/// - true if a new transaction has begun
 	/// - false if
@@ -181,10 +185,14 @@ impl<'a> Executor<'a> {
 			}
 			// Get the statement start time
 			let now = Instant::now();
+			// Check if this is a LIVE statement
+			let is_stm_live = matches!(stm, Statement::Live(_));
+			// Check if this is a KILL statement
+			let is_stm_kill = matches!(stm, Statement::Kill(_));
 			// Check if this is a RETURN statement
-			let clr = matches!(stm, Statement::Output(_));
+			let is_stm_output = matches!(stm, Statement::Output(_));
 			// Process a single statement
-			let res = match stm.clone() {
+			let res = match stm {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
@@ -275,10 +283,7 @@ impl<'a> Executor<'a> {
 							// Check if the variable is a protected variable
 							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 								// The variable isn't protected and can be stored
-								false => {
-									ctx.add_transaction(self.txn.as_ref());
-									stm.compute(&ctx, &opt).await
-								}
+								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
 									// Move the parameter name, as we no longer need it
@@ -338,16 +343,15 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
+								let mut ctx = Context::new(&ctx);
 								// Process the statement
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
 										// Set statement timeout
-										let mut ctx = Context::new(&ctx);
 										ctx.add_timeout(timeout);
-										ctx.add_transaction(self.txn.as_ref());
 										// Process the statement
-										let res = stm.compute(&ctx, &opt).await;
+										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
 											true => Err(Error::QueryTimedout),
@@ -355,10 +359,7 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => {
-										ctx.add_transaction(self.txn.as_ref());
-										stm.compute(&ctx, &opt).await
-									}
+									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
@@ -402,15 +403,15 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
-				query_type: match stm {
-					Statement::Live(_) => QueryType::Live,
-					Statement::Kill(_) => QueryType::Kill,
+				query_type: match (is_stm_live, is_stm_kill) {
+					(true, _) => QueryType::Live,
+					(_, true) => QueryType::Kill,
 					_ => QueryType::Other,
 				},
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if clr {
+				if is_stm_output {
 					buf.clear();
 				}
 				buf.push(res);

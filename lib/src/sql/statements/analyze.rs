@@ -1,7 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
+use crate::dbs::{Level, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
 use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
@@ -22,15 +24,19 @@ pub enum AnalyzeStatement {
 
 impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Selected DB?
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
-				// Clone transaction
-				let txn = ctx.try_clone_transaction()?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Read the index
@@ -46,7 +52,16 @@ impl AnalyzeStatement {
 						hl,
 					} => {
 						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl).await?;
+						let ft = FtIndex::new(
+							&mut run,
+							az,
+							ikb,
+							*order,
+							sc,
+							*hl,
+							BTreeStoreType::Traversal,
+						)
+						.await?;
 						ft.statistics(&mut run).await?
 					}
 					_ => {

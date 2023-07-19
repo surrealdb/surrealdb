@@ -16,3 +16,4 @@ pub mod spread;
 pub mod top;
 pub mod trimean;
 pub mod variance;
+pub mod vector;

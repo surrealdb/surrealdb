@@ -8,10 +8,10 @@ mod sql;
 #[cfg(feature = "has-storage")]
 mod start;
 mod upgrade;
+mod validate;
 pub(crate) mod validator;
 mod version;
 
-use self::upgrade::UpgradeCommandArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -24,6 +24,9 @@ use sql::SqlCommandArguments;
 #[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
 use std::process::ExitCode;
+use upgrade::UpgradeCommandArguments;
+use validate::ValidateCommandArguments;
+use version::VersionCommandArguments;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -59,8 +62,8 @@ enum Commands {
 	Import(ImportCommandArguments),
 	#[command(about = "Export an existing database as a SurrealQL script")]
 	Export(ExportCommandArguments),
-	#[command(about = "Output the command-line tool version information")]
-	Version,
+	#[command(about = "Output the command-line tool and remote server version information")]
+	Version(VersionCommandArguments),
 	#[command(about = "Upgrade to the latest stable version")]
 	Upgrade(UpgradeCommandArguments),
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
@@ -70,6 +73,8 @@ enum Commands {
 		visible_alias = "isready"
 	)]
 	IsReady(IsReadyCommandArguments),
+	#[command(about = "Validate SurrealQL query files")]
+	Validate(ValidateCommandArguments),
 }
 
 pub async fn init() -> ExitCode {
@@ -80,10 +85,11 @@ pub async fn init() -> ExitCode {
 		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
-		Commands::Version => version::init(),
+		Commands::Version(args) => version::init(args).await,
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
+		Commands::Validate(args) => validate::init(args).await,
 	};
 	if let Err(e) = output {
 		error!("{}", e);

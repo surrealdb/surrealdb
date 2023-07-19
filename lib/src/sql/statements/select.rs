@@ -1,14 +1,16 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::{Iterable, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
+use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
@@ -43,7 +45,7 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	pub explain: bool,
+	pub explain: Option<Explain>,
 }
 
 impl SelectStatement {
@@ -72,7 +74,13 @@ impl SelectStatement {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.needs(Level::Db)?;
 		// Allowed to run?
@@ -86,10 +94,10 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt).await?;
+			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(t) => {
-					i.ingest(planner.get_iterable(ctx, t).await?);
+					i.ingest(planner.get_iterable(ctx, txn, t).await?);
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
@@ -124,10 +132,10 @@ impl SelectStatement {
 			let mut ctx = Context::new(ctx);
 			ctx.set_query_executors(ex);
 			// Output the results
-			i.output(&ctx, opt, &stm).await
+			i.output(&ctx, opt, txn, &stm).await
 		} else {
 			// Output the results
-			i.output(ctx, opt, &stm).await
+			i.output(ctx, opt, txn, &stm).await
 		}
 	}
 }
@@ -165,6 +173,9 @@ impl fmt::Display for SelectStatement {
 		if self.parallel {
 			f.write_str(" PARALLEL")?
 		}
+		if let Some(ref v) = self.explain {
+			write!(f, " {v}")?
+		}
 		Ok(())
 	}
 }
@@ -190,7 +201,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	let (i, explain) = opt(preceded(shouldbespace, tag_no_case("EXPLAIN")))(i)?;
+	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
 	Ok((
 		i,
 		SelectStatement {
@@ -206,7 +217,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 			version,
 			timeout,
 			parallel: parallel.is_some(),
-			explain: explain.is_some(),
+			explain,
 		},
 	))
 }
