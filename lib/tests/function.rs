@@ -451,6 +451,33 @@ RETURN array::find_index([0, 1, 2], 3);"#;
 }
 
 #[tokio::test]
+async fn function_array_first() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::first(["hello", "world"]);
+		RETURN array::first([["hello", "world"], 10]);
+		RETURN array::first([]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Strand("hello".into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Array(vec!["hello", "world"].into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_flatten() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::flatten([]);
@@ -610,6 +637,33 @@ async fn function_string_join_arr() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from("42 and true and 1.61");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_last() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::last(["hello", "world"]);
+		RETURN array::last([["hello", "world"], 10]);
+		RETURN array::last([]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Strand("world".into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = 10.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	Ok(())
