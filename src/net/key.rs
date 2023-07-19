@@ -264,8 +264,7 @@ async fn delete_all(
 async fn select_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
-	Path(table): Path<String>,
-	Path(id): Path<String>,
+	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -302,8 +301,7 @@ async fn create_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
-	Path(table): Path<String>,
-	Path(id): Path<String>,
+	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
@@ -351,8 +349,7 @@ async fn update_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
-	Path(table): Path<String>,
-	Path(id): Path<String>,
+	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
@@ -400,8 +397,7 @@ async fn modify_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
-	Path(table): Path<String>,
-	Path(id): Path<String>,
+	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
@@ -448,8 +444,7 @@ async fn modify_one(
 async fn delete_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
-	Path(table): Path<String>,
-	Path(id): Path<String>,
+	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();

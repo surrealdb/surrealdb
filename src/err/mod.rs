@@ -10,6 +10,7 @@ use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::Error as SurrealError;
+use surrealdb::error::Db as SurrealDbError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -100,13 +101,13 @@ pub(super) struct Message {
 impl IntoResponse for Error {
 	fn into_response(self) -> Response {
 		match self {
-			Error::InvalidAuth => (
-				StatusCode::FORBIDDEN,
+			err @ Error::InvalidAuth | err @ Error::Db(SurrealError::Db(SurrealDbError::InvalidAuth)) => (
+				StatusCode::UNAUTHORIZED,
 				Json(Message {
-					code: 403,
+					code: 401,
 					details: Some("Authentication failed".to_string()),
 					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
-					information: Some(self.to_string()),
+					information: Some(err.to_string()),
 				})
 			),
 			Error::InvalidType => (

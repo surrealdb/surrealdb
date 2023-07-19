@@ -1,5 +1,5 @@
 mod auth;
-mod backup;
+mod sync;
 pub mod client_ip;
 mod export;
 mod headers;
@@ -122,7 +122,7 @@ pub async fn init() -> Result<(), Error> {
 		.merge(import::router())
 		.merge(rpc::router())
 		.merge(version::router())
-		.merge(backup::router())
+		.merge(sync::router())
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
