@@ -316,7 +316,7 @@ async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-		assert!(body["token"].as_str().unwrap().to_string().len() > 0, "body: {}", body);
+		assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 	}
 
 	// Signin with invalid credentials returns 403
