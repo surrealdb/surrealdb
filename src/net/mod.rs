@@ -1,5 +1,4 @@
 mod auth;
-mod sync;
 pub mod client_ip;
 mod export;
 mod headers;
@@ -14,6 +13,7 @@ mod signals;
 mod signin;
 mod signup;
 mod sql;
+mod sync;
 mod tracer;
 mod version;
 

@@ -2,12 +2,12 @@ mod common;
 
 use std::time::Duration;
 
-use http::{Method, header};
+use http::{header, Method};
 use reqwest::Client;
 use serde_json::json;
 use serial_test::serial;
 
-use crate::common::{USER, PASS};
+use crate::common::{PASS, USER};
 
 #[tokio::test]
 #[serial]
@@ -20,19 +20,27 @@ async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
-	
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
+
 	// Request without credentials, gives an anonymous session
 	{
 		let res = client.post(url).body("CREATE foo").send().await?;
 		assert_eq!(res.status(), 200);
 		let body = res.text().await?;
-		assert!(body.contains("You don't have permission to perform this query type"), "body: {}", body);
+		assert!(
+			body.contains("You don't have permission to perform this query type"),
+			"body: {}",
+			body
+		);
 	}
 
 	// Request with invalid credentials, returns 401
 	{
-		let res = client.post(url).basic_auth("user", Some("pass")).body("CREATE foo").send().await?;
+		let res =
+			client.post(url).basic_auth("user", Some("pass")).body("CREATE foo").send().await?;
 		assert_eq!(res.status(), 401);
 	}
 
@@ -58,26 +66,36 @@ async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create user
 	{
-		let res = client.post(url)
+		let res = client
+			.post(url)
 			.basic_auth(USER, Some(PASS))
 			.body(r#"DEFINE LOGIN user ON DB PASSWORD 'pass'"#)
-			.send().await?;
+			.send()
+			.await?;
 		assert!(res.status().is_success(), "body: {}", res.text().await?);
 	}
-	
+
 	// Signin with user and get the token
 	let token: String;
 	{
-		let req_body = serde_json::to_string(json!({
-			"ns": "N",
-			"db": "D",
-			"user": "user",
-			"pass": "pass",
-		}).as_object().unwrap()).unwrap();
+		let req_body = serde_json::to_string(
+			json!({
+				"ns": "N",
+				"db": "D",
+				"user": "user",
+				"pass": "pass",
+			})
+			.as_object()
+			.unwrap(),
+		)
+		.unwrap();
 
 		let res = client.post(format!("http://{addr}/signin")).body(req_body).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
@@ -94,12 +112,18 @@ async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 		assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
 
 		// Check the selected namespace and database
-		let res = client.post(url).header("NS", "N2").header("DB", "D2").bearer_auth(&token).body("SELECT * FROM session::ns(); SELECT * FROM session::db()").send().await?;
+		let res = client
+			.post(url)
+			.header("NS", "N2")
+			.header("DB", "D2")
+			.bearer_auth(&token)
+			.body("SELECT * FROM session::ns(); SELECT * FROM session::db()")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 		let body = res.text().await?;
 		assert!(body.contains(r#""result":["N"]"#), "body: {}", body);
 		assert!(body.contains(r#""result":["D"]"#), "body: {}", body);
-
 	}
 
 	// Request with invalid token, returns 401
@@ -129,11 +153,19 @@ async fn export_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create some data
 	{
-		let res = client.post(format!("http://{addr}/sql")).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("CREATE foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 	}
 
@@ -177,7 +209,10 @@ async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// When no auth is provided, the endpoint returns a 403
 	{
@@ -222,7 +257,12 @@ async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 		// Check that the data was persisted
-		let res = client.post(format!("http://{addr}/sql")).basic_auth(USER, Some(PASS)).body("SELECT * FROM foo").send().await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("SELECT * FROM foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 		let body = res.text().await?;
 		assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {}", body);
@@ -242,25 +282,35 @@ async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create a user
 	{
-		let res = client.post(format!("http://{addr}/sql"))
+		let res = client
+			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
 			.body(r#"DEFINE LOGIN user ON DB PASSWORD 'pass'"#)
-			.send().await?;
+			.send()
+			.await?;
 		assert!(res.status().is_success(), "body: {}", res.text().await?);
 	}
-	
+
 	// Signin with valid credentials and get the token
 	{
-		let req_body = serde_json::to_string(json!({
-			"ns": "N",
-			"db": "D",
-			"user": "user",
-			"pass": "pass",
-		}).as_object().unwrap()).unwrap();
+		let req_body = serde_json::to_string(
+			json!({
+				"ns": "N",
+				"db": "D",
+				"user": "user",
+				"pass": "pass",
+			})
+			.as_object()
+			.unwrap(),
+		)
+		.unwrap();
 
 		let res = client.post(url).body(req_body).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
@@ -271,12 +321,17 @@ async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Signin with invalid credentials returns 403
 	{
-		let req_body = serde_json::to_string(json!({
-			"ns": "N",
-			"db": "D",
-			"user": "user",
-			"pass": "invalid_pass",
-		}).as_object().unwrap()).unwrap();
+		let req_body = serde_json::to_string(
+			json!({
+				"ns": "N",
+				"db": "D",
+				"user": "user",
+				"pass": "invalid_pass",
+			})
+			.as_object()
+			.unwrap(),
+		)
+		.unwrap();
 
 		let res = client.post(url).body(req_body).send().await?;
 		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
@@ -296,31 +351,43 @@ async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create a scope
 	{
-		let res = client.post(format!("http://{addr}/sql"))
+		let res = client
+			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
-			.body(r#"
+			.body(
+				r#"
 				DEFINE SCOPE scope SESSION 24h
 					SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 					SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 				;
-			"#)
-			.send().await?;
+			"#,
+			)
+			.send()
+			.await?;
 		assert!(res.status().is_success(), "body: {}", res.text().await?);
 	}
-	
+
 	// Signup into the scope
 	{
-		let req_body = serde_json::to_string(json!({
-			"ns": "N",
-			"db": "D",
-			"sc": "scope",
-			"email": "email@email.com",
-			"pass": "pass",
-		}).as_object().unwrap()).unwrap();
+		let req_body = serde_json::to_string(
+			json!({
+				"ns": "N",
+				"db": "D",
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			})
+			.as_object()
+			.unwrap(),
+		)
+		.unwrap();
 
 		let res = client.post(url).body(req_body).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
@@ -343,8 +410,11 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
-	
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
+
 	// Options method works
 	{
 		let res = client.request(Method::OPTIONS, url).send().await?;
@@ -357,14 +427,16 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(res.status(), 200);
 
 		let body = res.text().await?;
-		assert!(body.contains("You don't have permission to perform this query type"), "body: {}", body);
+		assert!(
+			body.contains("You don't have permission to perform this query type"),
+			"body: {}",
+			body
+		);
 	}
 
 	// Creating a record with Accept JSON encoding is allowed
 	{
-		let res = client.post(url)
-			.basic_auth(USER, Some(PASS))
-			.body("CREATE foo").send().await?;
+		let res = client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 		assert_eq!(res.status(), 200);
 
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -373,10 +445,13 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Creating a record with Accept CBOR encoding is allowed
 	{
-		let res = client.post(url)
+		let res = client
+			.post(url)
 			.basic_auth(USER, Some(PASS))
 			.header(header::ACCEPT, "application/cbor")
-			.body("CREATE foo").send().await?;
+			.body("CREATE foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200);
 
 		let _: serde_cbor::Value = serde_cbor::from_slice(&res.bytes().await?).unwrap();
@@ -384,10 +459,13 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Creating a record with Accept PACK encoding is allowed
 	{
-		let res = client.post(url)
+		let res = client
+			.post(url)
 			.basic_auth(USER, Some(PASS))
 			.header(header::ACCEPT, "application/pack")
-			.body("CREATE foo").send().await?;
+			.body("CREATE foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200);
 
 		let _: serde_cbor::Value = serde_pack::from_slice(&res.bytes().await?).unwrap();
@@ -395,32 +473,42 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Creating a record with Accept Surrealdb encoding is allowed
 	{
-		let res = client.post(url)
+		let res = client
+			.post(url)
 			.basic_auth(USER, Some(PASS))
 			.header(header::ACCEPT, "application/surrealdb")
-			.body("CREATE foo").send().await?;
+			.body("CREATE foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200);
-		
+
 		// TODO: parse the result
 	}
 
 	// Creating a record with an unsupported Accept header, returns a 415
 	{
-		let res = client.post(url)
+		let res = client
+			.post(url)
 			.basic_auth(USER, Some(PASS))
 			.header(header::ACCEPT, "text/plain")
-			.body("CREATE foo").send().await?;
+			.body("CREATE foo")
+			.send()
+			.await?;
 		assert_eq!(res.status(), 415);
 	}
 
 	// Test WebSocket upgrade
 	{
-		let res = client.get(url)
+		let res = client
+			.get(url)
 			.header(header::CONNECTION, "Upgrade")
 			.header(header::UPGRADE, "websocket")
 			.header(header::SEC_WEBSOCKET_VERSION, "13")
 			.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
-			.send().await?.upgrade().await;
+			.send()
+			.await?
+			.upgrade()
+			.await;
 		assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
 	}
 
@@ -438,8 +526,10 @@ async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
-
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// GET
 	{
@@ -450,7 +540,6 @@ async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	}
 	// POST
 	{
-
 		let res = client.post(url).body("").send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 		let body = res.text().await?;
@@ -476,13 +565,28 @@ async fn version_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 ///
 /// Key endpoint tests
-/// 
+///
 
-async fn seed_table(client: &Client, addr: &str, table: &str, num_records: usize) -> Result<(), Box<dyn std::error::Error>> {
-	let res = client.post(format!("http://{addr}/sql")).basic_auth(USER, Some(PASS)).body(format!("CREATE |{table}:1..{num_records}| SET default = 'content'")).send().await?;
+async fn seed_table(
+	client: &Client,
+	addr: &str,
+	table: &str,
+	num_records: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+	let res = client
+		.post(format!("http://{addr}/sql"))
+		.basic_auth(USER, Some(PASS))
+		.body(format!("CREATE |{table}:1..{num_records}| SET default = 'content'"))
+		.send()
+		.await?;
 	let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-	
-	assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "error seeding the table: {}", body);
+
+	assert_eq!(
+		body[0]["result"].as_array().unwrap().len(),
+		num_records,
+		"error seeding the table: {}",
+		body
+	);
 
 	Ok(())
 }
@@ -500,7 +604,10 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Seed the table
 	seed_table(&client, &addr, table_name, num_records).await?;
@@ -509,25 +616,27 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 	{
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
 	}
 
 	// GET records with a limit
 	{
-		let res = client.get(format!("{}?limit=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+		let res =
+			client.get(format!("{}?limit=10", url)).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
 	}
 
 	// GET records with a start
 	{
-		let res = client.get(format!("{}?start=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+		let res =
+			client.get(format!("{}?start=10", url)).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records - 10, "body: {}", body);
 		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {}", body);
@@ -535,9 +644,13 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 
 	// GET records with a start and limit
 	{
-		let res = client.get(format!("{}?start=10&limit=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+		let res = client
+			.get(format!("{}?start=10&limit=10", url))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
 		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {}", body);
@@ -547,7 +660,7 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 	{
 		let res = client.get(url).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
 	}
@@ -565,7 +678,10 @@ async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create record with random ID
 	{
@@ -578,13 +694,23 @@ async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
 
 		// Try to create the record
-		let res = client.post(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was created
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["name"], "record_name", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["name"],
+			"record_name",
+			"body: {}",
+			body
+		);
 	}
 
 	// POST without authentication creates no records
@@ -595,7 +721,7 @@ async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to create the record
 		let res = client.post(url).body(r#"{"name": "record_name"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the table is empty
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -618,16 +744,24 @@ async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	seed_table(&client, &addr, &table_name, num_records).await?;
 
 	// Update all records
 	{
 		// Try to update the records
-		let res = client.put(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.put(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were updated
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -648,12 +782,12 @@ async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to update the records
 		let res = client.put(url).body(r#"{"noauth": "yes"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were not updated
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
-		
+
 		// Verify the records don't have the new data
 		for record in body[0]["result"].as_array().unwrap() {
 			assert!(record["noauth"].is_null(), "body: {}", body);
@@ -680,16 +814,24 @@ async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	seed_table(&client, &addr, &table_name, num_records).await?;
 
 	// Modify all records
 	{
 		// Try to modify the records
-		let res = client.patch(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.patch(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were modified
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -710,12 +852,12 @@ async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to modify the records
 		let res = client.patch(url).body(r#"{"noauth": "yes"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were not modified
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
-		
+
 		// Verify the records don't have the new data
 		for record in body[0]["result"].as_array().unwrap() {
 			assert!(record["noauth"].is_null(), "body: {}", body);
@@ -742,8 +884,10 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
-
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Delete all records
 	{
@@ -757,7 +901,7 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to delete the records
 		let res = client.delete(url).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were deleted
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -767,11 +911,11 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 	// Delete all records without authentication
 	{
 		seed_table(&client, &addr, &table_name, num_records).await?;
-	
+
 		// Try to delete the records
 		let res = client.delete(url).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were not deleted
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -793,7 +937,10 @@ async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Seed the table
 	seed_table(&client, &addr, table_name, 1).await?;
@@ -802,7 +949,7 @@ async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 	{
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
 	}
@@ -811,7 +958,7 @@ async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 	{
 		let res = client.get(url).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
 	}
@@ -830,20 +977,33 @@ async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Create record with known ID
 	{
 		let url = &format!("http://{addr}/key/{table_name}/new_id");
 
 		// Try to create the record
-		let res = client.post(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was created with the given ID
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:new_id", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["id"],
+			"table:new_id",
+			"body: {}",
+			body
+		);
 	}
 
 	// POST without authentication creates no records
@@ -853,7 +1013,7 @@ async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to create the record
 		let res = client.post(url).body(r#"{"name": "record_name"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the table is empty
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -875,23 +1035,36 @@ async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	seed_table(&client, &addr, &table_name, 1).await?;
 
 	// Update one record
 	{
 		// Try to update the record
-		let res = client.put(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.put(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was updated
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
 
 		// Verify the record has the new data
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["name"], "record_name", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["name"],
+			"record_name",
+			"body: {}",
+			body
+		);
 
 		// Verify the record doesn't have the original data
 		assert!(body[0]["result"].as_array().unwrap()[0]["default"].is_null(), "body: {}", body);
@@ -902,17 +1075,22 @@ async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to update the record
 		let res = client.put(url).body(r#"{"noauth": "yes"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was not updated
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
-		
+
 		// Verify the record doesn't have the new data
 		assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
 
 		// Verify the record has the original data
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["name"], "record_name", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["name"],
+			"record_name",
+			"body: {}",
+			body
+		);
 	}
 
 	Ok(())
@@ -930,26 +1108,44 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	seed_table(&client, &addr, &table_name, 1).await?;
 
 	// Modify one record
 	{
 		// Try to modify one record
-		let res = client.patch(url).basic_auth(USER, Some(PASS)).body(r#"{"name": "record_name"}"#).send().await?;
+		let res = client
+			.patch(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{"name": "record_name"}"#)
+			.send()
+			.await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the records were modified
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 		assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
 
 		// Verify the record has the new data
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["name"], "record_name", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["name"],
+			"record_name",
+			"body: {}",
+			body
+		);
 
 		// Verify the record has the original data too
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["default"], "content", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["default"],
+			"content",
+			"body: {}",
+			body
+		);
 	}
 
 	// Modify one record without authentication
@@ -957,7 +1153,7 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to modify the record
 		let res = client.patch(url).body(r#"{"noauth": "yes"}"#).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was not modified
 		let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -967,7 +1163,12 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 		assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
 
 		// Verify the record has the original data too
-		assert_eq!(body[0]["result"].as_array().unwrap()[0]["default"], "content", "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["default"],
+			"content",
+			"body: {}",
+			body
+		);
 	}
 
 	Ok(())
@@ -985,8 +1186,10 @@ async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
 	headers.insert(header::ACCEPT, "application/json".parse()?);
-	let client = reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).default_headers(headers).build()?;
-
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
 
 	// Delete all records
 	{
@@ -998,9 +1201,10 @@ async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {}", body);
 
 		// Try to delete the record
-		let res = client.delete(format!("{}/1", base_url)).basic_auth(USER, Some(PASS)).send().await?;
+		let res =
+			client.delete(format!("{}/1", base_url)).basic_auth(USER, Some(PASS)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify only one record was deleted
 		let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
@@ -1013,7 +1217,7 @@ async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 		// Try to delete the record
 		let res = client.delete(format!("{}/2", base_url)).send().await?;
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-		
+
 		// Verify the record was not deleted
 		let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();

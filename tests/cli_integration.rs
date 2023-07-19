@@ -1,4 +1,3 @@
-
 // cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
 mod common;
@@ -7,7 +6,7 @@ use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 use serial_test::serial;
 use std::fs;
 
-use common::{USER, PASS};
+use common::{PASS, USER};
 
 #[test]
 #[serial]
