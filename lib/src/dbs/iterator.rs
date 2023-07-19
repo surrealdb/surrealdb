@@ -8,6 +8,7 @@ use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
+use crate::kvs::Key;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -16,10 +17,13 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
+use radix_trie::Trie;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) enum Iterable {
 	Value(Value),
@@ -38,6 +42,8 @@ pub(crate) struct Processed {
 	pub(crate) doc_id: Option<DocId>,
 	pub(crate) val: Operable,
 }
+
+pub(crate) type ProcessedThings = Arc<Mutex<Trie<Key, bool>>>;
 
 pub(crate) enum Operable {
 	Value(Value),
@@ -62,6 +68,7 @@ pub(crate) struct Iterator {
 	// Iterator runtime error
 	error: Option<Error>,
 	// Iterator output results
+	// TODO: Should be stored on disk / (mmap?)
 	results: Vec<Value>,
 	// Iterator input values
 	entries: Vec<Iterable>,
@@ -402,6 +409,8 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// TODO: This is currently processed in memory. In the future is should be on disk (mmap?)
+		let done = Arc::new(Mutex::new(Trie::new()));
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
 		// Check if iterating in parallel
@@ -410,7 +419,7 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, txn, stm, self).await?;
+					v.iterate(ctx, opt, txn, stm, self, &done).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -429,7 +438,7 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), &done))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -471,7 +480,6 @@ impl Iterator {
 	}
 
 	/// Process a new record Thing and Value
-	#[allow(clippy::too_many_arguments)]
 	pub async fn process(
 		&mut self,
 		ctx: &Context<'_>,

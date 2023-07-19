@@ -1,5 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
+use crate::dbs::{
+	Iterable, Iterator, Operable, Options, Processed, ProcessedThings, Statement, Transaction,
+};
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
@@ -18,8 +20,9 @@ impl Iterable {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
-		Processor::Iterator(ite).process_iterable(ctx, opt, txn, stm, self).await
+		Processor::Iterator(ite).process_iterable(ctx, opt, txn, stm, self, done).await
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -30,8 +33,9 @@ impl Iterable {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		chn: Sender<Processed>,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
-		Processor::Channel(chn).process_iterable(ctx, opt, txn, stm, self).await
+		Processor::Channel(chn).process_iterable(ctx, opt, txn, stm, self, done).await
 	}
 }
 
@@ -49,7 +53,14 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		pro: Processed,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
+		let rid_key = pro.rid.as_ref().map(|rid| rid.to_vec());
+		if let Some(k) = &rid_key {
+			if done.lock().await.get(k).is_some() {
+				return Ok(());
+			}
+		}
 		match self {
 			Processor::Iterator(ite) => {
 				ite.process(ctx, opt, txn, stm, pro).await;
@@ -59,6 +70,9 @@ impl<'a> Processor<'a> {
 				chn.send(pro).await?;
 			}
 		};
+		if let Some(k) = rid_key {
+			done.lock().await.insert(k, true);
+		}
 		Ok(())
 	}
 
@@ -69,22 +83,23 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		iterable: Iterable,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
-				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
-				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
-				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
+				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v, done).await?,
+				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v, done).await?,
+				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v, done).await?,
+				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v, done).await?,
+				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e, done).await?,
 				Iterable::Index(t, ir, io) => {
-					self.process_index(ctx, opt, txn, stm, t, ir, io).await?
+					self.process_index(ctx, opt, txn, stm, t, ir, io, done).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
+					self.process_mergeable(ctx, opt, txn, stm, v, o, done).await?
 				}
 				Iterable::Relatable(f, v, w) => {
-					self.process_relatable(ctx, opt, txn, stm, f, v, w).await?
+					self.process_relatable(ctx, opt, txn, stm, f, v, w, done).await?
 				}
 			}
 		}
@@ -98,6 +113,7 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Value,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Pass the value through
 		let pro = Processed {
@@ -107,7 +123,7 @@ impl<'a> Processor<'a> {
 			val: Operable::Value(v),
 		};
 		// Process the document record
-		self.process(ctx, opt, txn, stm, pro).await
+		self.process(ctx, opt, txn, stm, pro, done).await
 	}
 
 	async fn process_thing(
@@ -117,6 +133,7 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -135,7 +152,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(ctx, opt, txn, stm, pro, done).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -148,6 +165,7 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Thing,
 		o: Value,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -168,7 +186,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(ctx, opt, txn, stm, pro, done).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -183,6 +201,7 @@ impl<'a> Processor<'a> {
 		f: Thing,
 		v: Thing,
 		w: Thing,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -203,7 +222,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(ctx, opt, txn, stm, pro, done).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -215,6 +234,7 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Table,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
@@ -270,7 +290,7 @@ impl<'a> Processor<'a> {
 						doc_id: None,
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro).await?;
+					self.process(ctx, opt, txn, stm, pro, done).await?;
 				}
 				continue;
 			}
@@ -287,6 +307,7 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Range,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -359,7 +380,7 @@ impl<'a> Processor<'a> {
 						doc_id: None,
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro).await?;
+					self.process(ctx, opt, txn, stm, pro, done).await?;
 				}
 				continue;
 			}
@@ -376,6 +397,7 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		e: Edges,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Pull out options
 		let ns = opt.ns();
@@ -505,7 +527,7 @@ impl<'a> Processor<'a> {
 							doc_id: None,
 							val,
 						};
-						self.process(ctx, opt, txn, stm, pro).await?;
+						self.process(ctx, opt, txn, stm, pro, done).await?;
 					}
 					continue;
 				}
@@ -526,6 +548,7 @@ impl<'a> Processor<'a> {
 		table: Table,
 		ir: IteratorRef,
 		io: IndexOption,
+		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
@@ -566,7 +589,7 @@ impl<'a> Processor<'a> {
 						doc_id: Some(doc_id),
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro).await?;
+					self.process(ctx, opt, txn, stm, pro, done).await?;
 				}
 
 				// Collect the next batch of ids

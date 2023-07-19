@@ -382,7 +382,7 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let cur = CursorDoc::from_doc(&doc);
+		let cur = (&doc).into();
 		let res = val.get(&ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
 		assert_eq!(
 			res,

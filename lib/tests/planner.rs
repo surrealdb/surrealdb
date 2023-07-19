@@ -7,7 +7,6 @@ use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-#[ignore]
 async fn select_where_iterate_indexes() -> Result<(), Error> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
@@ -16,7 +15,7 @@ async fn select_where_iterate_indexes() -> Result<(), Error> {
 		DEFINE INDEX ft_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
 		SELECT name FROM person WHERE name = 'Jaime' OR genre = 'm';
-	    SELECT name FROM person WHERE name = 'Jaime' OR genre = 'm' EXPLAIN;";
+	    SELECT name FROM person WHERE name = 'Jaime' OR genre = 'm' EXPLAIN FULL;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -30,10 +29,10 @@ async fn select_where_iterate_indexes() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				name: 'Tobie'
+				name: 'Jaime'
 			},
             {
-				name: 'Jaime'
+				name: 'Tobie'
 			}
 		]",
 	);
@@ -46,8 +45,8 @@ async fn select_where_iterate_indexes() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'ft_name',
-							operator: '@@',
-							value: 'Tobie'
+							operator: '=',
+							value: 'Jaime'
 						},
 						table: 'person',
 					},
@@ -56,15 +55,21 @@ async fn select_where_iterate_indexes() -> Result<(), Error> {
                 {
 					detail: {
 						plan: {
-							index: 'ft_name',
-							operator: '@@',
-							value: 'Jaime'
+							index: 'idx_genre',
+							operator: '=',
+							value: 'm'
 						},
 						table: 'person',
 					},
 					operation: 'Iterate Index'
-				}
-		]",
+					},
+					{
+						detail: {
+							count: 2
+						},
+						operation: 'Fetch'
+					}
+				]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
