@@ -1,7 +1,6 @@
 use crate::sql::{Object, Value};
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,7 +11,7 @@ pub enum Action {
 	Delete,
 }
 
-impl fmt::Display for Action {
+impl Display for Action {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
 			Action::Create => write!(f, "CREATE"),
