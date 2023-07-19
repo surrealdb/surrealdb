@@ -1,11 +1,11 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Operable, Options, Statement, Transaction};
+use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
-use crate::sql::{Edges, Expression, Range, Table, Thing, Value};
+use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use std::ops::Bound;
@@ -29,7 +29,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		chn: Sender<(Option<Thing>, Option<DocId>, Operable)>,
+		chn: Sender<Processed>,
 	) -> Result<(), Error> {
 		Processor::Channel(chn).process_iterable(ctx, opt, txn, stm, self).await
 	}
@@ -38,28 +38,25 @@ impl Iterable {
 enum Processor<'a> {
 	Iterator(&'a mut Iterator),
 	#[cfg(not(target_arch = "wasm32"))]
-	Channel(Sender<(Option<Thing>, Option<DocId>, Operable)>),
+	Channel(Sender<Processed>),
 }
 
 impl<'a> Processor<'a> {
-	#[allow(clippy::too_many_arguments)]
 	async fn process(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		rid: Option<Thing>,
-		doc_id: Option<DocId>,
-		val: Operable,
+		pro: Processed,
 	) -> Result<(), Error> {
 		match self {
 			Processor::Iterator(ite) => {
-				ite.process(ctx, opt, txn, stm, rid, doc_id, val).await;
+				ite.process(ctx, opt, txn, stm, pro).await;
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			Processor::Channel(chn) => {
-				chn.send((rid, doc_id, val)).await?;
+				chn.send(pro).await?;
 			}
 		};
 		Ok(())
@@ -80,8 +77,8 @@ impl<'a> Processor<'a> {
 				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, exp, io) => {
-					self.process_index(ctx, opt, txn, stm, t, exp, io).await?
+				Iterable::Index(t, ir, io) => {
+					self.process_index(ctx, opt, txn, stm, t, ir, io).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
@@ -103,9 +100,14 @@ impl<'a> Processor<'a> {
 		v: Value,
 	) -> Result<(), Error> {
 		// Pass the value through
-		let val = Operable::Value(v);
+		let pro = Processed {
+			ir: None,
+			rid: None,
+			doc_id: None,
+			val: Operable::Value(v),
+		};
 		// Process the document record
-		self.process(ctx, opt, txn, stm, None, None, val).await
+		self.process(ctx, opt, txn, stm, pro).await
 	}
 
 	async fn process_thing(
@@ -127,7 +129,13 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		});
 		// Process the document record
-		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
+		let pro = Processed {
+			ir: None,
+			rid: Some(v),
+			doc_id: None,
+			val,
+		};
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -154,7 +162,13 @@ impl<'a> Processor<'a> {
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
 		// Process the document record
-		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
+		let pro = Processed {
+			ir: None,
+			rid: Some(v),
+			doc_id: None,
+			val,
+		};
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -183,7 +197,13 @@ impl<'a> Processor<'a> {
 		// Create a new operable value
 		let val = Operable::Relatable(f, x, w);
 		// Process the document record
-		self.process(ctx, opt, txn, stm, Some(v), None, val).await?;
+		let pro = Processed {
+			ir: None,
+			rid: Some(v),
+			doc_id: None,
+			val,
+		};
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -244,7 +264,13 @@ impl<'a> Processor<'a> {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
+					let pro = Processed {
+						ir: None,
+						rid: Some(rid),
+						doc_id: None,
+						val,
+					};
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
 				continue;
 			}
@@ -327,7 +353,13 @@ impl<'a> Processor<'a> {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
+					let pro = Processed {
+						ir: None,
+						rid: Some(rid),
+						doc_id: None,
+						val,
+					};
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
 				continue;
 			}
@@ -467,7 +499,13 @@ impl<'a> Processor<'a> {
 							None => Value::None,
 						});
 						// Process the record
-						self.process(ctx, opt, txn, stm, Some(rid), None, val).await?;
+						let pro = Processed {
+							ir: None,
+							rid: Some(rid),
+							doc_id: None,
+							val,
+						};
+						self.process(ctx, opt, txn, stm, pro).await?;
 					}
 					continue;
 				}
@@ -486,17 +524,15 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: Table,
-		exp: Expression,
+		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		let exe = ctx.get_query_executor(&table.0);
 		if let Some(exe) = exe {
-			let mut iterator = exe.new_iterator(opt, &exp, io).await?;
+			let mut iterator = exe.new_iterator(opt, ir, io).await?;
 			let mut things = iterator.next_batch(txn, 1000).await?;
-			let mut ite_ctx = Context::new(ctx);
-			ite_ctx.add_pre_match(&exp);
 			while !things.is_empty() {
 				// Check if the context is finished
 				if ctx.is_done() {
@@ -524,7 +560,13 @@ impl<'a> Processor<'a> {
 						None => Value::None,
 					});
 					// Process the document record
-					self.process(&ite_ctx, opt, txn, stm, Some(rid), Some(doc_id), val).await?;
+					let pro = Processed {
+						ir: Some(ir),
+						rid: Some(rid),
+						doc_id: Some(doc_id),
+						val,
+					};
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
 
 				// Collect the next batch of ids

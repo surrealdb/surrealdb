@@ -179,9 +179,11 @@ pub(crate) async fn matches(
 				// If we find the expression in `pre_match`,
 				// it means that we are using an Iterator::Index
 				// and we are iterating over documents that already matches the expression.
-				if let Some(e) = ctx.pre_match() {
-					if e.eq(exp) {
-						return Ok(Value::Bool(true));
+				if let Some(ir) = doc.ir {
+					if let Some(e) = exe.get_iterator_expression(ir) {
+						if e.eq(exp) {
+							return Ok(Value::Bool(true));
+						}
 					}
 				}
 				// Evaluate the matches

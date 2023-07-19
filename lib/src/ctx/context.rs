@@ -3,7 +3,6 @@ use crate::ctx::reason::Reason;
 use crate::dbs::Notification;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
-use crate::sql::Expression;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -37,8 +36,6 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query executor
 	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
-	// An pre-match expression
-	pre_match: Option<&'a Expression>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -68,7 +65,6 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_executors: None,
-			pre_match: None,
 		}
 	}
 
@@ -81,7 +77,6 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_executors: parent.query_executors.clone(),
-			pre_match: parent.pre_match,
 		}
 	}
 
@@ -128,11 +123,6 @@ impl<'a> Context<'a> {
 		self.query_executors = Some(Arc::new(executors));
 	}
 
-	/// Set the pre matching expression
-	pub(crate) fn add_pre_match(&mut self, exp: &'a Expression) {
-		self.pre_match = Some(exp);
-	}
-
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
@@ -149,10 +139,6 @@ impl<'a> Context<'a> {
 		} else {
 			None
 		}
-	}
-
-	pub(crate) fn pre_match(&self) -> Option<&Expression> {
-		self.pre_match
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

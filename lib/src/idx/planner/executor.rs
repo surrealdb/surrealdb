@@ -20,11 +20,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub(crate) type IteratorRef = u16;
+
 pub(crate) struct QueryExecutor {
 	table: String,
 	ft_map: HashMap<String, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Expression, FtEntry>,
+	iterators: Vec<Expression>,
 }
 
 impl QueryExecutor {
@@ -86,7 +89,18 @@ impl QueryExecutor {
 			ft_map,
 			mr_entries,
 			exp_entries,
+			iterators: Vec::new(),
 		})
+	}
+
+	pub(super) fn add_iterator(&mut self, exp: Expression) -> IteratorRef {
+		let ir = self.iterators.len();
+		self.iterators.push(exp);
+		ir as IteratorRef
+	}
+
+	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
+		self.iterators.get(ir as usize)
 	}
 
 	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
@@ -101,7 +115,7 @@ impl QueryExecutor {
 	pub(crate) async fn new_iterator(
 		&self,
 		opt: &Options,
-		exp: &Expression,
+		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<ThingIterator, Error> {
 		match &io.ix().index {
@@ -109,7 +123,7 @@ impl QueryExecutor {
 			Index::Uniq => Self::new_unique_index_iterator(opt, io),
 			Index::Search {
 				..
-			} => self.new_search_index_iterator(exp, io).await,
+			} => self.new_search_index_iterator(ir, io).await,
 		}
 	}
 
@@ -137,15 +151,17 @@ impl QueryExecutor {
 
 	async fn new_search_index_iterator(
 		&self,
-		exp: &Expression,
+		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<ThingIterator, Error> {
-		if let Operator::Matches(_) = io.op() {
-			let ixn = &io.ix().name.0;
-			if let Some(fti) = self.ft_map.get(ixn) {
-				if let Some(fte) = self.exp_entries.get(exp) {
-					let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
-					return Ok(ThingIterator::Matches(it));
+		if let Some(exp) = self.iterators.get(ir as usize) {
+			if let Operator::Matches(_) = io.op() {
+				let ixn = &io.ix().name.0;
+				if let Some(fti) = self.ft_map.get(ixn) {
+					if let Some(fte) = self.exp_entries.get(exp) {
+						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
+						return Ok(ThingIterator::Matches(it));
+					}
 				}
 			}
 		}

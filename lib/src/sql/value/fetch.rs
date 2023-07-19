@@ -64,7 +64,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							let cur = CursorDoc::new(None, None, v);
+							let cur = CursorDoc::from_doc(v);
 							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								v.fetch(ctx, opt, txn, path).await?;
 							}

@@ -119,7 +119,7 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								let cur = CursorDoc::new(None, None, v);
+								let cur = CursorDoc::from_doc(v);
 								if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 									m.insert(i);
 								};
@@ -133,7 +133,7 @@ impl Value {
 								let mut p = Vec::new();
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
-									let cur = CursorDoc::new(None, None, o);
+									let cur = CursorDoc::from_doc(o);
 									if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 										a.push(o.clone());
 										p.push(i);
@@ -157,7 +157,7 @@ impl Value {
 							_ => {
 								let path = path.next();
 								for v in v.iter_mut() {
-									let cur = CursorDoc::new(None, None, v);
+									let cur = CursorDoc::from_doc(v);
 									if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 										v.del(ctx, opt, txn, path).await?;
 									}

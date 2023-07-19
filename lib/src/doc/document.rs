@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
+use crate::idx::planner::executor::IteratorRef;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -23,14 +24,30 @@ pub(crate) struct Document<'a> {
 }
 
 pub struct CursorDoc<'a> {
+	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<&'a Thing>,
 	pub(crate) doc: Cow<'a, Value>,
 	pub(crate) doc_id: Option<DocId>,
 }
 
 impl<'a> CursorDoc<'a> {
-	pub(crate) fn new(rid: Option<&'a Thing>, doc_id: Option<DocId>, doc: &'a Value) -> Self {
+	pub(crate) fn from_doc(doc: &'a Value) -> Self {
 		Self {
+			ir: None,
+			rid: None,
+			doc: Cow::Borrowed(doc),
+			doc_id: None,
+		}
+	}
+
+	pub(crate) fn new(
+		ir: Option<IteratorRef>,
+		rid: Option<&'a Thing>,
+		doc_id: Option<DocId>,
+		doc: &'a Value,
+	) -> Self {
+		Self {
+			ir,
 			rid,
 			doc: Cow::Borrowed(doc),
 			doc_id,
@@ -52,6 +69,7 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 
 impl<'a> Document<'a> {
 	pub fn new(
+		ir: Option<IteratorRef>,
 		id: Option<&'a Thing>,
 		doc_id: Option<DocId>,
 		val: &'a Value,
@@ -60,8 +78,8 @@ impl<'a> Document<'a> {
 		Document {
 			id,
 			extras,
-			current: CursorDoc::new(id, doc_id, val),
-			initial: CursorDoc::new(id, doc_id, val),
+			current: CursorDoc::new(ir, id, doc_id, val),
+			initial: CursorDoc::new(ir, id, doc_id, val),
 		}
 	}
 }

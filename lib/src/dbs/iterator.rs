@@ -7,6 +7,7 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::ft::docids::DocId;
+use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
@@ -15,7 +16,6 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Expression;
 use async_recursion::async_recursion;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -30,7 +30,14 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, Expression, IndexOption),
+	Index(Table, IteratorRef, IndexOption),
+}
+
+pub(crate) struct Processed {
+	pub(crate) ir: Option<IteratorRef>,
+	pub(crate) rid: Option<Thing>,
+	pub(crate) doc_id: Option<DocId>,
+	pub(crate) val: Operable,
 }
 
 pub(crate) enum Operable {
@@ -262,10 +269,10 @@ impl Iterator {
 								_ => {
 									let x = vals.first();
 									let x = if let Some(alias) = alias {
-										let cur = CursorDoc::new(None, None, &x);
+										let cur = CursorDoc::from_doc(&x);
 										alias.compute(ctx, opt, txn, Some(&cur)).await?
 									} else {
-										let cur = CursorDoc::new(None, None, &x);
+										let cur = CursorDoc::from_doc(&x);
 										expr.compute(ctx, opt, txn, Some(&cur)).await?
 									};
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
@@ -435,8 +442,8 @@ impl Iterator {
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
-					while let Ok((k, d, v)) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), k, d, v))
+					while let Ok(pro) = docs.recv().await {
+						e.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), pro))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -472,22 +479,20 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		thg: Option<Thing>,
-		doc_id: Option<DocId>,
-		val: Operable,
+		pro: Processed,
 	) {
 		// Check current context
 		if ctx.is_done() {
 			return;
 		}
 		// Setup a new workable
-		let (val, ext) = match val {
+		let (val, ext) = match pro.val {
 			Operable::Value(v) => (v, Workable::Normal),
 			Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(thg.as_ref(), doc_id, &val, ext);
+		let mut doc = Document::new(pro.ir, pro.rid.as_ref(), pro.doc_id, &val, ext);
 		// Process the document
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,

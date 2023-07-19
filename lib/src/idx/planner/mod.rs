@@ -37,23 +37,28 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let res = Tree::build(ctx, self.opt, txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
-			let exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
-			self.executors.insert(t.0.clone(), exe);
-			match PlanBuilder::build(node) {
+			let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
+			let ok = match PlanBuilder::build(node) {
 				Ok(plan) => match plan {
 					Plan::SingleIndex(exp, io) => {
-						it.ingest(Iterable::Index(t, exp, io));
-						return Ok(());
+						let ir = exe.add_iterator(exp);
+						it.ingest(Iterable::Index(t.clone(), ir, io));
+						true
 					}
 					Plan::MultiIndex(v) => {
 						for (exp, io) in v {
-							it.ingest(Iterable::Index(t.clone(), exp, io));
+							let ir = exe.add_iterator(exp);
+							it.ingest(Iterable::Index(t.clone(), ir, io));
 						}
-						return Ok(());
+						true
 					}
 				},
-				Err(Error::BypassQueryPlanner) => {}
+				Err(Error::BypassQueryPlanner) => false,
 				Err(e) => return Err(e),
+			};
+			self.executors.insert(t.0.clone(), exe);
+			if ok {
+				return Ok(());
 			}
 		}
 		it.ingest(Iterable::Table(t));
