@@ -35,7 +35,7 @@ bench:
 
 .PHONY: serve
 serve:
-	cargo run $(DEV_FEATURES) -- start --user root --pass root memory
+	cargo run $(DEV_FEATURES) -- start --log trace --user root --pass root memory
 
 .PHONY: sql
 sql:

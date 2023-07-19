@@ -34,17 +34,24 @@ strip = false
 
 [dependencies]
 argon2 = "0.5.1"
+axum = { version = "0.6.18", features = ["tracing", "ws", "headers"] }
+axum-client-ip = "0.4.1"
+axum-extra = { version = "0.7.4", features = ["typed-routing"] }
+axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.2"
 bytes = "1.4.0"
 clap = { version = "4.3.12", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.28"
+futures-util = "0.3.28"
 glob = "0.3.1"
 http = "0.2.9"
+http-body = "0.4.5"
 hyper = "0.14.27"
 ipnet = "2.8.0"
 once_cell = "1.18.0"
 opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
+pin-project-lite = "0.2.9"
 rand = "0.8.5"
 reqwest = { version = "0.11.18", features = ["blocking"] }
 rustyline = { version = "11.0.0", features = ["derive"] }
@@ -57,21 +64,13 @@ tempfile = "3.6.0"
 thiserror = "1.0.43"
 tokio = { version = "1.29.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
+tower = "0.4.13"
+tower-http = { version = "0.4.1", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension"] }
 tracing = "0.1"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.2"
 uuid = { version = "1.4.0", features = ["serde", "js", "v4", "v7"] }
-warp = { version = "0.3.5", features = ["compression", "tls", "websocket"] }
-axum-server = { version = "0.5.1", features = ["tls-rustls"] }
-tower = "0.4.13"
-pin-project-lite = "0.2.9"
-futures-util = "0.3.28"
-http-body = "0.4.5"
-axum = { version = "0.6.18", features = ["tracing", "ws", "headers"] }
-axum-extra = { version = "0.7.4", features = ["typed-routing"] }
-tower-http = { version = "0.4.1", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension"] }
-axum-client-ip = "0.4.1"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.26.2"

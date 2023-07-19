@@ -273,6 +273,40 @@ async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 #[serial]
+async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let url = &format!("http://{addr}/rpc");
+
+	// Prepare HTTP client
+	let mut headers = reqwest::header::HeaderMap::new();
+	headers.insert("NS", "N".parse()?);
+	headers.insert("DB", "D".parse()?);
+	headers.insert(header::ACCEPT, "application/json".parse()?);
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
+
+	// Test WebSocket upgrade
+	{
+		let res = client
+			.get(url)
+			.header(header::CONNECTION, "Upgrade")
+			.header(header::UPGRADE, "websocket")
+			.header(header::SEC_WEBSOCKET_VERSION, "13")
+			.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+			.send()
+			.await?
+			.upgrade()
+			.await;
+		assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(false, true).await.unwrap();
 	let url = &format!("http://{addr}/signin");
@@ -1001,6 +1035,46 @@ async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(
 			body[0]["result"].as_array().unwrap()[0]["id"],
 			"table:new_id",
+			"body: {}",
+			body
+		);
+	}
+
+	// Create record with known ID and query params
+	{
+		let url = &format!(
+			"http://{addr}/key/{table_name}/new_id_query?{params}",
+			params = "age=45&elems=[1,2,3]&other={test: true}"
+		);
+
+		// Try to create the record
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.body(r#"{ age: $age, elems: $elems, other: $other }"#)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		// Verify the record was created with the given ID
+		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+		assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["id"],
+			"table:new_id_query",
+			"body: {}",
+			body
+		);
+		assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {}", body);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["elems"].as_array().unwrap().len(),
+			3,
+			"body: {}",
+			body
+		);
+		assert_eq!(
+			body[0]["result"].as_array().unwrap()[0]["other"].as_object().unwrap()["test"],
+			true,
 			"body: {}",
 			body
 		);
