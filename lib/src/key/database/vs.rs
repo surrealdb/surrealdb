@@ -10,7 +10,9 @@ pub struct Vs<'a> {
 	pub ns: &'a str,
 	_b: u8,
 	pub db: &'a str,
+	_c: u8,
 	_d: u8,
+	_e: u8,
 }
 
 #[allow(unused)]
@@ -26,7 +28,9 @@ impl<'a> Vs<'a> {
 			ns,
 			_b: b'*',
 			db,
-			_d: b'*',
+			_c: b'!',
+			_d: b'v',
+			_e: b's',
 		}
 	}
 }
