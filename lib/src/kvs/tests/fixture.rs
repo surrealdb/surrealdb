@@ -7,7 +7,8 @@ async fn a_live_query(
 	table: &str,
 	lq: Uuid,
 ) -> Result<(), Error> {
-	let lq_key = crate::key::node::lq::new(cl, namespace, database, lq);
+	// TODO Create a statement and write that because that is source of truth
+	let lq_key = crate::key::node::lq::new(cl, lq, namespace, database);
 	tx.put(&lq_key, table).await?;
 
 	let lv_key = crate::key::table::lq::new(namespace, database, table, lq);

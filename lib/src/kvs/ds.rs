@@ -426,9 +426,9 @@ impl Datastore {
 				hits.push(lq_value.clone());
 				let lq = crate::key::node::lq::Lq::new(
 					lq_value.nd.clone(),
+					lq_value.lq.clone(),
 					lq_value.ns.as_str(),
 					lq_value.db.as_str(),
-					lq_value.lq.clone(),
 				);
 				tx.del(lq).await?;
 				trace!("Deleted lq {:?} as part of session garbage collection", lq_value.clone());
