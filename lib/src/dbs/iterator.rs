@@ -1,5 +1,8 @@
 use crate::ctx::Canceller;
 use crate::ctx::Context;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::dbs::distinct::AsyncDistinct;
+use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::explanation::Explanation;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
@@ -8,7 +11,6 @@ use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
-use crate::kvs::Key;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -17,13 +19,10 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use radix_trie::Trie;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub(crate) enum Iterable {
 	Value(Value),
@@ -42,8 +41,6 @@ pub(crate) struct Processed {
 	pub(crate) doc_id: Option<DocId>,
 	pub(crate) val: Operable,
 }
-
-pub(crate) type ProcessedThings = Arc<Mutex<Trie<Key, bool>>>;
 
 pub(crate) enum Operable {
 	Value(Value),
@@ -392,9 +389,13 @@ impl Iterator {
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
+		// If any iterator requires distinct, we new to create a global distinct instance
+		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, txn, stm, self).await?;
+			// Distinct is passed only for iterators that really requires it
+			let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
+			v.iterate(ctx, opt, txn, stm, self, dis).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -409,23 +410,27 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// TODO: This is currently processed in memory. In the future is should be on disk (mmap?)
-		let done = Arc::new(Mutex::new(Trie::new()));
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
 		// Check if iterating in parallel
 		match stm.parallel() {
 			// Run statements sequentially
 			false => {
+				// If any iterator requires distinct, we new to create a global distinct instance
+				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, txn, stm, self, &done).await?;
+					// Distinct is passed only for iterators that really requires it
+					let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
+					v.iterate(ctx, opt, txn, stm, self, dis).await?;
 				}
 				// Everything processed ok
 				Ok(())
 			}
 			// Run statements in parallel
 			true => {
+				// If any iterator requires distinct, we new to create a global distinct instance
+				let distinct = AsyncDistinct::new(ctx);
 				// Create a new executor
 				let e = executor::Executor::new();
 				// Take all of the iterator values
@@ -438,7 +443,9 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), &done))
+						// Distinct is passed only for iterators that really requires it
+						let dis = AsyncDistinct::requires_distinct(ctx, distinct.as_ref(), &v);
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), dis))
 							// Ensure we detach the spawned task
 							.detach();
 					}

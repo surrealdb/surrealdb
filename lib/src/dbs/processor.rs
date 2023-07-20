@@ -1,7 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::{
-	Iterable, Iterator, Operable, Options, Processed, ProcessedThings, Statement, Transaction,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::dbs::distinct::AsyncDistinct;
+use crate::dbs::distinct::SyncDistinct;
+use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::plan::IndexOption;
@@ -20,9 +21,9 @@ impl Iterable {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
-		done: &ProcessedThings,
+		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Iterator(ite).process_iterable(ctx, opt, txn, stm, self, done).await
+		Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -33,16 +34,16 @@ impl Iterable {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		chn: Sender<Processed>,
-		done: &ProcessedThings,
+		dis: Option<AsyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Channel(chn).process_iterable(ctx, opt, txn, stm, self, done).await
+		Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
 	}
 }
 
 enum Processor<'a> {
-	Iterator(&'a mut Iterator),
+	Iterator(Option<&'a mut SyncDistinct>, &'a mut Iterator),
 	#[cfg(not(target_arch = "wasm32"))]
-	Channel(Sender<Processed>),
+	Channel(Option<AsyncDistinct>, Sender<Processed>),
 }
 
 impl<'a> Processor<'a> {
@@ -53,26 +54,30 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		pro: Processed,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
-		let rid_key = pro.rid.as_ref().map(|rid| rid.to_vec());
-		if let Some(k) = &rid_key {
-			if done.lock().await.get(k).is_some() {
-				return Ok(());
-			}
-		}
 		match self {
-			Processor::Iterator(ite) => {
-				ite.process(ctx, opt, txn, stm, pro).await;
+			Processor::Iterator(distinct, ite) => {
+				let is_processed = if let Some(d) = distinct {
+					d.check_already_processed(&pro)
+				} else {
+					false
+				};
+				if !is_processed {
+					ite.process(ctx, opt, txn, stm, pro).await;
+				}
 			}
 			#[cfg(not(target_arch = "wasm32"))]
-			Processor::Channel(chn) => {
-				chn.send(pro).await?;
+			Processor::Channel(distinct, chn) => {
+				let is_processed = if let Some(d) = distinct {
+					d.check_already_processed(&pro).await
+				} else {
+					false
+				};
+				if !is_processed {
+					chn.send(pro).await?;
+				}
 			}
 		};
-		if let Some(k) = rid_key {
-			done.lock().await.insert(k, true);
-		}
 		Ok(())
 	}
 
@@ -83,23 +88,22 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		iterable: Iterable,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v, done).await?,
-				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v, done).await?,
-				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v, done).await?,
-				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v, done).await?,
-				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e, done).await?,
+				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
+				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
+				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
+				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
 				Iterable::Index(t, ir, io) => {
-					self.process_index(ctx, opt, txn, stm, t, ir, io, done).await?
+					self.process_index(ctx, opt, txn, stm, t, ir, io).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(ctx, opt, txn, stm, v, o, done).await?
+					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
 				}
 				Iterable::Relatable(f, v, w) => {
-					self.process_relatable(ctx, opt, txn, stm, f, v, w, done).await?
+					self.process_relatable(ctx, opt, txn, stm, f, v, w).await?
 				}
 			}
 		}
@@ -113,7 +117,6 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Value,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Pass the value through
 		let pro = Processed {
@@ -123,7 +126,7 @@ impl<'a> Processor<'a> {
 			val: Operable::Value(v),
 		};
 		// Process the document record
-		self.process(ctx, opt, txn, stm, pro, done).await
+		self.process(ctx, opt, txn, stm, pro).await
 	}
 
 	async fn process_thing(
@@ -133,7 +136,6 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -152,7 +154,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro, done).await?;
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -165,7 +167,6 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Thing,
 		o: Value,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -186,7 +187,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro, done).await?;
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -201,7 +202,6 @@ impl<'a> Processor<'a> {
 		f: Thing,
 		v: Thing,
 		w: Thing,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -222,7 +222,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro, done).await?;
+		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -234,7 +234,6 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Table,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
@@ -290,7 +289,7 @@ impl<'a> Processor<'a> {
 						doc_id: None,
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro, done).await?;
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
 				continue;
 			}
@@ -307,7 +306,6 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Range,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
@@ -380,7 +378,7 @@ impl<'a> Processor<'a> {
 						doc_id: None,
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro, done).await?;
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
 				continue;
 			}
@@ -397,7 +395,6 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		e: Edges,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Pull out options
 		let ns = opt.ns();
@@ -527,7 +524,7 @@ impl<'a> Processor<'a> {
 							doc_id: None,
 							val,
 						};
-						self.process(ctx, opt, txn, stm, pro, done).await?;
+						self.process(ctx, opt, txn, stm, pro).await?;
 					}
 					continue;
 				}
@@ -548,59 +545,58 @@ impl<'a> Processor<'a> {
 		table: Table,
 		ir: IteratorRef,
 		io: IndexOption,
-		done: &ProcessedThings,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		let exe = ctx.get_query_executor(&table.0);
-		if let Some(exe) = exe {
-			let mut iterator = exe.new_iterator(opt, ir, io).await?;
-			let mut things = iterator.next_batch(txn, 1000).await?;
-			while !things.is_empty() {
-				// Check if the context is finished
-				if ctx.is_done() {
-					break;
-				}
-
-				for (thing, doc_id) in things {
-					// Check the context
+		if let Some(pla) = ctx.get_query_planner() {
+			if let Some(exe) = pla.get_query_executor(&table.0) {
+				let mut iterator = exe.new_iterator(opt, ir, io).await?;
+				let mut things = iterator.next_batch(txn, 1000).await?;
+				while !things.is_empty() {
+					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
 
-					// If the record is from another table we can skip
-					if !thing.tb.eq(table.as_str()) {
-						continue;
+					for (thing, doc_id) in things {
+						// Check the context
+						if ctx.is_done() {
+							break;
+						}
+
+						// If the record is from another table we can skip
+						if !thing.tb.eq(table.as_str()) {
+							continue;
+						}
+
+						// Fetch the data from the store
+						let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+						let val = txn.lock().await.get(key.clone()).await?;
+						let rid = Thing::from((key.tb, key.id));
+						// Parse the data from the store
+						let val = Operable::Value(match val {
+							Some(v) => Value::from(v),
+							None => Value::None,
+						});
+						// Process the document record
+						let pro = Processed {
+							ir: Some(ir),
+							rid: Some(rid),
+							doc_id: Some(doc_id),
+							val,
+						};
+						self.process(ctx, opt, txn, stm, pro).await?;
 					}
 
-					// Fetch the data from the store
-					let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-					let val = txn.lock().await.get(key.clone()).await?;
-					let rid = Thing::from((key.tb, key.id));
-					// Parse the data from the store
-					let val = Operable::Value(match val {
-						Some(v) => Value::from(v),
-						None => Value::None,
-					});
-					// Process the document record
-					let pro = Processed {
-						ir: Some(ir),
-						rid: Some(rid),
-						doc_id: Some(doc_id),
-						val,
-					};
-					self.process(ctx, opt, txn, stm, pro, done).await?;
+					// Collect the next batch of ids
+					things = iterator.next_batch(txn, 1000).await?;
 				}
-
-				// Collect the next batch of ids
-				things = iterator.next_batch(txn, 1000).await?;
+				// Everything ok
+				return Ok(());
 			}
-			// Everything ok
-			Ok(())
-		} else {
-			Err(Error::QueryNotExecutedDetail {
-				message: "The QueryExecutor has not been found.".to_string(),
-			})
 		}
+		Err(Error::QueryNotExecutedDetail {
+			message: "No QueryExecutor has not been found.".to_string(),
+		})
 	}
 }

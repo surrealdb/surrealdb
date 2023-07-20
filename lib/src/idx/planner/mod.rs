@@ -17,6 +17,7 @@ pub(crate) struct QueryPlanner<'a> {
 	cond: &'a Option<Cond>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
+	requires_distinct: bool,
 }
 
 impl<'a> QueryPlanner<'a> {
@@ -25,6 +26,7 @@ impl<'a> QueryPlanner<'a> {
 			opt,
 			cond,
 			executors: HashMap::default(),
+			requires_distinct: false,
 		}
 	}
 
@@ -49,6 +51,7 @@ impl<'a> QueryPlanner<'a> {
 						for (exp, io) in v {
 							let ir = exe.add_iterator(exp);
 							it.ingest(Iterable::Index(t.clone(), ir, io));
+							self.requires_distinct = true;
 						}
 						true
 					}
@@ -65,11 +68,15 @@ impl<'a> QueryPlanner<'a> {
 		Ok(())
 	}
 
-	pub(crate) fn finish(self) -> Option<HashMap<String, QueryExecutor>> {
-		if self.executors.is_empty() {
-			None
-		} else {
-			Some(self.executors)
-		}
+	pub(crate) fn has_executors(&self) -> bool {
+		!self.executors.is_empty()
+	}
+
+	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
+		self.executors.get(tb)
+	}
+
+	pub(crate) fn requires_distinct(&self) -> bool {
+		self.requires_distinct
 	}
 }

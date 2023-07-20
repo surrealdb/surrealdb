@@ -128,9 +128,9 @@ impl SelectStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Add query executors if any
-		if let Some(ex) = planner.finish() {
+		if planner.has_executors() {
 			let mut ctx = Context::new(ctx);
-			ctx.set_query_executors(ex);
+			ctx.set_query_planner(&planner);
 			// Output the results
 			i.output(&ctx, opt, txn, &stm).await
 		} else {

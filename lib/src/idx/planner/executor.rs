@@ -99,6 +99,10 @@ impl QueryExecutor {
 		ir as IteratorRef
 	}
 
+	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
+		(ir as usize) < self.iterators.len()
+	}
+
 	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
 		self.iterators.get(ir as usize)
 	}
