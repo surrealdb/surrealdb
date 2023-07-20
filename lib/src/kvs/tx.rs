@@ -449,8 +449,8 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(
 			"Scan {:?} - {:?}",
-			crate::key::debug::sprint_key(&(&rng).clone().start.into()),
-			crate::key::debug::sprint_key(&(&rng).clone().end.into()),
+			crate::key::debug::sprint_key(&(rng.start).clone().into()),
+			crate::key::debug::sprint_key(&(rng.end).clone().into()),
 			// rng.start, rng.end);
 		);
 		match self {
@@ -1043,7 +1043,7 @@ impl Transaction {
 				ns: lv.ns.to_string(),
 				db: lv.db.to_string(),
 				tb: lv.tb.to_string(),
-				lq: val.id.0.clone(),
+				lq: val.id.0,
 			});
 		}
 		Ok(res)

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::ctx::context;
 
-use crate::dbs::{Options, Session};
+use crate::dbs::{Auth, Options, Session};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -112,6 +112,7 @@ async fn expired_nodes_get_live_queries_archived() {
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
+	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
@@ -120,6 +121,11 @@ async fn single_live_queries_are_garbage_collected() {
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
+	let options = Options::default()
+		.with_live(true)
+		.with_ns(Some(Arc::from(namespace)))
+		.with_db(Some(Arc::from(database)))
+		.with_auth(Arc::new(Auth::Kv));
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
@@ -127,17 +133,38 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
+	let live_st = LiveStatement {
+		id: sql::Uuid(live_query_to_delete),
+		node: node_id,
+		expr: Fields(vec![sql::Field::All], false),
+		what: Table(sql::Table::from(table)),
+		cond: None,
+		fetch: None,
+		archived: None,
+	};
+	live_st
+		.compute(&ctx, &options, &tx, None)
+		.await
+		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
+		.unwrap();
 	let live_query_to_keep = Uuid::parse_str("adea762a-17db-4810-a4a2-c54babfdaf23").unwrap();
-	a_live_query(&mut tx, node_id, namespace, database, table, live_query_to_delete).await.unwrap();
-	a_live_query(&mut tx, node_id, namespace, database, table, live_query_to_keep).await.unwrap();
-	tx.commit().await.unwrap();
-
-	trace!("Debug scan");
-	let mut tx = test.db.transaction(true, false).await.unwrap();
-	_debug_scan(&mut tx, "Before GC").await;
-	tx.commit().await.unwrap();
+	let live_st = LiveStatement {
+		id: sql::Uuid(live_query_to_keep),
+		node: node_id,
+		expr: Fields(vec![sql::Field::All], false),
+		what: Table(sql::Table::from(table)),
+		cond: None,
+		fetch: None,
+		archived: None,
+	};
+	live_st
+		.compute(&ctx, &options, &tx, None)
+		.await
+		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
+		.unwrap();
+	tx.lock().await.commit().await.unwrap();
 
 	// Subject: Perform the action we are testing
 	trace!("Garbage collecting dead sessions");

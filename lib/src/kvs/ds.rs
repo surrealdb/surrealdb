@@ -425,8 +425,8 @@ impl Datastore {
 			if live_queries.contains(&lq_value.lq) {
 				hits.push(lq_value.clone());
 				let lq = crate::key::node::lq::Lq::new(
-					lq_value.nd.clone(),
-					lq_value.lq.clone(),
+					lq_value.nd,
+					lq_value.lq,
 					lq_value.ns.as_str(),
 					lq_value.db.as_str(),
 				);

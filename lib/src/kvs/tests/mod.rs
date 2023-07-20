@@ -17,7 +17,6 @@ mod mem {
 	}
 
 	include!("cluster_init.rs");
-	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -48,7 +47,6 @@ mod rocksdb {
 	}
 
 	include!("cluster_init.rs");
-	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -81,7 +79,6 @@ mod speedb {
 	}
 
 	include!("cluster_init.rs");
-	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -118,7 +115,6 @@ mod tikv {
 	}
 
 	include!("cluster_init.rs");
-	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -155,7 +151,6 @@ mod fdb {
 	}
 
 	include!("cluster_init.rs");
-	include!("fixture.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
