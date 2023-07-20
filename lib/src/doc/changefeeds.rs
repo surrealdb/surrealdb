@@ -21,7 +21,7 @@ impl<'a> Document<'a> {
 		let _ = self.id.as_ref().unwrap();
 		let ns = opt.ns();
 		let db = opt.db();
-		let tb = self.tb(opt, &txn).await?;
+		let tb = self.tb(opt, txn).await?;
 		let tb = tb.as_ref();
 		if tb.changefeed.is_some() {
 			// Clone transaction
