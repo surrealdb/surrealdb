@@ -93,7 +93,7 @@ impl SelectStatement {
 		let opt = &opt.new_with_futures(false);
 
 		// Get a query planner
-		let mut planner = QueryPlanner::new(opt, &self.cond);
+		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;

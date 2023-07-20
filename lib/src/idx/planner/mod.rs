@@ -9,11 +9,13 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
+use crate::sql::with::With;
 use crate::sql::{Cond, Table};
 use std::collections::HashMap;
 
 pub(crate) struct QueryPlanner<'a> {
 	opt: &'a Options,
+	with: &'a Option<With>,
 	cond: &'a Option<Cond>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
@@ -21,9 +23,10 @@ pub(crate) struct QueryPlanner<'a> {
 }
 
 impl<'a> QueryPlanner<'a> {
-	pub(crate) fn new(opt: &'a Options, cond: &'a Option<Cond>) -> Self {
+	pub(crate) fn new(opt: &'a Options, with: &'a Option<With>, cond: &'a Option<Cond>) -> Self {
 		Self {
 			opt,
+			with,
 			cond,
 			executors: HashMap::default(),
 			requires_distinct: false,
@@ -37,7 +40,7 @@ impl<'a> QueryPlanner<'a> {
 		t: Table,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
-		let res = Tree::build(ctx, self.opt, txn, &t, self.cond).await?;
+		let res = Tree::build(ctx, self.opt, txn, &t, self.with, self.cond).await?;
 		if let Some((node, im)) = res {
 			let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
 			let ok = match PlanBuilder::build(node) {

@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::idx::planner::plan::IndexOption;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
+use crate::sql::with::With;
 use crate::sql::{Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
 use std::collections::HashMap;
@@ -19,13 +20,15 @@ impl Tree {
 		opt: &'a Options,
 		txn: &'a Transaction,
 		table: &'a Table,
-		cond: &Option<Cond>,
+		with: &'a Option<With>,
+		cond: &'a Option<Cond>,
 	) -> Result<Option<(Node, IndexMap)>, Error> {
 		let mut b = TreeBuilder {
 			ctx,
 			opt,
 			txn,
 			table,
+			with,
 			indexes: None,
 			index_map: IndexMap::default(),
 		};
@@ -41,6 +44,7 @@ struct TreeBuilder<'a> {
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	txn: &'a Transaction,
+	with: &'a Option<With>,
 	table: &'a Table,
 	indexes: Option<Arc<[DefineIndexStatement]>>,
 	index_map: IndexMap,
@@ -48,6 +52,11 @@ struct TreeBuilder<'a> {
 
 impl<'a> TreeBuilder<'a> {
 	async fn find_index(&mut self, i: &Idiom) -> Result<Option<DefineIndexStatement>, Error> {
+		if let Some(with) = self.with {
+			if matches!(with, With::NoIndex) {
+				return Ok(None);
+			}
+		}
 		if self.indexes.is_none() {
 			let indexes = self
 				.txn
@@ -61,6 +70,14 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(indexes) = &self.indexes {
 			for ix in indexes.as_ref() {
 				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
+					// Check if we have an explicit list of index we can use
+					if let Some(with) = self.with {
+						if let With::Index(ixs) = with {
+							if !ixs.contains(&ix.name.0) {
+								continue;
+							}
+						}
+					}
 					return Ok(Some(ix.clone()));
 				}
 			}
