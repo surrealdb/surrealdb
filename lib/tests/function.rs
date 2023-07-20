@@ -5378,7 +5378,7 @@ pub async fn function_http_error() -> Result<(), Error> {
 		Err(Error::Http(text)) => {
 			assert_eq!(text, "Internal Server Error");
 		}
-		e => panic!("query didnt return correct response: {:?}", e),
+		e => panic!("query didn't return correct response: {:?}", e),
 	}
 
 	server.verify().await;
