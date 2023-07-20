@@ -380,7 +380,7 @@ impl Datastore {
 	) -> Result<(), Error> {
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd, &lq.ns, &lq.db, lq.lq);
+			let key = crate::key::node::lq::new(lq.nd, lq.lq, &lq.ns, &lq.db);
 			tx.del(key).await?;
 			// Delete the table key, used for finding LQ associated with a table
 			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq);

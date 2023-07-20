@@ -1582,7 +1582,7 @@ impl Transaction {
 		db: &str,
 		lq: Uuid,
 	) -> Result<Strand, Error> {
-		let key = crate::key::node::lq::new(nd, ns, db, lq);
+		let key = crate::key::node::lq::new(nd, lq, ns, db);
 		let val = self.get(key).await?.ok_or(Error::LqNotFound {
 			value: lq.to_string(),
 		})?;
