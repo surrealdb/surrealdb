@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Auth, Options};
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -34,6 +34,8 @@ pub struct LiveStatement {
 
 	// When a live query is archived, this should be the node ID that archived the query.
 	pub archived: Option<uuid::Uuid>,
+	// A live query is run with permissions, and we must validate that during the run.
+	pub auth: Auth,
 }
 
 impl LiveStatement {
