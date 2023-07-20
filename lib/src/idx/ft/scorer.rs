@@ -2,10 +2,9 @@ use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, TermFrequency};
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::Bm25Params;
 use crate::kvs::Transaction;
-use roaring::RoaringTreemap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -13,7 +12,7 @@ pub(super) type Score = f32;
 
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,
-	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
+	terms_docs: TermsDocs,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -23,7 +22,7 @@ pub(crate) struct BM25Scorer {
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Arc<RwLock<Postings>>,
-		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
+		terms_docs: TermsDocs,
 		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,
