@@ -5350,6 +5350,42 @@ pub async fn function_http_delete() -> Result<(), Error> {
 	Ok(())
 }
 
+#[cfg(feature = "http")]
+#[tokio::test]
+pub async fn function_http_error() -> Result<(), Error> {
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
+
+	let server = wiremock::MockServer::start().await;
+	Mock::given(method("GET"))
+		.and(path("/some/path"))
+		.and(header("user-agent", "SurrealDB"))
+		.and(header("a-test-header", "with-a-test-value"))
+		.respond_with(ResponseTemplate::new(500).set_body_string("some text result"))
+		.expect(1)
+		.mount(&server)
+		.await;
+
+	let query = format!(
+		r#"RETURN http::get("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,
+		server.uri()
+	);
+
+	let res = test_queries(&query, &["NONE"]).await;
+	match res {
+		Err(Error::Http(text)) => {
+			assert_eq!(text, "Internal Server Error");
+		}
+		e => panic!("query didnt return correct response: {:?}", e),
+	}
+
+	server.verify().await;
+
+	Ok(())
+}
+
 #[cfg(not(feature = "http"))]
 #[tokio::test]
 pub async fn function_http_disabled() -> Result<(), Error> {
