@@ -438,7 +438,7 @@ impl Datastore {
 		// Now delete the table entries for the live queries
 		for lq in hits {
 			let lv =
-				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), self.id);
+				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq);
 			tx.del(lv.clone()).await?;
 			trace!("Deleted lv {:?} as part of session garbage collection", lv);
 		}
