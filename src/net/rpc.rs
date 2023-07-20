@@ -329,6 +329,11 @@ impl Rpc {
 				Ok(v) => rpc.read().await.select(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
+			// Insert a value or values in the database
+			"insert" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.insert(v, o).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
 			// Create a value or values in the database
 			"create" => match params.needs_one_or_two() {
 				Ok((v, o)) => rpc.read().await.create(v, o).await,
@@ -552,6 +557,35 @@ impl Rpc {
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
+			=> &self.vars
+		});
+		// Execute the query on the database
+		let mut res = kvs.execute(sql, &self.session, var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for inserting
+	// ------------------------------
+
+	#[instrument(skip_all, name = "rpc insert", fields(websocket=self.uuid.to_string()))]
+	async fn insert(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the SQL query string
+		let sql = "INSERT INTO $what $data RETURN AFTER";
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
