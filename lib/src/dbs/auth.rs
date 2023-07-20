@@ -1,3 +1,6 @@
+use derive::Store;
+use serde::{Deserialize, Serialize};
+
 /// The authentication level for a datastore execution context.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Level {
@@ -9,7 +12,7 @@ pub enum Level {
 }
 
 /// Specifies the current authentication for the datastore execution context.
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Store)]
 pub enum Auth {
 	/// Specifies that the user is not authenticated
 	#[default]

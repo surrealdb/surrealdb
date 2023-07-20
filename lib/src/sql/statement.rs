@@ -213,7 +213,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			map(info, Statement::Info),
 			map(insert, Statement::Insert),
 			map(kill, Statement::Kill),
-			map(live, Statement::Live),
+			map(live, Statement::Live), // TODO set auth from options?
 			map(option, Statement::Option),
 			map(output, Statement::Output),
 			map(relate, Statement::Relate),

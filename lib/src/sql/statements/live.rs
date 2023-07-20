@@ -101,7 +101,7 @@ impl fmt::Display for LiveStatement {
 	}
 }
 
-pub fn live(i: &str) -> IResult<&str, LiveStatement> {
+pub fn live(options: Options, i: &str) -> IResult<&str, LiveStatement> {
 	let (i, _) = tag_no_case("LIVE SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
@@ -121,6 +121,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 			cond,
 			fetch,
 			archived: None,
+			auth: Auth::No, // This is set elsewhere
 		},
 	))
 }
