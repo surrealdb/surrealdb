@@ -10,20 +10,21 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
-use crate::sql::table::{table, Table};
+use crate::sql::param::param;
+use crate::sql::table::table;
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
+use nom::combinator::{map, opt};
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct InsertStatement {
-	pub into: Table,
+	pub into: Value,
 	pub data: Data,
 	pub ignore: bool,
 	pub update: Option<Data>,
@@ -62,49 +63,56 @@ impl InsertStatement {
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
 		// Parse the expression
-		match &self.data {
-			// Check if this is a traditional statement
-			Data::ValuesExpression(v) => {
-				for v in v {
-					// Create a new empty base object
-					let mut o = Value::base();
-					// Set each field from the expression
-					for (k, v) in v.iter() {
-						let v = v.compute(ctx, opt, txn, None).await?;
-						o.set(ctx, opt, txn, k, v).await?;
+		match self.into.compute(ctx, opt, txn, doc).await? {
+			Value::Table(into) => match &self.data {
+				// Check if this is a traditional statement
+				Data::ValuesExpression(v) => {
+					for v in v {
+						// Create a new empty base object
+						let mut o = Value::base();
+						// Set each field from the expression
+						for (k, v) in v.iter() {
+							let v = v.compute(ctx, opt, txn, None).await?;
+							o.set(ctx, opt, txn, k, v).await?;
+						}
+						// Specify the new table record id
+						let id = o.rid().generate(&into, true)?;
+						// Pass the mergeable to the iterator
+						i.ingest(Iterable::Mergeable(id, o));
 					}
-					// Specify the new table record id
-					let id = o.rid().generate(&self.into, true)?;
-					// Pass the mergeable to the iterator
-					i.ingest(Iterable::Mergeable(id, o));
 				}
-			}
-			// Check if this is a modern statement
-			Data::SingleExpression(v) => {
-				let v = v.compute(ctx, opt, txn, doc).await?;
-				match v {
-					Value::Array(v) => {
-						for v in v {
+				// Check if this is a modern statement
+				Data::SingleExpression(v) => {
+					let v = v.compute(ctx, opt, txn, doc).await?;
+					match v {
+						Value::Array(v) => {
+							for v in v {
+								// Specify the new table record id
+								let id = v.rid().generate(&into, true)?;
+								// Pass the mergeable to the iterator
+								i.ingest(Iterable::Mergeable(id, v));
+							}
+						}
+						Value::Object(_) => {
 							// Specify the new table record id
-							let id = v.rid().generate(&self.into, true)?;
+							let id = v.rid().generate(&into, true)?;
 							// Pass the mergeable to the iterator
 							i.ingest(Iterable::Mergeable(id, v));
 						}
-					}
-					Value::Object(_) => {
-						// Specify the new table record id
-						let id = v.rid().generate(&self.into, true)?;
-						// Pass the mergeable to the iterator
-						i.ingest(Iterable::Mergeable(id, v));
-					}
-					v => {
-						return Err(Error::InsertStatement {
-							value: v.to_string(),
-						})
+						v => {
+							return Err(Error::InsertStatement {
+								value: v.to_string(),
+							})
+						}
 					}
 				}
+				_ => unreachable!(),
+			},
+			v => {
+				return Err(Error::RelateStatement {
+					value: v.to_string(),
+				})
 			}
-			_ => unreachable!(),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
@@ -136,9 +144,12 @@ impl fmt::Display for InsertStatement {
 pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, _) = tag_no_case("INSERT")(i)?;
 	let (i, ignore) = opt(preceded(shouldbespace, tag_no_case("IGNORE")))(i)?;
-	let (i, _) = preceded(shouldbespace, tag_no_case("INTO"))(i)?;
-	let (i, into) = preceded(shouldbespace, table)(i)?;
-	let (i, data) = preceded(shouldbespace, alt((values, single)))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("INTO")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, into) = alt((map(table, Value::Table), map(param, Value::Param)))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, data) = alt((values, single))(i)?;
 	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;

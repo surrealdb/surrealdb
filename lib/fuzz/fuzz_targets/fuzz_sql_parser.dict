@@ -150,6 +150,7 @@
 "array::add("
 "array::all("
 "array::any("
+"array::at("
 "array::append("
 "array::boolean_and("
 "array::boolean_not("

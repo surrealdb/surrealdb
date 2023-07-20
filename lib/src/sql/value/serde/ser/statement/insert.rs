@@ -3,8 +3,8 @@ use crate::sql::statements::InsertStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Data;
 use crate::sql::Output;
-use crate::sql::Table;
 use crate::sql::Timeout;
+use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -38,7 +38,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeInsertStatement {
-	into: Option<Table>,
+	into: Option<Value>,
 	data: Option<Data>,
 	ignore: Option<bool>,
 	update: Option<Data>,
@@ -57,7 +57,7 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 	{
 		match key {
 			"into" => {
-				self.into = Some(Table(value.serialize(ser::string::Serializer.wrap())?));
+				self.into = Some(value.serialize(ser::value::Serializer.wrap())?);
 			}
 			"data" => {
 				self.data = Some(value.serialize(ser::data::Serializer.wrap())?);

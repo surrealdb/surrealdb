@@ -304,9 +304,9 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Setup a live query on a specific table
-			"live" => match params.needs_one() {
-				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
-				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
+			"live" => match params.needs_one_or_two() {
+				Ok((v, d)) if v.is_table() => rpc.read().await.live(v, d).await,
+				Ok((v, d)) if v.is_strand() => rpc.read().await.live(v, d).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify a connection-wide parameter
@@ -327,6 +327,11 @@ impl Rpc {
 			// Select a value or values from the database
 			"select" => match params.needs_one() {
 				Ok(v) => rpc.read().await.select(v).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
+			// Insert a value or values in the database
+			"insert" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.insert(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Create a value or values in the database
@@ -516,9 +521,12 @@ impl Rpc {
 	}
 
 	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_string()))]
-	async fn live(&self, tb: Value) -> Result<Value, Error> {
+	async fn live(&self, tb: Value, diff: Value) -> Result<Value, Error> {
 		// Specify the SQL query string
-		let sql = "LIVE SELECT * FROM $tb";
+		let sql = match diff.is_true() {
+			true => "LIVE SELECT DIFF FROM $tb",
+			false => "LIVE SELECT * FROM $tb",
+		};
 		// Specify the query parameters
 		let var = map! {
 			String::from("tb") => tb.could_be_table(),
@@ -549,6 +557,35 @@ impl Rpc {
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
+			=> &self.vars
+		});
+		// Execute the query on the database
+		let mut res = kvs.execute(sql, &self.session, var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for inserting
+	// ------------------------------
+
+	#[instrument(skip_all, name = "rpc insert", fields(websocket=self.uuid.to_string()))]
+	async fn insert(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the SQL query string
+		let sql = "INSERT INTO $what $data RETURN AFTER";
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
