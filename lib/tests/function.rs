@@ -204,21 +204,20 @@ async fn function_array_append() -> Result<(), Error> {
 async fn function_array_at() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::at(["hello", "world"], 0);
-		RETURN array::at(["hello", "world"], 3);
 		RETURN array::at(["hello", "world"], -1);
+		RETURN array::at(["hello", "world"], 3);
 		RETURN array::at(["hello", "world"], -3);
+		RETURN array::at([], 0);
+		RETURN array::at([], 3);
+		RETURN array::at([], -3);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::Strand("hello".into());
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -226,8 +225,19 @@ async fn function_array_at() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
 	//
 	Ok(())
 }
