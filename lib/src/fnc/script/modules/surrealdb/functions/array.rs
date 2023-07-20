@@ -10,6 +10,7 @@ impl_module_def!(
 	"add" => run,
 	"all" => run,
 	"any" => run,
+	"at" => run,
 	"append" => run,
 	"boolean_and" => run,
 	"boolean_not" => run,
