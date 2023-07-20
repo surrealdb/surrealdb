@@ -57,21 +57,19 @@ mod test {
 					crate::fnc::script::fetch::register(&$ctx).unwrap();
 
 					$ctx.eval::<(),_>(r"
-					globalThis.assert = (...arg) => {
-						arg.forEach(x => {
-							if (!x) {
-								throw new Error('assertion failed')
-							}
-						})
-					};
-					assert.eq = (a,b) => {
-						if(a != b){
-							throw new Error(`assertion failed, '${a}' != '${b}'`)
+					globalThis.assert = (arg, text) => {
+						if (!arg) {
+							throw new Error('assertion failed ' + (text ? text : ''))
 						}
 					};
-					assert.seq = (a,b) => {
+					assert.eq = (a,b, text) => {
+						if(a != b){
+							throw new Error(`assertion failed, '${a}' != '${b}'` + (text ? text : ''))
+						}
+					};
+					assert.seq = (a,b, text) => {
 						if(!(a === b)){
-							throw new Error(`assertion failed, '${a}' !== '${b}'`)
+							throw new Error(`assertion failed, '${a}' !== '${b}'` +( text ? text : ''))
 						}
 					};
 					assert.mustThrow = (cb) => {

@@ -124,6 +124,7 @@ temp-dir = "0.1.11"
 time = { version = "0.3.23", features = ["serde"] }
 tokio = { version = "1.29.1", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+wiremock = "0.5.19"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"

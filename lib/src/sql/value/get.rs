@@ -123,8 +123,8 @@ impl Value {
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
-							let cur = Some(CursorDoc::new(None, None, v));
-							if w.compute(ctx, opt, txn, cur.as_ref()).await?.is_truthy() {
+							let cur = v.into();
+							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								a.push(v.clone());
 							}
 						}
@@ -382,7 +382,7 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let cur = CursorDoc::new(None, None, &doc);
+		let cur = (&doc).into();
 		let res = val.get(&ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
 		assert_eq!(
 			res,
