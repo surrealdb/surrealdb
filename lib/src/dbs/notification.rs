@@ -1,5 +1,5 @@
 use crate::sql::{Object, Uuid, Value};
-use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -20,7 +20,7 @@ impl Display for Action {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
 	pub id: Uuid,
 	pub action: Action,
@@ -36,18 +36,5 @@ impl Display for Notification {
 		}
 		.into();
 		write!(f, "{}", obj)
-	}
-}
-
-impl Serialize for Notification {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let mut val = serializer.serialize_struct("Notification", 3)?;
-		val.serialize_field("id", &self.id.to_string())?;
-		val.serialize_field("action", &self.action)?;
-		val.serialize_field("result", &self.result)?;
-		val.end()
 	}
 }
