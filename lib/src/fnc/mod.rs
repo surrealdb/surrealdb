@@ -82,6 +82,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::all" => array::all,
 		"array::any" => array::any,
 		"array::append" => array::append,
+		"array::at" => array::at,
 		"array::boolean_and" => array::boolean_and,
 		"array::boolean_not" => array::boolean_not,
 		"array::boolean_or" => array::boolean_or,

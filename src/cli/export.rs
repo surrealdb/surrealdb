@@ -38,7 +38,7 @@ pub async fn init(
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::o11y::builder().with_log_level("error").init();
+	crate::telemetry::builder().with_log_level("error").init();
 
 	let root = Root {
 		username: &username,

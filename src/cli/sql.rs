@@ -49,7 +49,7 @@ pub async fn init(
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::o11y::builder().with_log_level("warn").init();
+	crate::telemetry::builder().with_log_level("warn").init();
 
 	let root = Root {
 		username: &username,

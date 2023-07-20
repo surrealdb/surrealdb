@@ -281,6 +281,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("all"),
 			tag("any"),
 			tag("append"),
+			tag("at"),
 			tag("boolean_and"),
 			tag("boolean_not"),
 			tag("boolean_or"),

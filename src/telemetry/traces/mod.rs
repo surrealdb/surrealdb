@@ -59,7 +59,9 @@ pub mod tests {
 			request: tonic::Request<ExportTraceServiceRequest>,
 		) -> Result<tonic::Response<ExportTraceServiceResponse>, tonic::Status> {
 			self.tx.lock().unwrap().try_send(request.into_inner()).expect("Channel full");
-			Ok(tonic::Response::new(ExportTraceServiceResponse {}))
+			Ok(tonic::Response::new(ExportTraceServiceResponse {
+				partial_success: None,
+			}))
 		}
 	}
 

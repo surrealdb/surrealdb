@@ -47,7 +47,7 @@ impl UpgradeCommandArguments {
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::o11y::builder().with_log_level("error").init();
+	crate::telemetry::builder().with_log_level("error").init();
 
 	// Upgrading overwrites the existing executable
 	let exe = std::env::current_exe()?;
