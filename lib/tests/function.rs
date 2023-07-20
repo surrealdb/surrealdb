@@ -201,6 +201,38 @@ async fn function_array_append() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_at() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::at(["hello", "world"], 0);
+		RETURN array::at(["hello", "world"], 3);
+		RETURN array::at(["hello", "world"], -1);
+		RETURN array::at(["hello", "world"], -3);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Strand("hello".into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Strand("world".into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_boolean_and() -> Result<(), Error> {
 	test_queries(
 		r#"RETURN array::boolean_and([false, true, false, true], [false, false, true, true]);
