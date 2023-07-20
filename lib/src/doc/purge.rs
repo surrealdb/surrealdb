@@ -24,10 +24,6 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
-			return Ok(());
-		}
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
