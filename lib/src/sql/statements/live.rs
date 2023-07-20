@@ -62,9 +62,9 @@ impl LiveStatement {
 				if let Err(e) = opt.id() {
 					trace!("No ID for live query {:?}, error={:?}", stm, e)
 				}
-				stm.node = opt.id()?.clone();
+				stm.node = Uuid(opt.id()?);
 				// Insert the node live query
-				let key = crate::key::node::lq::new(opt.id()?.0, opt.ns(), opt.db(), self.id.0);
+				let key = crate::key::node::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self.id.0);

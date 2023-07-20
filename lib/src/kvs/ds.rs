@@ -588,7 +588,7 @@ impl Datastore {
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.clone())
+			.with_id(self.id.0)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -641,7 +641,7 @@ impl Datastore {
 	) -> Result<Value, Error> {
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.clone())
+			.with_id(self.id.0)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())

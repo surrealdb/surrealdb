@@ -87,7 +87,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_db(ses.db())
 		.with_auth(Arc::new(Default::default()))
 		.with_live(true)
-		.with_id(old_node.clone());
+		.with_id(old_node.0);
 	let opt = Options::new_with_sender(&opt, sender);
 	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
 	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
