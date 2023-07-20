@@ -1,3 +1,5 @@
+use super::tx::Transaction;
+use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
@@ -21,8 +23,6 @@ use std::time::Duration;
 use tracing::instrument;
 use tracing::trace;
 use uuid::Uuid;
-
-use super::tx::Transaction;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -528,6 +528,7 @@ impl Datastore {
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
+			cf: cf::Writer::new(),
 		})
 	}
 

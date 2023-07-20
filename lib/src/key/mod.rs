@@ -15,7 +15,7 @@
 ///
 /// crate::key::database::all            /*{ns}*{db}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
-/// crate::key::database::cf             /*{ns}*{db}!cf{ts}
+/// crate::key::database::cf             /*{ns}*{db}#{ts}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::lg             /*{ns}*{db}!lg{lg}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
