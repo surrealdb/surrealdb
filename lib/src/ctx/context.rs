@@ -1,7 +1,7 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::dbs::Notification;
-use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -34,8 +34,8 @@ pub struct Context<'a> {
 	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 	// Stores the notification channel if available
 	notifications: Option<Sender<Notification>>,
-	// An optional query executor
-	query_executors: Option<Arc<HashMap<String, QueryExecutor>>>,
+	// An optional query planner
+	query_planner: Option<&'a QueryPlanner<'a>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -64,7 +64,7 @@ impl<'a> Context<'a> {
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
-			query_executors: None,
+			query_planner: None,
 		}
 	}
 
@@ -76,7 +76,7 @@ impl<'a> Context<'a> {
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
-			query_executors: parent.query_executors.clone(),
+			query_planner: parent.query_planner,
 		}
 	}
 
@@ -118,9 +118,9 @@ impl<'a> Context<'a> {
 		self.notifications = chn.cloned()
 	}
 
-	/// Set the query executors
-	pub(crate) fn set_query_executors(&mut self, executors: HashMap<String, QueryExecutor>) {
-		self.query_executors = Some(Arc::new(executors));
+	/// Set the query planner
+	pub(crate) fn set_query_planner(&mut self, qp: &'a QueryPlanner) {
+		self.query_planner = Some(qp);
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -133,12 +133,8 @@ impl<'a> Context<'a> {
 		self.notifications.clone()
 	}
 
-	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
-		if let Some(qe) = &self.query_executors {
-			qe.get(tb)
-		} else {
-			None
-		}
+	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
+		self.query_planner
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
