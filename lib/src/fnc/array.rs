@@ -45,6 +45,14 @@ pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn at((array, i): (Array, i64)) -> Result<Value, Error> {
+	let mut idx = i as usize;
+	if i < 0 {
+		idx = (array.len() as i64 + i) as usize;
+	}
+	Ok(array.get(idx).cloned().unwrap_or_default())
+}
+
 pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	let longest_length = lh.len().max(rh.len());
 	let mut results = Array::with_capacity(longest_length);
@@ -391,7 +399,7 @@ pub mod sort {
 
 #[cfg(test)]
 mod tests {
-	use super::{first, join, last, slice};
+	use super::{at, first, join, last, slice};
 	use crate::sql::{Array, Value};
 
 	#[test]
@@ -454,5 +462,14 @@ mod tests {
 
 		test(vec!["hello", "world"].into(), "world".into());
 		test(Array::new(), Value::None);
+	}
+
+	#[test]
+	fn array_at() {
+		fn test(arr: Array, i: i64, expected: Value) {
+			assert_eq!(at((arr, i)).unwrap(), expected);
+		}
+		test(vec!["hello", "world"].into(), -2, "hello".into());
+		test(vec!["hello", "world"].into(), -3, Value::None);
 	}
 }
