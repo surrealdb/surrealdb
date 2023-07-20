@@ -6,7 +6,7 @@ use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
-const TABLE_ITERATOR: &str = "[
+const TWO_TABLE_ITERATOR: &str = "[
 	{
 		detail: {
 			table: 'person'
@@ -16,6 +16,21 @@ const TABLE_ITERATOR: &str = "[
 	{
 		detail: {
 			count: 2
+		},
+		operation: 'Fetch'
+	}
+]";
+
+const THREE_TABLE_ITERATOR: &str = "[
+	{
+		detail: {
+			table: 'person'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			count: 3
 		},
 		operation: 'Fetch'
 	}
@@ -181,7 +196,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Err
 async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 	let mut res = execute_test(&two_multi_index_query("WITH NOINDEX", ""), 7).await?;
 	check_result(&mut res, TWO_MULTI_INDEX_RESULT)?;
-	check_result(&mut res, TABLE_ITERATOR)?;
+	check_result(&mut res, TWO_TABLE_ITERATOR)?;
 	Ok(())
 }
 
@@ -189,7 +204,7 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Error> {
 	let mut res = execute_test(&two_multi_index_query("WITH INDEX idx_genre", ""), 7).await?;
 	check_result(&mut res, TWO_MULTI_INDEX_RESULT)?;
-	check_result(&mut res, TABLE_ITERATOR)?;
+	check_result(&mut res, TWO_TABLE_ITERATOR)?;
 	Ok(())
 }
 
@@ -198,6 +213,27 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	let mut res = execute_test(&three_multi_index_query("", ""), 10).await?;
 	check_result(&mut res, THREE_MULTI_INDEX_RESULT)?;
 	check_result(&mut res, THREE_MULTI_INDEX_ITERATORS)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), Error> {
+	let mut res = execute_test(&three_multi_index_query("WITH INDEX ft_company", ""), 10).await?;
+	check_result(
+		&mut res,
+		"[
+			{
+				name: 'Jaime'
+			},
+			{
+				name: 'Lizzie'
+			},
+			{
+				name: 'Tobie'
+			}
+		]",
+	)?;
+	check_result(&mut res, THREE_TABLE_ITERATOR)?;
 	Ok(())
 }
 

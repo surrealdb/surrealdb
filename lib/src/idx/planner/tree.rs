@@ -71,11 +71,9 @@ impl<'a> TreeBuilder<'a> {
 			for ix in indexes.as_ref() {
 				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
 					// Check if we have an explicit list of index we can use
-					if let Some(with) = self.with {
-						if let With::Index(ixs) = with {
-							if !ixs.contains(&ix.name.0) {
-								continue;
-							}
+					if let Some(With::Index(ixs)) = self.with {
+						if !ixs.contains(&ix.name.0) {
+							continue;
 						}
 					}
 					return Ok(Some(ix.clone()));
