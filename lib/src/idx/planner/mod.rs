@@ -40,10 +40,10 @@ impl<'a> QueryPlanner<'a> {
 		t: Table,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
-		let res = Tree::build(ctx, self.opt, txn, &t, self.with, self.cond).await?;
+		let res = Tree::build(ctx, self.opt, txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
-			let ok = match PlanBuilder::build(node) {
+			let ok = match PlanBuilder::build(node, self.with) {
 				Ok(plan) => match plan {
 					Plan::SingleIndex(exp, io) => {
 						let ir = exe.add_iterator(exp);

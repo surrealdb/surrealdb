@@ -2,22 +2,30 @@ use crate::err::Error;
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::Node;
 use crate::sql::statements::DefineIndexStatement;
+use crate::sql::with::With;
 use crate::sql::Object;
 use crate::sql::{Expression, Idiom, Operator, Value};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
-pub(super) struct PlanBuilder {
+pub(super) struct PlanBuilder<'a> {
 	indexes: Vec<(Expression, IndexOption)>,
+	with: &'a Option<With>,
 	all_and: bool,
 	all_exp_with_index: bool,
 }
 
-impl PlanBuilder {
-	pub(super) fn build(root: Node) -> Result<Plan, Error> {
+impl<'a> PlanBuilder<'a> {
+	pub(super) fn build(root: Node, with: &'a Option<With>) -> Result<Plan, Error> {
+		if let Some(with) = with {
+			if matches!(with, With::NoIndex) {
+				return Err(Error::BypassQueryPlanner);
+			}
+		}
 		let mut b = PlanBuilder {
 			indexes: Vec::new(),
+			with,
 			all_and: true,
 			all_exp_with_index: true,
 		};
@@ -40,6 +48,18 @@ impl PlanBuilder {
 		Err(Error::BypassQueryPlanner)
 	}
 
+	// Check if we have an explicit list of index we can use
+	fn filter_index_option(&self, io: Option<IndexOption>) -> Option<IndexOption> {
+		if let Some(io) = &io {
+			if let Some(With::Index(ixs)) = self.with {
+				if !ixs.contains(&io.ix().name.0) {
+					return None;
+				}
+			}
+		}
+		io
+	}
+
 	fn eval_node(&mut self, node: Node) -> Result<(), Error> {
 		match node {
 			Node::Expression {
@@ -52,7 +72,7 @@ impl PlanBuilder {
 					self.all_and = false;
 				}
 				let is_bool = self.check_boolean_operator(exp.operator());
-				if let Some(io) = io {
+				if let Some(io) = self.filter_index_option(io) {
 					self.add_index_option(exp, io);
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
