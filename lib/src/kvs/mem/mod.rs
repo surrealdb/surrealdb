@@ -6,18 +6,6 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
-use std::ascii::escape_default;
-use std::str;
-
-fn show(bs: &[u8]) -> String {
-	let mut visible = String::new();
-	for &b in bs {
-		let part: Vec<u8> = escape_default(b).collect();
-		visible.push_str(str::from_utf8(&part).unwrap());
-	}
-	visible
-}
-
 pub struct Datastore {
 	db: echodb::Db<Key, Val>,
 }
@@ -180,13 +168,8 @@ impl Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.clone());
 
-		println!(
-			"get_versionstamped_key: ts_key={} prefix={} r={} suffix={} k={}",
-			show(ts_key.as_slice()),
-			show(prefix.as_slice()),
-			show(ts.as_slice()),
-			show(suffix.as_slice()),
-			show(k.as_slice())
+		trace!(
+			"get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",
 		);
 
 		Ok(k)

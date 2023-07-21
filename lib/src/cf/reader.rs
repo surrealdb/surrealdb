@@ -5,18 +5,6 @@ use crate::key::database;
 use crate::kvs::Transaction;
 use crate::vs;
 
-use std::ascii::escape_default;
-use std::str;
-
-fn show(bs: &[u8]) -> String {
-	let mut visible = String::new();
-	for &b in bs {
-		let part: Vec<u8> = escape_default(b).collect();
-		visible.push_str(str::from_utf8(&part).unwrap());
-	}
-	visible
-}
-
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.
 //
@@ -55,7 +43,7 @@ pub async fn read(
 	let mut r = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
 	for (k, v) in _x {
-		println!("read: k={}", show(k.as_slice()));
+		trace!("read change feed; {k:?}");
 
 		let dec = crate::key::change::Cf::decode(&k).unwrap();
 
