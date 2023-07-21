@@ -11,7 +11,7 @@ defaults:
 jobs:
   bench:
     name: Bench library
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -11,7 +11,7 @@
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
     in {
-      depsBuildBuild = [ clang cmake gcc10 perl protobuf grpc llvm ]
+      depsBuildBuild = [ clang cmake gcc perl protobuf grpc llvm ]
         ++ lib.lists.optional crossCompiling qemu;
 
       nativeBuildInputs = [ pkg-config ];
