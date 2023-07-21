@@ -43,24 +43,21 @@ impl<'a> QueryPlanner<'a> {
 		let res = Tree::build(ctx, self.opt, txn, &t, self.cond).await?;
 		if let Some((node, im)) = res {
 			let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
-			let ok = match PlanBuilder::build(node, self.with) {
-				Ok(plan) => match plan {
-					Plan::SingleIndex(exp, io) => {
+			let ok = match PlanBuilder::build(node, self.with)? {
+				Plan::SingleIndex(exp, io) => {
+					let ir = exe.add_iterator(exp);
+					it.ingest(Iterable::Index(t.clone(), ir, io));
+					true
+				}
+				Plan::MultiIndex(v) => {
+					for (exp, io) in v {
 						let ir = exe.add_iterator(exp);
 						it.ingest(Iterable::Index(t.clone(), ir, io));
-						true
+						self.requires_distinct = true;
 					}
-					Plan::MultiIndex(v) => {
-						for (exp, io) in v {
-							let ir = exe.add_iterator(exp);
-							it.ingest(Iterable::Index(t.clone(), ir, io));
-							self.requires_distinct = true;
-						}
-						true
-					}
-				},
-				Err(Error::BypassQueryPlanner) => false,
-				Err(e) => return Err(e),
+					true
+				}
+				Plan::TableIterator => false,
 			};
 			self.executors.insert(t.0.clone(), exe);
 			if ok {

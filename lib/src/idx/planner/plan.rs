@@ -20,7 +20,7 @@ impl<'a> PlanBuilder<'a> {
 	pub(super) fn build(root: Node, with: &'a Option<With>) -> Result<Plan, Error> {
 		if let Some(with) = with {
 			if matches!(with, With::NoIndex) {
-				return Err(Error::BypassQueryPlanner);
+				return Ok(Plan::TableIterator);
 			}
 		}
 		let mut b = PlanBuilder {
@@ -30,10 +30,12 @@ impl<'a> PlanBuilder<'a> {
 			all_exp_with_index: true,
 		};
 		// Browse the AST and collect information
-		b.eval_node(root)?;
+		if !b.eval_node(root)? {
+			return Ok(Plan::TableIterator);
+		}
 		// If we didn't found any index, we're done with no index plan
 		if b.indexes.is_empty() {
-			return Err(Error::BypassQueryPlanner);
+			return Ok(Plan::TableIterator);
 		}
 		// If every boolean operator are AND then we can use the single index plan
 		if b.all_and {
@@ -45,7 +47,7 @@ impl<'a> PlanBuilder<'a> {
 		if b.all_exp_with_index {
 			return Ok(Plan::MultiIndex(b.indexes));
 		}
-		Err(Error::BypassQueryPlanner)
+		Ok(Plan::TableIterator)
 	}
 
 	// Check if we have an explicit list of index we can use
@@ -60,7 +62,7 @@ impl<'a> PlanBuilder<'a> {
 		io
 	}
 
-	fn eval_node(&mut self, node: Node) -> Result<(), Error> {
+	fn eval_node(&mut self, node: Node) -> Result<bool, Error> {
 		match node {
 			Node::Expression {
 				io,
@@ -79,8 +81,8 @@ impl<'a> PlanBuilder<'a> {
 				}
 				self.eval_expression(*left, *right)
 			}
-			Node::Unsupported => Err(Error::BypassQueryPlanner),
-			_ => Ok(()),
+			Node::Unsupported => Ok(false),
+			_ => Ok(true),
 		}
 	}
 
@@ -97,10 +99,14 @@ impl<'a> PlanBuilder<'a> {
 		}
 	}
 
-	fn eval_expression(&mut self, left: Node, right: Node) -> Result<(), Error> {
-		self.eval_node(left)?;
-		self.eval_node(right)?;
-		Ok(())
+	fn eval_expression(&mut self, left: Node, right: Node) -> Result<bool, Error> {
+		if !self.eval_node(left)? {
+			return Ok(false);
+		}
+		if !self.eval_node(right)? {
+			return Ok(false);
+		}
+		Ok(true)
 	}
 
 	fn add_index_option(&mut self, e: Expression, i: IndexOption) {
@@ -109,6 +115,7 @@ impl<'a> PlanBuilder<'a> {
 }
 
 pub(super) enum Plan {
+	TableIterator,
 	SingleIndex(Expression, IndexOption),
 	MultiIndex(Vec<(Expression, IndexOption)>),
 }
