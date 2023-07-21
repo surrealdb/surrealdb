@@ -121,7 +121,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ir: IteratorRef,
 		io: IndexOption,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<Option<ThingIterator>, Error> {
 		match &io.ix().index {
 			Index::Idx => Self::new_index_iterator(opt, io),
 			Index::Uniq => Self::new_unique_index_iterator(opt, io),
@@ -131,45 +131,48 @@ impl QueryExecutor {
 		}
 	}
 
-	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<ThingIterator, Error> {
+	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
 		if io.op() == &Operator::Equal {
-			return Ok(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
+			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
 				opt,
 				io.ix(),
 				io.value(),
-			)?));
+			)?)));
 		}
-		Err(Error::BypassQueryPlanner)
+		Ok(None)
 	}
 
-	fn new_unique_index_iterator(opt: &Options, io: IndexOption) -> Result<ThingIterator, Error> {
+	fn new_unique_index_iterator(
+		opt: &Options,
+		io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
 		if io.op() == &Operator::Equal {
-			return Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
+			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
 				opt,
 				io.ix(),
 				io.value(),
-			)?));
+			)?)));
 		}
-		Err(Error::BypassQueryPlanner)
+		Ok(None)
 	}
 
 	async fn new_search_index_iterator(
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(exp) = self.iterators.get(ir as usize) {
 			if let Operator::Matches(_) = io.op() {
 				let ixn = &io.ix().name.0;
 				if let Some(fti) = self.ft_map.get(ixn) {
 					if let Some(fte) = self.exp_entries.get(exp) {
 						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
-						return Ok(ThingIterator::Matches(it));
+						return Ok(Some(ThingIterator::Matches(it)));
 					}
 				}
 			}
 		}
-		Err(Error::BypassQueryPlanner)
+		Ok(None)
 	}
 
 	pub(crate) async fn matches(

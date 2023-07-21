@@ -550,49 +550,50 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(pla) = ctx.get_query_planner() {
 			if let Some(exe) = pla.get_query_executor(&table.0) {
-				let mut iterator = exe.new_iterator(opt, ir, io).await?;
-				let mut things = iterator.next_batch(txn, 1000).await?;
-				while !things.is_empty() {
-					// Check if the context is finished
-					if ctx.is_done() {
-						break;
-					}
-
-					for (thing, doc_id) in things {
-						// Check the context
+				if let Some(mut iterator) = exe.new_iterator(opt, ir, io).await? {
+					let mut things = iterator.next_batch(txn, 1000).await?;
+					while !things.is_empty() {
+						// Check if the context is finished
 						if ctx.is_done() {
 							break;
 						}
 
-						// If the record is from another table we can skip
-						if !thing.tb.eq(table.as_str()) {
-							continue;
+						for (thing, doc_id) in things {
+							// Check the context
+							if ctx.is_done() {
+								break;
+							}
+
+							// If the record is from another table we can skip
+							if !thing.tb.eq(table.as_str()) {
+								continue;
+							}
+
+							// Fetch the data from the store
+							let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+							let val = txn.lock().await.get(key.clone()).await?;
+							let rid = Thing::from((key.tb, key.id));
+							// Parse the data from the store
+							let val = Operable::Value(match val {
+								Some(v) => Value::from(v),
+								None => Value::None,
+							});
+							// Process the document record
+							let pro = Processed {
+								ir: Some(ir),
+								rid: Some(rid),
+								doc_id: Some(doc_id),
+								val,
+							};
+							self.process(ctx, opt, txn, stm, pro).await?;
 						}
 
-						// Fetch the data from the store
-						let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-						let val = txn.lock().await.get(key.clone()).await?;
-						let rid = Thing::from((key.tb, key.id));
-						// Parse the data from the store
-						let val = Operable::Value(match val {
-							Some(v) => Value::from(v),
-							None => Value::None,
-						});
-						// Process the document record
-						let pro = Processed {
-							ir: Some(ir),
-							rid: Some(rid),
-							doc_id: Some(doc_id),
-							val,
-						};
-						self.process(ctx, opt, txn, stm, pro).await?;
+						// Collect the next batch of ids
+						things = iterator.next_batch(txn, 1000).await?;
 					}
-
-					// Collect the next batch of ids
-					things = iterator.next_batch(txn, 1000).await?;
+					// Everything ok
+					return Ok(());
 				}
-				// Everything ok
-				return Ok(());
 			}
 		}
 		Err(Error::QueryNotExecutedDetail {

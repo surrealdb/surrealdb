@@ -39,6 +39,7 @@ mod timeout;
 mod uuid;
 mod value;
 mod version;
+mod with;
 
 use serde::ser::Error;
 use serde::ser::Serialize;

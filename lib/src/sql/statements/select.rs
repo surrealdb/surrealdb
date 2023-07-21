@@ -24,6 +24,7 @@ use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
+use crate::sql::with::{with, With};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -35,6 +36,7 @@ use std::fmt;
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
+	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -91,7 +93,7 @@ impl SelectStatement {
 		let opt = &opt.new_with_futures(false);
 
 		// Get a query planner
-		let mut planner = QueryPlanner::new(opt, &self.cond);
+		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
@@ -143,6 +145,9 @@ impl SelectStatement {
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
+		if let Some(ref v) = self.with {
+			write!(f, " {v}")?
+		}
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}
@@ -188,6 +193,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = selects(i)?;
+	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
 	check_split_on_fields(i, &expr, &split)?;
@@ -207,6 +213,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		SelectStatement {
 			expr,
 			what,
+			with,
 			cond,
 			split,
 			group,
