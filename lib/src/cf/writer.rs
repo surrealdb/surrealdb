@@ -96,8 +96,6 @@ impl Writer {
 	}
 }
 
-// fn tb_mutations(ts: u64, tb: &str, changes: Vec<(ID, Patch))
-
 #[cfg(test)]
 mod tests {
 	use std::borrow::Cow;
