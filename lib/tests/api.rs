@@ -84,6 +84,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "protocol-http")]
@@ -174,6 +175,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "kv-rocksdb")]
@@ -196,6 +198,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "kv-rocksdb")]
@@ -212,6 +215,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "kv-speedb")]
@@ -228,6 +232,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "kv-tikv")]
@@ -249,6 +254,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "kv-fdb")]
@@ -270,6 +276,7 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "protocol-http")]
@@ -291,5 +298,6 @@ mod api_integration {
 
 		include!("api/mod.rs");
 		include!("api/backup.rs");
+		include!("api/live.rs");
 	}
 }
