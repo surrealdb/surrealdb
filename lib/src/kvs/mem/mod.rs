@@ -168,9 +168,7 @@ impl Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.clone());
 
-		trace!(
-			"get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",
-		);
+		trace!("get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",);
 
 		Ok(k)
 	}
