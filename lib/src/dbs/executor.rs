@@ -350,8 +350,9 @@ impl<'a> Executor<'a> {
 									Some(timeout) => {
 										// Set statement timeout
 										ctx.add_timeout(timeout);
-										// Process the statement
+										// Augment the statement to include missing contextual information
 										let stm = stm.augment(&ctx, &opt)?;
+										// Process the statement
 										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
