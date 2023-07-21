@@ -39,8 +39,8 @@ pub async fn gc_db(
 	watermark: u64,
 	limit: Option<u32>,
 ) -> Result<(), Error> {
-	let beg: Vec<u8> = change::ts_prefix(ns, db, vs::u64_to_versionstamp(0));
-	let end = change::ts_prefix(ns, db, vs::u64_to_versionstamp(watermark));
+	let beg: Vec<u8> = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
+	let end = change::prefix_ts(ns, db, vs::u64_to_versionstamp(watermark));
 
 	let limit = limit.unwrap_or(100);
 

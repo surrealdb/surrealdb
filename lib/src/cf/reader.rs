@@ -25,10 +25,10 @@ pub async fn read(
 	let seq = database::vs::new(ns, db);
 
 	let beg = match start {
-		Some(x) => change::ts_prefix(ns, db, vs::u64_to_versionstamp(x)),
+		Some(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
 		None => {
 			let ts = tx.get_timestamp(seq, false).await?;
-			change::ts_prefix(ns, db, ts)
+			change::prefix_ts(ns, db, ts)
 		} // None => dc::prefix(ns, db),
 	};
 	let end = change::suffix(ns, db);

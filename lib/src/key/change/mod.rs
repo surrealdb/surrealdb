@@ -47,7 +47,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
 #[allow(unused)]
-pub fn ts_prefix(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
+pub fn prefix_ts(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'#']);
 	k.extend_from_slice(&vs);
