@@ -100,3 +100,22 @@ async fn create_with_id() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn create_on_non_values_with_unique_index() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX national_id_idx ON foo FIELDS national_id UNIQUE;
+		CREATE foo SET name = 'John Doe';
+		CREATE foo SET name = 'Jane Doe';
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..3 {
+		let _ = res.remove(0).result?;
+	}
+	Ok(())
+}
