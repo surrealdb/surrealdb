@@ -138,6 +138,15 @@ impl Statement {
 			_ => unreachable!(),
 		}
 	}
+
+	/// Augment the statement with context and options that need to be known up-front
+	pub(crate) fn augment(&self, ctx: &Context, options: &Options) -> Result<Statement, Error> {
+		match self {
+			Self::Live(v) => v.augment(ctx, options),
+			_ => Ok(self.clone()),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -213,7 +222,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			map(info, Statement::Info),
 			map(insert, Statement::Insert),
 			map(kill, Statement::Kill),
-			map(live, Statement::Live), // TODO set auth from options?
+			map(live, Statement::Live),
 			map(option, Statement::Option),
 			map(output, Statement::Output),
 			map(relate, Statement::Relate),

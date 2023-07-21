@@ -11,7 +11,7 @@ use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::value::Value;
-use crate::sql::Uuid;
+use crate::sql::{Statement, Uuid};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -35,7 +35,25 @@ pub struct LiveStatement {
 	// When a live query is archived, this should be the node ID that archived the query.
 	pub archived: Option<uuid::Uuid>,
 	// A live query is run with permissions, and we must validate that during the run.
-	pub auth: Auth,
+	// It is optional, because the live query may be constructed without it being set.
+	// It is populated during compute.
+	pub auth: Option<Auth>,
+}
+
+impl LiveStatement {
+	pub(crate) fn augment(&self, ctx: &Context, opt: &Options) -> Result<Statement, Error> {
+		let copy = LiveStatement {
+			id: self.id.clone(),
+			node: self.node,
+			expr: self.expr.clone(),
+			what: self.what.clone(),
+			cond: self.cond.clone(),
+			fetch: self.fetch.clone(),
+			archived: self.archived.clone(),
+			auth: Some(opt.auth.as_ref().clone()),
+		};
+		Ok(Statement::Live(copy))
+	}
 }
 
 impl LiveStatement {
@@ -53,6 +71,8 @@ impl LiveStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
+		// Check that auth has been set
+		self.auth.as_ref().ok_or(Error::UnknownAuth)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
@@ -101,7 +121,7 @@ impl fmt::Display for LiveStatement {
 	}
 }
 
-pub fn live(options: Options, i: &str) -> IResult<&str, LiveStatement> {
+pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	let (i, _) = tag_no_case("LIVE SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
@@ -121,7 +141,7 @@ pub fn live(options: Options, i: &str) -> IResult<&str, LiveStatement> {
 			cond,
 			fetch,
 			archived: None,
-			auth: Auth::No, // This is set elsewhere
+			auth: None, // Auth is set via options in compute()
 		},
 	))
 }

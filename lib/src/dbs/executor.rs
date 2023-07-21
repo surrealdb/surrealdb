@@ -351,6 +351,7 @@ impl<'a> Executor<'a> {
 										// Set statement timeout
 										ctx.add_timeout(timeout);
 										// Process the statement
+										let stm = stm.augment(&ctx, &opt)?;
 										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 										// Catch statement timeout
 										match ctx.is_timedout() {
