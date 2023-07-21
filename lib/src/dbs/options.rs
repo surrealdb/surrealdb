@@ -91,6 +91,23 @@ impl Options {
 
 	// --------------------------------------------------
 
+	/// Set all the required options from a single point.
+	/// The system expects these values to always be set, so this should be called for all
+	/// instances when there is doubt.
+	pub fn with_required(
+		mut self,
+		node_id: Uuid,
+		ns: Option<Arc<str>>,
+		db: Option<Arc<str>>,
+		auth: Arc<Auth>,
+	) -> Self {
+		self.id = Some(node_id);
+		self.ns = ns;
+		self.db = db;
+		self.auth = auth;
+		self
+	}
+
 	/// Set the Node ID for subsequent code which uses
 	/// this `Options`, with support for chaining.
 	pub fn with_id(mut self, id: Uuid) -> Self {

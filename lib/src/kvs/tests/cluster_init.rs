@@ -122,10 +122,13 @@ async fn single_live_queries_are_garbage_collected() {
 	let database = "test_db";
 	let table = "test_table";
 	let options = Options::default()
-		.with_live(true)
-		.with_ns(Some(Arc::from(namespace)))
-		.with_db(Some(Arc::from(database)))
-		.with_auth(Arc::new(Auth::Kv));
+		.with_required(
+			node_id.clone(),
+			Some(Arc::from(namespace)),
+			Some(Arc::from(database)),
+			Arc::new(Auth::Kv),
+		)
+		.with_live(true);
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
