@@ -209,7 +209,7 @@ impl Rpc {
 		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &id {
 				trace!("Removing live query: {}", key);
-				live_queries.push(key.clone());
+				live_queries.push(*key);
 				return false;
 			}
 			true

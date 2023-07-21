@@ -1039,7 +1039,7 @@ impl Transaction {
 			let val: LiveStatement = value.into();
 			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 			res.push(LqValue {
-				nd: val.node.clone(),
+				nd: val.node,
 				ns: lv.ns.to_string(),
 				db: lv.db.to_string(),
 				tb: lv.tb.to_string(),
