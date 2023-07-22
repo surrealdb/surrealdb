@@ -4152,6 +4152,40 @@ async fn function_time_hour() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_min() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::min(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'1987-06-22T08:30:45Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_max() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::max(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'1988-06-22T08:30:45Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_minute() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::minute();
