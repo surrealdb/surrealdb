@@ -286,11 +286,11 @@ impl<'a> Document<'a> {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
-						"math::min" => {
+						"math::min" | "time::min" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.min(&mut ops, &act, idiom, val);
 						}
-						"math::max" => {
+						"math::max" | "time::max" => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.max(&mut ops, &act, idiom, val);
 						}

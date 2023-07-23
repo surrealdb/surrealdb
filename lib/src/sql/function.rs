@@ -97,6 +97,8 @@ impl Function {
 			Self::Normal(f, _) if f == "math::mean" => true,
 			Self::Normal(f, _) if f == "math::min" => true,
 			Self::Normal(f, _) if f == "math::sum" => true,
+			Self::Normal(f, _) if f == "time::max" => true,
+			Self::Normal(f, _) if f == "time::min" => true,
 			_ => false,
 		}
 	}
