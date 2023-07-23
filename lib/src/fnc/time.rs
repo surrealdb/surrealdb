@@ -118,6 +118,20 @@ pub fn hour((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn max((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
+	Ok(match array.into_iter().max() {
+		Some(v) => v.into(),
+		None => Value::None,
+	})
+}
+
+pub fn min((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
+	Ok(match array.into_iter().min() {
+		Some(v) => v.into(),
+		None => Value::None,
+	})
+}
+
 pub fn minute((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.minute().into(),

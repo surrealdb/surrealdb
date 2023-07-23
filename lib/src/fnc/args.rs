@@ -97,6 +97,12 @@ impl FromArg for Vec<Number> {
 	}
 }
 
+impl FromArg for Vec<Datetime> {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_array_type(&Kind::Datetime)?.into_iter().map(Value::try_into).collect()
+	}
+}
+
 pub trait FromArgs: Sized {
 	/// Convert a collection of argument values into a certain argument format, failing if there are
 	/// too many or too few arguments, or if one of the arguments could not be converted.
