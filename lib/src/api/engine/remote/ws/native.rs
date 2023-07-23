@@ -167,12 +167,7 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	tokio::spawn(async move {
-		let ping = {
-			let mut request = BTreeMap::new();
-			request.insert("method".to_owned(), PING_METHOD.into());
-			let value = Value::from(request);
-			Message::Binary(value.into())
-		};
+		let ping = Message::Ping(vec![]);
 
 		let mut vars = IndexMap::new();
 		let mut replay = IndexMap::new();

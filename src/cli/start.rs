@@ -115,7 +115,7 @@ pub async fn init(
 		listen_addresses,
 		dbs,
 		web,
-		log: CustomEnvFilter(log),
+		log,
 		tick_interval,
 		no_banner,
 		..

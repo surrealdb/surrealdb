@@ -7,7 +7,9 @@ use surrealdb::dbs;
 use surrealdb::dbs::Notification;
 use surrealdb::sql;
 use surrealdb::sql::Value;
-use tracing::instrument;
+
+use crate::err;
+use crate::rpc::CONN_CLOSED_ERR;
 
 #[derive(Clone)]
 pub enum Output {
@@ -34,6 +36,12 @@ pub enum Data {
 impl From<Value> for Data {
 	fn from(v: Value) -> Self {
 		Data::Other(v)
+	}
+}
+
+impl From<String> for Data {
+	fn from(v: String) -> Self {
+		Data::Other(Value::from(v))
 	}
 }
 
@@ -82,8 +90,19 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	#[instrument(skip_all, name = "rpc response", fields(response = ?self))]
 	pub async fn send(self, out: Output, chn: Sender<Message>) {
+		debug!("Processing response");
+		if let Err(err) = &self.result {
+			debug!("Send error to the client");
+			
+			// if the current scope is a RPC request span, record the error
+			let span = tracing::Span::current();
+			if span.field("rpc.method").is_some() {
+				span.record("status", "Error");
+				span.record("message", format!("code: {}, message: {}", err.code, err.message));
+			}
+		}
+
 		let message = match out {
 			Output::Json => {
 				let res = serde_json::to_string(&self.simplify()).unwrap();
@@ -102,8 +121,12 @@ impl Response {
 				Message::Binary(res)
 			}
 		};
-		let _ = chn.send(message).await;
-		trace!("Response sent");
+
+		if let Err(err) = chn.send(message).await {
+			if err.to_string() != CONN_CLOSED_ERR {
+				error!("Error sending response: {}", err);
+			}
+		};
 	}
 }
 
@@ -163,5 +186,28 @@ pub fn failure(id: Option<Value>, err: Failure) -> Response {
 	Response {
 		id,
 		result: Err(err),
+	}
+}
+
+impl From<err::Error> for Failure {
+	fn from(err: err::Error) -> Self {
+		Failure::custom(err.to_string())
+	}
+}
+
+pub trait IntoRpcResponse {
+	fn into_response(self, id: Option<Value>) -> Response;
+}
+
+impl<T, E> IntoRpcResponse for Result<T, E>
+where
+	T: Into<Data>,
+	E: Into<Failure>,
+{
+	fn into_response(self, id: Option<Value>) -> Response {
+		match self {
+			Ok(v) => success(id, v.into()),
+			Err(err) => failure(id, err.into()),
+		}
 	}
 }
