@@ -133,7 +133,7 @@ pub async fn init() -> Result<(), Error> {
 
 	// Setup the graceful shutdown with no timeout
 	let handle = Handle::new();
-	graceful_shutdown(handle.clone(), None);
+	let shutdown_handler = graceful_shutdown(handle.clone());
 
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// configure certificate and private key used by https
@@ -157,6 +157,12 @@ pub async fn init() -> Result<(), Error> {
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
 			.await?;
 	};
+
+	// Wait for the shutdown to finish
+	let _ = shutdown_handler.await;
+
+	// Flush all telemetry data
+	opentelemetry::global::shutdown_tracer_provider();
 
 	info!(target: LOG, "Web server stopped. Bye!");
 

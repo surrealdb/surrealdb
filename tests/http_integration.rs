@@ -1,3 +1,5 @@
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test http_integration -- --nocapture
+
 mod common;
 
 use std::time::Duration;

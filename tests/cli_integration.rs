@@ -1,4 +1,4 @@
-// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli_integration -- --nocapture
 
 mod common;
 
