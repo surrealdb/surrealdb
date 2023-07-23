@@ -197,6 +197,7 @@ impl Rpc {
 									tasks.push(tokio::task::spawn(Rpc::call(rpc.clone(), msg, internal_sender.clone()).in_current_span()));
 								}
 								Message::Close(_) => {
+									tasks.push(tokio::task::spawn(Rpc::call(rpc.clone(), Message::Close(None), internal_sender.clone()).in_current_span()));
 									break;
 								}
 								_ => {
