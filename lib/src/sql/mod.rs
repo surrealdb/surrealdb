@@ -68,6 +68,7 @@ pub(crate) mod uuid;
 pub(crate) mod value;
 pub(crate) mod version;
 pub(crate) mod view;
+pub(crate) mod with;
 
 #[cfg(test)]
 pub(crate) mod test;

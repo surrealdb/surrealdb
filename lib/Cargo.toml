@@ -105,8 +105,8 @@ sha2 = "0.10.7"
 speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.43"
-tikv = { version = "0.1.0-surreal.1", package = "surrealdb-tikv-client", optional = true }
-tikv-client-proto = { version = "0.1.0-surreal.1", package = "surrealdb-tikv-client-proto", optional = true }
+tikv = { version = "0.1.0-surreal.2", package = "surrealdb-tikv-client", optional = true }
+tikv-client-proto = { version = "0.1.0-surreal.2", package = "surrealdb-tikv-client-proto", optional = true }
 tokio-util = { version = "0.7.8", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"

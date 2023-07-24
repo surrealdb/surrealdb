@@ -164,9 +164,11 @@ impl<'a> IndexOperation<'a> {
 		}
 		// Create the new index data
 		if let Some(n) = &self.n {
-			let key = self.get_unique_index_key(n);
-			if run.putc(key, self.rid, None).await.is_err() {
-				return self.err_index_exists(n);
+			if !n.is_all_none_or_null() {
+				let key = self.get_unique_index_key(n);
+				if run.putc(key, self.rid, None).await.is_err() {
+					return self.err_index_exists(n);
+				}
 			}
 		}
 		Ok(())

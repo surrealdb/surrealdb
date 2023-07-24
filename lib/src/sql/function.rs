@@ -97,6 +97,8 @@ impl Function {
 			Self::Normal(f, _) if f == "math::mean" => true,
 			Self::Normal(f, _) if f == "math::min" => true,
 			Self::Normal(f, _) if f == "math::sum" => true,
+			Self::Normal(f, _) if f == "time::max" => true,
+			Self::Normal(f, _) if f == "time::min" => true,
 			_ => false,
 		}
 	}
@@ -125,6 +127,8 @@ impl Function {
 			Self::Normal(f, _) if f == "math::top" => true,
 			Self::Normal(f, _) if f == "math::trimean" => true,
 			Self::Normal(f, _) if f == "math::variance" => true,
+			Self::Normal(f, _) if f == "time::max" => true,
+			Self::Normal(f, _) if f == "time::min" => true,
 			_ => false,
 		}
 	}
@@ -527,6 +531,8 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("group"),
 		tag("hour"),
 		tag("minute"),
+		tag("max"),
+		tag("min"),
 		tag("month"),
 		tag("nano"),
 		tag("now"),
