@@ -2,7 +2,7 @@ use crate::fnc::script::modules::impl_module_def;
 use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, Value};
 
 mod functions;
-mod query;
+pub mod query;
 
 pub struct Package;
 

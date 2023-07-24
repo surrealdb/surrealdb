@@ -21,10 +21,10 @@ pub const QUERY_DATA_PROP_NAME: &str = "__query_data__";
 
 /// A class to carry the data to run subqueries.
 pub struct QueryData<'js> {
-	context: &'js Context<'js>,
-	opt: &'js Options,
-	txn: &'js Transaction,
-	doc: Option<&'js CursorDoc<'js>>,
+	pub context: &'js Context<'js>,
+	pub opt: &'js Options,
+	pub txn: &'js Transaction,
+	pub doc: Option<&'js CursorDoc<'js>>,
 }
 
 impl<'js> Trace<'js> for QueryData<'js> {

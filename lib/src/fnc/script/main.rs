@@ -4,6 +4,8 @@ use super::globals;
 use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
+use super::modules::surrealdb::query::QueryData;
+use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -14,19 +16,49 @@ use js::prelude::Promise;
 use js::prelude::Rest;
 use js::prelude::This;
 use js::CatchResultExt;
+use js::Class;
+use js::Ctx;
 use js::Function;
 use js::Module;
 
+/// Insert query data into the context,
+///
+/// # Safety
+/// Caller must ensure that the runtime from which `Ctx` originitates cannot outlife 'a.
+pub unsafe fn create_query_data<'a>(
+	context: &'a Context<'a>,
+	opt: &'a Options,
+	txn: &'a Transaction,
+	doc: Option<&'a CursorDoc<'a>>,
+	ctx: &Ctx<'_>,
+) -> Result<(), js::Error> {
+	// remove the restricting lifetime.
+	let ctx = Ctx::from_raw(ctx.as_raw());
+
+	let object = Class::instance(
+		ctx.clone(),
+		QueryData {
+			context,
+			opt,
+			txn,
+			doc,
+		},
+	)?;
+	ctx.globals().set(QUERY_DATA_PROP_NAME, object)?;
+
+	Ok(())
+}
+
 pub async fn run(
-	ctx: &Context<'_>,
-	_opt: &Options,
-	_txn: &Transaction,
+	context: &Context<'_>,
+	opt: &Options,
+	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	src: &str,
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {
 	// Check the context
-	if ctx.is_done() {
+	if context.is_done() {
 		return Ok(Value::None);
 	}
 	// Create an JavaScript context
@@ -36,7 +68,7 @@ pub async fn run(
 	// Explicitly set max memory size to 2 MB
 	run.set_memory_limit(2_000_000).await;
 	// Ensure scripts are cancelled with context
-	let cancellation = ctx.cancellation();
+	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done());
 	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
@@ -54,6 +86,10 @@ pub async fn run(
 			// register all classes to the runtime.
 			// Get the context global object
 			let global = ctx.globals();
+
+			// SAFETY: This is safe because the runtime only lifes for the duration of the this
+			// function, all of which context, opt, txn and doc are valid.
+			unsafe{ create_query_data(context,opt,txn,doc,&ctx) }?;
 			// Register the surrealdb module as a global object
 			global.set(
 				"surrealdb",
