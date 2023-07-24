@@ -10,7 +10,8 @@ use crate::sql::array::Array;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Ident, Thing};
+use crate::sql::Part::All;
+use crate::sql::{Ident, Thing, Value};
 use crate::{key, kvs};
 
 impl<'a> Document<'a> {
@@ -78,26 +79,114 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		ix: &DefineIndexStatement,
 		doc: &CursorDoc<'_>,
-	) -> Result<Option<Array>, Error> {
+	) -> Result<Option<Vec<Array>>, Error> {
 		if !doc.doc.is_some() {
 			return Ok(None);
 		}
-		let mut o = Array::with_capacity(ix.cols.len());
-		for i in ix.cols.iter() {
+		let mut f = Vec::with_capacity(ix.cols.len());
+		let mut o = Vec::with_capacity(f.len());
+		let mut no_f = true;
+		for i in &ix.cols.0 {
 			let v = i.compute(ctx, opt, txn, Some(doc)).await?;
+			let b = matches!(i.0.last(), Some(&All));
+			if b {
+				no_f = false;
+			}
+			f.push(b);
 			o.push(v);
 		}
-		Ok(Some(o))
+		// Nothing flattened? We can return the array of values
+		if no_f {
+			return Ok(Some(vec![Array(o)]));
+		}
+		let mut iterators: Vec<Box<dyn ValuesIterator>> = Vec::new();
+		// Otherwise we generate all the possibilities.
+		for (i, v) in o.iter().enumerate() {
+			if f.get(i) == Some(&true) {
+				if let Value::Array(v) = v {
+					iterators.push(Box::new(MultiValuesIterator {
+						vals: &v.0,
+						done: false,
+						current: 0,
+					}));
+					continue;
+				}
+			}
+			iterators.push(Box::new(SingleValueIterator {
+				val: v,
+			}));
+		}
+		let mut r = Vec::new();
+		let mut has_next = true;
+		while has_next {
+			let mut o = Vec::with_capacity(f.len());
+			// Create the combination and advance to the next
+			has_next = false;
+			for i in &mut iterators {
+				o.push(i.current().clone());
+				if !has_next {
+					// We advance only one iterator per iteration
+					if i.next() {
+						has_next = true;
+					}
+				}
+			}
+			r.push(Array(o));
+		}
+		Ok(Some(r))
+	}
+}
+
+trait ValuesIterator<'a> {
+	fn next(&mut self) -> bool;
+	fn current(&self) -> &'a Value;
+}
+
+struct MultiValuesIterator<'a> {
+	vals: &'a Vec<Value>,
+	done: bool,
+	current: usize,
+}
+
+impl<'a> ValuesIterator<'a> for MultiValuesIterator<'a> {
+	fn next(&mut self) -> bool {
+		if self.done {
+			return false;
+		}
+		if self.current == self.vals.len() - 1 {
+			self.done = true;
+			return false;
+		}
+		self.current += 1;
+		return true;
+	}
+
+	fn current(&self) -> &'a Value {
+		self.vals.get(self.current).unwrap_or(&Value::Null)
+	}
+}
+
+struct SingleValueIterator<'a> {
+	val: &'a Value,
+}
+
+impl<'a> ValuesIterator<'a> for SingleValueIterator<'a> {
+	fn next(&mut self) -> bool {
+		false
+	}
+
+	fn current(&self) -> &'a Value {
+		&self.val
 	}
 }
 
 struct IndexOperation<'a> {
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
-	/// The old value (if existing)
-	o: Option<Array>,
-	/// The new value (if existing)
-	n: Option<Array>,
+	/// The old values (if existing)
+	o: Option<Vec<Array>>,
+	/// The new values (if existing)
+	n: Option<Vec<Array>>,
 	rid: &'a Thing,
 }
 
@@ -105,8 +194,8 @@ impl<'a> IndexOperation<'a> {
 	fn new(
 		opt: &'a Options,
 		ix: &'a DefineIndexStatement,
-		o: Option<Array>,
-		n: Option<Array>,
+		o: Option<Vec<Array>>,
+		n: Option<Vec<Array>>,
 		rid: &'a Thing,
 	) -> Self {
 		Self {
@@ -132,14 +221,18 @@ impl<'a> IndexOperation<'a> {
 	async fn index_non_unique(&self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = &self.o {
-			let key = self.get_non_unique_index_key(o);
-			let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
+			for o in o {
+				let key = self.get_non_unique_index_key(o);
+				let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
+			}
 		}
 		// Create the new index data
 		if let Some(n) = &self.n {
-			let key = self.get_non_unique_index_key(n);
-			if run.putc(key, self.rid, None).await.is_err() {
-				return self.err_index_exists(n);
+			for n in n {
+				let key = self.get_non_unique_index_key(n);
+				if run.putc(key, self.rid, None).await.is_err() {
+					return self.err_index_exists(n);
+				}
 			}
 		}
 		Ok(())
@@ -159,15 +252,19 @@ impl<'a> IndexOperation<'a> {
 	async fn index_unique(&self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = &self.o {
-			let key = self.get_unique_index_key(o);
-			let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
+			for o in o {
+				let key = self.get_unique_index_key(o);
+				let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
+			}
 		}
 		// Create the new index data
 		if let Some(n) = &self.n {
-			if !n.is_all_none_or_null() {
-				let key = self.get_unique_index_key(n);
-				if run.putc(key, self.rid, None).await.is_err() {
-					return self.err_index_exists(n);
+			for n in n {
+				if !n.is_all_none_or_null() {
+					let key = self.get_unique_index_key(n);
+					if run.putc(key, self.rid, None).await.is_err() {
+						return self.err_index_exists(n);
+					}
 				}
 			}
 		}
