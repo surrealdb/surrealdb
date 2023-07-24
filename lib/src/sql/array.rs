@@ -134,6 +134,10 @@ impl Array {
 		}
 		Ok(Value::Array(x))
 	}
+
+	pub(crate) fn is_all_none_or_null(&self) -> bool {
+		self.0.iter().all(|v| v.is_none_or_null())
+	}
 }
 
 impl Display for Array {

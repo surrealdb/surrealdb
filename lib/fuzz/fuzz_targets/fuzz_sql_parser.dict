@@ -320,6 +320,8 @@
 "time::format("
 "time::group("
 "time::hour("
+"time::max("
+"time::min("
 "time::minute("
 "time::month("
 "time::nano("

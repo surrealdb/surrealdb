@@ -507,10 +507,6 @@ pub enum Error {
 		feature: &'static str,
 	},
 
-	#[doc(hidden)]
-	#[error("Bypass the query planner")]
-	BypassQueryPlanner,
-
 	/// Duplicated match references are not allowed
 	#[error("Duplicated Match reference: {mr}")]
 	DuplicatedMatchRef {

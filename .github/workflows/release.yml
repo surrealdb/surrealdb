@@ -116,6 +116,7 @@ jobs:
       - name: Install dependencies
         if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-msvc')
         run: |
+          vcpkg upgrade
           vcpkg integrate install
           vcpkg install openssl:x64-windows-static
           choco install protoc
