@@ -121,11 +121,11 @@ impl Rpc {
 
 		// Store this WebSocket in the list of WebSockets
 		WEBSOCKETS.write().await.insert(
-			ws_id.clone(),
+			ws_id,
 			WebSocketRef(internal_sender.clone(), rpc.read().await.graceful_shutdown.clone()),
 		);
 
-		trace!("WebSocket {} connected", &ws_id);
+		trace!("WebSocket {} connected", ws_id);
 
 		// Wait until all tasks finish
 		tokio::join!(
@@ -147,7 +147,7 @@ impl Rpc {
 		// Remove this WebSocket from the list of WebSockets
 		WEBSOCKETS.write().await.remove(&ws_id);
 
-		trace!("WebSocket {} disconnected", &ws_id);
+		trace!("WebSocket {} disconnected", ws_id);
 	}
 
 	/// Send Ping messages to the client
@@ -218,18 +218,22 @@ impl Rpc {
 				}
 				_ = is_shutdown => break,
 			}
-		};
+		}
 
 		// Wait for all tasks to finish
 		for task in tasks.into_iter() {
 			if let Err(err) = task.await {
 				error!("Error while processing RPC request: {:?}", err);
 			}
-		};
+		}
 	}
 
 	/// Write messages to the client
-	async fn write(rpc: Arc<RwLock<Rpc>>, mut sender: SplitSink<WebSocket, Message>, mut internal_receiver: Receiver<Message>) {
+	async fn write(
+		rpc: Arc<RwLock<Rpc>>,
+		mut sender: SplitSink<WebSocket, Message>,
+		mut internal_receiver: Receiver<Message>,
+	) {
 		let cancel_token = rpc.read().await.graceful_shutdown.clone();
 		loop {
 			let is_shutdown = cancel_token.cancelled();
@@ -251,7 +255,7 @@ impl Rpc {
 				},
 				_ = is_shutdown => break,
 			}
-		};
+		}
 	}
 
 	/// Send live query notifications to the client
@@ -330,16 +334,21 @@ impl Rpc {
 			Value::Array(v) => v,
 			_ => Array::new(),
 		};
-		
+
 		let span = span_for_request(&method, &ws_id);
 		// Process the request
-		let res = Self::process_request(rpc.clone(), &method, params).instrument(span.clone()).await;
+		let res =
+			Self::process_request(rpc.clone(), &method, params).instrument(span.clone()).await;
 
 		// Process the response
 		res.into_response(id).send(out, chn).instrument(span).await
 	}
 
-	async fn process_request(rpc: Arc<RwLock<Rpc>>, method: &str, params: Array) -> Result<Data, Failure> {
+	async fn process_request(
+		rpc: Arc<RwLock<Rpc>>,
+		method: &str,
+		params: Array,
+	) -> Result<Data, Failure> {
 		debug!("Process request: {}", method);
 
 		// Match the method to a function
@@ -351,17 +360,23 @@ impl Rpc {
 			},
 			// Switch to a specific namespace and database
 			"use" => match params.needs_two() {
-				Ok((ns, db)) => rpc.write().await.yuse(ns, db).await.map(Into::into).map_err(Into::into),
+				Ok((ns, db)) => {
+					rpc.write().await.yuse(ns, db).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Signup to a specific authentication scope
 			"signup" => match params.needs_one() {
-				Ok(Value::Object(v)) => rpc.write().await.signup(v).await.map(Into::into).map_err(Into::into),
+				Ok(Value::Object(v)) => {
+					rpc.write().await.signup(v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Signin as a root, namespace, database or scope user
 			"signin" => match params.needs_one() {
-				Ok(Value::Object(v)) => rpc.write().await.signin(v).await.map(Into::into).map_err(Into::into),
+				Ok(Value::Object(v)) => {
+					rpc.write().await.signin(v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Invalidate the current authentication session
@@ -371,33 +386,47 @@ impl Rpc {
 			},
 			// Authenticate using an authentication token
 			"authenticate" => match params.needs_one() {
-				Ok(Value::Strand(v)) => rpc.write().await.authenticate(v).await.map(Into::into).map_err(Into::into),
+				Ok(Value::Strand(v)) => {
+					rpc.write().await.authenticate(v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
-				Ok(v) if v.is_uuid() => rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into),
+				Ok(v) if v.is_uuid() => {
+					rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Setup a live query on a specific table
 			"live" => match params.needs_one_or_two() {
-				Ok((v, d)) if v.is_table() => rpc.read().await.live(v, d).await.map(Into::into).map_err(Into::into),
-				Ok((v, d)) if v.is_strand() => rpc.read().await.live(v, d).await.map(Into::into).map_err(Into::into),
+				Ok((v, d)) if v.is_table() => {
+					rpc.read().await.live(v, d).await.map(Into::into).map_err(Into::into)
+				}
+				Ok((v, d)) if v.is_strand() => {
+					rpc.read().await.live(v, d).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Specify a connection-wide parameter
 			"let" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into),
+				Ok((Value::Strand(s), v)) => {
+					rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Specify a connection-wide parameter
 			"set" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into),
+				Ok((Value::Strand(s), v)) => {
+					rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Unset and clear a connection-wide parameter
 			"unset" => match params.needs_one() {
-				Ok(Value::Strand(s)) => rpc.write().await.unset(s).await.map(Into::into).map_err(Into::into),
+				Ok(Value::Strand(s)) => {
+					rpc.write().await.unset(s).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Select a value or values from the database
@@ -407,27 +436,37 @@ impl Rpc {
 			},
 			// Insert a value or values in the database
 			"insert" => match params.needs_one_or_two() {
-				Ok((v, o)) => rpc.read().await.insert(v, o).await.map(Into::into).map_err(Into::into),
+				Ok((v, o)) => {
+					rpc.read().await.insert(v, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Create a value or values in the database
 			"create" => match params.needs_one_or_two() {
-				Ok((v, o)) => rpc.read().await.create(v, o).await.map(Into::into).map_err(Into::into),
+				Ok((v, o)) => {
+					rpc.read().await.create(v, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `CONTENT`
 			"update" => match params.needs_one_or_two() {
-				Ok((v, o)) => rpc.read().await.update(v, o).await.map(Into::into).map_err(Into::into),
+				Ok((v, o)) => {
+					rpc.read().await.update(v, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `MERGE`
 			"change" | "merge" => match params.needs_one_or_two() {
-				Ok((v, o)) => rpc.read().await.change(v, o).await.map(Into::into).map_err(Into::into),
+				Ok((v, o)) => {
+					rpc.read().await.change(v, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `PATCH`
 			"modify" | "patch" => match params.needs_one_or_two() {
-				Ok((v, o)) => rpc.read().await.modify(v, o).await.map(Into::into).map_err(Into::into),
+				Ok((v, o)) => {
+					rpc.read().await.modify(v, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Delete a value or values from the database
@@ -437,7 +476,9 @@ impl Rpc {
 			},
 			// Specify the output format for text requests
 			"format" => match params.needs_one() {
-				Ok(Value::Strand(v)) => rpc.write().await.format(v).await.map(Into::into).map_err(Into::into),
+				Ok(Value::Strand(v)) => {
+					rpc.write().await.format(v).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Get the current server version
@@ -447,8 +488,12 @@ impl Rpc {
 			},
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), o)) if o.is_none_or_null() => rpc.read().await.query(s).await.map(Into::into).map_err(Into::into),
-				Ok((Value::Strand(s), Value::Object(o))) => rpc.read().await.query_with(s, o).await.map(Into::into).map_err(Into::into),
+				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
+					rpc.read().await.query(s).await.map(Into::into).map_err(Into::into)
+				}
+				Ok((Value::Strand(s), Value::Object(o))) => {
+					rpc.read().await.query_with(s, o).await.map(Into::into).map_err(Into::into)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			_ => Err(Failure::METHOD_NOT_FOUND),

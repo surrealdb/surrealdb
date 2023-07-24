@@ -94,7 +94,7 @@ impl Response {
 		debug!("Processing response");
 		if let Err(err) = &self.result {
 			debug!("Send error to the client");
-			
+
 			// if the current scope is a RPC request span, record the error
 			let span = tracing::Span::current();
 			if span.field("rpc.method").is_some() {

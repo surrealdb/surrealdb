@@ -49,10 +49,10 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			network.protocol.name = "http",
 			network.protocol.version = format!("{:?}", req.version()).strip_prefix("HTTP/"),
 			client.address = field::Empty,
-			client.port	= field::Empty,
+			client.port = field::Empty,
 			client.socket.address = field::Empty,
 			server.address = field::Empty,
-			server.port    = field::Empty,
+			server.port = field::Empty,
 			// set on the response hook
 			http.latency.ms = field::Empty,
 			http.response.status_code = field::Empty,

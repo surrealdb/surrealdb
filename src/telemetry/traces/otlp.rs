@@ -4,7 +4,9 @@ use opentelemetry_otlp::WithExportConfig;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
-use crate::{telemetry::OTEL_DEFAULT_RESOURCE, cli::validator::parser::env_filter::CustomEnvFilter};
+use crate::{
+	cli::validator::parser::env_filter::CustomEnvFilter, telemetry::OTEL_DEFAULT_RESOURCE,
+};
 
 pub fn new<S>(filter: CustomEnvFilter) -> Box<dyn Layer<S> + Send + Sync>
 where

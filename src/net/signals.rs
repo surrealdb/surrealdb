@@ -3,11 +3,14 @@ use std::time::Duration;
 use axum_server::Handle;
 use tokio::task::JoinHandle;
 
-use crate::{err::Error, net::rpc::{WEBSOCKETS, WebSocketRef}};
+use crate::{
+	err::Error,
+	net::rpc::{WebSocketRef, WEBSOCKETS},
+};
 
 /// Start a graceful shutdown on the Axum Handle when a shutdown signal is received.
 /// Stop all WebSocket connections.
-pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()>{
+pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
 	tokio::spawn(async move {
 		let result = listen().await.expect("Failed to listen to shutdown signal");
 		info!(target: super::LOG, "{} received. Waiting for graceful shutdown... A second signal will force an immediate shutdown", result);
