@@ -13,24 +13,25 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check if forced
-		if !opt.force && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
-		// Get the record id
-		let _ = self.id.as_ref().unwrap();
-		let ns = opt.ns();
-		let db = opt.db();
+		// Get the table for the record
 		let tb = self.tb(opt, txn).await?;
-		let tb = tb.as_ref();
+		// Check if changefeeds are enabled
 		if tb.changefeed.is_some() {
 			// Clone transaction
-			let txn = txn.clone();
-			let mut txn = txn.lock().await;
-
-			let id = &(*self.id.as_ref().unwrap()).clone();
+			let run = txn.clone();
+			// Claim transaction
+			let mut run = run.lock().await;
+			// Get the arguments
+			let ns = opt.ns();
+			let db = opt.db();
+			let tb = tb.name.as_str();
+			let id = self.id.as_ref().unwrap();
 			// Create the changefeed entry
-			txn.record_change(ns, db, tb, id, self.current.doc.clone());
+			run.record_change(ns, db, tb, id, self.current.doc.clone());
 		}
 		// Carry on
 		Ok(())

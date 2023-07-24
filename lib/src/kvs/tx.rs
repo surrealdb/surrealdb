@@ -2400,13 +2400,11 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 		db: &str,
-		tb: &DefineTableStatement,
+		tb: &str,
 		id: &Thing,
 		v: Cow<'_, Value>,
 	) {
-		if tb.changefeed.is_some() {
-			self.cf.update(ns, db, tb.name.to_owned(), id.clone(), v)
-		}
+		self.cf.update(ns, db, tb, id.clone(), v)
 	}
 
 	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
