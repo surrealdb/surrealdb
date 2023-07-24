@@ -924,11 +924,10 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS tags UNIQUE;
-		DEFINE INDEX test ON user COLUMNS tags UNIQUE;
+		DEFINE INDEX test ON user FIELDS tags[*] UNIQUE;
+		DEFINE INDEX test ON user COLUMNS tags[*] UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET tags = ['one', 'two'];
 		CREATE user:2 SET tags = ['two', 'three'];
@@ -950,7 +949,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags[*] UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -960,20 +959,23 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:2`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains 'two', with record `user:2`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, tags UNIQUE;
-		DEFINE INDEX test ON user COLUMNS account, tags UNIQUE;
+		DEFINE INDEX test ON user FIELDS account, tags[*] UNIQUE;
+		DEFINE INDEX test ON user COLUMNS account, tags[*] UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET account = 'apple', tags = ['one', 'two'];
 		CREATE user:2 SET account = 'tesla', tags = ['one', 'two'];
@@ -997,7 +999,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags[*] UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1007,20 +1009,28 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'tesla', tags: ['one', 'two'] }]");
+	let val = Value::parse("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['apple', 'two'], with record `user:3`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:4`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['tesla', 'two'], with record `user:4`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }

@@ -121,7 +121,7 @@ async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn create_with_unique_index_on_flatten_values() -> Result<(), Error> {
+async fn create_with_unique_index_on_one_flatten_values() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, tags[*], emails UNIQUE;
 		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
@@ -139,6 +139,31 @@ async fn create_with_unique_index_on_flatten_values() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	if let Err(e) = tmp {
 		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:2`");
+	} else {
+		panic!("An error was expected.")
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_unique_index_on_two_flatten_values() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX test ON user FIELDS account, tags[*], emails[*] UNIQUE;
+		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:2 SET account = 'Apple', tags = ['one', 'two'], emails = ['b@example.com', 'c@example.com'];
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result;
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', 'b@example.com'], with record `user:2`");
 	} else {
 		panic!("An error was expected.")
 	}

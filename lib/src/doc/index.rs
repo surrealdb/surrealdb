@@ -158,7 +158,7 @@ impl<'a> ValuesIterator<'a> for MultiValuesIterator<'a> {
 			return false;
 		}
 		self.current += 1;
-		return true;
+		true
 	}
 
 	fn current(&self) -> &'a Value {
@@ -176,7 +176,7 @@ impl<'a> ValuesIterator<'a> for SingleValueIterator<'a> {
 	}
 
 	fn current(&self) -> &'a Value {
-		&self.val
+		self.val
 	}
 }
 
