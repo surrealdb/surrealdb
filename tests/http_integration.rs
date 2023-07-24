@@ -307,6 +307,72 @@ async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 #[serial]
+async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let url = &format!("http://{addr}/rpc");
+
+	// Prepare HTTP client
+	let mut headers = reqwest::header::HeaderMap::new();
+	headers.insert("NS", "N".parse()?);
+	headers.insert("DB", "D".parse()?);
+	headers.insert(header::ACCEPT, "application/json".parse()?);
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
+
+	// Test WebSocket upgrade
+	{
+		let res = client
+			.get(url)
+			.header(header::CONNECTION, "Upgrade")
+			.header(header::UPGRADE, "websocket")
+			.header(header::SEC_WEBSOCKET_VERSION, "13")
+			.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+			.send()
+			.await?
+			.upgrade()
+			.await;
+		assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+	}
+
+	Ok(())
+}
+
+async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let url = &format!("http://{addr}/rpc");
+
+	// Prepare HTTP client
+	let mut headers = reqwest::header::HeaderMap::new();
+	headers.insert("NS", "N".parse()?);
+	headers.insert("DB", "D".parse()?);
+	headers.insert(header::ACCEPT, "application/json".parse()?);
+	let client = reqwest::Client::builder()
+		.connect_timeout(Duration::from_millis(10))
+		.default_headers(headers)
+		.build()?;
+
+	// Test WebSocket upgrade
+	{
+		let res = client
+			.get(url)
+			.header(header::CONNECTION, "Upgrade")
+			.header(header::UPGRADE, "websocket")
+			.header(header::SEC_WEBSOCKET_VERSION, "13")
+			.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+			.send()
+			.await?
+			.upgrade()
+			.await;
+		assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(false, true).await.unwrap();
 	let url = &format!("http://{addr}/signin");
