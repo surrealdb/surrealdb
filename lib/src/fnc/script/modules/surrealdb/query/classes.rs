@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::sql::{self, Query as SurQuery, Value as SurValue};
+use crate::sql::{self, subquery::Subquery, Value as SurValue};
 
 use js::{
 	class::Trace,
@@ -12,9 +12,9 @@ use js::{
 #[derive(Trace, Clone)]
 pub struct Query {
 	#[qjs(skip_trace)]
-	ast: SurQuery,
+	pub(crate) query: Subquery,
 	#[qjs(skip_trace)]
-	vars: Option<BTreeMap<String, SurValue>>,
+	pub(crate) vars: Option<BTreeMap<String, SurValue>>,
 }
 
 #[derive(Default, Clone)]
@@ -94,27 +94,23 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = sql::parse(&text).map_err(|e| {
+		let query = sql::sub_query(&text).map_err(|e| {
 			let error_text = format!("{}", e);
 			Exception::throw_type(&ctx, &error_text)
 		})?;
 		let vars = variables.into_inner().map(|x| x.0);
 		Ok(Query {
-			ast: query,
+			query,
 			vars,
 		})
 	}
 
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		format!("{}", self.ast)
+		format!("{}", self.query)
 	}
 
 	pub fn bind(&mut self, key: Coerced<String>, value: SurValue) {
 		self.vars.get_or_insert_with(BTreeMap::new).insert(key.0, value);
-	}
-
-	pub fn execute(&self) -> SurValue {
-		todo!()
 	}
 }

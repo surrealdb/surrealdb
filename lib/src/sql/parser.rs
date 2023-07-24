@@ -14,6 +14,12 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
+/// Parses a SurrealQL [`Query`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn sub_query(input: &str) -> Result<super::subquery::Subquery, Error> {
+	parse_impl(input, super::subquery::subquery)
+}
+
 /// Parses a SurrealQL [`Thing`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
