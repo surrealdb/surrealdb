@@ -27,7 +27,6 @@ impl ModuleDef for Package {
 		default.set("version", version)?;
 
 		let query_func = Function::new(ctx.clone(), query::js_query)?.with_name("query")?;
-
 		exports.export("query", query_func.clone())?;
 		default.set("query", query_func)?;
 
