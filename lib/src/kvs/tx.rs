@@ -1180,11 +1180,11 @@ impl Transaction {
 			let tb: String = String::from_utf8(value).unwrap();
 			trace!("scan_lq Found tb: {:?}", tb);
 			res.push(LqValue {
-				nd: crate::sql::uuid::Uuid::from(lq.nd),
+				nd: lq.nd.into(),
 				ns: lq.ns.to_string(),
 				db: lq.db.to_string(),
 				tb,
-				lq: crate::sql::uuid::Uuid::from(lq.lq),
+				lq: lq.lq.into(),
 			});
 		}
 		Ok(res)
@@ -1606,11 +1606,11 @@ impl Transaction {
 				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
 			})?;
 			let lqv = LqValue {
-				nd: crate::sql::uuid::Uuid::from(*nd),
+				nd: (*nd).into(),
 				ns: lq_key.ns.to_string(),
 				db: lq_key.db.to_string(),
 				tb: lq_value,
-				lq: crate::sql::uuid::Uuid::from(lq_key.lq),
+				lq: lq_key.lq.into(),
 			};
 			lqs.push(lqv);
 		}
