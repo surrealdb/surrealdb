@@ -6,25 +6,28 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
+use crate::idx::planner::iterators::{
+	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
+};
 use crate::idx::planner::plan::IndexOption;
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Table, Thing, Value};
-use roaring::RoaringTreemap;
+use crate::sql::{Expression, Operator, Table, Thing, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub(crate) type IteratorRef = u16;
+
 pub(crate) struct QueryExecutor {
 	table: String,
-	pre_match_expression: Option<Expression>,
-	pre_match_entry: Option<FtEntry>,
 	ft_map: HashMap<String, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Expression, FtEntry>,
+	iterators: Vec<Expression>,
 }
 
 impl QueryExecutor {
@@ -33,7 +36,6 @@ impl QueryExecutor {
 		txn: &Transaction,
 		table: &Table,
 		index_map: IndexMap,
-		pre_match_expression: Option<Expression>,
 	) -> Result<Self, Error> {
 		let mut run = txn.lock().await;
 
@@ -82,25 +84,27 @@ impl QueryExecutor {
 			}
 		}
 
-		let mut pre_match_entry = None;
-		if let Some(exp) = &pre_match_expression {
-			pre_match_entry = exp_entries.get(exp).cloned();
-		}
 		Ok(Self {
 			table: table.0.clone(),
-			pre_match_expression,
-			pre_match_entry,
 			ft_map,
 			mr_entries,
 			exp_entries,
+			iterators: Vec::new(),
 		})
 	}
 
-	pub(super) fn pre_match_terms_docs(&self) -> Option<TermsDocs> {
-		if let Some(entry) = &self.pre_match_entry {
-			return Some(entry.0.terms_docs.clone());
-		}
-		None
+	pub(super) fn add_iterator(&mut self, exp: Expression) -> IteratorRef {
+		let ir = self.iterators.len();
+		self.iterators.push(exp);
+		ir as IteratorRef
+	}
+
+	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
+		(ir as usize) < self.iterators.len()
+	}
+
+	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
+		self.iterators.get(ir as usize)
 	}
 
 	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
@@ -112,21 +116,71 @@ impl QueryExecutor {
 		}
 	}
 
+	pub(crate) async fn new_iterator(
+		&self,
+		opt: &Options,
+		ir: IteratorRef,
+		io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		match &io.ix().index {
+			Index::Idx => Self::new_index_iterator(opt, io),
+			Index::Uniq => Self::new_unique_index_iterator(opt, io),
+			Index::Search {
+				..
+			} => self.new_search_index_iterator(ir, io).await,
+		}
+	}
+
+	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
+		if io.op() == &Operator::Equal {
+			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
+				opt,
+				io.ix(),
+				io.value(),
+			)?)));
+		}
+		Ok(None)
+	}
+
+	fn new_unique_index_iterator(
+		opt: &Options,
+		io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		if io.op() == &Operator::Equal {
+			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
+				opt,
+				io.ix(),
+				io.value(),
+			)?)));
+		}
+		Ok(None)
+	}
+
+	async fn new_search_index_iterator(
+		&self,
+		ir: IteratorRef,
+		io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		if let Some(exp) = self.iterators.get(ir as usize) {
+			if let Operator::Matches(_) = io.op() {
+				let ixn = &io.ix().name.0;
+				if let Some(fti) = self.ft_map.get(ixn) {
+					if let Some(fte) = self.exp_entries.get(exp) {
+						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
+						return Ok(Some(ThingIterator::Matches(it)));
+					}
+				}
+			}
+		}
+		Ok(None)
+	}
+
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
 	) -> Result<Value, Error> {
-		// If we find the expression in `pre_match_expression`,
-		// it means that we are using an Iterator::Index
-		// and we are iterating over document that already matches the expression.
-		if let Some(pme) = &self.pre_match_expression {
-			if pme.eq(exp) {
-				return Ok(Value::Bool(true));
-			}
-		}
-
 		// Otherwise, we look for the first possible index options, and evaluate the expression
 		// Does the record id match this executor's table?
 		if thg.tb.eq(&self.table) {
@@ -244,7 +298,7 @@ struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
 	terms: Vec<Option<TermId>>,
-	terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
+	terms_docs: TermsDocs,
 	scorer: Option<BM25Scorer>,
 }
 

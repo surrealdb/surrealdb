@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
@@ -64,7 +63,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							let cur = CursorDoc::new(None, None, v);
+							let cur = v.into();
 							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								v.fetch(ctx, opt, txn, path).await?;
 							}

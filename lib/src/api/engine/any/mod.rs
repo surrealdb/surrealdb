@@ -416,7 +416,7 @@ where
 }
 
 /// A dynamic connection that supports any engine and allows you to pick at runtime
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Any {
 	id: i64,
 	method: Method,

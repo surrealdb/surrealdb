@@ -14,6 +14,8 @@ impl_module_def!(
 	"format" => run,
 	"group" => run,
 	"hour" => run,
+	"max" => run,
+	"min" => run,
 	"mins" => run,
 	"minute" => run,
 	"month" => run,

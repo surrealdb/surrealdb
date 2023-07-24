@@ -24,6 +24,7 @@ use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
+use crate::sql::with::{with, With};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -35,6 +36,7 @@ use std::fmt;
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
+	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -91,13 +93,13 @@ impl SelectStatement {
 		let opt = &opt.new_with_futures(false);
 
 		// Get a query planner
-		let mut planner = QueryPlanner::new(opt, &self.cond);
+		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(t) => {
-					i.ingest(planner.get_iterable(ctx, txn, t).await?);
+					planner.add_iterables(ctx, txn, t, &mut i).await?;
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
@@ -128,9 +130,9 @@ impl SelectStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Add query executors if any
-		if let Some(ex) = planner.finish() {
+		if planner.has_executors() {
 			let mut ctx = Context::new(ctx);
-			ctx.set_query_executors(ex);
+			ctx.set_query_planner(&planner);
 			// Output the results
 			i.output(&ctx, opt, txn, &stm).await
 		} else {
@@ -143,6 +145,9 @@ impl SelectStatement {
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
+		if let Some(ref v) = self.with {
+			write!(f, " {v}")?
+		}
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}
@@ -188,6 +193,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = selects(i)?;
+	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
 	check_split_on_fields(i, &expr, &split)?;
@@ -207,6 +213,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		SelectStatement {
 			expr,
 			what,
+			with,
 			cond,
 			split,
 			group,

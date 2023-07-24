@@ -17,7 +17,7 @@ use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
-use crate::idx::ft::termdocs::TermDocs;
+use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
@@ -320,7 +320,7 @@ impl FtIndex {
 
 	pub(super) fn new_hits_iterator(
 		&self,
-		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
+		terms_docs: TermsDocs,
 	) -> Result<Option<HitsIterator>, Error> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
@@ -342,10 +342,7 @@ impl FtIndex {
 		Ok(None)
 	}
 
-	pub(super) fn new_scorer(
-		&self,
-		terms_docs: Arc<Vec<Option<(TermId, RoaringTreemap)>>>,
-	) -> Result<Option<BM25Scorer>, Error> {
+	pub(super) fn new_scorer(&self, terms_docs: TermsDocs) -> Result<Option<BM25Scorer>, Error> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
 				self.postings.clone(),

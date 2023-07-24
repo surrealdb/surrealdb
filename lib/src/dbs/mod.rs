@@ -3,6 +3,7 @@
 //! glue between the API and the response. In this module we use channels as a transport layer
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 mod auth;
+mod distinct;
 mod executor;
 mod explanation;
 mod iterator;

@@ -22,7 +22,7 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
 pub struct Datetime(#[serde(with = "ts_binary")] pub DateTime<Utc>);
 

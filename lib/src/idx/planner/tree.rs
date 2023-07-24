@@ -19,7 +19,7 @@ impl Tree {
 		opt: &'a Options,
 		txn: &'a Transaction,
 		table: &'a Table,
-		cond: &Option<Cond>,
+		cond: &'a Option<Cond>,
 	) -> Result<Option<(Node, IndexMap)>, Error> {
 		let mut b = TreeBuilder {
 			ctx,

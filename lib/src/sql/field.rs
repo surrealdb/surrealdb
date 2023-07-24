@@ -84,7 +84,7 @@ impl Fields {
 		if let Some(doc) = doc {
 			self.compute_value(ctx, opt, txn, doc, group).await
 		} else {
-			let doc = CursorDoc::new(None, None, &Value::None);
+			let doc = (&Value::None).into();
 			self.compute_value(ctx, opt, txn, &doc, group).await
 		}
 	}

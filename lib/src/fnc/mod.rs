@@ -263,6 +263,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::format" => time::format,
 		"time::group" => time::group,
 		"time::hour" => time::hour,
+		"time::max" => time::max,
+		"time::min" => time::min,
 		"time::minute" => time::minute,
 		"time::month" => time::month,
 		"time::nano" => time::nano,
