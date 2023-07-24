@@ -38,8 +38,7 @@ impl TypedValueParser for CustomEnvFilterParser {
 
 		let inner = NonEmptyStringValueParser::new();
 		let v = inner.parse_ref(cmd, arg, value)?;
-		let filter = filter_from_value(v.as_str())
-		.map_err(|e| {
+		let filter = filter_from_value(v.as_str()).map_err(|e| {
 			let mut err = clap::Error::new(ErrorKind::ValueValidation).with_cmd(cmd);
 			err.insert(ContextKind::Custom, ContextValue::String(e.to_string()));
 			err.insert(

@@ -11,7 +11,7 @@ use opentelemetry::sdk::resource::{
 };
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
-use tracing::{Subscriber, Level};
+use tracing::{Level, Subscriber};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 #[cfg(feature = "has-storage")]
@@ -80,8 +80,8 @@ impl Builder {
 		let registry = registry.with(logs::new(self.filter.clone()));
 
 		// Setup tracing layer
-		let registry = registry.with(traces::new(self.filter.clone()));
-		
+		let registry = registry.with(traces::new(self.filter));
+
 		Box::new(registry)
 	}
 
