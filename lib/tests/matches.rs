@@ -171,6 +171,76 @@ async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(
 	select_where_matches_using_index_and_arrays(true).await
 }
 
+async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<(), Error> {
+	let p = if parallel {
+		"PARALLEL"
+	} else {
+		""
+	};
+	let sql = format!(
+		r"
+		CREATE blog:1 SET content = {{ 'title':'Hello World!', 'content':'Be Bop', 'tags': ['Foo', 'Bãr'] }};
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		SELECT id FROM blog WHERE content @1@ 'Hello Bãr' {p} EXPLAIN;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {p};
+	"
+	);
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						detail: {
+							plan: {
+								index: 'blog_content',
+								operator: '@1@',
+								value: 'Hello Bãr'
+							},
+							table: 'blog',
+						},
+						operation: 'Iterate Index'
+					}
+			]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				content: [
+					'Be Bop',
+					'Foo',
+					'<em>Bãr</em>',
+					'<em>Hello</em> World!'
+				]
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_objects_non_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_objects(false).await
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_objects_with_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_objects(true).await
+}
+
 #[tokio::test]
 async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let sql = r"

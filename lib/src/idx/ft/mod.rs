@@ -195,7 +195,7 @@ impl FtIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		field_content: &Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
@@ -206,12 +206,12 @@ impl FtIndex {
 		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
 			let (dl, tf, ofs) = self
 				.analyzer
-				.extract_terms_with_frequencies_with_offsets(&mut t, tx, field_content)
+				.extract_terms_with_frequencies_with_offsets(&mut t, tx, content)
 				.await?;
 			(dl, tf, Some(ofs))
 		} else {
 			let (dl, tf) =
-				self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
+				self.analyzer.extract_terms_with_frequencies(&mut t, tx, content).await?;
 			(dl, tf, None)
 		};
 
