@@ -1,6 +1,7 @@
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
@@ -526,6 +527,9 @@ pub enum Error {
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
+
+	#[error("Versionstamp in key is corrupted: {0}")]
+	CorruptedVersionstampInKey(#[from] VersionstampError),
 }
 
 impl From<Error> for String {
