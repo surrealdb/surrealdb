@@ -58,9 +58,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(crate::sql::uuid::Uuid(old_node.clone()), old_time.clone())
-		.await
-		.unwrap();
+	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
 	// Set up live query
 	let ses = Session::for_kv()
@@ -100,7 +98,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
-	test.bootstrap_at_time(crate::sql::uuid::Uuid(new_node), new_time.clone()).await.unwrap();
+	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(true, false).await.unwrap();
