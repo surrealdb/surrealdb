@@ -24,7 +24,7 @@ kv-mem = ["dep:echodb", "tokio/time"]
 kv-indxdb = ["dep:indxdb"]
 kv-speedb = ["dep:speedb", "tokio/time"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time"]
-kv-tikv = ["dep:tikv", "dep:tikv-client-proto"]
+kv-tikv = ["dep:tikv"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -105,8 +105,7 @@ sha2 = "0.10.7"
 speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.43"
-tikv = { version = "0.1.0-surreal.2", package = "surrealdb-tikv-client", optional = true }
-tikv-client-proto = { version = "0.1.0-surreal.2", package = "surrealdb-tikv-client-proto", optional = true }
+tikv = { version = "0.2.0-surreal.1", package = "surrealdb-tikv-client", optional = true }
 tokio-util = { version = "0.7.8", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"
