@@ -3,11 +3,10 @@ use crate::err::Error;
 
 const LOG: &str = "surrealdb::node";
 
-// the following init function starts a long-running process
-// that is backed by tokio.
-// It periodicall calls the Datastore's `gc` function currently.
-// This is a blocking call, so we spawn it on a separate thread.
-// This is a temporary solution until we have a proper background
+// The init starts a long-running thread for periodically calling Datastore.tick.
+// Datastore.tick is responsible for running garbage collection and other
+// background tasks.
+// This can be a temporary solution until we have a proper background
 // task system in place.
 pub async fn init() -> Result<(), Error> {
 	let opt = CF.get().unwrap();
