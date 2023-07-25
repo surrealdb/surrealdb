@@ -2482,7 +2482,9 @@ impl Value {
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
+			Value::Function(v) => {
+				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
+			}
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,

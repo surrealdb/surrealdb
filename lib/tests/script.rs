@@ -248,7 +248,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_query_from_script_create() -> Result<(), Error> {
+async fn script_query_from_script() -> Result<(), Error> {
 	let sql = r#"
 		RETURN function() {
 			return await surrealdb.query(`CREATE article:test SET name = "The daily news", issue_number = 3`)
@@ -258,13 +258,28 @@ async fn script_query_from_script_create() -> Result<(), Error> {
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	match res.remove(0).result {
-		Err(Error::InvalidScript {
-			message,
-		}) => {
-			assert_eq!(message, "An exception occurred: Couldn't write to a read only transaction");
-		}
-		_ => panic!("wrote from non-writable exception"),
-	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"{
+				id: article:test,
+				name: "The daily news",
+				issue_number: 3.0
+		}"#,
+	);
+	assert_eq!(tmp, val);
+
+	let sql = r#"
+		SELECT * FROM article
+	"#;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[{
+				id: article:test,
+				name: "The daily news",
+				issue_number: 3.0
+		}]"#,
+	);
 	Ok(())
 }
