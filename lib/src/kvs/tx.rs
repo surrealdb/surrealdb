@@ -2351,8 +2351,8 @@ impl Transaction {
 			Some((_, v)) => {
 				if v.len() == 10 {
 					let mut sl = [0u8; 10];
-					sl.copy_from_slice(&v);
-					return Ok(Some(sl.into()));
+					sl.copy_from_slice(v);
+					return Ok(Some(sl));
 				} else {
 					return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
 				}
