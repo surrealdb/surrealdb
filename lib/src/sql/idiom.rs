@@ -5,8 +5,8 @@ use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, Fmt};
-use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, start, Part};
+use crate::sql::part::{flatten, Next};
 use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::value::Value;
 use md5::Digest;
@@ -180,7 +180,7 @@ impl Display for Idiom {
 /// Used in DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
-	let (i, mut v) = many0(alt((all, index, field)))(i)?;
+	let (i, mut v) = many0(alt((all, flatten, index, field)))(i)?;
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }

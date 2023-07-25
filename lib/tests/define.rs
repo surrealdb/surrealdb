@@ -926,8 +926,8 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 #[tokio::test]
 async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS tags[*] UNIQUE;
-		DEFINE INDEX test ON user COLUMNS tags[*] UNIQUE;
+		DEFINE INDEX test ON user FIELDS tags UNIQUE;
+		DEFINE INDEX test ON user COLUMNS tags UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET tags = ['one', 'two'];
 		CREATE user:2 SET tags = ['two', 'three'];
@@ -949,7 +949,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags[*] UNIQUE' },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -974,8 +974,8 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 #[tokio::test]
 async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, tags[*] UNIQUE;
-		DEFINE INDEX test ON user COLUMNS account, tags[*] UNIQUE;
+		DEFINE INDEX test ON user FIELDS account, tags UNIQUE;
+		DEFINE INDEX test ON user COLUMNS account, tags UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET account = 'apple', tags = ['one', 'two'];
 		CREATE user:2 SET account = 'tesla', tags = ['one', 'two'];
@@ -999,7 +999,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags[*] UNIQUE' },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
 		}",
 	);
 	assert_eq!(tmp, val);

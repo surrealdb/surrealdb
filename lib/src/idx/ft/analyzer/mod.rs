@@ -7,7 +7,7 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::{Array, Value};
+use crate::sql::Value;
 use filter::Filter;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -64,7 +64,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &Vec<Array>,
+		field_content: &Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -101,7 +101,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &Vec<Array>,
+		field_content: &Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -137,13 +137,11 @@ impl Analyzer {
 
 	fn analyze_content(
 		&self,
-		field_content: &Vec<Array>,
+		field_content: &Vec<Value>,
 		tks: &mut Vec<Tokens>,
 	) -> Result<(), Error> {
-		for a in field_content {
-			for v in &a.0 {
-				self.analyze_value(v, tks)?;
-			}
+		for v in field_content {
+			self.analyze_value(v, tks)?;
 		}
 		Ok(())
 	}
