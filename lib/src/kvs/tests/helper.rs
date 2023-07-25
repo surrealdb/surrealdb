@@ -14,11 +14,11 @@ pub struct TestContext {
 impl TestContext {
 	pub(crate) async fn bootstrap_at_time(
 		&self,
-		node_id: &Uuid,
+		node_id: crate::sql::uuid::Uuid,
 		time: Timestamp,
 	) -> Result<(), Error> {
 		let mut tx = self.db.transaction(true, true).await?;
-		let archived = self.db.register_remove_and_archive(&mut tx, node_id, time).await?;
+		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
 		let mut tx = self.db.transaction(true, true).await?;
 		self.db.remove_archived(&mut tx, archived).await?;

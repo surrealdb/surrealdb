@@ -19,7 +19,6 @@ use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::{QueryType, Response, Session};
 use surrealdb::opt::auth::Root;
@@ -27,6 +26,7 @@ use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
+use surrealdb::{channel, sql};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use uuid::Uuid;
@@ -209,7 +209,7 @@ impl Rpc {
 		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &id {
 				trace!("Removing live query: {}", key);
-				live_queries.push(*key);
+				live_queries.push(sql::Uuid::from(*key));
 				return false;
 			}
 			true

@@ -6,7 +6,7 @@ mod mem {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		Datastore::new_full("memory", node_id).await.unwrap()
+		Datastore::new_full("memory", sql::Uuid::from(node_id)).await.unwrap()
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -36,7 +36,9 @@ mod rocksdb {
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("rocksdb:{path}").as_str(), node_id).await.unwrap()
+		Datastore::new_full(format!("rocksdb:{path}").as_str(), sql::Uuid::from(node_id))
+			.await
+			.unwrap()
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {

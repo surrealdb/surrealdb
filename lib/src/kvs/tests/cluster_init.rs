@@ -22,13 +22,13 @@ async fn expired_nodes_are_garbage_collected() {
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(&old_node, old_time.clone()).await.unwrap();
+	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
 		value: 456,
 	};
-	test.bootstrap_at_time(&new_node, new_time.clone()).await.unwrap();
+	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -58,7 +58,9 @@ async fn expired_nodes_get_live_queries_archived() {
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(&old_node, old_time.clone()).await.unwrap();
+	test.bootstrap_at_time(crate::sql::uuid::Uuid(old_node.clone()), old_time.clone())
+		.await
+		.unwrap();
 
 	// Set up live query
 	let ses = Session::for_kv()
@@ -67,12 +69,12 @@ async fn expired_nodes_get_live_queries_archived() {
 	let table = "my_table";
 	let lq = LiveStatement {
 		id: sql::Uuid(Uuid::parse_str("da60fa34-902d-4110-b810-7d435267a9f8").unwrap()),
-		node: old_node,
+		node: crate::sql::uuid::Uuid::from(old_node),
 		expr: Fields(vec![sql::Field::All], false),
 		what: Table(sql::Table::from(table)),
 		cond: None,
 		fetch: None,
-		archived: Some(old_node),
+		archived: Some(crate::sql::uuid::Uuid::from(old_node)),
 	};
 	let ctx = context::Context::background();
 	let (sender, _) = channel::unbounded();
@@ -81,7 +83,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_db(ses.db())
 		.with_auth(Arc::new(Default::default()))
 		.with_live(true)
-		.with_id(old_node.clone());
+		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
 	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
 	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
@@ -98,7 +100,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
-	test.bootstrap_at_time(&new_node, new_time.clone()).await.unwrap();
+	test.bootstrap_at_time(crate::sql::uuid::Uuid(new_node), new_time.clone()).await.unwrap();
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -132,7 +134,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
-	test.bootstrap_at_time(&node_id, time).await.unwrap();
+	test.bootstrap_at_time(crate::sql::uuid::Uuid::from(node_id), time).await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
@@ -140,7 +142,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_delete),
-		node: node_id,
+		node: sql::uuid::Uuid::from(node_id),
 		expr: Fields(vec![sql::Field::All], false),
 		what: Table(sql::Table::from(table)),
 		cond: None,
@@ -155,7 +157,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let live_query_to_keep = Uuid::parse_str("adea762a-17db-4810-a4a2-c54babfdaf23").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_keep),
-		node: node_id,
+		node: sql::Uuid::from(node_id),
 		expr: Fields(vec![sql::Field::All], false),
 		what: Table(sql::Table::from(table)),
 		cond: None,
@@ -171,7 +173,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// Subject: Perform the action we are testing
 	trace!("Garbage collecting dead sessions");
-	test.db.garbage_collect_dead_session(&[live_query_to_delete.clone()]).await.unwrap();
+	test.db.garbage_collect_dead_session(&[sql::Uuid::from(live_query_to_delete)]).await.unwrap();
 
 	// Validate
 	trace!("Validating live queries");
@@ -181,6 +183,6 @@ async fn single_live_queries_are_garbage_collected() {
 	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
 	let scanned = tx.all_lq(&node_id).await.unwrap();
 	assert_eq!(scanned.len(), 1);
-	assert_eq!(&scanned[0].lq, &live_query_to_keep);
+	assert_eq!(&scanned[0].lq, &sql::Uuid::from(live_query_to_keep));
 	tx.commit().await.unwrap();
 }

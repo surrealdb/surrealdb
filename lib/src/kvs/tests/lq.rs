@@ -29,10 +29,10 @@ async fn scan_node_lq() {
 	let res = tx.scan_ndlq(&node_id, 100).await.unwrap();
 	assert_eq!(res.len(), 1);
 	for val in res {
-		assert_eq!(val.nd, node_id);
+		assert_eq!(val.nd.0, node_id.clone());
 		assert_eq!(val.ns, namespace);
 		assert_eq!(val.db, database);
-		assert_eq!(val.lq, live_query_id);
+		assert_eq!(val.lq.0, live_query_id.clone());
 	}
 
 	tx.commit().await.unwrap();

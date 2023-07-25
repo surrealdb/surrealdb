@@ -5,7 +5,6 @@ use crate::dbs::Notification;
 use crate::err::Error;
 use channel::Sender;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
@@ -16,7 +15,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// Current Node ID
-	id: Option<Uuid>,
+	id: Option<uuid::Uuid>,
 	/// Currently selected NS
 	ns: Option<Arc<str>>,
 	/// Currently selected DB
@@ -96,7 +95,7 @@ impl Options {
 	/// instances when there is doubt.
 	pub fn with_required(
 		mut self,
-		node_id: Uuid,
+		node_id: uuid::Uuid,
 		ns: Option<Arc<str>>,
 		db: Option<Arc<str>>,
 		auth: Arc<Auth>,
@@ -110,7 +109,7 @@ impl Options {
 
 	/// Set the Node ID for subsequent code which uses
 	/// this `Options`, with support for chaining.
-	pub fn with_id(mut self, id: Uuid) -> Self {
+	pub fn with_id(mut self, id: uuid::Uuid) -> Self {
 		self.id = Some(id);
 		self
 	}
@@ -346,7 +345,7 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Get current Node ID
-	pub fn id(&self) -> Result<Uuid, Error> {
+	pub fn id(&self) -> Result<uuid::Uuid, Error> {
 		self.id.ok_or(Error::Unreachable)
 	}
 

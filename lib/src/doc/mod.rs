@@ -20,6 +20,7 @@ mod update; // Processes a UPDATE statement for this document
 
 mod allow; // Checks whether the query can access this document
 mod alter; // Modifies and updates the fields in this document
+mod changefeeds; // Processes any change feeds relevant for this document
 mod check; // Checks whether the WHERE clauses matches this document
 mod clean; // Ensures records adhere to the table schema
 mod edges; // Attempts to store the edge data for this document
