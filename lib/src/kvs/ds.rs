@@ -448,6 +448,46 @@ impl Datastore {
 		Ok::<Vec<Hb>, Error>(dead)
 	}
 
+	pub async fn tick(&self) -> Result<(), Error> {
+		self.save_timestamp_for_versionstamp().await?;
+		self.garbage_collect_stale_change_feeds().await?;
+		// TODO Add LQ GC
+		// TODO Add Node GC?
+		Ok(())
+	}
+
+	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
+	pub async fn save_timestamp_for_versionstamp(&self) -> Result<(), Error> {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map_err(|e| Error::Internal(e.to_string()))?;
+		let ts = now.as_secs();
+
+		let mut tx = self.transaction(true, false).await?;
+		let nses = tx.all_ns().await?;
+		let nses = nses.as_ref();
+		for ns in nses {
+			let ns = ns.name.as_str();
+			let dbs = tx.all_db(ns).await?;
+			let dbs = dbs.as_ref();
+			for db in dbs {
+				let db = db.name.as_str();
+				tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?;
+			}
+		}
+		tx.commit().await?;
+		Ok(())
+	}
+
+	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
+	pub async fn garbage_collect_stale_change_feeds(&self) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		// TODO Make gc batch size/limit configurable?
+		crate::cf::gc_all(&mut tx, Some(100)).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive.
 	// This is the preferred way of creating heartbeats inside the database, so try to use this.

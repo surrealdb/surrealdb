@@ -2,15 +2,25 @@ use crate::err::Error;
 use crate::key::change;
 use crate::kvs::Transaction;
 use crate::vs;
+use crate::vs::Versionstamp;
 use std::str;
 
 // gc_all deletes all change feed entries that are older than the given watermark.
 #[allow(unused)]
-pub async fn gc_all(tx: &mut Transaction, watermark: u64, limit: Option<u32>) -> Result<(), Error> {
+pub async fn gc_all(tx: &mut Transaction, limit: Option<u32>) -> Result<(), Error> {
+	let now = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_err(|e| Error::Internal(e.to_string()))?;
+	gc_all_at(tx, now.as_secs(), limit).await?;
+	Ok(())
+}
+
+#[allow(unused)]
+pub async fn gc_all_at(tx: &mut Transaction, ts: u64, limit: Option<u32>) -> Result<(), Error> {
 	let nses = tx.all_ns().await?;
 	let nses = nses.as_ref();
 	for ns in nses {
-		gc_ns(tx, ns.name.as_str(), watermark, limit).await?;
+		gc_ns(tx, ns.name.as_str(), limit, ts).await?;
 	}
 	Ok(())
 }
@@ -20,13 +30,29 @@ pub async fn gc_all(tx: &mut Transaction, watermark: u64, limit: Option<u32>) ->
 pub async fn gc_ns(
 	tx: &mut Transaction,
 	ns: &str,
-	watermark: u64,
 	limit: Option<u32>,
+	ts: u64,
 ) -> Result<(), Error> {
 	let dbs = tx.all_db(ns).await?;
 	let dbs = dbs.as_ref();
 	for db in dbs {
-		gc_db(tx, ns, db.name.as_str(), watermark, limit).await?;
+		match &db.changefeed {
+			None => continue,
+			Some(cf) => {
+				if cf.expiry.is_zero() {
+					continue;
+				}
+				let c = ts - cf.expiry.as_secs();
+				let watermark_vs =
+					tx.get_versionstamp_from_timestamp(ts, ns, db.name.as_str(), true).await?;
+				match watermark_vs {
+					Some(watermark_vs) => {
+						gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
+					}
+					None => {}
+				}
+			}
+		}
 	}
 	Ok(())
 }
@@ -36,11 +62,11 @@ pub async fn gc_db(
 	tx: &mut Transaction,
 	ns: &str,
 	db: &str,
-	watermark: u64,
+	watermark: Versionstamp,
 	limit: Option<u32>,
 ) -> Result<(), Error> {
 	let beg: Vec<u8> = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
-	let end = change::prefix_ts(ns, db, vs::u64_to_versionstamp(watermark));
+	let end = change::prefix_ts(ns, db, watermark);
 
 	let limit = limit.unwrap_or(100);
 
