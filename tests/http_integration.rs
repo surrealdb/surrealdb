@@ -353,20 +353,18 @@ async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
 		.default_headers(headers)
 		.build()?;
 
-	// Test WebSocket upgrade
-	{
-		let res = client
-			.get(url)
-			.header(header::CONNECTION, "Upgrade")
-			.header(header::UPGRADE, "websocket")
-			.header(header::SEC_WEBSOCKET_VERSION, "13")
-			.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
-			.send()
-			.await?
-			.upgrade()
-			.await;
-		assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
-	}
+	let res = client
+		.get(url)
+		.header(header::CONNECTION, "Upgrade")
+		.header(header::UPGRADE, "websocket")
+		.header(header::SEC_WEBSOCKET_VERSION, "13")
+		.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+		.send()
+		.await?
+		.upgrade()
+		.await;
+	assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+	let ws = res.unwrap();
 
 	Ok(())
 }
