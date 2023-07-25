@@ -24,7 +24,7 @@ use js::Module;
 /// Insert query data into the context,
 ///
 /// # Safety
-/// Caller must ensure that the runtime from which `Ctx` originitates cannot outlife 'a.
+/// Caller must ensure that the runtime from which `Ctx` originates cannot outlife 'a.
 pub unsafe fn create_query_data<'a>(
 	context: &'a Context<'a>,
 	opt: &'a Options,
@@ -87,8 +87,8 @@ pub async fn run(
 			// Get the context global object
 			let global = ctx.globals();
 
-			// SAFETY: This is safe because the runtime only lifes for the duration of the this
-			// function, all of which context, opt, txn and doc are valid.
+			// SAFETY: This is safe because the runtime only lifes for the duration of this
+			// function. For the entire duration of which context, opt, txn and doc are valid.
 			unsafe{ create_query_data(context,opt,txn,doc,&ctx) }?;
 			// Register the surrealdb module as a global object
 			global.set(
