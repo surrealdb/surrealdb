@@ -575,14 +575,8 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
-				abort,
-				..
-			}) if abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
-			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
-				raft_entry_too_large,
-				..
-			}) if raft_entry_too_large.is_some() => Error::TxTooLarge,
+			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
+			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
 	}
