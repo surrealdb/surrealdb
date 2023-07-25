@@ -12,6 +12,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::async_with;
+use js::object::Property;
 use js::prelude::Promise;
 use js::prelude::Rest;
 use js::prelude::This;
@@ -44,7 +45,10 @@ pub unsafe fn create_query_data<'a>(
 			doc,
 		},
 	)?;
-	ctx.globals().set(QUERY_DATA_PROP_NAME, object)?;
+
+	// make the query data not enumerable, writeable, or configurable.
+	let prop = Property::from(object);
+	ctx.globals().set(QUERY_DATA_PROP_NAME, prop)?;
 
 	Ok(())
 }
