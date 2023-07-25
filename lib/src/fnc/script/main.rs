@@ -48,7 +48,7 @@ pub unsafe fn create_query_data<'a>(
 
 	// make the query data not enumerable, writeable, or configurable.
 	let prop = Property::from(object);
-	ctx.globals().set(QUERY_DATA_PROP_NAME, prop)?;
+	ctx.globals().prop(QUERY_DATA_PROP_NAME, prop)?;
 
 	Ok(())
 }
