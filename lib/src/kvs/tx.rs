@@ -2319,19 +2319,16 @@ impl Transaction {
 		let end = crate::key::database::ts::suffix(ns, db);
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
-		match latest_ts_pair {
-			Some((k, _)) => {
-				let k = crate::key::database::ts::Ts::decode(&k)?;
-				let latest_ts = k.ts;
-				if latest_ts >= ts {
-					return Err(Error::Internal(
-						"ts is less than or equal to the latest ts".to_string(),
-					));
-				}
+		if let Some((k, _)) = latest_ts_pair {
+			let k = crate::key::database::ts::Ts::decode(&k)?;
+			let latest_ts = k.ts;
+			if latest_ts >= ts {
+				return Err(Error::Internal(
+					"ts is less than or equal to the latest ts".to_string(),
+				));
 			}
-			None => {}
 		}
-		let _ = self.set(ts_key, vs).await?;
+		self.set(ts_key, vs).await?;
 		Ok(())
 	}
 
@@ -2347,17 +2344,14 @@ impl Transaction {
 		let end = ts_key.encode()?;
 		let ts_pairs = self.getr(start..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
-		match latest_ts_pair {
-			Some((_, v)) => {
-				if v.len() == 10 {
-					let mut sl = [0u8; 10];
-					sl.copy_from_slice(v);
-					return Ok(Some(sl));
-				} else {
-					return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
-				}
+		if let Some((_, v)) = latest_ts_pair {
+			if v.len() == 10 {
+				let mut sl = [0u8; 10];
+				sl.copy_from_slice(v);
+				return Ok(Some(sl));
+			} else {
+				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
 			}
-			None => {}
 		}
 		Ok(None)
 	}

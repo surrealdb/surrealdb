@@ -45,11 +45,8 @@ pub async fn gc_ns(
 				let c = ts - cf.expiry.as_secs();
 				let watermark_vs =
 					tx.get_versionstamp_from_timestamp(ts, ns, db.name.as_str(), true).await?;
-				match watermark_vs {
-					Some(watermark_vs) => {
-						gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
-					}
-					None => {}
+				if let Some(watermark_vs) = watermark_vs {
+					gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
 				}
 			}
 		}
