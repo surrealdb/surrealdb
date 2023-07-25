@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    types: [ labeled ]
 
 # Setting the shell option, it will run 'bash --noprofile --norc -eo pipefail {0}'
 defaults:
@@ -14,6 +16,7 @@ jobs:
 
   build-static:
     name: Build static Linux binary
+    if: ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -28,6 +31,7 @@ jobs:
 
   build-docker:
     name: Build Docker image
+    if: ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -42,6 +46,7 @@ jobs:
 
   build-native-linux:
     name: Build native Linux binary
+    if: ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
