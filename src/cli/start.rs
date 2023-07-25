@@ -9,6 +9,7 @@ use crate::env;
 use crate::err::Error;
 use crate::iam;
 use crate::net::{self, client_ip::ClientIp};
+use crate::node;
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
