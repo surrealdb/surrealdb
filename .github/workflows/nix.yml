@@ -16,7 +16,7 @@ jobs:
 
   build-static:
     name: Build static Linux binary
-    if: ${{ github.event.label.name == 'nix' }}
+    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -31,7 +31,7 @@ jobs:
 
   build-docker:
     name: Build Docker image
-    if: ${{ github.event.label.name == 'nix' }}
+    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -46,7 +46,7 @@ jobs:
 
   build-native-linux:
     name: Build native Linux binary
-    if: ${{ github.event.label.name == 'nix' }}
+    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
