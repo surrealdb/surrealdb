@@ -15,8 +15,6 @@ pub struct Cf<'a> {
 	_b: u8,
 	pub db: &'a str,
 	_d: u8,
-	_e: u8,
-	_f: u8,
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
 	// Use the to_u64_be function to convert it to a u128.
 	pub vs: [u8; 10],
@@ -49,7 +47,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
 #[allow(unused)]
-pub fn ts_prefix(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
+pub fn prefix_ts(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'#']);
 	k.extend_from_slice(&vs);
@@ -60,7 +58,7 @@ pub fn ts_prefix(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 #[allow(unused)]
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'#', 0x00]);
+	k.extend_from_slice(&[b'#']);
 	k
 }
 
@@ -80,9 +78,7 @@ impl<'a> Cf<'a> {
 			ns,
 			_b: b'*',
 			db,
-			_d: b'!',
-			_e: b'c',
-			_f: b'f',
+			_d: b'#',
 			vs,
 			_c: b'*',
 			tb,

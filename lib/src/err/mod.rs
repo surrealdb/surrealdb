@@ -1,6 +1,7 @@
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
@@ -530,6 +531,9 @@ pub enum Error {
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
+
+	#[error("Versionstamp in key is corrupted: {0}")]
+	CorruptedVersionstampInKey(#[from] VersionstampError),
 }
 
 impl From<Error> for String {
@@ -575,14 +579,8 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
-				abort,
-				..
-			}) if abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
-			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
-				raft_entry_too_large,
-				..
-			}) if raft_entry_too_large.is_some() => Error::TxTooLarge,
+			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
+			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
 	}

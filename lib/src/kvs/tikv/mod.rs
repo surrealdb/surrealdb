@@ -3,8 +3,10 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 use tikv::CheckLevel;
+use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
 pub struct Datastore {
@@ -92,6 +94,71 @@ impl Transaction {
 		self.tx.commit().await?;
 		// Continue
 		Ok(())
+	}
+	/// Obtain a new change timestamp for a key
+	/// which is replaced with the current timestamp when the transaction is committed.
+	/// NOTE: This should be called when composing the change feed entries for this transaction,
+	/// which should be done immediately before the transaction commit.
+	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	#[allow(unused)]
+	pub async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Get the current timestamp
+		let res = self.tx.get_current_timestamp().await?;
+		let ver = res.version();
+		let verbytes = u64_to_versionstamp(ver);
+		// Write the timestamp to the "last-write-timestamp" key
+		// to ensure that no other transactions can commit with older timestamps.
+		let k: Key = key.into();
+		if lock {
+			let prev = self.tx.get(k.clone()).await?;
+			if let Some(prev) = prev {
+				let slice = prev.as_slice();
+				let res: Result<[u8; 10], Error> = match slice.try_into() {
+					Ok(ba) => Ok(ba),
+					Err(e) => Err(Error::Ds(e.to_string())),
+				};
+				let array = res?;
+				let prev = try_to_u64_be(array)?;
+				if prev >= ver {
+					return Err(Error::TxFailure);
+				}
+			}
+
+			self.tx.put(k, verbytes.to_vec()).await?;
+		}
+		// Return the uint64 representation of the timestamp as the result
+		Ok(u64_to_versionstamp(ver))
+	}
+	/// Obtain a new key that is suffixed with the change timestamp
+	pub async fn get_versionstamped_key<K>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		let ts = self.get_timestamp(ts_key, false).await?;
+		let mut k: Vec<u8> = prefix.into();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.into());
+		Ok(k)
 	}
 	/// Check if a key exists
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>

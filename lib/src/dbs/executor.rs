@@ -59,6 +59,11 @@ impl<'a> Executor<'a> {
 		}
 	}
 
+	/// Commits the transaction if it is local.
+	/// This function takes two additional parameters that are not present in the underlying kvs::Transaction::commit() function:
+	/// ns: The namespace of the transaction
+	/// db: The database of the transaction
+	/// These parameters are used updating the changefeed.
 	/// # Return
 	///
 	/// An `Err` if the transaction could not be commited;
@@ -72,14 +77,20 @@ impl<'a> Executor<'a> {
 					// Cancel and ignore any error because the error flag was
 					// already set
 					let _ = txn.cancel().await;
-				} else if let Err(e) = txn.commit().await {
-					// Transaction failed to commit
-					//
-					// TODO: Not all commit errors definitively mean
-					// the transaction didn't commit. Detect that and tell
-					// the user.
-					self.err = true;
-					return Err(e);
+				} else {
+					let r = match txn.complete_changes(false).await {
+						Ok(_) => txn.commit().await,
+						r => r,
+					};
+					if let Err(e) = r {
+						// Transaction failed to commit
+						//
+						// TODO: Not all commit errors definitively mean
+						// the transaction didn't commit. Detect that and tell
+						// the user.
+						self.err = true;
+						return Err(e);
+					}
 				}
 			}
 		}

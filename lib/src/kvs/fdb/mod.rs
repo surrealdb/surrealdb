@@ -5,6 +5,7 @@ use futures::TryStreamExt;
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::vs::{u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 use std::sync::Arc;
 // We use it to work-around the fact that foundationdb-rs' Transaction
@@ -15,6 +16,7 @@ use std::sync::Arc;
 // self or the fdb-rs Transaction it contains.
 //
 // We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
+use foundationdb::options::MutationType;
 use futures::lock::Mutex;
 use once_cell::sync::Lazy;
 
@@ -193,7 +195,30 @@ impl Transaction {
 			.map(|v| v.as_ref().map(|v| v.to_vec()))
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FoundationDB: {}", e)))
 	}
-	/// Insert or update a key in the database
+	/// Obtain a new change timestamp for a key
+	/// which is replaced with the current timestamp when the transaction is committed.
+	/// NOTE: This should be called when composing the change feed entries for this transaction,
+	/// which should be done immediately before the transaction commit.
+	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	#[allow(unused)]
+	pub async fn get_timestamp(&mut self) -> Result<Versionstamp, Error> {
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
+		let res = tx
+			.get_read_version()
+			.await
+			.map_err(|e| Error::Tx(format!("Unable to get read version from FDB: {}", e)))?;
+		let res: u64 = res.try_into().unwrap();
+		let res = u64_to_versionstamp(res);
+
+		// Return the uint64 representation of the timestamp as the result
+		Ok(res)
+	}
+	/// Inserts or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -293,6 +318,49 @@ impl Transaction {
 			(Err(e), _) => return Err(e),
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Return result
+		Ok(())
+	}
+	// Sets the value for a versionstamped key prefixed with the user-supplied key.
+	pub async fn set_versionstamped_key<K, V>(
+		&mut self,
+		prefix: K,
+		suffix: K,
+		val: V,
+	) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Set the key
+		let mut k: Vec<u8> = prefix.into();
+		let pos = k.len();
+		let pos: u32 = pos.try_into().unwrap();
+		// The incomplete versionstamp is 10 bytes long.
+		// See the documentation of SetVersionstampedKey for more information.
+		let mut ts_placeholder: Vec<u8> =
+			vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+		k.append(&mut ts_placeholder);
+		k.append(&mut suffix.into());
+		// FDB's SetVersionstampedKey expects the parameter, the start position of the 10-bytes placeholder
+		// to be replaced by the versionstamp, to be in little endian.
+		let mut posbs: Vec<u8> = pos.to_le_bytes().to_vec();
+		k.append(&mut posbs);
+
+		let key: &[u8] = &k[..];
+		let val: Vec<u8> = val.into();
+		let val: &[u8] = &val[..];
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
+		tx.atomic_op(key, val, MutationType::SetVersionstampedKey);
 		// Return result
 		Ok(())
 	}

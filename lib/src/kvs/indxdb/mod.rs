@@ -3,6 +3,7 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -103,6 +104,68 @@ impl Transaction {
 		let res = self.tx.get(key.into()).await?;
 		// Return result
 		Ok(res)
+	}
+	/// Obtain a new change timestamp for a key
+	/// which is replaced with the current timestamp when the transaction is committed.
+	/// NOTE: This should be called when composing the change feed entries for this transaction,
+	/// which should be done immediately before the transaction commit.
+	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	#[allow(unused)]
+	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Write the timestamp to the "last-write-timestamp" key
+		// to ensure that no other transactions can commit with older timestamps.
+		let k: Key = key.into();
+		let prev = self.tx.get(k.clone()).await?;
+		let ver = match prev {
+			Some(prev) => {
+				let slice = prev.as_slice();
+				let res: Result<[u8; 10], Error> = match slice.try_into() {
+					Ok(ba) => Ok(ba),
+					Err(e) => Err(Error::Ds(e.to_string())),
+				};
+				let array = res?;
+				let prev: u64 = try_to_u64_be(array)?;
+				prev + 1
+			}
+			None => 1,
+		};
+
+		let verbytes = u64_to_versionstamp(ver);
+
+		self.tx.put(k, verbytes.to_vec()).await?;
+		// Return the uint64 representation of the timestamp as the result
+		Ok(verbytes)
+	}
+	/// Obtain a new key that is suffixed with the change timestamp
+	pub async fn get_versionstamped_key<K>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		let ts = self.get_timestamp(ts_key).await?;
+		let mut k: Vec<u8> = prefix.into();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.into());
+		Ok(k)
 	}
 	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
