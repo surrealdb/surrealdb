@@ -8,8 +8,8 @@ use crate::api::engine::local::Db;
 use crate::api::opt::Endpoint;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
 use crate::dbs::Session;
+use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
@@ -86,7 +86,7 @@ pub(crate) fn router(
 	spawn_local(async move {
 		let url = address.endpoint;
 		let configured_root = match address.auth {
-			Level::Kv => Some(Root {
+			Level::Root => Some(Root {
 				username: &address.username,
 				password: &address.password,
 			}),
@@ -109,7 +109,7 @@ pub(crate) fn router(
 				}
 
 				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs.auth(configured_root.is_some())
+				kvs.with_auth_enabled(configured_root.is_some())
 			}
 			Err(error) => {
 				let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -121,19 +121,10 @@ pub(crate) fn router(
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
-
-		let mut session = if kvs.is_auth_enabled() {
-			// If auth is enabled, lock down the database
-			Session::default()
-		} else {
-			// If auth is disabled, the database should be open
-			warn!("Authentication is disabled");
-			Session::for_kv()
-		};
+		let mut session = Session::default();
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &mut session, &mut vars).await
-			{
+			match super::router(route.request, &kvs, &mut session, &mut vars).await {
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;
 				}

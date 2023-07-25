@@ -11,7 +11,7 @@ use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
+use crate::iam::Level;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
 use std::collections::HashSet;

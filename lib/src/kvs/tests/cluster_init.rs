@@ -67,7 +67,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	test.bootstrap_at_time(old_node.clone(), old_time.clone()).await.unwrap();
 
 	// Set up live query
-	let ses = Session::for_kv()
+	let ses = Session::owner()
 		.with_ns(test.test_str("testns").as_str())
 		.with_db(test.test_str("testdb").as_str());
 	let table = "my_table";

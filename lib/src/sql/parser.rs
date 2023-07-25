@@ -1,5 +1,6 @@
 use crate::err::Error;
-use crate::sql::error::Error::{Field, Group, Order, Parser, Split};
+use crate::iam::Error as IamError;
+use crate::sql::error::Error::{Field, Group, Order, Parser, Role, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
 use crate::sql::thing::Thing;
@@ -76,6 +77,8 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 					line: locate(input, e).1,
 					field: f,
 				},
+				// There was an error parsing the ROLE
+				Role(_, role) => Error::IamError(IamError::InvalidRole(role)),
 			}),
 			_ => unreachable!(),
 		},

@@ -7,7 +7,7 @@ use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Tls;
 use crate::api::Endpoint;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::net::SocketAddr;
 use url::Url;
 

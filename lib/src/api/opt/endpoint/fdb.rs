@@ -6,7 +6,7 @@ use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::path::Path;
 use url::Url;
 
@@ -59,7 +59,7 @@ where
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (path, root) = self;
 		let mut endpoint = IntoEndpoint::<FDb>::into_endpoint(path.as_ref())?;
-		endpoint.auth = Level::Kv;
+		endpoint.auth = Level::Root;
 		endpoint.username = root.username.to_owned();
 		endpoint.password = root.password.to_owned();
 		Ok(endpoint)

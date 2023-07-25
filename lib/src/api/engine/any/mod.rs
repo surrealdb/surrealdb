@@ -114,7 +114,7 @@ use crate::api::opt::Tls;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::marker::PhantomData;
 use url::Url;
 
@@ -238,7 +238,7 @@ where
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, root) = self;
 		let mut endpoint = IntoEndpoint::into_endpoint(address.into())?;
-		endpoint.auth = Level::Kv;
+		endpoint.auth = Level::Root;
 		endpoint.username = root.username.to_owned();
 		endpoint.password = root.password.to_owned();
 		Ok(endpoint)
@@ -508,10 +508,10 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>
 		response_type: PhantomData,
 	}
 }
-
-#[cfg(test)]
+#[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use super::*;
+	use crate::opt::auth::Root;
 	use crate::sql::{test::Parse, value::Value};
 
 	#[tokio::test]
@@ -521,8 +521,8 @@ mod tests {
 		db.use_ns("N").use_db("D").await.unwrap();
 		// The client has access to everything
 		assert!(
-			db.query("INFO FOR KV").await.unwrap().check().is_ok(),
-			"client should have access to KV"
+			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
+			"client should have access to ROOT"
 		);
 		assert!(
 			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
@@ -534,7 +534,7 @@ mod tests {
 		);
 
 		// There are no users in the datastore
-		let mut res = db.query("INFO FOR KV").await.unwrap();
+		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
 		assert_eq!(users, Value::parse("[{}]"), "there should be no users in the system");
@@ -552,7 +552,7 @@ mod tests {
 
 		// The client needs to sign in before it can access anything
 		assert!(
-			db.query("INFO FOR KV").await.unwrap().check().is_err(),
+			db.query("INFO FOR ROOT").await.unwrap().check().is_err(),
 			"client should not have access to KV"
 		);
 		assert!(
@@ -565,11 +565,11 @@ mod tests {
 		);
 
 		// It can sign in
-		assert!(db.signin(creds).await.is_ok(), "client should not be able to sign in");
+		assert!(db.signin(creds).await.is_ok(), "client should be able to sign in");
 
 		// After the sign in, the client has access to everything
 		assert!(
-			db.query("INFO FOR KV").await.unwrap().check().is_ok(),
+			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
 			"client should have access to KV"
 		);
 		assert!(

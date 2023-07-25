@@ -10,7 +10,7 @@ pub struct Us<'a> {
 	pub user: &'a str,
 }
 
-pub fn new<'a>(user: &'a str) -> Us<'a> {
+pub fn new(user: &str) -> Us<'_> {
 	Us::new(user)
 }
 

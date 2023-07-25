@@ -12,7 +12,10 @@ use axum::{
 use futures_util::future::BoxFuture;
 use http::{header, request::Parts, StatusCode};
 use hyper::{Request, Response};
-use surrealdb::{dbs::Session, iam::verify::{token, basic}};
+use surrealdb::{
+	dbs::Session,
+	iam::verify::{basic, token},
+};
 use tower_http::{
 	auth::AsyncAuthorizeRequest,
 	request_id::RequestId,

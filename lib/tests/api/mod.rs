@@ -35,7 +35,11 @@ async fn invalidate() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	db.invalidate().await.unwrap();
 	let error = db.create::<Option<RecordId>>(("user", "john")).await.unwrap_err();
-	assert!(error.to_string().contains("You don't have permission to perform this query type"));
+	assert!(
+		error.to_string().contains("Not enough permissions to perform this action"),
+		"Unexpected error: {:?}",
+		error
+	);
 }
 
 #[tokio::test]

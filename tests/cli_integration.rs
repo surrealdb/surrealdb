@@ -1,4 +1,4 @@
-// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli_integration -- --nocapture
 
 mod common;
 
@@ -38,7 +38,7 @@ async fn all_commands() {
 	// Commands without credentials when auth is disabled, should succeed
 	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
 	let creds = ""; // Anonymous user
-	// Create a record
+				// Create a record
 	{
 		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
 		assert_eq!(
@@ -238,29 +238,26 @@ async fn with_anon_auth() {
 	{
 		let args = format!("{sql_args} {creds}");
 		let input = "";
-		assert!(
-			common::run(&args).input(input).output().is_ok(),
-			"anonymous user should be able to query"
-		);
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
 	}
 
 	// Can query /sql over HTTP
 	{
 		let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 		let input = "";
-		assert!(
-			common::run(&args).input(input).output().is_ok(),
-			"anonymous user should be able to query"
-		);
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
 	}
 
 	// Can't do exports
 	{
 		let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
-
+		let output = common::run(&args).output();
 		assert!(
-			common::run(&args).output().err().unwrap().contains("Forbidden"),
-			"anonymous user shouldn't be able to export"
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to export: {:?}",
+			output
 		);
 	}
 
@@ -268,19 +265,25 @@ async fn with_anon_auth() {
 	{
 		let tmp_file = common::tmp_file("exported.surql");
 		let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
-
+		let output = common::run(&args).output();
 		assert!(
-			common::run(&args).output().err().unwrap().contains("Forbidden"),
-			"anonymous user shouldn't be able to import"
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to import: {:?}",
+			output
 		);
 	}
 
 	// Can't do backups
 	{
 		let args = format!("backup {creds} http://{addr}");
+		let output = common::run(&args).output();
 		// TODO(sgirones): Once backups are functional, update this test.
-		// assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to backup");
-		assert!(common::run(&args).output().is_ok(), "anonymous user can do backups");
+		// assert!(
+		// 	output.unwrap_err().contains("Forbidden"),
+		// 	"anonymous user shouldn't be able to backup",
+		// 	output
+		// );
+		assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
 	}
 }
 
