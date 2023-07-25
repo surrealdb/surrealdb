@@ -18,44 +18,28 @@ impl ModuleDef for Package {
 
 	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Object::new(ctx.clone())?;
-		exports.export(
-			"functions",
-			impl_module_def!(ctx, "surrealdb", "functions", (functions::Package),),
-		)?;
-		default.set(
-			"functions",
-			impl_module_def!(ctx, "surrealdb", "functions", (functions::Package),),
-		)?;
-		exports.export(
-			"version",
-			impl_module_def!(ctx, "surrealdb", "version", (env!("CARGO_PKG_VERSION")),),
-		)?;
-		default.set(
-			"version",
-			impl_module_def!(ctx, "surrealdb", "version", (env!("CARGO_PKG_VERSION")),),
-		)?;
+		let package = impl_module_def!(ctx, "surrealdb", "functions", (functions::Package),);
+		exports.export("functions", package.clone())?;
+		default.set("functions", package)?;
+
+		let version = impl_module_def!(ctx, "surrealdb", "version", (env!("CARGO_PKG_VERSION")),);
+		exports.export("version", version.clone())?;
+		default.set("version", version)?;
 
 		let query_func = Function::new(ctx.clone(), query::js_query)?.with_name("query")?;
 		exports.export("query", query_func.clone())?;
 		default.set("query", query_func)?;
-		exports.export(
+
+		let query_object = impl_module_def!(
+			ctx,
+			"surrealdb",
 			"Query",
-			impl_module_def!(
-				ctx,
-				"surrealdb",
-				"Query",
-				(Class::<query::Query>::create_constructor(ctx)),
-			),
+			(Class::<query::Query>::create_constructor(ctx)),
 		)?;
-		default.set(
-			"Query",
-			impl_module_def!(
-				ctx,
-				"surrealdb",
-				"Query",
-				(Class::<query::Query>::create_constructor(ctx)),
-			),
-		)?;
+
+		exports.export("Query", query_object.clone())?;
+		default.set("Query", query_object)?;
+
 		exports.export("default", default)?;
 		Ok(())
 	}

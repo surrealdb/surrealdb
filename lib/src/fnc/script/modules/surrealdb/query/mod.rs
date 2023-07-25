@@ -13,7 +13,6 @@ use crate::{
 
 #[allow(clippy::module_inception)]
 mod classes;
-//mod txn;
 
 pub use classes::Query;
 
