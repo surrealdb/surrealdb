@@ -192,3 +192,94 @@ async fn script_function_module_os() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn script_query_from_script_select() -> Result<(), Error> {
+	let sql = r#"
+		CREATE test SET name = "a", number = 0;
+		CREATE test SET name = "b", number = 1;
+		CREATE test SET name = "c", number = 2;
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+
+	// direct query
+	dbs.execute(sql, &ses, None).await?;
+	let sql = r#"
+		RETURN function(){
+			return await surrealdb.query(`SELECT number FROM test WHERE name = $name`,{
+				name: "b"
+			})
+		}
+	"#;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				number: 1
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	// indirect query
+	let sql = r#"
+		RETURN function(){
+			let query = new surrealdb.Query(`SELECT number FROM test WHERE name = $name`);
+			query.bind("name","c")
+			return await surrealdb.query(query);
+		}
+	"#;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				number: 2
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_query_from_script() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return await surrealdb.query(`CREATE article:test SET name = "The daily news", issue_number = 3`)
+		}
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"{
+				id: article:test,
+				name: "The daily news",
+				issue_number: 3.0
+		}"#,
+	);
+	assert_eq!(tmp, val);
+
+	let sql = r#"
+		SELECT * FROM article
+	"#;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[{
+				id: article:test,
+				name: "The daily news",
+				issue_number: 3.0
+		}]"#,
+	);
+	Ok(())
+}

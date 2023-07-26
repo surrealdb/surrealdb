@@ -6,7 +6,7 @@ macro_rules! create_test_context{
 		let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
 		js::async_with!(ctx => |$ctx|{
-			super::register($ctx).unwrap();
+			super::register(&$ctx).unwrap();
 			$($t)*
 		}).await;
 	};
@@ -15,7 +15,7 @@ macro_rules! create_test_context{
 #[tokio::test]
 async fn fetch() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("fetch()").catch(ctx);
+		let res = ctx.eval::<(),_>("fetch()").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
@@ -30,7 +30,7 @@ async fn fetch() {
 #[tokio::test]
 async fn request() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("new Request('http://a',{ body: 'test' })").catch(ctx);
+		let res = ctx.eval::<(),_>("new Request('http://a',{ body: 'test' })").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
@@ -45,7 +45,7 @@ async fn request() {
 #[tokio::test]
 async fn response() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("new Response('test')").catch(ctx);
+		let res = ctx.eval::<(),_>("new Response('test')").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
@@ -60,7 +60,7 @@ async fn response() {
 #[tokio::test]
 async fn headers() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("new Headers({ foo: 'bar'})").catch(ctx);
+		let res = ctx.eval::<(),_>("new Headers({ foo: 'bar'})").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
@@ -75,7 +75,7 @@ async fn headers() {
 #[tokio::test]
 async fn blob() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("new Blob()").catch(ctx);
+		let res = ctx.eval::<(),_>("new Blob()").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
@@ -90,7 +90,7 @@ async fn blob() {
 #[tokio::test]
 async fn form_data() {
 	create_test_context!(ctx => {
-		let res = ctx.eval::<(),_>("new FormData()").catch(ctx);
+		let res = ctx.eval::<(),_>("new FormData()").catch(&ctx);
 		match res{
 			Ok(_) => panic!("didn't return an error when it should"),
 			Err(CaughtError::Exception(e)) => {
