@@ -53,6 +53,22 @@ pub enum Oracle {
 
 impl Oracle {
 	#[allow(unused)]
+	pub fn systime_counter() -> Self {
+		Oracle::SysTimeCounter(SysTimeCounter {
+			state: Mutex::new((0, 0)),
+			stale: (0, 0),
+		})
+	}
+
+	#[allow(unused)]
+	pub fn epoch_counter() -> Self {
+		Oracle::EpochCounter(EpochCounter {
+			epoch: 0,
+			counter: AtomicU64::new(0),
+		})
+	}
+
+	#[allow(unused)]
 	pub fn now(&mut self) -> Versionstamp {
 		match self {
 			Oracle::SysTimeCounter(sys) => sys.now(),
@@ -141,10 +157,7 @@ mod tests {
 
 	#[test]
 	fn systime_counter() {
-		let mut o = Oracle::SysTimeCounter(SysTimeCounter {
-			state: Mutex::new((0, 0)),
-			stale: (0, 0),
-		});
+		let mut o = Oracle::systime_counter();
 		let a = to_u128_be(o.now());
 		let b = to_u128_be(o.now());
 		assert!(a < b, "a = {}, b = {}", a, b);
@@ -152,10 +165,7 @@ mod tests {
 
 	#[test]
 	fn epoch_counter() {
-		let mut o1 = Oracle::EpochCounter(EpochCounter {
-			epoch: 0,
-			counter: AtomicU64::new(0),
-		});
+		let mut o1 = Oracle::epoch_counter();
 		let a = to_u128_be(o1.now());
 		let b = to_u128_be(o1.now());
 		assert!(a < b, "a = {}, b = {}", a, b);

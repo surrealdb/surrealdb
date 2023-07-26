@@ -16,8 +16,10 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
 use channel::Sender;
+use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -46,6 +48,7 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
+	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -409,6 +412,21 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
+		let use_nonmonontonic = match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => true,
+			_ => false,
+		};
+		let nonmonotonic_vs = if use_nonmonontonic {
+			self.get_non_monotonic_versionstamp().await
+		} else {
+			Err(Error::Internal(
+				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
+			))
+		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -429,7 +447,11 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.get_timestamp(key, lock).await,
+			} => {
+				// TODO Make it configurable to use monotonic or non-monotonic versionstamps
+				// v.get_timestamp(key, lock).await
+				nonmonotonic_vs
+			}
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
@@ -445,6 +467,29 @@ impl Transaction {
 		}
 	}
 
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamp(&mut self) -> Result<Versionstamp, Error> {
+		Ok(self.vso.lock().await.now())
+	}
+
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamped_key<K>(
+		&mut self,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		let prefix: Key = prefix.into();
+		let suffix: Key = suffix.into();
+		let ts = self.get_non_monotonic_versionstamp().await?;
+		let mut k: Vec<u8> = prefix.clone();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.clone());
+		Ok(k)
+	}
+
 	/// Insert or update a key in the datastore.
 	#[allow(unused_variables)]
 	pub async fn set_versionstamped_key<K, V>(
@@ -455,11 +500,21 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
+		let nonmonotonic_key = match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => self.get_non_monotonic_versionstamped_key(prefix.clone(), suffix.clone()).await,
+			_ => Err(Error::Internal(
+				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
+			)),
+		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -490,7 +545,10 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				// TODO Maybe make it configurable to use monotonic or non-monotonic versionstamps
+				// at the database definition time?
+				// let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				let k = nonmonotonic_key?;
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-fdb")]
