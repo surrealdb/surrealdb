@@ -2320,7 +2320,7 @@ impl Transaction {
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
-			let k = crate::key::database::ts::Ts::decode(&k)?;
+			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
 				return Err(Error::Internal(
