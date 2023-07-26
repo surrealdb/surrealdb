@@ -79,7 +79,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		cond: None,
 		fetch: None,
 		archived: Some(crate::sql::uuid::Uuid::from(old_node.0)),
-		auth: Auth::Kv,
+		auth: Some(Auth::Kv),
 	};
 	let ctx = context::Context::background();
 	let (sender, _) = channel::unbounded();

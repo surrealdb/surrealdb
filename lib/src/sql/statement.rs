@@ -139,14 +139,6 @@ impl Statement {
 		}
 	}
 
-	/// Augment the statement with context and options that need to be known up-front
-	pub(crate) fn augment(&self, ctx: &Context, options: &Options) -> Result<Statement, Error> {
-		match self {
-			Self::Live(v) => v.augment(ctx, options),
-			_ => Ok(self.clone()),
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

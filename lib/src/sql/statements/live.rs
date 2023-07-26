@@ -11,7 +11,7 @@ use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::value::Value;
-use crate::sql::{Statement, Uuid};
+use crate::sql::Uuid;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -41,22 +41,6 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
-	pub(crate) fn augment(&self, ctx: &Context, opt: &Options) -> Result<Statement, Error> {
-		let copy = LiveStatement {
-			id: self.id.clone(),
-			node: self.node,
-			expr: self.expr.clone(),
-			what: self.what.clone(),
-			cond: self.cond.clone(),
-			fetch: self.fetch.clone(),
-			archived: self.archived.clone(),
-			auth: Some(opt.auth.as_ref().clone()),
-		};
-		Ok(Statement::Live(copy))
-	}
-}
-
-impl LiveStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -72,11 +56,17 @@ impl LiveStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Check that auth has been set
-		self.auth.as_ref().ok_or(Error::UnknownAuth)?;
+		let self_override = LiveStatement {
+			auth: match self.auth {
+				Some(ref auth) => Some(auth.clone()),
+				None => Some(opt.auth.as_ref().clone()),
+			},
+			..self.clone()
+		};
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
-		match self.what.compute(ctx, opt, txn, doc).await? {
+		match self_override.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
 				// Clone the current statement
 				let mut stm = self.clone();
@@ -99,7 +89,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.clone().into())
+		Ok(self_override.id.clone().into())
 	}
 
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
