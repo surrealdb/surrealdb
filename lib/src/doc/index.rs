@@ -5,6 +5,7 @@ use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
+use crate::idx::vector::balltree::BallTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::sql::array::Array;
 use crate::sql::index::Index;
@@ -61,6 +62,14 @@ impl<'a> Document<'a> {
 						hl,
 						order,
 					} => ic.index_full_text(&mut run, az, *order, sc, *hl).await?,
+					Index::BallTree {
+						dimension,
+						bucket_size,
+						doc_ids_order,
+					} => {
+						ic.index_ball_tree(&mut run, *dimension, *bucket_size, *doc_ids_order)
+							.await?
+					}
 				};
 			}
 		}
@@ -328,5 +337,30 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(run, self.rid).await?;
 		}
 		ft.finish(run).await
+	}
+
+	async fn index_ball_tree(
+		&self,
+		run: &mut kvs::Transaction,
+		dimension: u16,
+		bucket_size: u16,
+		docids_order: u32,
+	) -> Result<(), Error> {
+		let ikb = IndexKeyBase::new(self.opt, self.ix);
+		let mut bt = BallTreeIndex::new(
+			run,
+			ikb,
+			dimension,
+			bucket_size,
+			docids_order,
+			BTreeStoreType::Write,
+		)
+		.await?;
+		if let Some(n) = &self.n {
+			bt.index_document(run, self.rid, n).await?;
+		} else {
+			bt.remove_document(run, self.rid).await?;
+		}
+		bt.finish(run).await
 	}
 }

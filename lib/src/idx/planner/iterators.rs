@@ -1,6 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::{DocId, NO_DOC_ID};
+use crate::idx::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::key;

@@ -1,5 +1,4 @@
 pub(crate) mod analyzer;
-pub(crate) mod docids;
 mod doclength;
 mod highlighter;
 mod offsets;
@@ -10,8 +9,8 @@ pub(crate) mod terms;
 
 use crate::err::Error;
 use crate::idx::btree::store::BTreeStoreType;
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;

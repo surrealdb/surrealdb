@@ -1467,6 +1467,29 @@ mod tests {
 	}
 
 	#[test]
+	fn check_define_ball_tree_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col BALLTREE DIMENSION 4";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::BallTree {
+					dimension: 4,
+					bucket_size: 40,
+					doc_ids_order: 100,
+				},
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col BALLTREE DIMENSION 4 BUCKET_SIZE 40 DOCIDS_ORDER 100"
+		);
+	}
+
+	#[test]
 	fn define_database_with_changefeed() {
 		let sql = "DEFINE DATABASE mydatabase CHANGEFEED 1h";
 		let res = database(sql);

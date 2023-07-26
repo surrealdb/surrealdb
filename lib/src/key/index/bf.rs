@@ -1,5 +1,5 @@
 //! Stores Term/Doc frequency
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use derive::Key;
 use serde::{Deserialize, Serialize};

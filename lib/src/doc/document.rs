@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;

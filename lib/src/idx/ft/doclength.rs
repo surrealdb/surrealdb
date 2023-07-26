@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
 use crate::idx::btree::{BTree, Payload, Statistics};
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;

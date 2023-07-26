@@ -154,6 +154,9 @@ impl<'a> TreeBuilder<'a> {
 						(false, None, None)
 					}
 				}
+				Index::BallTree {
+					..
+				} => todo!(),
 			};
 			if found {
 				let io = IndexOption::new(

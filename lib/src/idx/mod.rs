@@ -1,12 +1,14 @@
 pub mod bkeys;
 pub mod btree;
+pub(crate) mod docids;
 pub(crate) mod ft;
 pub(crate) mod planner;
+pub(crate) mod vector;
 
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::btree::NodeId;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::Bd;

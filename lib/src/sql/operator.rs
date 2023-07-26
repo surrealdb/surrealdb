@@ -6,6 +6,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::character::complete::u16 as uint16;
 use nom::character::complete::u8 as uint8;
 use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,8 @@ pub enum Operator {
 	//
 	Outside,
 	Intersects,
+	//
+	Knn(u16), // <{k}>
 }
 
 impl Default for Operator {
@@ -137,6 +140,7 @@ impl fmt::Display for Operator {
 					f.write_str("@@")
 				}
 			}
+			Self::Knn(k) => write!(f, "<{}>", k),
 		}
 	}
 }
@@ -194,6 +198,7 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			map(char('<'), |_| Operator::LessThan),
 			map(tag(">="), |_| Operator::MoreThanOrEqual),
 			map(char('>'), |_| Operator::MoreThan),
+			knn,
 		)),
 		alt((
 			map(tag("**"), |_| Operator::Pow),
@@ -254,10 +259,16 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 
 pub fn matches(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('@')(i)?;
-	// let (i, reference) = opt(|i| uint8(i))(i)?;
 	let (i, reference) = opt(uint8)(i)?;
 	let (i, _) = char('@')(i)?;
 	Ok((i, Operator::Matches(reference)))
+}
+
+pub fn knn(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = char('<')(i)?;
+	let (i, k) = uint16(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, Operator::Knn(k)))
 }
 
 #[cfg(test)]
@@ -286,5 +297,14 @@ mod tests {
 	fn matches_with_invalid_reference() {
 		let res = matches("@256@");
 		assert!(res.is_err());
+	}
+
+	#[test]
+	fn test_knn() {
+		let res = knn("<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5));
 	}
 }

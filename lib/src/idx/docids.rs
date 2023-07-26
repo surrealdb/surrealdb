@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub(crate) type DocId = u64;
+pub type DocId = u64;
 
-pub(crate) const NO_DOC_ID: u64 = u64::MAX;
+pub const NO_DOC_ID: u64 = u64::MAX;
 
-pub(crate) struct DocIds {
+pub struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -24,7 +24,7 @@ pub(crate) struct DocIds {
 }
 
 impl DocIds {
-	pub(super) async fn new(
+	pub(crate) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
@@ -77,7 +77,7 @@ impl DocIds {
 
 	/// Returns the doc_id for the given doc_key.
 	/// If the doc_id does not exists, a new one is created, and associated to the given key.
-	pub(super) async fn resolve_doc_id(
+	pub(crate) async fn resolve_doc_id(
 		&mut self,
 		tx: &mut Transaction,
 		doc_key: Key,
@@ -96,7 +96,7 @@ impl DocIds {
 		Ok(Resolved::New(doc_id))
 	}
 
-	pub(super) async fn remove_doc(
+	pub(crate) async fn remove_doc(
 		&mut self,
 		tx: &mut Transaction,
 		doc_key: Key,
@@ -118,7 +118,7 @@ impl DocIds {
 		}
 	}
 
-	pub(super) async fn get_doc_key(
+	pub(crate) async fn get_doc_key(
 		&self,
 		tx: &mut Transaction,
 		doc_id: DocId,
@@ -131,12 +131,12 @@ impl DocIds {
 		}
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
 		let updated = self.store.lock().await.finish(tx).await?;
 		if self.updated || updated {
 			let state = State {
@@ -170,20 +170,20 @@ impl State {
 }
 
 #[derive(Debug, PartialEq)]
-pub(super) enum Resolved {
+pub(crate) enum Resolved {
 	New(DocId),
 	Existing(DocId),
 }
 
 impl Resolved {
-	pub(super) fn doc_id(&self) -> &DocId {
+	pub(crate) fn doc_id(&self) -> &DocId {
 		match self {
 			Resolved::New(doc_id) => doc_id,
 			Resolved::Existing(doc_id) => doc_id,
 		}
 	}
 
-	pub(super) fn was_existing(&self) -> bool {
+	pub(crate) fn was_existing(&self) -> bool {
 		match self {
 			Resolved::New(_) => false,
 			Resolved::Existing(_) => true,
@@ -194,7 +194,7 @@ impl Resolved {
 #[cfg(test)]
 mod tests {
 	use crate::idx::btree::store::BTreeStoreType;
-	use crate::idx::ft::docids::{DocIds, Resolved};
+	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
 

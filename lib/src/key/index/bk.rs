@@ -1,5 +1,5 @@
 //! Stores the term list for doc_ids
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 

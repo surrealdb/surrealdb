@@ -5,7 +5,8 @@ use crate::sql::ident::{ident, Ident};
 use crate::sql::scoring::{scoring, Scoring};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::u32;
+use nom::character::complete::u16 as uint16;
+use nom::character::complete::u32 as uint32;
 use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -22,6 +23,11 @@ pub enum Index {
 		hl: bool,
 		sc: Scoring,
 		order: u32,
+	},
+	BallTree {
+		dimension: u16,
+		bucket_size: u16,
+		doc_ids_order: u32,
 	},
 }
 
@@ -48,12 +54,23 @@ impl fmt::Display for Index {
 				}
 				Ok(())
 			}
+			Self::BallTree {
+				dimension,
+				bucket_size,
+				doc_ids_order,
+			} => {
+				write!(
+					f,
+					"BALLTREE DIMENSION {} BUCKET_SIZE {} DOCIDS_ORDER {}",
+					dimension, bucket_size, doc_ids_order
+				)
+			}
 		}
 	}
 }
 
 pub fn index(i: &str) -> IResult<&str, Index> {
-	alt((unique, search, non_unique))(i)
+	alt((unique, search, ball_tree, non_unique))(i)
 }
 
 pub fn non_unique(i: &str) -> IResult<&str, Index> {
@@ -78,7 +95,7 @@ pub fn order(i: &str) -> IResult<&str, u32> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("ORDER")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, order) = u32(i)?;
+	let (i, order) = uint32(i)?;
 	Ok((i, order))
 }
 
@@ -102,6 +119,45 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 			sc,
 			hl,
 			order: o.unwrap_or(100),
+		},
+	))
+}
+
+pub fn dimension(i: &str) -> IResult<&str, u16> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("DIMENSION")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, dim) = uint16(i)?;
+	Ok((i, dim))
+}
+
+pub fn bucket_size(i: &str) -> IResult<&str, u16> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("BUCKET_SIZE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, bucket_size) = uint16(i)?;
+	Ok((i, bucket_size))
+}
+
+pub fn doc_ids_order(i: &str) -> IResult<&str, u32> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("DOCIDS_ORDER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, order) = uint32(i)?;
+	Ok((i, order))
+}
+
+pub fn ball_tree(i: &str) -> IResult<&str, Index> {
+	let (i, _) = tag_no_case("BALLTREE")(i)?;
+	let (i, dimension) = dimension(i)?;
+	let (i, bucket_size) = opt(bucket_size)(i)?;
+	let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
+	Ok((
+		i,
+		Index::BallTree {
+			dimension,
+			bucket_size: bucket_size.unwrap_or(40),
+			doc_ids_order: doc_ids_order.unwrap_or(100),
 		},
 	))
 }

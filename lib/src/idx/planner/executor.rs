@@ -1,7 +1,7 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::btree::store::BTreeStoreType;
-use crate::idx::ft::docids::{DocId, DocIds};
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
@@ -128,6 +128,11 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(ir, io).await,
+			Index::BallTree {
+				..
+			} => {
+				todo!()
+			}
 		}
 	}
 

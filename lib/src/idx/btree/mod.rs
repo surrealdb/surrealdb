@@ -46,7 +46,7 @@ impl State {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub(super) struct Statistics {
+pub(crate) struct Statistics {
 	pub(super) keys_count: u64,
 	pub(super) max_depth: u32,
 	pub(super) nodes_count: u32,

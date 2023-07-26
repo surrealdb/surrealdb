@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::termdocs::TermsDocs;
