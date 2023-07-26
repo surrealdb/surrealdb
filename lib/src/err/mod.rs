@@ -167,6 +167,20 @@ pub enum Error {
 		message: String,
 	},
 
+	/// The size of the vector is incorrect
+	#[error("Incorrect vector dimension ({current}). Expected a vector of {expected} dimension.")]
+	InvalidVectorDimension {
+		current: usize,
+		expected: usize,
+	},
+
+	/// The size of the vector is incorrect
+	#[error("The vector element ({current}) is not a number.")]
+	InvalidVectorType {
+		current: String,
+		expected: &'static str,
+	},
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,

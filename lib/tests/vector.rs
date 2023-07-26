@@ -31,7 +31,7 @@ async fn select_where_ball_tree_knn() -> Result<(), Error> {
 						detail: {
 							plan: {
 								index: 'bt_vec',
-								operator: '<1,2>',
+								operator: '<2>',
 								value: [2,3,4,5]
 							},
 							table: 'vec',
@@ -40,7 +40,7 @@ async fn select_where_ball_tree_knn() -> Result<(), Error> {
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -54,6 +54,6 @@ async fn select_where_ball_tree_knn() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

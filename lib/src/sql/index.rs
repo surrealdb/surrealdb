@@ -10,6 +10,7 @@ use nom::character::complete::u32 as uint32;
 use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Index {
@@ -26,9 +27,35 @@ pub enum Index {
 	},
 	BallTree {
 		dimension: u16,
+		vector_type: VectorType,
 		bucket_size: u16,
 		doc_ids_order: u32,
 	},
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum VectorType {
+	I64,
+	F64,
+	U32,
+	I32,
+	F32,
+	U16,
+	I16,
+}
+
+impl Display for VectorType {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			VectorType::I64 => f.write_str("I64"),
+			VectorType::F64 => f.write_str("F64"),
+			VectorType::U32 => f.write_str("U32"),
+			VectorType::I32 => f.write_str("I32"),
+			VectorType::F32 => f.write_str("F32"),
+			VectorType::U16 => f.write_str("U16"),
+			VectorType::I16 => f.write_str("I16"),
+		}
+	}
 }
 
 impl Default for Index {
@@ -37,7 +64,7 @@ impl Default for Index {
 	}
 }
 
-impl fmt::Display for Index {
+impl Display for Index {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Idx => Ok(()),
@@ -56,13 +83,14 @@ impl fmt::Display for Index {
 			}
 			Self::BallTree {
 				dimension,
+				vector_type,
 				bucket_size,
 				doc_ids_order,
 			} => {
 				write!(
 					f,
-					"BALLTREE DIMENSION {} BUCKET_SIZE {} DOCIDS_ORDER {}",
-					dimension, bucket_size, doc_ids_order
+					"BALLTREE DIMENSION {} TYPE {}  BUCKET_SIZE {} DOCIDS_ORDER {}",
+					dimension, vector_type, bucket_size, doc_ids_order
 				)
 			}
 		}
@@ -123,6 +151,20 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 	))
 }
 
+pub fn vector_type(i: &str) -> IResult<&str, VectorType> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case("TYPE")(i)?;
+	alt((
+		map(tag_no_case("I64"), |_| VectorType::I64),
+		map(tag_no_case("F64"), |_| VectorType::F64),
+		map(tag_no_case("U32"), |_| VectorType::U32),
+		map(tag_no_case("I32"), |_| VectorType::I32),
+		map(tag_no_case("F32"), |_| VectorType::F32),
+		map(tag_no_case("U16"), |_| VectorType::U16),
+		map(tag_no_case("I16"), |_| VectorType::I16),
+	))(i)
+}
+
 pub fn dimension(i: &str) -> IResult<&str, u16> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("DIMENSION")(i)?;
@@ -150,12 +192,14 @@ pub fn doc_ids_order(i: &str) -> IResult<&str, u32> {
 pub fn ball_tree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("BALLTREE")(i)?;
 	let (i, dimension) = dimension(i)?;
+	let (i, vector_type) = opt(vector_type)(i)?;
 	let (i, bucket_size) = opt(bucket_size)(i)?;
 	let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
 	Ok((
 		i,
 		Index::BallTree {
 			dimension,
+			vector_type: vector_type.unwrap_or(VectorType::F64),
 			bucket_size: bucket_size.unwrap_or(40),
 			doc_ids_order: doc_ids_order.unwrap_or(100),
 		},

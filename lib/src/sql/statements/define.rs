@@ -1374,6 +1374,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::index::VectorType;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::Part;
 
@@ -1477,6 +1478,7 @@ mod tests {
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::BallTree {
+					vector_type: VectorType::F64,
 					dimension: 4,
 					bucket_size: 40,
 					doc_ids_order: 100,

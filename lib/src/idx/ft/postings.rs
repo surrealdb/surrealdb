@@ -1,10 +1,10 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use crate::idx::btree::store::{BTreeNodeStore, KeyProvider};
 use crate::idx::btree::{BTree, Statistics};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::idx::{btree, IndexKeyBase, SerdeState, StoreType};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -23,7 +23,7 @@ impl Postings {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
-		store_type: BTreeStoreType,
+		store_type: StoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bp_key(None);
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -91,9 +91,9 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
+	use crate::idx::StoreType;
 	use crate::kvs::Datastore;
 	use test_log::test;
 
@@ -104,14 +104,10 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		// Check empty state
-		let mut p = Postings::new(
-			&mut tx,
-			IndexKeyBase::default(),
-			DEFAULT_BTREE_ORDER,
-			BTreeStoreType::Write,
-		)
-		.await
-		.unwrap();
+		let mut p =
+			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER, StoreType::Write)
+				.await
+				.unwrap();
 
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 
@@ -122,14 +118,10 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut p = Postings::new(
-			&mut tx,
-			IndexKeyBase::default(),
-			DEFAULT_BTREE_ORDER,
-			BTreeStoreType::Write,
-		)
-		.await
-		.unwrap();
+		let mut p =
+			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER, StoreType::Write)
+				.await
+				.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
 		assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));

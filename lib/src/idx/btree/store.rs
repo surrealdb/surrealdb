@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::bkeys::BKeys;
 use crate::idx::btree::{Node, NodeId};
-use crate::idx::IndexKeyBase;
+use crate::idx::{IndexKeyBase, StoreType};
 use crate::kvs::{Key, Transaction};
 use lru::LruCache;
 use serde::de::DeserializeOwned;
@@ -10,13 +10,6 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-#[derive(Clone, Copy)]
-pub enum BTreeStoreType {
-	Write,
-	Read,
-	Traversal,
-}
 
 pub enum BTreeNodeStore<BK>
 where
@@ -34,15 +27,11 @@ impl<BK> BTreeNodeStore<BK>
 where
 	BK: BKeys + Serialize + DeserializeOwned,
 {
-	pub fn new(
-		keys: KeyProvider,
-		store_type: BTreeStoreType,
-		read_size: usize,
-	) -> Arc<Mutex<Self>> {
+	pub fn new(keys: KeyProvider, store_type: StoreType, read_size: usize) -> Arc<Mutex<Self>> {
 		Arc::new(Mutex::new(match store_type {
-			BTreeStoreType::Write => Self::Write(BTreeWriteCache::new(keys)),
-			BTreeStoreType::Read => Self::Read(BTreeReadCache::new(keys, read_size)),
-			BTreeStoreType::Traversal => Self::Traversal(keys),
+			StoreType::Write => Self::Write(BTreeWriteCache::new(keys)),
+			StoreType::Read => Self::Read(BTreeReadCache::new(keys, read_size)),
+			StoreType::Traversal => Self::Traversal(keys),
 		}))
 	}
 

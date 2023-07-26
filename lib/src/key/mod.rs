@@ -45,6 +45,7 @@
 /// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
 /// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
 /// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
+/// crate::key::index::vp                /*{ns}*{db}*{tb}+{ix}!vp{id}
 /// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 ///
 /// crate::key::change                   /*{ns}*{db}#{ts}

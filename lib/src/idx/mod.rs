@@ -21,12 +21,20 @@ use crate::key::index::bp::Bp;
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
+use crate::key::index::vp::Vp;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
 use roaring::RoaringTreemap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::sync::Arc;
+
+#[derive(Clone, Copy)]
+pub enum StoreType {
+	Write,
+	Read,
+	Traversal,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct IndexKeyBase {
@@ -171,6 +179,17 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			term_id,
+		)
+		.into()
+	}
+
+	fn new_vp_key(&self, doc_id: DocId) -> Key {
+		Vp::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
 		)
 		.into()
 	}

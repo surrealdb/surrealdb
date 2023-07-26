@@ -3,9 +3,8 @@ use crate::dbs::Options;
 use crate::dbs::{Level, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
-use crate::idx::IndexKeyBase;
+use crate::idx::{IndexKeyBase, StoreType};
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -52,16 +51,9 @@ impl AnalyzeStatement {
 						hl,
 					} => {
 						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(
-							&mut run,
-							az,
-							ikb,
-							*order,
-							sc,
-							*hl,
-							BTreeStoreType::Traversal,
-						)
-						.await?;
+						let ft =
+							FtIndex::new(&mut run, az, ikb, *order, sc, *hl, StoreType::Traversal)
+								.await?;
 						ft.statistics(&mut run).await?
 					}
 					_ => {

@@ -8,7 +8,6 @@ pub(super) mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
-use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::doclength::DocLengths;
@@ -18,7 +17,7 @@ use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
-use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::idx::{btree, IndexKeyBase, SerdeState, StoreType};
 use crate::kvs::{Key, Transaction};
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -96,7 +95,7 @@ impl FtIndex {
 		order: u32,
 		scoring: &Scoring,
 		hl: bool,
-		store_type: BTreeStoreType,
+		store_type: StoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -447,10 +446,9 @@ impl HitsIterator {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::IndexKeyBase;
+	use crate::idx::{IndexKeyBase, StoreType};
 	use crate::kvs::{Datastore, Transaction};
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
@@ -495,12 +493,12 @@ mod tests {
 
 	pub(super) async fn tx_fti(
 		ds: &Datastore,
-		store_type: BTreeStoreType,
+		store_type: StoreType,
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
 	) -> (Transaction, FtIndex) {
-		let write = matches!(store_type, BTreeStoreType::Write);
+		let write = matches!(store_type, StoreType::Write);
 		let mut tx = ds.transaction(write, false).await.unwrap();
 		let fti = FtIndex::new(
 			&mut tx,
@@ -509,7 +507,7 @@ mod tests {
 			order,
 			&Scoring::bm25(),
 			hl,
-			BTreeStoreType::Write,
+			StoreType::Write,
 		)
 		.await
 		.unwrap();
@@ -534,8 +532,7 @@ mod tests {
 
 		{
 			// Add one document
-			let (mut tx, mut fti) =
-				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
+			let (mut tx, mut fti) = tx_fti(&ds, StoreType::Write, &az, btree_order, false).await;
 			fti.index_document(&mut tx, &doc1, &vec![Value::from("hello the world")])
 				.await
 				.unwrap();
@@ -544,15 +541,14 @@ mod tests {
 
 		{
 			// Add two documents
-			let (mut tx, mut fti) =
-				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
+			let (mut tx, mut fti) = tx_fti(&ds, StoreType::Write, &az, btree_order, false).await;
 			fti.index_document(&mut tx, &doc2, &vec![Value::from("a yellow hello")]).await.unwrap();
 			fti.index_document(&mut tx, &doc3, &vec![Value::from("foo bar")]).await.unwrap();
 			finish(tx, fti).await;
 		}
 
 		{
-			let (mut tx, fti) = tx_fti(&ds, BTreeStoreType::Read, &az, btree_order, false).await;
+			let (mut tx, fti) = tx_fti(&ds, StoreType::Read, &az, btree_order, false).await;
 			// Check the statistics
 			let statistics = fti.statistics(&mut tx).await.unwrap();
 			assert_eq!(statistics.terms.keys_count, 7);
@@ -582,12 +578,11 @@ mod tests {
 
 		{
 			// Reindex one document
-			let (mut tx, mut fti) =
-				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
+			let (mut tx, mut fti) = tx_fti(&ds, StoreType::Write, &az, btree_order, false).await;
 			fti.index_document(&mut tx, &doc3, &vec![Value::from("nobar foo")]).await.unwrap();
 			finish(tx, fti).await;
 
-			let (mut tx, fti) = tx_fti(&ds, BTreeStoreType::Read, &az, btree_order, false).await;
+			let (mut tx, fti) = tx_fti(&ds, StoreType::Read, &az, btree_order, false).await;
 
 			// We can still find 'foo'
 			let (hits, scr) = search(&mut tx, &fti, "foo").await;
@@ -604,8 +599,7 @@ mod tests {
 
 		{
 			// Remove documents
-			let (mut tx, mut fti) =
-				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
+			let (mut tx, mut fti) = tx_fti(&ds, StoreType::Write, &az, btree_order, false).await;
 			fti.remove_document(&mut tx, &doc1).await.unwrap();
 			fti.remove_document(&mut tx, &doc2).await.unwrap();
 			fti.remove_document(&mut tx, &doc3).await.unwrap();
@@ -613,7 +607,7 @@ mod tests {
 		}
 
 		{
-			let (mut tx, fti) = tx_fti(&ds, BTreeStoreType::Read, &az, btree_order, false).await;
+			let (mut tx, fti) = tx_fti(&ds, StoreType::Read, &az, btree_order, false).await;
 			let (hits, _) = search(&mut tx, &fti, "hello").await;
 			assert!(hits.is_none());
 			let (hits, _) = search(&mut tx, &fti, "foo").await;
@@ -637,8 +631,7 @@ mod tests {
 
 			let btree_order = 5;
 			{
-				let (mut tx, mut fti) =
-					tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, hl).await;
+				let (mut tx, mut fti) = tx_fti(&ds, StoreType::Write, &az, btree_order, hl).await;
 				fti.index_document(
 					&mut tx,
 					&doc1,
@@ -671,7 +664,7 @@ mod tests {
 			}
 
 			{
-				let (mut tx, fti) = tx_fti(&ds, BTreeStoreType::Read, &az, btree_order, hl).await;
+				let (mut tx, fti) = tx_fti(&ds, StoreType::Read, &az, btree_order, hl).await;
 
 				let statistics = fti.statistics(&mut tx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);

@@ -655,9 +655,9 @@ where
 mod tests {
 	use crate::err::Error;
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+	use crate::idx::btree::store::{BTreeNodeStore, KeyProvider};
 	use crate::idx::btree::{BTree, Node, NodeId, Payload, State, Statistics, StoredNode};
-	use crate::idx::SerdeState;
+	use crate::idx::{SerdeState, StoreType};
 	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
@@ -716,7 +716,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let mut t = BTree::new(State::new(5));
 		let ds = Datastore::new("memory").await.unwrap();
@@ -740,7 +740,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let mut t = BTree::new(State::new(6));
 		let ds = Datastore::new("memory").await.unwrap();
@@ -765,7 +765,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_random_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -788,7 +788,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_random_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -811,7 +811,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -836,7 +836,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_large_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -869,7 +869,7 @@ mod tests {
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -972,7 +972,7 @@ mod tests {
 	#[test(tokio::test)]
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn clrs_insertion_test() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::<TrieKeys>::new(State::new(3));
@@ -1065,7 +1065,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+			let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1077,7 +1077,7 @@ mod tests {
 
 		{
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+				let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 				let mut s = s.lock().await;
 				let mut tx = ds.transaction(true, false).await.unwrap();
 				debug!("Delete {}", key);
@@ -1172,7 +1172,7 @@ mod tests {
 		let mut expected_keys = HashMap::new();
 
 		{
-			let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+			let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1193,7 +1193,7 @@ mod tests {
 			debug!("Delete {}", key);
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+				let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Write, 20);
 				let mut s = s.lock().await;
 				t.delete(&mut tx, &mut s, key.into()).await.unwrap();
 				print_tree::<BK>(&mut tx, &t).await;
@@ -1206,7 +1206,7 @@ mod tests {
 
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Read, 20);
+				let s = BTreeNodeStore::new(KeyProvider::Debug, StoreType::Read, 20);
 				let mut s = s.lock().await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(

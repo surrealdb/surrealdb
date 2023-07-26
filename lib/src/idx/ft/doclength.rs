@@ -1,9 +1,9 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use crate::idx::btree::store::{BTreeNodeStore, KeyProvider};
 use crate::idx::btree::{BTree, Payload, Statistics};
 use crate::idx::docids::DocId;
-use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::idx::{btree, IndexKeyBase, SerdeState, StoreType};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -21,7 +21,7 @@ impl DocLengths {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
-		store_type: BTreeStoreType,
+		store_type: StoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bl_key(None);
 		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -80,9 +80,8 @@ impl DocLengths {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::doclength::DocLengths;
-	use crate::idx::IndexKeyBase;
+	use crate::idx::{IndexKeyBase, StoreType};
 	use crate::kvs::Datastore;
 
 	#[tokio::test]
@@ -93,21 +92,17 @@ mod tests {
 
 		// Check empty state
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let l = DocLengths::new(
-			&mut tx,
-			IndexKeyBase::default(),
-			BTREE_ORDER,
-			BTreeStoreType::Traversal,
-		)
-		.await
-		.unwrap();
+		let l =
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, StoreType::Traversal)
+				.await
+				.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 0);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
 		assert_eq!(dl, None);
 
 		// Set a doc length
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, StoreType::Write)
 				.await
 				.unwrap();
 		l.set_doc_length(&mut tx, 99, 199).await.unwrap();
@@ -118,7 +113,7 @@ mod tests {
 
 		// Update doc length
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, StoreType::Write)
 				.await
 				.unwrap();
 		l.set_doc_length(&mut tx, 99, 299).await.unwrap();
@@ -129,7 +124,7 @@ mod tests {
 
 		// Remove doc lengths
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, StoreType::Write)
 				.await
 				.unwrap();
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));

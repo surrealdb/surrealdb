@@ -3,12 +3,11 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
 use crate::idx::vector::balltree::BallTreeIndex;
-use crate::idx::IndexKeyBase;
+use crate::idx::{IndexKeyBase, StoreType};
 use crate::sql::array::Array;
-use crate::sql::index::Index;
+use crate::sql::index::{Index, VectorType};
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Ident, Part, Thing, Value};
@@ -63,12 +62,19 @@ impl<'a> Document<'a> {
 						order,
 					} => ic.index_full_text(&mut run, az, *order, sc, *hl).await?,
 					Index::BallTree {
+						vector_type,
 						dimension,
 						bucket_size,
 						doc_ids_order,
 					} => {
-						ic.index_ball_tree(&mut run, *dimension, *bucket_size, *doc_ids_order)
-							.await?
+						ic.index_ball_tree(
+							&mut run,
+							vector_type.clone(),
+							*dimension,
+							*bucket_size,
+							*doc_ids_order,
+						)
+						.await?
 					}
 				};
 			}
@@ -330,7 +336,7 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, order, scoring, hl, BTreeStoreType::Write).await?;
+		let mut ft = FtIndex::new(run, az, ikb, order, scoring, hl, StoreType::Write).await?;
 		if let Some(n) = &self.n {
 			ft.index_document(run, self.rid, n).await?;
 		} else {
@@ -342,6 +348,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_ball_tree(
 		&self,
 		run: &mut kvs::Transaction,
+		vector_type: VectorType,
 		dimension: u16,
 		bucket_size: u16,
 		docids_order: u32,
@@ -350,10 +357,11 @@ impl<'a> IndexOperation<'a> {
 		let mut bt = BallTreeIndex::new(
 			run,
 			ikb,
+			vector_type,
 			dimension,
 			bucket_size,
 			docids_order,
-			BTreeStoreType::Write,
+			StoreType::Write,
 		)
 		.await?;
 		if let Some(n) = &self.n {
