@@ -505,7 +505,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
-		let nonmonotonic_key = match self {
+		let nonmonotonic_key: Result<Vec<u8>, Error> = match self {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
