@@ -17,7 +17,7 @@ macro_rules! impl_module_def {
 	// Delegate to a sub-module.
 	($ctx: expr, $path: literal, $name: literal, ($module: ident::$pkg: ident), $($wrapper: ident)?) => {
 		{
-			crate::fnc::script::modules::surrealdb::pkg::<$module::$pkg>($ctx, $name)
+			crate::fnc::script::modules::surrealdb::pkg::<$module::$pkg>($ctx, $name)?
 		}
 	};
 	($ctx: expr, $path: literal, $name: literal, $call: ident, Async) => {
@@ -27,15 +27,15 @@ macro_rules! impl_module_def {
             async fn f<'js>(ctx: js::Ctx<'js>, v: js::function::Rest<crate::sql::value::Value>) -> js::Result<crate::sql::value::Value>{
                 $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0).await
             }
-			js::function::Func::from(Async(f))
+			let func = Async(f);
+			js::Function::new($ctx.clone(),func)?.with_name(stringify!($name))?
 		}
 	};
 	// Call a (possibly-async) function.
 	($ctx: expr, $path: literal, $name: literal, $call: ident, ) => {
 		{
-
-
-			js::function::Func::from(|ctx: js::Ctx<'_>, v: js::function::Rest<crate::sql::value::Value>| $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0))
+			let func = |ctx: js::Ctx<'_>, v: js::function::Rest<crate::sql::value::Value>| $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0);
+			js::Function::new($ctx.clone(),func)?.with_name(stringify!($name))?
 		}
 	};
 	// Return the value of an expression that can be converted to JS.
@@ -57,8 +57,9 @@ macro_rules! impl_module_def {
 			fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
 				let default = js::Object::new(ctx.clone())?;
 				$(
-					exports.export($name, crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?))?;
-					default.set($name, crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?))?;
+					let value = crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?);
+					exports.export($name, value.clone())?;
+					default.set($name, value)?;
 				)*
 				exports.export("default", default)?;
 				Ok(())
