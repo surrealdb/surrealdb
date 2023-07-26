@@ -6,11 +6,11 @@ use surrealdb::sql::{Object, Strand};
 #[tokio::test]
 async fn live_query_with_permission_gets_updates() {
 	let db = new_db().await;
-	let ns_name = "8bd3ed3d-8820-4e49-b733-7e2e12dbbdcb";
-	let db_name = "c0fe8923-1a43-4ae5-95a6-c61d33d010af";
-	db.use_ns(ns_name).use_db(db_name).await.unwrap();
+	let ns_name = "8bd3ed3d88204e49b7337e2e12dbbdcb";
+	let db_name = "c0fe89231a434ae595a6c61d33d010af";
+	db.use_ns(ns_name.clone()).use_db(db_name.clone()).await.unwrap();
 
-	let scope = "40eccb7c-aa6f-4034-8da7-fecb73ba1dcd";
+	let scope = "40eccb7caa6f40348da7fecb73ba1dcd";
 	let email = format!("{scope}@example.com");
 	let pass = "password123";
 	let sql = format!(
@@ -20,7 +20,8 @@ async fn live_query_with_permission_gets_updates() {
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
 	);
-	let response = db.query(sql).await.unwrap();
+	let response =
+		db.query(sql).bind(("email", email.clone())).bind(("pass", pass.clone())).await.unwrap();
 	response.check().unwrap();
 	db.signup(Scope {
 		namespace: &ns_name,
@@ -47,9 +48,14 @@ async fn live_query_with_permission_gets_updates() {
 
 	// TODO change this to the live endpoint when ready in rust API
 	let table = "table_name";
-	let live_query_id: Option<sql::Uuid> =
+	let live_query_id: Option<Value> =
 		db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap().take(0).unwrap();
 	assert_ne!(live_query_id, None);
+
+	let live_query_id = match live_query_id {
+		Some(Value::Uuid(uuid)) => uuid,
+		_ => panic!("Expected a UUID"),
+	};
 
 	let mut some_data = HashMap::new();
 	some_data.insert("some_key".to_string(), Value::Strand(Strand::from("some_value")));
@@ -65,11 +71,11 @@ async fn live_query_with_permission_gets_updates() {
 #[tokio::test]
 async fn live_query_without_permission_does_not_get_updates() {
 	let db = new_db().await;
-	let ns_name = "0df38097-d8e7-41d6-88b1-30146eb76e7b";
-	let db_name = "b5d67dad-04f5-4660-b0a7-e64fe8f021ad";
+	let ns_name = "0df38097d8e741d688b130146eb76e7b";
+	let db_name = "b5d67dad04f54660b0a7e64fe8f021ad";
 	db.use_ns(ns_name).use_db(db_name).await.unwrap();
 
-	let scope = "cdc594be-46b5-49cf-90ba-4d74c371cb1e";
+	let scope = "cdc594be46b549cf90ba4d74c371cb1e";
 	let email = format!("{scope}@example.com");
 	let pass = "password123";
 	let sql = format!(
@@ -79,12 +85,13 @@ async fn live_query_without_permission_does_not_get_updates() {
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
 	);
-	let response = db.query(sql).await.unwrap();
+	let response =
+		db.query(sql).bind(("email", email.clone())).bind(("pass", pass.clone())).await.unwrap();
 	response.check().unwrap();
 	db.signup(Scope {
-		namespace: &ns_name,
-		database: &db_name,
-		scope: &scope,
+		namespace: ns_name,
+		database: db_name,
+		scope,
 		params: AuthParams {
 			pass,
 			email: &email,
@@ -93,12 +100,12 @@ async fn live_query_without_permission_does_not_get_updates() {
 	.await
 	.unwrap();
 	db.signin(Scope {
-		namespace: &ns_name,
-		database: &db_name,
-		scope: &scope,
+		namespace: ns_name,
+		database: db_name,
+		scope,
 		params: AuthParams {
 			pass,
-			email: &email,
+			email: email.as_str(),
 		},
 	})
 	.await
@@ -106,9 +113,13 @@ async fn live_query_without_permission_does_not_get_updates() {
 
 	// TODO change this to the live endpoint when ready in rust API
 	let table = "table_name";
-	let live_query_id: Option<sql::Uuid> =
+	let live_query_id: Option<Value> =
 		db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap().take(0).unwrap();
 	assert_ne!(live_query_id, None);
+	let live_query_id = match live_query_id {
+		Some(Value::Uuid(uuid)) => uuid,
+		_ => panic!("Expected a UUID"),
+	};
 
 	let mut some_data = HashMap::new();
 	some_data.insert("some_key".to_string(), Value::Strand(Strand::from("some_value")));
