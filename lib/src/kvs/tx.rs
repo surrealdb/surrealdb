@@ -2340,7 +2340,7 @@ impl Transaction {
 		_lock: bool,
 	) -> Result<Option<Versionstamp>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db);
-		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
 		let ts_pairs = self.getr(start..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
