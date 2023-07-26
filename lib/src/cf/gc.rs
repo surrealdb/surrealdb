@@ -31,27 +31,23 @@ pub async fn gc_ns(
 			None => 0,
 			Some(cf) => cf.expiry.as_secs(),
 		};
-		let db_cf_expiry = if db_cf_expiry == 0 {
-			let tbs = tx.all_tb(ns, db.name.as_str()).await?;
-			let tbs = tbs.as_ref();
-			let max_tb_cf_expiry = tbs.iter().fold(0, |acc, tb| match &tb.changefeed {
-				None => acc,
-				Some(cf) => {
-					if cf.expiry.is_zero() {
-						acc
-					} else {
-						acc.max(cf.expiry.as_secs())
-					}
+		let tbs = tx.all_tb(ns, db.name.as_str()).await?;
+		let tbs = tbs.as_ref();
+		let max_tb_cf_expiry = tbs.iter().fold(0, |acc, tb| match &tb.changefeed {
+			None => acc,
+			Some(cf) => {
+				if cf.expiry.is_zero() {
+					acc
+				} else {
+					acc.max(cf.expiry.as_secs())
 				}
-			});
-			max_tb_cf_expiry
-		} else {
-			db_cf_expiry
-		};
-		if ts < db_cf_expiry {
+			}
+		});
+		let cf_expiry = db_cf_expiry.max(max_tb_cf_expiry);
+		if ts < cf_expiry {
 			continue;
 		}
-		let watermark_ts = ts - db_cf_expiry;
+		let watermark_ts = ts - cf_expiry;
 		let watermark_vs =
 			tx.get_versionstamp_from_timestamp(watermark_ts, ns, db.name.as_str(), true).await?;
 		if let Some(watermark_vs) = watermark_vs {
