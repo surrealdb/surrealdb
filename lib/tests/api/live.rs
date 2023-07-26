@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use surrealdb::dbs::Notification;
 use surrealdb::sql;
-use surrealdb::sql::{Object, Strand};
+use surrealdb::sql::{Array, Object, Strand, Uuid};
 
 #[tokio::test]
 async fn live_query_with_permission_gets_updates() {
@@ -113,13 +113,25 @@ async fn live_query_without_permission_does_not_get_updates() {
 
 	// TODO change this to the live endpoint when ready in rust API
 	let table = "table_name";
-	let live_query_id: Option<Value> =
+	let live_query_id: Value =
 		db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap().take(0).unwrap();
-	assert_ne!(live_query_id, None);
+	// assert_ne!(live_query_id, None);
 	let live_query_id = match live_query_id {
-		Some(Value::Uuid(uuid)) => uuid,
-		_ => panic!("Expected a UUID"),
+		Value::Uuid(uuid) => uuid, // TODO this does not trigger
+		Value::Array(Array(array)) => {
+			assert_eq!(array.len(), 1);
+			let ret: Uuid = match array[0].clone() {
+				Value::Uuid(uuid) => uuid,
+				_ => panic!("Expected a UUID"),
+			};
+			ret
+		}
+		other => panic!("Expected a UUID, got {:?}", other),
 	};
+	// let live_query_id = match live_query_id {
+	// 	Some(Value::Uuid(uuid)) => uuid,
+	// 	_ => panic!("Expected a UUID"),
+	// };
 
 	let mut some_data = HashMap::new();
 	some_data.insert("some_key".to_string(), Value::Strand(Strand::from("some_value")));
