@@ -89,6 +89,12 @@ impl Function {
 	pub fn is_custom(&self) -> bool {
 		matches!(self, Self::Custom(_, _))
 	}
+
+	/// Check if this function is a scripting function
+	pub fn is_script(&self) -> bool {
+		matches!(self, Self::Script(_, _))
+	}
+
 	/// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {

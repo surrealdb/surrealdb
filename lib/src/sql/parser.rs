@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::error::Error::{Field, Group, Order, Parser, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
+use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use nom::Err;
@@ -12,6 +13,12 @@ use tracing::instrument;
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
+}
+
+/// Parses a SurrealQL Subquery [`Subquery`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn sub_query(input: &str) -> Result<Subquery, Error> {
+	parse_impl(input, subquery)
 }
 
 /// Parses a SurrealQL [`Thing`]
