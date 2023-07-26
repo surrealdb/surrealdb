@@ -5,16 +5,7 @@ use crate::vs;
 use crate::vs::Versionstamp;
 use std::str;
 
-// gc_all deletes all change feed entries that are older than the given watermark.
-#[allow(unused)]
-pub async fn gc_all(tx: &mut Transaction, limit: Option<u32>) -> Result<(), Error> {
-	let now = std::time::SystemTime::now()
-		.duration_since(std::time::UNIX_EPOCH)
-		.map_err(|e| Error::Internal(e.to_string()))?;
-	gc_all_at(tx, now.as_secs(), limit).await?;
-	Ok(())
-}
-
+// gc_all_at deletes all change feed entries that become stale at the given timestamp.
 #[allow(unused)]
 pub async fn gc_all_at(tx: &mut Transaction, ts: u64, limit: Option<u32>) -> Result<(), Error> {
 	let nses = tx.all_ns().await?;
@@ -36,19 +27,35 @@ pub async fn gc_ns(
 	let dbs = tx.all_db(ns).await?;
 	let dbs = dbs.as_ref();
 	for db in dbs {
-		match &db.changefeed {
-			None => continue,
-			Some(cf) => {
-				if cf.expiry.is_zero() {
-					continue;
+		let db_cf_expiry = match &db.changefeed {
+			None => 0,
+			Some(cf) => cf.expiry.as_secs(),
+		};
+		let db_cf_expiry = if db_cf_expiry == 0 {
+			let tbs = tx.all_tb(ns, db.name.as_str()).await?;
+			let tbs = tbs.as_ref();
+			let max_tb_cf_expiry = tbs.iter().fold(0, |acc, tb| match &tb.changefeed {
+				None => acc,
+				Some(cf) => {
+					if cf.expiry.is_zero() {
+						acc
+					} else {
+						acc.max(cf.expiry.as_secs())
+					}
 				}
-				let c = ts - cf.expiry.as_secs();
-				let watermark_vs =
-					tx.get_versionstamp_from_timestamp(ts, ns, db.name.as_str(), true).await?;
-				if let Some(watermark_vs) = watermark_vs {
-					gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
-				}
-			}
+			});
+			max_tb_cf_expiry
+		} else {
+			db_cf_expiry
+		};
+		if ts < db_cf_expiry {
+			continue;
+		}
+		let watermark_ts = ts - db_cf_expiry;
+		let watermark_vs =
+			tx.get_versionstamp_from_timestamp(watermark_ts, ns, db.name.as_str(), true).await?;
+		if let Some(watermark_vs) = watermark_vs {
+			gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
 		}
 	}
 	Ok(())

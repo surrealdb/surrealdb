@@ -448,21 +448,32 @@ impl Datastore {
 		Ok::<Vec<Hb>, Error>(dead)
 	}
 
+	// tick is called periodically to perform maintenance tasks.
+	// On a linux/windows/macos system, this is called every TICK_INTERVAL.
+	// On embedded scenarios like WASM where there is no background thread,
+	// this should be called by the application.
 	pub async fn tick(&self) -> Result<(), Error> {
-		self.save_timestamp_for_versionstamp().await?;
-		self.garbage_collect_stale_change_feeds().await?;
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map_err(|e| Error::Internal(e.to_string()))?;
+		let ts = now.as_secs();
+		self.tick_at(ts).await?;
+		Ok(())
+	}
+
+	// tick_at is the utility function that is called by tick.
+	// It is handy for testing, because it allows you to specify the timestamp,
+	// without depending on a system clock.
+	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
+		self.save_timestamp_for_versionstamp(ts).await?;
+		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
 		// TODO Add Node GC?
 		Ok(())
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	pub async fn save_timestamp_for_versionstamp(&self) -> Result<(), Error> {
-		let now = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_err(|e| Error::Internal(e.to_string()))?;
-		let ts = now.as_secs();
-
+	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
@@ -480,10 +491,10 @@ impl Datastore {
 	}
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
-	pub async fn garbage_collect_stale_change_feeds(&self) -> Result<(), Error> {
+	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		// TODO Make gc batch size/limit configurable?
-		crate::cf::gc_all(&mut tx, Some(100)).await?;
+		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
