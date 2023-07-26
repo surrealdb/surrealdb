@@ -306,7 +306,7 @@ async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/rpc");
 
 	// Prepare HTTP client
@@ -338,7 +338,7 @@ async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/rpc");
 
 	// Prepare HTTP client

@@ -6,8 +6,9 @@ use std::{
 use super::Level;
 
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
 	#[default]
 	Any,
@@ -72,7 +73,7 @@ impl ResourceKind {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct Resource(String, ResourceKind, Level);
 
 impl std::fmt::Display for Resource {

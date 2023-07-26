@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
+use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
 use crate::iam::Role;
@@ -11,7 +12,7 @@ use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
 //
 // User
 //
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct Actor {
 	res: Resource,
 	roles: Vec<Role>,

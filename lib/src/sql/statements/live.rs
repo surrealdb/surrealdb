@@ -1,8 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::{Auth, Options};
-use crate::dbs::{Level, Transaction};
+use crate::dbs::Options;
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
