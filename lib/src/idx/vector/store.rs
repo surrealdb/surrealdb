@@ -307,7 +307,7 @@ mod tests {
 	#[test(tokio::test)]
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn test_points_store() {
-		let s = PointsStore::new(PointKeyProvider::Debug, StoreType::Write, 20, VectorType::I64);
+		let s = PointsStore::new(PointKeyProvider::_Debug, StoreType::Write, 20, VectorType::I64);
 		s.lock().await.put(1, Vector::I64(vec![1, 2, 3, 4])).unwrap();
 	}
 }
