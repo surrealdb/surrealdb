@@ -10,7 +10,7 @@ macro_rules! query {
 		$c.bench_function(stringify!($name), |b| {
 			let (dbs, ses) = futures::executor::block_on(async {
 				let dbs = Datastore::new("memory").await.unwrap();
-				let ses = Session::for_kv().with_ns("test").with_db("test");
+				let ses = Session::owner().with_ns("test").with_db("test");
 				let setup = $setup;
 				if !setup.is_empty() {
 					dbs.execute(setup, &ses, None).await.unwrap();

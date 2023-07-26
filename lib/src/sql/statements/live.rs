@@ -49,12 +49,10 @@ impl LiveStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
+		// Is realtime enabled?
 		opt.realtime()?;
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::No)?;
+		// Valid options?
+		opt.valid_for_db()?;
 		// Check that auth has been set
 		let self_override = LiveStatement {
 			auth: match self.auth {

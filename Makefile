@@ -1,4 +1,13 @@
-DEV_FEATURES := --no-default-features --features storage-mem,http,scripting
+DEV_FEATURES ?= storage-mem,http,scripting
+SURREAL_LOG ?= trace
+SURREAL_USER ?= root
+SURREAL_PASS ?= root
+SURREAL_AUTH ?= true
+SURREAL_PATH ?= memory
+SURREAL_NAMESPACE ?= test
+SURREAL_DATABASE ?= test
+
+SHELL := env SURREAL_PATH=$(SURREAL_PATH) SURREAL_LOG=$(SURREAL_LOG) SURREAL_AUTH=$(SURREAL_AUTH) SURREAL_USER=$(SURREAL_USER) SURREAL_PASS=$(SURREAL_PASS) $(SHELL)
 
 .PHONY: default
 default:
@@ -35,11 +44,11 @@ bench:
 
 .PHONY: serve
 serve:
-	cargo run $(DEV_FEATURES) -- start --log trace --user root --pass root memory
+	cargo run --no-default-features --features $(DEV_FEATURES) -- start
 
 .PHONY: sql
 sql:
-	cargo run $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --multi --pretty
+	cargo run --no-default-features --features $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --multi --pretty
 
 .PHONY: quick
 quick:

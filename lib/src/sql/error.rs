@@ -10,6 +10,7 @@ pub enum Error<I> {
 	Split(I, String),
 	Order(I, String),
 	Group(I, String),
+	Role(I, String),
 }
 
 pub type IResult<I, O, E = Error<I>> = Result<(I, O), Err<E>>;

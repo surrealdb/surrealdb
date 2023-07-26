@@ -33,7 +33,7 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE

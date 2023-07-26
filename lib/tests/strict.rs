@@ -16,7 +16,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?.with_strict_mode(true);
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -74,7 +74,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?.with_strict_mode(true);
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -127,7 +127,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?.with_strict_mode(true);
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -175,7 +175,7 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?.with_strict_mode(true);
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
@@ -208,13 +208,13 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
 		SELECT * FROM test;
-		INFO FOR KV;
+		INFO FOR ROOT;
 		INFO FOR NS;
 		INFO FOR DB;
 		INFO FOR TABLE test;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -233,6 +233,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -243,6 +244,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			databases: { test: 'DEFINE DATABASE test' },
 			logins: {},
 			tokens: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -257,6 +259,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);

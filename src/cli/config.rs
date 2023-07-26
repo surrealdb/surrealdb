@@ -13,7 +13,7 @@ pub struct Config {
 	pub path: String,
 	#[cfg(feature = "has-storage")]
 	pub client_ip: ClientIp,
-	pub user: String,
+	pub user: Option<String>,
 	pub pass: Option<String>,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,

@@ -3,6 +3,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -96,7 +97,7 @@ impl<'a> Document<'a> {
 					}
 				}
 				// Check for a PERMISSIONS clause
-				if opt.perms && opt.auth.perms() {
+				if opt.check_perms(Action::Edit) {
 					// Get the permission clause
 					let perms = if self.is_new() {
 						&fd.permissions.create
