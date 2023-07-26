@@ -511,6 +511,10 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => self.get_non_monotonic_versionstamped_key(prefix.clone(), suffix.clone()).await,
+			// We need this to make the compiler happy.
+			// The below is unreachable only when only the tikv feature is enabled.
+			// It's still reachable if we enabled more than one kv feature.
+			#[allow(unreachable_patterns)]
 			_ => Err(Error::Internal(
 				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
 			)),
