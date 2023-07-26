@@ -2,7 +2,9 @@
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-// Ts stands for Database Timestamps
+// Ts stands for Database Timestamps that corresponds to Versionstamps.
+// Each Ts key is suffixed by a timestamp.
+// The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Ts<'a> {
 	__: u8,
