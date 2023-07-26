@@ -19,7 +19,7 @@ impl IntoEndpoint<TiKv> for &str {
 		let url = format!("tikv://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
