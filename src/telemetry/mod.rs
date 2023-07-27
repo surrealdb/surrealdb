@@ -128,7 +128,7 @@ mod tests {
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = telemetry::builder().build().set_default();
+					let _enter = telemetry::builder().with_log_level("info").build().set_default();
 
 					println!("Sending span...");
 
@@ -144,7 +144,11 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = req_rx.recv().await.expect("missing export request");
+		let req = tokio::select! {
+			req = req_rx.recv() => req.expect("missing export request"),
+			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
+		};
+
 		let first_span =
 			req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans.first().unwrap();
 		assert_eq!("test-surreal-span", first_span.name);
@@ -162,11 +166,10 @@ mod tests {
 			temp_env::with_vars(
 				vec![
 					("SURREAL_TRACING_TRACER", Some("otlp")),
-					("SURREAL_TRACING_FILTER", Some("debug")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = telemetry::builder().build().set_default();
+					let _enter = telemetry::builder().with_log_level("debug").build().set_default();
 
 					println!("Sending spans...");
 
@@ -190,7 +193,10 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = req_rx.recv().await.expect("missing export request");
+		let req = tokio::select! {
+			req = req_rx.recv() => req.expect("missing export request"),
+			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
+		};
 		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 
 		assert_eq!(1, spans.len());
