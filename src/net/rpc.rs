@@ -10,7 +10,7 @@ use crate::rpc::res;
 use crate::rpc::res::Data;
 use crate::rpc::res::Failure;
 use crate::rpc::res::IntoRpcResponse;
-use crate::rpc::res::Output;
+use crate::rpc::res::OutputFormat;
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::routing::get;
@@ -27,14 +27,17 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::{Receiver, Sender};
 use surrealdb::dbs::{QueryType, Response, Session};
+use surrealdb::sql::serde::deserialize;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
 use tokio::sync::RwLock;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower_http::request_id::RequestId;
 use tracing::Instrument;
+use tracing::Span;
 use uuid::Uuid;
 
 use axum::{
@@ -85,7 +88,7 @@ async fn handle_socket(ws: WebSocket, sess: Session, req_id: RequestId) {
 
 pub struct Rpc {
 	session: Session,
-	format: Output,
+	format: OutputFormat,
 	ws_id: Uuid,
 	vars: BTreeMap<String, Value>,
 	graceful_shutdown: CancellationToken,
@@ -97,7 +100,7 @@ impl Rpc {
 		// Create a new RPC variables store
 		let vars = BTreeMap::new();
 		// Set the default output format
-		let format = Output::Json;
+		let format = OutputFormat::Json;
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the Rpc connection
@@ -179,7 +182,7 @@ impl Rpc {
 		internal_sender: Sender<Message>,
 	) {
 		// Collect all spawned tasks so we can wait for them at the end
-		let mut tasks = vec![];
+		let mut tasks = JoinSet::new();
 		let cancel_token = rpc.read().await.graceful_shutdown.clone();
 		loop {
 			let is_shutdown = cancel_token.cancelled();
@@ -191,13 +194,13 @@ impl Rpc {
 							// Ping/Pong is automatically handled by the WebSocket library
 							Ok(msg) => match msg {
 								Message::Text(_) => {
-									tasks.push(tokio::task::spawn(Rpc::call(rpc.clone(), msg, internal_sender.clone()).in_current_span()));
+									tasks.spawn(Rpc::handle_msg(rpc.clone(), msg, internal_sender.clone()));
 								}
 								Message::Binary(_) => {
-									tasks.push(tokio::task::spawn(Rpc::call(rpc.clone(), msg, internal_sender.clone()).in_current_span()));
+									tasks.spawn(Rpc::handle_msg(rpc.clone(), msg, internal_sender.clone()));
 								}
 								Message::Close(_) => {
-									tasks.push(tokio::task::spawn(Rpc::call(rpc.clone(), Message::Close(None), internal_sender.clone()).in_current_span()));
+									tasks.spawn(Rpc::handle_msg(rpc.clone(), Message::Close(None), internal_sender.clone()));
 									break;
 								}
 								_ => {
@@ -205,7 +208,6 @@ impl Rpc {
 								}
 							},
 							Err(err) => {
-								// Output the WebSocket error to the logs
 								trace!("WebSocket error: {:?}", err);
 								// Start the graceful shutdown of the WebSocket and close the channels
 								rpc.read().await.graceful_shutdown.cancel();
@@ -221,9 +223,9 @@ impl Rpc {
 		}
 
 		// Wait for all tasks to finish
-		for task in tasks.into_iter() {
-			if let Err(err) = task.await {
-				error!("Error while processing RPC request: {:?}", err);
+		while let Some(res) = tasks.join_next().await {
+			if let Err(err) = res {
+				error!("Error while handling RPC message: {}", err);
 			}
 		}
 	}
@@ -286,33 +288,68 @@ impl Rpc {
 		}
 	}
 
-	/// Call RPC methods from the WebSocket
-	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
+	/// Handle individual WebSocket messages
+	async fn handle_msg(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let mut out = { rpc.read().await.format.clone() };
-		// Get the connection ID
-		let ws_id = rpc.read().await.ws_id;
+		let mut out_fmt = rpc.read().await.format.clone();
+		let span = span_for_request(&rpc.read().await.ws_id);
+		let _enter = span.enter();
 		// Parse the request
+		match Self::parse_request(msg).in_current_span().await {
+			Ok((id, method, params, _out_fmt)) => {
+				if let Some(_out_fmt) = _out_fmt {
+					out_fmt = _out_fmt;
+				}
+
+				// Process the request
+				let res =
+					Self::process_request(rpc.clone(), &method, params).in_current_span().await;
+
+				// Process the response
+				res.into_response(id).send(out_fmt, chn).in_current_span().await
+			}
+			Err(err) => {
+				// Process the response
+				res::failure(None, err).send(out_fmt, chn).in_current_span().await
+			}
+		}
+	}
+
+	async fn parse_request(
+		msg: Message,
+	) -> Result<(Option<Value>, String, Array, Option<OutputFormat>), Failure> {
+		let mut out_fmt = None;
 		let req = match msg {
 			// This is a binary message
 			Message::Binary(val) => {
+				Span::current().record("rpc.request.format", "binary");
 				// Use binary output
-				out = Output::Full;
-				// Deserialize the input
-				Value::from(val)
+				out_fmt = Some(OutputFormat::Full);
+
+				match deserialize(&val) {
+					Ok(v) => v,
+					Err(_) => {
+						debug!("Error when trying to deserialize the request");
+						return Err(Failure::PARSE_ERROR);
+					}
+				}
 			}
 			// This is a text message
 			Message::Text(ref val) => {
+				Span::current().record("rpc.request.format", "text");
 				// Parse the SurrealQL object
 				match surrealdb::sql::value(val) {
 					// The SurrealQL message parsed ok
 					Ok(v) => v,
 					// The SurrealQL message failed to parse
-					_ => return res::failure(None, Failure::PARSE_ERROR).send(out, chn).await,
+					_ => return Err(Failure::PARSE_ERROR),
 				}
 			}
 			// Unsupported message type
-			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
+			_ => {
+				debug!("Unsupported message type: {:?}", msg);
+				return Err(res::Failure::custom("Unsupported message type"));
+			}
 		};
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
@@ -322,26 +359,25 @@ impl Rpc {
 			v if v.is_number() => Some(v),
 			v if v.is_strand() => Some(v),
 			v if v.is_datetime() => Some(v),
-			_ => return res::failure(None, Failure::INVALID_REQUEST).send(out, chn).await,
+			_ => return Err(Failure::INVALID_REQUEST),
 		};
 		// Fetch the 'method' argument
 		let method = match req.pick(&*METHOD) {
 			Value::Strand(v) => v.to_raw(),
-			_ => return res::failure(id, Failure::INVALID_REQUEST).send(out, chn).await,
+			_ => return Err(Failure::INVALID_REQUEST),
 		};
+
+		// Now that we know the method, we can update the span
+		Span::current().record("rpc.method", &method);
+		Span::current().record("otel.name", format!("surrealdb.rpc/{}", method));
+
 		// Fetch the 'params' argument
 		let params = match req.pick(&*PARAMS) {
 			Value::Array(v) => v,
 			_ => Array::new(),
 		};
 
-		let span = span_for_request(&method, &ws_id);
-		// Process the request
-		let res =
-			Self::process_request(rpc.clone(), &method, params).instrument(span.clone()).await;
-
-		// Process the response
-		res.into_response(id).send(out, chn).instrument(span).await
+		Ok((id, method, params, out_fmt))
 	}
 
 	async fn process_request(
@@ -349,10 +385,17 @@ impl Rpc {
 		method: &str,
 		params: Array,
 	) -> Result<Data, Failure> {
-		debug!("Process request: {}", method);
+		info!("Process RPC request");
 
 		// Match the method to a function
 		match method {
+			// Handle a surrealdb ping message
+			//
+			// This is used to keep the WebSocket connection alive in environments where the WebSocket protocol is not enough.
+			// For example, some browsers will wait for the TCP protocol to timeout before triggering an on_close event. This may take several seconds or even minutes in certain scenarios.
+			// By sending a ping message every few seconds from the client, we can force a connection check and trigger a an on_close event if the ping can't be sent.
+			//
+			"ping" => Ok(Value::None.into()),
 			// Retrieve the current auth record
 			"info" => match params.len() {
 				0 => rpc.read().await.info().await.map(Into::into).map_err(Into::into),
@@ -506,9 +549,9 @@ impl Rpc {
 
 	async fn format(&mut self, out: Strand) -> Result<Value, Error> {
 		match out.as_str() {
-			"json" | "application/json" => self.format = Output::Json,
-			"cbor" | "application/cbor" => self.format = Output::Cbor,
-			"pack" | "application/pack" => self.format = Output::Pack,
+			"json" | "application/json" => self.format = OutputFormat::Json,
+			"cbor" | "application/cbor" => self.format = OutputFormat::Cbor,
+			"pack" | "application/pack" => self.format = OutputFormat::Pack,
 			_ => return Err(Error::InvalidType),
 		};
 		Ok(Value::None)

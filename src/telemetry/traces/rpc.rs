@@ -1,31 +1,27 @@
 use tracing::{field, Span};
 use uuid::Uuid;
 
-pub fn span_for_request(method: &str, ws_id: &Uuid) -> Span {
+pub fn span_for_request(ws_id: &Uuid) -> Span {
 	let span = tracing::info_span!(
 		parent: None,
 		// Dynamic span names need to be 'recorded', can't be used on the macro
-		"rpc/request",
+		"rpc/call",
 		otel.name = field::Empty,
 		otel.kind = "server",
 
-		// OTEL fields (see https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/trace/semantic_conventions/rpc.md)
+		// To be populated by the request handler when the method is known
+		rpc.method = field::Empty,
 		rpc.service = "surrealdb",
-		rpc.method = %method,
-
-		network.transport = "tcp",
-		server.address = field::Empty,
-		server.port = field::Empty,
-		server.socket.address = field::Empty,
-		server.socket.port = field::Empty,
+		rpc.request.format = field::Empty,
+		rpc.response.format = field::Empty,
 
 		// SurrealDB custom fields
 		ws.id = %ws_id,
+
+		// Fields for error reporting
+		otel.status_code = field::Empty,
+		otel.status_message = field::Empty,
 	);
-
-	span.record("otel.name", format!("surrealdb.rpc/{}", method));
-
-	// TODO: populate the rest of the fields
 
 	span
 }
