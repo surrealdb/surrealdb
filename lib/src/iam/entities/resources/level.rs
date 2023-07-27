@@ -4,8 +4,9 @@ use std::{
 };
 
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 pub enum Level {
 	#[default]
 	No,
