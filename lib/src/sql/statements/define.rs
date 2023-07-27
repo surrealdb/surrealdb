@@ -1487,7 +1487,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col BALLTREE DIMENSION 4 BUCKET_SIZE 40 DOCIDS_ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col BALLTREE DIMENSION 4 TYPE F64 BUCKET_SIZE 40 DOCIDS_ORDER 100"
 		);
 	}
 

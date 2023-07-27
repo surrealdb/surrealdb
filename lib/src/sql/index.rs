@@ -89,7 +89,7 @@ impl Display for Index {
 			} => {
 				write!(
 					f,
-					"BALLTREE DIMENSION {} TYPE {}  BUCKET_SIZE {} DOCIDS_ORDER {}",
+					"BALLTREE DIMENSION {} TYPE {} BUCKET_SIZE {} DOCIDS_ORDER {}",
 					dimension, vector_type, bucket_size, doc_ids_order
 				)
 			}

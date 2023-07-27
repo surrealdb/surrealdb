@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::kvs::Val;
 use crate::sql::index::VectorType;
-use crate::sql::{Array, Number, Value};
+use crate::sql::{Number, Value};
 
 pub(crate) mod balltree;
 mod points;
@@ -18,7 +18,7 @@ enum Vector {
 }
 
 impl Vector {
-	fn new(a: &Array, vt: &VectorType, d: usize) -> Result<Self, Error> {
+	fn new(a: &[Value], vt: &VectorType, d: usize) -> Result<Self, Error> {
 		Self::check_dim(a, d)?;
 		match vt {
 			VectorType::I64 => Self::new_i64(a, d),
@@ -31,7 +31,7 @@ impl Vector {
 		}
 	}
 
-	fn new_i64(a: &Array, d: usize) -> Result<Self, Error> {
+	fn new_i64(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			r.push(Self::check_number(v, "64 bits signed integer")?.to_int());
@@ -39,7 +39,7 @@ impl Vector {
 		Ok(Self::I64(r))
 	}
 
-	pub(super) fn new_f64(a: &Array, d: usize) -> Result<Self, Error> {
+	pub(super) fn new_f64(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			r.push(Self::check_number(v, "64 bits float number")?.to_float());
@@ -47,7 +47,7 @@ impl Vector {
 		Ok(Self::F64(r))
 	}
 
-	pub(super) fn new_u32(a: &Array, d: usize) -> Result<Self, Error> {
+	pub(super) fn new_u32(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			let n = Self::check_number(v, "32 bits unsigned number")?.to_int();
@@ -62,7 +62,7 @@ impl Vector {
 		Ok(Self::U32(r))
 	}
 
-	fn new_i32(a: &Array, d: usize) -> Result<Self, Error> {
+	fn new_i32(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			let n = Self::check_number(v, "32 bits signed number")?.to_int();
@@ -77,7 +77,7 @@ impl Vector {
 		Ok(Self::I32(r))
 	}
 
-	fn new_f32(a: &Array, d: usize) -> Result<Self, Error> {
+	fn new_f32(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			let n = Self::check_number(v, "32 bits float number")?.to_float();
@@ -92,7 +92,7 @@ impl Vector {
 		Ok(Self::F32(r))
 	}
 
-	fn new_u16(a: &Array, d: usize) -> Result<Self, Error> {
+	fn new_u16(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			let n = Self::check_number(v, "16 bits unsigned number")?.to_int();
@@ -107,7 +107,7 @@ impl Vector {
 		Ok(Self::U16(r))
 	}
 
-	fn new_i16(a: &Array, d: usize) -> Result<Self, Error> {
+	fn new_i16(a: &[Value], d: usize) -> Result<Self, Error> {
 		let mut r = Vec::with_capacity(d);
 		for v in a.iter() {
 			let n = Self::check_number(v, "16 bits signed number")?.to_int();
@@ -122,7 +122,7 @@ impl Vector {
 		Ok(Self::I16(r))
 	}
 
-	fn check_dim(a: &Array, s: usize) -> Result<(), Error> {
+	fn check_dim(a: &[Value], s: usize) -> Result<(), Error> {
 		if s != a.len() {
 			return Err(Error::InvalidVectorDimension {
 				current: a.len(),

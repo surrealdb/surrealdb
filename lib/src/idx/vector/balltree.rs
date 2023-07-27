@@ -5,7 +5,7 @@ use crate::idx::vector::Vector;
 use crate::idx::{IndexKeyBase, StoreType};
 use crate::kvs::Transaction;
 use crate::sql::index::VectorType;
-use crate::sql::{Array, Thing};
+use crate::sql::{Thing, Value};
 use roaring::RoaringTreemap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -52,7 +52,7 @@ impl BallTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: &Array,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Extract the point
 		let point = Vector::new(content, &self.vt, self.dim)?;
