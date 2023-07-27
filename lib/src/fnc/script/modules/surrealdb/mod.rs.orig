@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+use crate::fnc::script::modules::impl_module_def;
+use js::{module::ModuleDef, Ctx, Module, Result, Value};
+=======
 use crate::sql::{value as parse_value, Value as SurValue};
 use js::class::OwnedBorrow;
 use js::prelude::Coerced;
@@ -5,6 +9,7 @@ use js::Exception;
 use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, String as JsString, Value};
 
 use self::query::{QueryContext, QUERY_DATA_PROP_NAME};
+>>>>>>> d8e19d28 (Implement value function)
 
 mod functions;
 pub mod query;

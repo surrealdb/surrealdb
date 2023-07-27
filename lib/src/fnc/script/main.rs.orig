@@ -4,7 +4,7 @@ use super::globals;
 use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
-use super::modules::surrealdb::query::QueryContext;
+use super::modules::surrealdb::query::QueryData;
 use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
@@ -38,7 +38,7 @@ pub unsafe fn create_query_data<'a>(
 
 	let object = Class::instance(
 		ctx.clone(),
-		QueryContext {
+		QueryData {
 			context,
 			opt,
 			txn,
@@ -48,7 +48,11 @@ pub unsafe fn create_query_data<'a>(
 
 	// make the query data not enumerable, writeable, or configurable.
 	let prop = Property::from(object);
+<<<<<<< HEAD
 	ctx.globals().prop(QUERY_DATA_PROP_NAME, prop)?;
+=======
+	ctx.globals().set(QUERY_DATA_PROP_NAME, prop)?;
+>>>>>>> 32190004 (Make the query_data object more fixed)
 
 	Ok(())
 }
@@ -70,7 +74,7 @@ pub async fn run(
 	// Explicitly set max stack size to 256 KiB
 	run.set_max_stack_size(262_144).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(4_000_000).await;
+	run.set_memory_limit(2_000_000).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done());
