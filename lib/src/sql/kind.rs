@@ -47,6 +47,10 @@ impl Kind {
 	fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
 	}
+
+	pub fn is_option(&self) -> bool {
+		matches!(self, Kind::Option(_))
+	}
 }
 
 impl From<&Kind> for Box<Kind> {

@@ -79,20 +79,24 @@ impl<'a> Document<'a> {
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the ASSERT clause
-					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
-						return Err(Error::FieldValue {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: val.to_string(),
-							check: expr.to_string(),
-						});
+					// Skip ASSERT check if field is optional and value is NONE
+					let opt_type = fd.kind.as_ref().map(|x| x.is_option()).unwrap_or_default();
+					if !(opt_type && val.is_none()) {
+						// Configure the context
+						let mut ctx = Context::new(ctx);
+						ctx.add_value("input", &inp);
+						ctx.add_value("value", &val);
+						ctx.add_value("after", &val);
+						ctx.add_value("before", &old);
+						// Process the ASSERT clause
+						if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+							return Err(Error::FieldValue {
+								thing: rid.to_string(),
+								field: fd.name.clone(),
+								value: val.to_string(),
+								check: expr.to_string(),
+							});
+						}
 					}
 				}
 				// Check for a PERMISSIONS clause
