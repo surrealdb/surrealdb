@@ -64,7 +64,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &Vec<Value>,
+		field_content: &[Value],
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -101,7 +101,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -135,7 +135,7 @@ impl Analyzer {
 		Ok((dl, tfid, osid))
 	}
 
-	fn analyze_content(&self, content: &Vec<Value>, tks: &mut Vec<Tokens>) -> Result<(), Error> {
+	fn analyze_content(&self, content: &[Value], tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		for v in content {
 			self.analyze_value(v, tks)?;
 		}

@@ -195,7 +195,7 @@ impl FtIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
