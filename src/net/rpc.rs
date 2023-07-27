@@ -310,8 +310,7 @@ impl Rpc {
 				}
 
 				// Process the request
-				let res =
-					Self::process_request(rpc.clone(), &method, params).await;
+				let res = Self::process_request(rpc.clone(), &method, params).await;
 
 				// Process the response
 				res.into_response(id).send(out_fmt, chn).await
