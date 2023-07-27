@@ -18,7 +18,7 @@ async fn script_function_error() -> Result<(), Error> {
 		};
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -47,7 +47,7 @@ async fn script_function_simple() -> Result<(), Error> {
 		};
 	"#;
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
@@ -76,7 +76,7 @@ async fn script_function_context() -> Result<(), Error> {
 		;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
@@ -110,7 +110,7 @@ async fn script_function_arguments() -> Result<(), Error> {
 		};
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -153,7 +153,7 @@ async fn script_function_types() -> Result<(), Error> {
 		;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
@@ -183,7 +183,7 @@ async fn script_function_module_os() -> Result<(), Error> {
 		};
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
@@ -201,7 +201,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 		CREATE test SET name = "c", number = 2;
 	"#;
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// direct query
 	dbs.execute(sql, &ses, None).await?;
@@ -255,7 +255,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 		}
 	"#;
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
@@ -281,5 +281,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 				issue_number: 3.0
 		}]"#,
 	);
+	assert_eq!(tmp, val);
+
 	Ok(())
 }

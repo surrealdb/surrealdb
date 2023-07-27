@@ -1,20 +1,25 @@
-use crate::dbs::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::error;
 use crate::iam::token::Claims;
+use crate::iam::Auth;
+use crate::iam::{Actor, Level, Role};
 use crate::kvs::Datastore;
-use crate::sql;
+use crate::sql::json;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::Algorithm;
 use crate::sql::Value;
 use argon2::Argon2;
 use argon2::PasswordHash;
 use argon2::PasswordVerifier;
+use base64_lib::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
+use std::str::{self, FromStr};
 use std::sync::Arc;
+
+use super::base::BASE64;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
@@ -83,12 +88,17 @@ static DUD: Lazy<Validation> = Lazy::new(|| {
 	validation
 });
 
-pub async fn basic(kvs: &Datastore, session: &mut Session, user: &str, pass: &str) -> Result<(), Error> {
+pub async fn basic(
+	kvs: &Datastore,
+	session: &mut Session,
+	user: &str,
+	pass: &str,
+) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting basic authentication");
 
 	match verify_creds(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
-		Ok((au, _)) if au.is_kv() => {
+		Ok((au, _)) if au.is_root() => {
 			debug!("Authenticated as root user '{}'", user);
 			session.au = Arc::new(au);
 			Ok(())
@@ -114,7 +124,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Parse the token and catch any errors
-	let value = super::parse::parse(token)?;
+	let value = parse(token)?;
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -146,7 +156,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
 			let id = match id {
-				Some(id) => sql::thing(&id)?.into(),
+				Some(id) => crate::sql::thing(&id)?.into(),
 				None => Value::None,
 			};
 			// Get the scope token
@@ -162,7 +172,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
-			session.au = Arc::new(Auth::Sc(ns, db, sc));
+			session.au = Arc::new(Auth::new(Actor::new(
+				de.name.to_string(),
+				Default::default(),
+				Level::Scope(ns, db, sc),
+			)));
 			Ok(())
 		}
 		// Check if this is scope authentication
@@ -178,7 +192,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Parse the record id
-			let id = sql::thing(&id)?;
+			let id = crate::sql::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
@@ -191,8 +205,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
-			session.sd = Some(Value::from(id));
-			session.au = Arc::new(Auth::Sc(ns, db, sc));
+			session.sd = Some(Value::from(id.to_owned()));
+			session.au = Arc::new(Auth::new(Actor::new(
+				id.to_string(),
+				Default::default(),
+				Level::Scope(ns, db, sc),
+			)));
 			Ok(())
 		}
 		// Check if this is database token authentication
@@ -211,13 +229,29 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// Parse the roles
+			let roles = match token_data.claims.roles {
+				// If no role is provided, grant the viewer role
+				None => vec![Role::Viewer],
+				// If roles are provided, parse them
+				Some(roles) => roles
+					.iter()
+					.map(|r| -> Result<Role, Error> {
+						Role::from_str(r.as_str()).map_err(Error::IamError)
+					})
+					.collect::<Result<Vec<_>, _>>()?,
+			};
 			// Log the success
 			debug!("Authenticated to database `{}` with token `{}`", db, tk);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.au = Arc::new(Auth::Db(ns, db));
+			session.au = Arc::new(Auth::new(Actor::new(
+				de.name.to_string(),
+				roles,
+				Level::Database(ns, db),
+			)));
 			Ok(())
 		}
 		// Check if this is database authentication
@@ -242,7 +276,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.au = Arc::new(Auth::Db(ns, db));
+			session.au = Arc::new(Auth::new(Actor::new(
+				id.to_string(),
+				de.roles.iter().map(|r| r.into()).collect(),
+				Level::Database(ns, db),
+			)));
 			Ok(())
 		}
 		// Check if this is namespace token authentication
@@ -260,12 +298,25 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// Parse the roles
+			let roles = match token_data.claims.roles {
+				// If no role is provided, grant the viewer role
+				None => vec![Role::Viewer],
+				// If roles are provided, parse them
+				Some(roles) => roles
+					.iter()
+					.map(|r| -> Result<Role, Error> {
+						Role::from_str(r.as_str()).map_err(Error::IamError)
+					})
+					.collect::<Result<Vec<_>, _>>()?,
+			};
 			// Log the success
 			trace!("Authenticated to namespace `{}` with token `{}`", ns, tk);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.au = Arc::new(Auth::Ns(ns));
+			session.au =
+				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
 			Ok(())
 		}
 		// Check if this is namespace authentication
@@ -288,12 +339,27 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.au = Arc::new(Auth::Ns(ns));
+			session.au = Arc::new(Auth::new(Actor::new(
+				id.to_string(),
+				de.roles.iter().map(|r| r.into()).collect(),
+				Level::Namespace(ns),
+			)));
 			Ok(())
 		}
 		// There was an auth error
 		_ => Err(Error::InvalidAuth),
 	}
+}
+
+pub fn parse(value: &str) -> Result<Value, Error> {
+	// Extract the middle part of the token
+	let value = value.splitn(3, '.').skip(1).take(1).next().ok_or(Error::InvalidAuth)?;
+	// Decode the base64 token data content
+	let value = BASE64.decode(value).map_err(|_| Error::InvalidAuth)?;
+	// Convert the decoded data to a string
+	let value = str::from_utf8(&value).map_err(|_| Error::InvalidAuth)?;
+	// Parse the token data into SurrealQL
+	json(value).map_err(|_| Error::InvalidAuth)
 }
 
 pub async fn verify_creds(
@@ -310,20 +376,23 @@ pub async fn verify_creds(
 	// TODO(sgirones): Keep the same behaviour as before, where it would try to authenticate as a KV first, then NS and then DB.
 	// In the future, we want the client to specify the type of user it wants to authenticate as, so we can remove this chain.
 
-	// Try to authenticate as a KV user
-	match verify_kv_creds(ds, user, pass).await {
-		Ok(u) => Ok((Auth::Kv, u)),
+	// Try to authenticate as a ROOT user
+	match verify_root_creds(ds, user, pass).await {
+		Ok(u) => Ok(((&u, Level::Root).into(), u)),
 		Err(_) => {
 			// Try to authenticate as a NS user
 			match ns {
 				Some(ns) => {
 					match verify_ns_creds(ds, ns, user, pass).await {
-						Ok(u) => Ok((Auth::Ns(ns.to_owned()), u)),
+						Ok(u) => Ok(((&u, Level::Namespace(ns.to_owned())).into(), u)),
 						Err(_) => {
 							// Try to authenticate as a DB user
 							match db {
 								Some(db) => match verify_db_creds(ds, ns, db, user, pass).await {
-									Ok(u) => Ok((Auth::Db(ns.to_owned(), db.to_owned()), u)),
+									Ok(u) => Ok((
+										(&u, Level::Database(ns.to_owned(), db.to_owned())).into(),
+										u,
+									)),
 									Err(_) => Err(Error::InvalidAuth),
 								},
 								None => Err(Error::InvalidAuth),
@@ -337,13 +406,13 @@ pub async fn verify_creds(
 	}
 }
 
-async fn verify_kv_creds(
+async fn verify_root_creds(
 	ds: &Datastore,
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	let mut tx = ds.transaction(false, false).await?;
-	let user_res = tx.get_kv_user(user).await?;
+	let user_res = tx.get_root_user(user).await?;
 
 	verify_pass(pass, user_res.hash.as_ref())?;
 
@@ -371,6 +440,7 @@ async fn verify_ns_creds(
 				name: u.name,
 				hash: u.hash,
 				code: u.code,
+				roles: vec![Role::Editor.into()],
 			}),
 			Err(e) => Err(e),
 		},
@@ -405,6 +475,7 @@ async fn verify_db_creds(
 				name: u.name,
 				hash: u.hash,
 				code: u.code,
+				roles: vec![Role::Editor.into()],
 			}),
 			Err(e) => Err(e),
 		},
@@ -418,7 +489,7 @@ async fn verify_db_creds(
 
 fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	// Compute the hash and verify the password
-	let hash = PasswordHash::new(hash.as_ref()).unwrap();
+	let hash = PasswordHash::new(hash).unwrap();
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
@@ -430,14 +501,436 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{kvs::Datastore, sql::Base};
+	use crate::{iam::token::HEADER, kvs::Datastore};
 	use argon2::password_hash::{PasswordHasher, SaltString};
+	use chrono::Duration;
+	use jsonwebtoken::{encode, EncodingKey};
 
 	#[tokio::test]
-	async fn basic() {}
+	async fn test_basic_root() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, None);
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert_eq!(sess.au.level().ns(), None);
+			assert_eq!(sess.au.level().db(), None);
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, None);
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert_eq!(sess.au.level().ns(), None);
+			assert_eq!(sess.au.level().db(), None);
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "invalid").await;
+
+			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+		}
+	}
 
 	#[tokio::test]
-	async fn token() {}
+	async fn test_basic_ns() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), None);
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), None);
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "invalid").await;
+
+			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_basic_db() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "pass").await;
+
+			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = basic(&ds, &mut sess, "user", "invalid").await;
+
+			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_ns() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			tk: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON NS TYPE HS512 VALUE '{secret}'").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Test without roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = Some(vec!["editor".to_string(), "owner".to_string()]);
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+		}
+
+		//
+		// Test with invalid token
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+
+		//
+		// Test with valid token invalid ns
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.ns = Some("invalid".to_string());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_db() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			tk: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON DB TYPE HS512 VALUE '{secret}'").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Test without roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = Some(vec!["editor".to_string(), "owner".to_string()]);
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+		}
+
+		//
+		// Test with invalid token
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+
+		//
+		// Test with valid token invalid db
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.db = Some("invalid".to_string());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+	}
 
 	#[test]
 	fn test_verify_pass() {
@@ -488,16 +981,16 @@ mod tests {
 
 		// Define users
 		{
-			let sess = Session::for_kv();
+			let sess = Session::owner();
 
-			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			let sql = "DEFINE USER kv ON ROOT PASSWORD 'kv'";
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 		}
 
 		// Accept KV user
@@ -505,10 +998,9 @@ mod tests {
 			let res = verify_creds(&ds, None, None, "kv", "kv").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Kv);
-			assert_eq!(user.base, Base::Kv);
-			assert_eq!(user.name.to_string(), "kv");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Root);
+			assert_eq!(auth.id(), "kv");
 		}
 
 		// Accept NS user
@@ -516,10 +1008,9 @@ mod tests {
 			let res = verify_creds(&ds, Some(&ns), None, "ns", "ns").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Ns(ns.to_owned()));
-			assert_eq!(user.base, Base::Ns);
-			assert_eq!(user.name.to_string(), "ns");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Namespace(ns.to_owned()));
+			assert_eq!(auth.id(), "ns");
 		}
 
 		// Accept DB user
@@ -527,10 +1018,9 @@ mod tests {
 			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Db(ns.to_owned(), db.to_owned()));
-			assert_eq!(user.base, Base::Db);
-			assert_eq!(user.name.to_string(), "db");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Database(ns.to_owned(), db.to_owned()));
+			assert_eq!(auth.id(), "db");
 		}
 	}
 
@@ -542,16 +1032,16 @@ mod tests {
 
 		// Define users
 		{
-			let sess = Session::for_kv();
+			let sess = Session::owner();
 
-			let sql = "DEFINE USER kv ON KV PASSWORD 'kv'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			let sql = "DEFINE USER kv ON ROOT PASSWORD 'kv'";
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(&sql, &sess, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 		}
 
 		// Accept KV user even with NS and DB defined
@@ -559,10 +1049,9 @@ mod tests {
 			let res = verify_creds(&ds, Some(&ns), Some(&db), "kv", "kv").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Kv);
-			assert_eq!(user.base, Base::Kv);
-			assert_eq!(user.name.to_string(), "kv");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Root);
+			assert_eq!(auth.id(), "kv");
 		}
 
 		// Accept NS user even with DB defined
@@ -570,10 +1059,9 @@ mod tests {
 			let res = verify_creds(&ds, Some(&ns), Some(&db), "ns", "ns").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Ns(ns.to_owned()));
-			assert_eq!(user.base, Base::Ns);
-			assert_eq!(user.name.to_string(), "ns");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Namespace(ns.to_owned()));
+			assert_eq!(auth.id(), "ns");
 		}
 
 		// Accept DB user
@@ -581,10 +1069,9 @@ mod tests {
 			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
 			assert!(res.is_ok());
 
-			let (auth, user) = res.unwrap();
-			assert_eq!(auth, Auth::Db(ns.to_owned(), db.to_owned()));
-			assert_eq!(user.base, Base::Db);
-			assert_eq!(user.name.to_string(), "db");
+			let (auth, _) = res.unwrap();
+			assert_eq!(auth.level(), &Level::Database(ns.to_owned(), db.to_owned()));
+			assert_eq!(auth.id(), "db");
 		}
 	}
 }

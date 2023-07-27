@@ -14,6 +14,8 @@ LimitNOFILE=infinity
 LimitCORE=infinity
 
 ; Environment variables:
+; Environment=SURREAL_USER=root
+; Environment=SURREAL_PASS=root
 ; Environment=SURREAL_BIND=0.0.0.0:8000
 ; Environment=SURREAL_LOG=debug
 ; Environment=SURREAL_STRICT=false

@@ -1563,8 +1563,8 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all KV users.
-	pub async fn all_kv_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
+	/// Retrieve all ROOT users.
+	pub async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
 		let beg = crate::key::root::us::prefix();
 		let end = crate::key::root::us::suffix();
 
@@ -1766,10 +1766,10 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific user definition from KV.
-	pub async fn get_kv_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
+	/// Retrieve a specific user definition from ROOT.
+	pub async fn get_root_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
 		let key = crate::key::root::us::new(user);
-		let val = self.get(key).await?.ok_or(Error::UserKvNotFound {
+		let val = self.get(key).await?.ok_or(Error::UserRootNotFound {
 			value: user.to_owned(),
 		})?;
 		Ok(val.into())
@@ -2382,23 +2382,23 @@ mod tests {
 	};
 
 	#[tokio::test]
-	async fn test_get_kv_user() {
+	async fn test_get_root_user() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut txn = ds.transaction(true, false).await.unwrap();
 
 		// Retrieve non-existent KV user
-		let res = txn.get_kv_user("nonexistent").await;
+		let res = txn.get_root_user("nonexistent").await;
 		assert_eq!(res.err().unwrap().to_string(), "The root user 'nonexistent' does not exist");
 
 		// Create KV user and retrieve it
 		let data = DefineUserStatement {
 			name: "user".into(),
-			base: Base::Kv,
+			base: Base::Root,
 			..Default::default()
 		};
 		let key = crate::key::root::us::new("user");
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
-		let res = txn.get_kv_user("user").await.unwrap();
+		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
 	}
 
@@ -2453,18 +2453,18 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_all_kv_users() {
+	async fn test_all_root_users() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut txn = ds.transaction(true, false).await.unwrap();
 
 		// When there are no users
-		let res = txn.all_kv_users().await.unwrap();
+		let res = txn.all_root_users().await.unwrap();
 		assert_eq!(res.len(), 0);
 
 		// When there are users
 		let data = DefineUserStatement {
 			name: "user".into(),
-			base: Base::Kv,
+			base: Base::Root,
 			..Default::default()
 		};
 
@@ -2472,7 +2472,7 @@ mod tests {
 		let key2 = crate::key::root::us::new("user2");
 		let _ = txn.set(key1, data.to_owned()).await.unwrap();
 		let _ = txn.set(key2, data.to_owned()).await.unwrap();
-		let res = txn.all_kv_users().await.unwrap();
+		let res = txn.all_root_users().await.unwrap();
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);

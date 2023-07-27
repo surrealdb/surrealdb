@@ -1,8 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::{Level, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
 use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -19,7 +21,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum InfoStatement {
-	Kv,
+	Root,
 	Ns,
 	Db,
 	Sc(Ident),
@@ -38,15 +40,13 @@ impl InfoStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
-			InfoStatement::Kv => {
-				// No need for NS/DB
-				opt.needs(Level::Kv)?;
+			InfoStatement::Root => {
 				// Allowed to run?
-				opt.check(Level::Kv)?;
-				// Create the result set
-				let mut res = Object::default();
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
 				// Process the namespaces
 				let mut tmp = Object::default();
 				for v in run.all_ns().await?.iter() {
@@ -55,7 +55,7 @@ impl InfoStatement {
 				res.insert("namespaces".to_owned(), tmp.into());
 				// Process the users
 				let mut tmp = Object::default();
-				for v in run.all_kv_users().await?.iter() {
+				for v in run.all_root_users().await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
@@ -63,10 +63,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Ns => {
-				// Selected NS?
-				opt.needs(Level::Ns)?;
 				// Allowed to run?
-				opt.check(Level::Ns)?;
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -99,10 +97,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
 				// Allowed to run?
-				opt.check(Level::Db)?;
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -159,10 +155,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Sc(sc) => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
 				// Allowed to run?
-				opt.check(Level::Db)?;
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -177,10 +171,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Tb(tb) => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
 				// Allowed to run?
-				opt.check(Level::Db)?;
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Create the result set
@@ -213,28 +205,18 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::User(user, base) => {
-				let level = match base {
-					// Get the level from the provided user statement
-					Some(val) => val.to_level(),
-					// If no level is provided, use the current selected level
-					None => opt.selected_level(),
-				};
+				let base = base.clone().unwrap_or(opt.selected_base()?);
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 
-				// Check if all the necessary options are set for the given level
-				opt.needs(level.to_owned())?;
-				// Check if the user is allowed to run the statement on the given level
-				opt.check(level.to_owned())?;
-
-				// Clone transaction
-				let run = txn.clone();
 				// Claim transaction
-				let mut run = run.lock().await;
+				let mut run = txn.lock().await;
 				// Process the user
-				let res = match level {
-					Level::Kv => run.get_kv_user(user).await?,
-					Level::Ns => run.get_ns_user(opt.ns(), user).await?,
-					Level::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
-					_ => return Err(Error::QueryPermissions),
+				let res = match base {
+					Base::Root => run.get_root_user(user).await?,
+					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
+					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Value::from(res.to_string()).ok()
@@ -246,7 +228,7 @@ impl InfoStatement {
 impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Kv => f.write_str("INFO FOR KV"),
+			Self::Root => f.write_str("INFO FOR ROOT"),
 			Self::Ns => f.write_str("INFO FOR NAMESPACE"),
 			Self::Db => f.write_str("INFO FOR DATABASE"),
 			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
@@ -264,12 +246,12 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	alt((kv, ns, db, sc, tb, user))(i)
+	alt((root, ns, db, sc, tb, user))(i)
 }
 
-fn kv(i: &str) -> IResult<&str, InfoStatement> {
-	let (i, _) = tag_no_case("KV")(i)?;
-	Ok((i, InfoStatement::Kv))
+fn root(i: &str) -> IResult<&str, InfoStatement> {
+	let (i, _) = alt((tag_no_case("ROOT"), tag_no_case("KV")))(i)?;
+	Ok((i, InfoStatement::Root))
 }
 
 fn ns(i: &str) -> IResult<&str, InfoStatement> {
@@ -317,13 +299,13 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn info_query_kv() {
-		let sql = "INFO FOR KV";
+	fn info_query_root() {
+		let sql = "INFO FOR ROOT";
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::Kv);
-		assert_eq!("INFO FOR KV", format!("{}", out));
+		assert_eq!(out, InfoStatement::Root);
+		assert_eq!("INFO FOR ROOT", format!("{}", out));
 	}
 
 	#[test]
@@ -368,12 +350,12 @@ mod tests {
 
 	#[test]
 	fn info_query_user() {
-		let sql = "INFO FOR USER test ON KV";
+		let sql = "INFO FOR USER test ON ROOT";
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Kv)));
-		assert_eq!("INFO FOR USER test ON KV", format!("{}", out));
+		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Root)));
+		assert_eq!("INFO FOR USER test ON ROOT", format!("{}", out));
 
 		let sql = "INFO FOR USER test ON NS";
 		let res = info(sql);

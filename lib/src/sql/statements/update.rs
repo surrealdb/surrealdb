@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Iterator;
-use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::{Iterable, Transaction};
@@ -51,10 +50,8 @@ impl UpdateStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::No)?;
+		// Valid options?
+		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored

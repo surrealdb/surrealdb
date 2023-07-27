@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iat: Option<i64>,
@@ -51,6 +51,13 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/record")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub id: Option<String>,
+	#[serde(alias = "rl")]
+	#[serde(alias = "RL")]
+	#[serde(rename = "RL")]
+	#[serde(alias = "https://surrealdb.com/rl")]
+	#[serde(alias = "https://surrealdb.com/roles")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub roles: Option<Vec<String>>,
 }
 
 impl From<Claims> for Value {
@@ -92,6 +99,10 @@ impl From<Claims> for Value {
 		// Add ID field if set
 		if let Some(id) = v.id {
 			out.insert("ID".to_string(), id.into());
+		}
+		// Add RL field if set
+		if let Some(role) = v.roles {
+			out.insert("RL".to_string(), role.into());
 		}
 		// Return value
 		out.into()

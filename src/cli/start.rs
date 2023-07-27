@@ -20,10 +20,6 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
-	#[arg(help = "Whether to enable authentication")]
-	#[arg(env = "SURREAL_AUTH", long)]
-	#[arg(default_value_t = false)]
-	auth: bool,
 	#[arg(
 		help = "The username for the initial database root user. Only if no other root user exists"
 	)]
@@ -97,7 +93,6 @@ struct StartCommandWebTlsOptions {
 pub async fn init(
 	StartCommandArguments {
 		path,
-		auth,
 		username: user,
 		password: pass,
 		client_ip,
@@ -122,7 +117,6 @@ pub async fn init(
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
 		path,
-		auth,
 		user,
 		pass,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),

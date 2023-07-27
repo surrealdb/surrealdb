@@ -5,7 +5,7 @@ use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use crate::opt::Config;
 use url::Url;
 
@@ -50,7 +50,7 @@ impl IntoEndpoint<Mem> for Root<'_> {
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(())?;
-		endpoint.auth = Level::Kv;
+		endpoint.auth = Level::Root;
 		endpoint.username = self.username.to_owned();
 		endpoint.password = self.password.to_owned();
 		Ok(endpoint)

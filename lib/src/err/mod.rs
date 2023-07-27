@@ -1,3 +1,4 @@
+use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
@@ -171,12 +172,6 @@ pub enum Error {
 		message: String,
 	},
 
-	/// Invalid level value
-	#[error("Level '{level}' is not valid")]
-	InvalidLevel {
-		level: String,
-	},
-
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -194,10 +189,6 @@ pub enum Error {
 	QueryNotExecutedDetail {
 		message: String,
 	},
-
-	/// The permissions do not allow for performing the specified query
-	#[error("You don't have permission to perform this query type")]
-	QueryPermissions,
 
 	/// The permissions do not allow for changing to the specified namespace
 	#[error("You don't have permission to change to the {ns} namespace")]
@@ -315,7 +306,7 @@ pub enum Error {
 
 	/// The requested root user does not exist
 	#[error("The root user '{value}' does not exist")]
-	UserKvNotFound {
+	UserRootNotFound {
 		value: String,
 	},
 
@@ -561,6 +552,14 @@ pub enum Error {
 
 	#[error("Versionstamp in key is corrupted: {0}")]
 	CorruptedVersionstampInKey(#[from] VersionstampError),
+
+	/// Invalid level
+	#[error("Invalid level '{0}'")]
+	InvalidLevel(String),
+
+	/// Represents an underlying IAM error
+	#[error("IAM error: {0}")]
+	IamError(#[from] IamError),
 }
 
 impl From<Error> for String {

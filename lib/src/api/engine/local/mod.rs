@@ -431,9 +431,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response =
-				crate::iam::signin::signin(kvs, session, credentials)
-					.await?;
+			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Authenticate => {
@@ -514,17 +512,23 @@ async fn router(
 			// Write to channel.
 			async fn export_with_err(
 				kvs: &Datastore,
+				sess: &Session,
 				ns: String,
 				db: String,
 				chn: channel::Sender<Vec<u8>>,
 			) -> std::result::Result<(), crate::Error> {
-				kvs.export(ns, db, chn).await.map_err(|error| {
-					error!("{error}");
+				let export = kvs.prepare_export(sess, ns, db, chn).await.map_err(|error| {
+					error!("Error preparing export: {error}");
+					crate::Error::Db(error)
+				})?;
+
+				export.await.map_err(|error| {
+					error!("Error processing export: {error}");
 					crate::Error::Db(error)
 				})
 			}
 
-			let export = export_with_err(kvs, ns, db, tx);
+			let export = export_with_err(kvs, session, ns, db, tx);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {

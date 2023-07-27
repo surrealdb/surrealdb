@@ -66,6 +66,7 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	if let Some(dir) = current_dir {
 		cmd.current_dir(&dir);
 	}
+	cmd.env_clear();
 	cmd.stdin(Stdio::piped());
 	cmd.stdout(Stdio::piped());
 	cmd.stderr(Stdio::piped());
@@ -114,7 +115,7 @@ pub async fn start_server(
 	}
 
 	if auth {
-		extra_args.push_str(format!(" --auth").as_str());
+		extra_args.push_str(" --auth");
 	}
 
 	let start_args = format!("start --bind {addr} memory --no-banner --log info --user {USER} --pass {PASS} {extra_args}");

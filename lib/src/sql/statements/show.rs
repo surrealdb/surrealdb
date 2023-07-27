@@ -1,14 +1,16 @@
 use crate::ctx::Context;
-use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
 use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use crate::sql::value::Value;
+use crate::sql::Base;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -38,9 +40,7 @@ impl ShowStatement {
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
 		// Clone transaction
 		let txn = txn.clone();
 		// Claim transaction

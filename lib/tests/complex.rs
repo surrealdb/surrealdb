@@ -202,7 +202,7 @@ async fn run_queries(
 	Error,
 > {
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
 }
 
@@ -215,7 +215,7 @@ fn with_enough_stack(
 	// Roughly how much stack is allocated for surreal server workers in release mode
 	#[cfg(not(debug_assertions))]
 	{
-		builder = builder.stack_size(8_000_000);
+		builder = builder.stack_size(10_000_000);
 	}
 
 	// Same for debug mode

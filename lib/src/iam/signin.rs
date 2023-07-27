@@ -1,8 +1,8 @@
 use crate::cnf::SERVER_NAME;
-use crate::dbs::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
+use crate::iam::Auth;
 use crate::kvs::Datastore;
 use crate::sql::Object;
 use crate::sql::Value;
@@ -11,6 +11,7 @@ use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
 
 use super::verify::verify_creds;
+use super::{Actor, Level};
 
 pub async fn signin(
 	kvs: &Datastore,
@@ -114,8 +115,8 @@ pub async fn sc(
 				Some(val) => {
 					// Setup the query params
 					let vars = Some(vars.0);
-					// Setup the query session
-					let sess = Session::for_db(&ns, &db);
+					// Setup the system session for finding the signin record
+					let sess = Session::viewer().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
 					match kvs.compute(val, &sess, vars).await {
 						// The signin value succeeded
@@ -151,8 +152,12 @@ pub async fn sc(
 								session.ns = Some(ns.to_owned());
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
-								session.sd = Some(Value::from(rid));
-								session.au = Arc::new(Auth::Sc(ns, db, sc));
+								session.sd = Some(Value::from(rid.to_owned()));
+								session.au = Arc::new(Auth::new(Actor::new(
+									rid.to_string(),
+									Default::default(),
+									Level::Scope(ns, db, sc),
+								)));
 								// Check the authentication token
 								match enc {
 									// The auth token was created successfully
@@ -186,7 +191,7 @@ pub async fn db(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	match verify_creds(kvs, Some(&ns), Some(&db), &user, &pass).await {
-		Ok((au, u)) => {
+		Ok((auth, u)) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -206,7 +211,7 @@ pub async fn db(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.au = Arc::new(au);
+			session.au = Arc::new(auth);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -228,7 +233,7 @@ pub async fn ns(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	match verify_creds(kvs, Some(&ns), None, &user, &pass).await {
-		Ok((au, u)) => {
+		Ok((auth, u)) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -246,7 +251,7 @@ pub async fn ns(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			session.au = Arc::new(au);
+			session.au = Arc::new(auth);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -266,7 +271,7 @@ pub async fn kv(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	match verify_creds(kvs, None, None, &user, &pass).await {
-		Ok((au, u)) => {
+		Ok((auth, u)) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -282,7 +287,7 @@ pub async fn kv(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			session.au = Arc::new(au);
+			session.au = Arc::new(auth);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
