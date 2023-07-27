@@ -202,7 +202,13 @@ impl Rpc {
 									tasks.spawn(Rpc::handle_msg(rpc.clone(), msg, internal_sender.clone()));
 								}
 								Message::Close(_) => {
-									tasks.spawn(Rpc::handle_msg(rpc.clone(), Message::Close(None), internal_sender.clone()));
+									// Respond with a close message
+									if let Err(err) = internal_sender.send(Message::Close(None)).await {
+										trace!("WebSocket error when replying to the Close frame: {:?}", err);
+									};
+									// Start the graceful shutdown of the WebSocket and close the channels
+									rpc.read().await.graceful_shutdown.cancel();
+									let _ = internal_sender.close();
 									break;
 								}
 								_ => {
