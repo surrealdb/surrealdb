@@ -12,8 +12,12 @@ pub fn span_for_request(ws_id: &Uuid) -> Span {
 		// To be populated by the request handler when the method is known
 		rpc.method = field::Empty,
 		rpc.service = "surrealdb",
-		rpc.request.format = field::Empty,
-		rpc.response.format = field::Empty,
+
+		// JSON-RPC fields
+		rpc.jsonrpc.version = "2.0",
+		rpc.jsonrpc.request_id = field::Empty,
+		rpc.jsonrpc.error_code = field::Empty,
+		rpc.jsonrpc.error_message = field::Empty,
 
 		// SurrealDB custom fields
 		ws.id = %ws_id,

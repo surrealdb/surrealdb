@@ -93,7 +93,6 @@ impl Response {
 	/// Send the response to the WebSocket channel
 	pub async fn send(self, out: OutputFormat, chn: Sender<Message>) {
 		let span = Span::current();
-		span.record("rpc.response.format", format!("{:?}", out));
 
 		info!("Process RPC response");
 
@@ -103,6 +102,8 @@ impl Response {
 				"otel.status_message",
 				format!("code: {}, message: {}", err.code, err.message),
 			);
+			span.record("rpc.jsonrpc.error_code", err.code);
+			span.record("rpc.jsonrpc.error_message", err.message.as_ref());
 		}
 
 		let message = match out {

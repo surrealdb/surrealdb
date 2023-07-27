@@ -305,6 +305,7 @@ impl Rpc {
 		// Parse the request
 		match Self::parse_request(msg).await {
 			Ok((id, method, params, _out_fmt)) => {
+				span.record("rpc.jsonrpc.request_id", id.clone().map(|v| v.as_string()).unwrap_or(String::new()));
 				if let Some(_out_fmt) = _out_fmt {
 					out_fmt = _out_fmt;
 				}
@@ -329,7 +330,6 @@ impl Rpc {
 		let req = match msg {
 			// This is a binary message
 			Message::Binary(val) => {
-				Span::current().record("rpc.request.format", "binary");
 				// Use binary output
 				out_fmt = Some(OutputFormat::Full);
 
@@ -343,7 +343,6 @@ impl Rpc {
 			}
 			// This is a text message
 			Message::Text(ref val) => {
-				Span::current().record("rpc.request.format", "text");
 				// Parse the SurrealQL object
 				match surrealdb::sql::value(val) {
 					// The SurrealQL message parsed ok
