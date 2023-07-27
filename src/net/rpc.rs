@@ -301,7 +301,7 @@ impl Rpc {
 		let span = span_for_request(&rpc.read().await.ws_id);
 		let _enter = span.enter();
 		// Parse the request
-		match Self::parse_request(msg).in_current_span().await {
+		match Self::parse_request(msg).await {
 			Ok((id, method, params, _out_fmt)) => {
 				if let Some(_out_fmt) = _out_fmt {
 					out_fmt = _out_fmt;
@@ -309,14 +309,14 @@ impl Rpc {
 
 				// Process the request
 				let res =
-					Self::process_request(rpc.clone(), &method, params).in_current_span().await;
+					Self::process_request(rpc.clone(), &method, params).await;
 
 				// Process the response
-				res.into_response(id).send(out_fmt, chn).in_current_span().await
+				res.into_response(id).send(out_fmt, chn).await
 			}
 			Err(err) => {
 				// Process the response
-				res::failure(None, err).send(out_fmt, chn).in_current_span().await
+				res::failure(None, err).send(out_fmt, chn).await
 			}
 		}
 	}
