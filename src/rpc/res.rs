@@ -7,12 +7,13 @@ use surrealdb::dbs;
 use surrealdb::dbs::Notification;
 use surrealdb::sql;
 use surrealdb::sql::Value;
+use tracing::Span;
 
 use crate::err;
 use crate::rpc::CONN_CLOSED_ERR;
 
-#[derive(Clone)]
-pub enum Output {
+#[derive(Debug, Clone)]
+pub enum OutputFormat {
 	Json, // JSON
 	Cbor, // CBOR
 	Pack, // MessagePack
@@ -90,33 +91,34 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, out: Output, chn: Sender<Message>) {
-		debug!("Processing response");
-		if let Err(err) = &self.result {
-			debug!("Send error to the client");
+	pub async fn send(self, out: OutputFormat, chn: Sender<Message>) {
+		let span = Span::current();
+		span.record("rpc.response.format", format!("{:?}", out));
 
-			// if the current scope is a RPC request span, record the error
-			let span = tracing::Span::current();
-			if span.field("rpc.method").is_some() {
-				span.record("status", "Error");
-				span.record("message", format!("code: {}, message: {}", err.code, err.message));
-			}
+		info!("Process RPC response");
+
+		if let Err(err) = &self.result {
+			span.record("otel.status_code", "Error");
+			span.record(
+				"otel.status_message",
+				format!("code: {}, message: {}", err.code, err.message),
+			);
 		}
 
 		let message = match out {
-			Output::Json => {
+			OutputFormat::Json => {
 				let res = serde_json::to_string(&self.simplify()).unwrap();
 				Message::Text(res)
 			}
-			Output::Cbor => {
+			OutputFormat::Cbor => {
 				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
 				Message::Binary(res)
 			}
-			Output::Pack => {
+			OutputFormat::Pack => {
 				let res = serde_pack::to_vec(&self.simplify()).unwrap();
 				Message::Binary(res)
 			}
-			Output::Full => {
+			OutputFormat::Full => {
 				let res = surrealdb::sql::serde::serialize(&self).unwrap();
 				Message::Binary(res)
 			}
@@ -136,6 +138,7 @@ pub struct Failure {
 	message: Cow<'static, str>,
 }
 
+#[allow(dead_code)]
 impl Failure {
 	pub const PARSE_ERROR: Failure = Failure {
 		code: -32700,
