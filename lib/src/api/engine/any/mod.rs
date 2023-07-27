@@ -98,6 +98,15 @@ use crate::api::err::Error;
 	feature = "kv-indxdb",
 ))]
 use crate::api::opt::auth::Root;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+))]
+use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 #[cfg(any(
 	feature = "kv-mem",
@@ -131,7 +140,7 @@ impl IntoEndpoint for &str {
 		};
 		Ok(Endpoint {
 			endpoint: Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -205,8 +214,40 @@ where
 	T: Into<String>,
 {
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let mut endpoint = IntoEndpoint::into_endpoint(self.0.into())?;
-		endpoint.strict = true;
+		let (address, _) = self;
+		let mut endpoint = IntoEndpoint::into_endpoint(address.into())?;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+))]
+#[cfg_attr(
+	docsrs,
+	doc(cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-speedb",
+		feature = "kv-fdb",
+		feature = "kv-indxdb",
+	)))
+)]
+impl<T> IntoEndpoint for (T, Config)
+where
+	T: Into<String>,
+{
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, config) = self;
+		let mut endpoint = IntoEndpoint::into_endpoint(address.into())?;
+		endpoint.config = config;
 		Ok(endpoint)
 	}
 }
@@ -266,7 +307,36 @@ where
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, _, root) = self;
 		let mut endpoint = IntoEndpoint::into_endpoint((address, root))?;
-		endpoint.strict = true;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+))]
+#[cfg_attr(
+	docsrs,
+	doc(cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-indxdb",
+	)))
+)]
+impl<T> IntoEndpoint for (T, Config, Root<'_>)
+where
+	T: Into<String>,
+{
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, config, root) = self;
+		let mut endpoint = IntoEndpoint::into_endpoint((address, root))?;
+		endpoint.config = config;
 		Ok(endpoint)
 	}
 }
@@ -302,7 +372,43 @@ where
 		let (address, _, config) = self;
 		let mut endpoint = address.into().into_endpoint()?;
 		endpoint.tls_config = Some(Tls::Native(config));
-		endpoint.strict = true;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+#[cfg(all(
+	any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-indxdb",
+	),
+	feature = "native-tls",
+))]
+#[cfg_attr(
+	docsrs,
+	doc(cfg(all(
+		any(
+			feature = "kv-mem",
+			feature = "kv-tikv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-indxdb",
+		),
+		feature = "native-tls",
+	)))
+)]
+impl<T> IntoEndpoint for (T, Config, native_tls::TlsConnector)
+where
+	T: Into<String>,
+{
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, opt_config, config) = self;
+		let mut endpoint = address.into().into_endpoint()?;
+		endpoint.tls_config = Some(Tls::Native(config));
+		endpoint.config = opt_config;
 		Ok(endpoint)
 	}
 }
@@ -375,7 +481,45 @@ where
 		let (address, _, config) = self;
 		let mut endpoint = address.into().into_endpoint()?;
 		endpoint.tls_config = Some(Tls::Rust(config));
-		endpoint.strict = true;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+#[cfg(all(
+	any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-speedb",
+		feature = "kv-fdb",
+		feature = "kv-indxdb",
+	),
+	feature = "rustls",
+))]
+#[cfg_attr(
+	docsrs,
+	doc(cfg(all(
+		any(
+			feature = "kv-mem",
+			feature = "kv-tikv",
+			feature = "kv-rocksdb",
+			feature = "kv-speedb",
+			feature = "kv-fdb",
+			feature = "kv-indxdb",
+		),
+		feature = "rustls",
+	)))
+)]
+impl<T> IntoEndpoint for (T, Config, rustls::ClientConfig)
+where
+	T: Into<String>,
+{
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, opt_config, config) = self;
+		let mut endpoint = address.into().into_endpoint()?;
+		endpoint.tls_config = Some(Tls::Rust(config));
+		endpoint.config = opt_config;
 		Ok(endpoint)
 	}
 }

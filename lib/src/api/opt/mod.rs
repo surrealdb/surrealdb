@@ -2,6 +2,7 @@
 
 pub mod auth;
 
+mod config;
 mod endpoint;
 mod query;
 mod resource;
@@ -20,6 +21,7 @@ use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
 
+pub use config::*;
 pub use endpoint::*;
 pub use query::*;
 pub use resource::*;
