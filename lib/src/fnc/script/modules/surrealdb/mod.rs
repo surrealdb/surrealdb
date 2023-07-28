@@ -14,7 +14,7 @@ pub struct Package;
 #[js::function]
 async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 	let value = parse_value(&value.0).map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
-	let this = ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+	let this = ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
 	let value = value
 		.compute(this.context, this.opt, this.txn, this.doc)
 		.await
