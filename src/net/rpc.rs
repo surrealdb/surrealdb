@@ -305,7 +305,10 @@ impl Rpc {
 		// Parse the request
 		match Self::parse_request(msg).await {
 			Ok((id, method, params, _out_fmt)) => {
-				span.record("rpc.jsonrpc.request_id", id.clone().map(|v| v.as_string()).unwrap_or(String::new()));
+				span.record(
+					"rpc.jsonrpc.request_id",
+					id.clone().map(|v| v.as_string()).unwrap_or(String::new()),
+				);
 				if let Some(_out_fmt) = _out_fmt {
 					out_fmt = _out_fmt;
 				}
@@ -458,14 +461,7 @@ impl Rpc {
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Specify a connection-wide parameter
-			"let" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), v)) => {
-					rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into)
-				}
-				_ => Err(Failure::INVALID_PARAMS),
-			},
-			// Specify a connection-wide parameter
-			"set" => match params.needs_one_or_two() {
+			"let" | "set" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), v)) => {
 					rpc.write().await.set(s, v).await.map(Into::into).map_err(Into::into)
 				}

@@ -83,6 +83,7 @@ rcgen = "0.10.0"
 serial_test = "2.0.0"
 temp-env = "0.3.4"
 tokio-stream = { version = "0.1", features = ["net"] }
+tokio-tungstenite = { version = "0.18.0" }
 tonic = "0.8.3"
 
 [package.metadata.deb]
