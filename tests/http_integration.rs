@@ -1300,3 +1300,7 @@ async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 
 	Ok(())
 }
+
+// Function tests are loaded after baseline serial protocol tests
+
+include!("ws_live_integration.rs");

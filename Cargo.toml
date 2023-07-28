@@ -80,6 +80,7 @@ assert_fs = "1.0.13"
 opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
 rcgen = "0.10.0"
 serial_test = "2.0.0"
+indoc = "2.0.3"
 temp-env = "0.3.4"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.8.3"
