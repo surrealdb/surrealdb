@@ -70,7 +70,7 @@ pub async fn run(
 	// Explicitly set max stack size to 256 KiB
 	run.set_max_stack_size(262_144).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(4_000_000).await;
+	run.set_memory_limit(2_000_000).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done());
