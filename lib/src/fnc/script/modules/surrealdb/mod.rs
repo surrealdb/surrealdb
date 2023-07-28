@@ -12,14 +12,14 @@ pub mod query;
 pub struct Package;
 
 #[js::function]
-async fn value<'js>(ctx: Ctx<'js>, value: Coerced<String>) -> Result<SurValue> {
+async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 	let value = parse_value(&value.0).map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
 	let this = ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
 	let value = value
-		.compute(&this.context, this.opt, this.txn, this.doc)
+		.compute(this.context, this.opt, this.txn, this.doc)
 		.await
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-	return Ok(value);
+	Ok(value)
 }
 
 impl ModuleDef for Package {
