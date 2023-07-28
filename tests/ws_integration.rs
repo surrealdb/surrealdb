@@ -2,6 +2,8 @@
 
 mod common;
 
+use futures_util::{SinkExt, StreamExt, TryStreamExt};
+use serde::Deserialize;
 use serde_json::json;
 use serial_test::serial;
 use tokio_tungstenite::tungstenite::Message;
@@ -803,8 +805,177 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 #[serial]
-async fn format() -> Result<(), Box<dyn std::error::Error>> {
-	todo!()
+async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	//
+	// Prepare the connection
+	//
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some("N"), Some("D")).await?;
+
+	//
+	// Setup the database
+	//
+	let _ = common::ws_query(socket, "CREATE table:id").await?;
+
+	//
+	// Test JSON format
+	//
+
+	// Change format
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "format",
+			"params": [
+				"json"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let _ = f.select_next_some().await?;
+
+	// Query data
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "query",
+			"params": [
+				"SELECT * FROM table:id"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	// Parse and verify data
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let msg = f.select_next_some().await?;
+	let res: serde_json::Value = serde_json::from_str(&msg.to_string()).unwrap();
+	assert_eq!(res["result"].as_array().unwrap().len(), 1, "result: {:?}", res);
+
+	Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	//
+	// Prepare the connection
+	//
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some("N"), Some("D")).await?;
+
+	//
+	// Setup the database
+	//
+	let _ = common::ws_query(socket, "CREATE table:id").await?;
+
+	//
+	// Test CBOR format
+	//
+
+	// Change format
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "format",
+			"params": [
+				"cbor"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let _ = f.select_next_some().await?;
+
+	// Query data
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "query",
+			"params": [
+				"SELECT * FROM table:id"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_binary()));
+	let msg = f.select_next_some().await?;
+	let res: serde_json::Value = serde_cbor::from_slice(&msg.into_data()).unwrap();
+	assert_eq!(res["result"].as_array().unwrap().len(), 1, "result: {:?}", res);
+
+	Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	//
+	// Prepare the connection
+	//
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some("N"), Some("D")).await?;
+
+	//
+	// Setup the database
+	//
+	let _ = common::ws_query(socket, "CREATE table:id").await?;
+
+	//
+	// Test PACK format
+	//
+
+	// Change format
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "format",
+			"params": [
+				"pack"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let _ = f.select_next_some().await?;
+
+	// Query data
+	let msg = Message::Text(
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "query",
+			"params": [
+				"SELECT * FROM table:id"
+			]
+		}))
+		.unwrap(),
+	);
+	socket.send(msg).await?;
+
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_binary()));
+	let msg = f.select_next_some().await?;
+	let res: serde_json::Value = serde_pack::from_slice(&msg.into_data()).unwrap();
+	assert_eq!(res["result"].as_array().unwrap().len(), 1, "result: {:?}", res);
+
+	Ok(())
 }
 
 #[tokio::test]
