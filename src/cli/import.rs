@@ -38,10 +38,10 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("error").init();
 
-	let client = if let Some(username) = username {
+	let client = if let Some((username, password)) = username.zip(password) {
 		let root = Root {
 			username: &username,
-			password: &password.expect("Password is required when username is provided"),
+			password: &password,
 		};
 
 		// Connect to the database engine with authentication
