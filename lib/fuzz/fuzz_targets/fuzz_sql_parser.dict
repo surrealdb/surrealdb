@@ -344,7 +344,6 @@
 "type::int("
 "type::number("
 "type::point("
-"type::regex("
 "type::string("
 "type::table("
 "type::thing("
