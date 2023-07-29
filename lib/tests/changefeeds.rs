@@ -33,8 +33,12 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let start_ts = 0u64;
+	let end_ts = start_ts + 1;
+	dbs.tick_at(start_ts).await?;
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	dbs.tick_at(end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
@@ -153,6 +157,20 @@ async fn table_change_feeds() -> Result<(), Error> {
 			}
 		]",
 	);
+	assert_eq!(tmp, val);
+	// Retain for 1h
+	let sql = "
+        SHOW CHANGES FOR TABLE person SINCE 0;
+	";
+	dbs.tick_at(end_ts + 3599).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, val);
+	// GC after 1hs
+	dbs.tick_at(end_ts + 3600).await?;
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

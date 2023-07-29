@@ -125,6 +125,7 @@
 "UPDATE"
 "UPPERCASE"
 "USE"
+"USER"
 "VALUE"
 "VALUES"
 "VERSION"
@@ -344,7 +345,6 @@
 "type::int("
 "type::number("
 "type::point("
-"type::regex("
 "type::string("
 "type::table("
 "type::thing("
@@ -369,4 +369,3 @@
 "vector::similarity::pearson("
 "vector::similarity::spearman("
 # TODO: Add Javascript keywords
-

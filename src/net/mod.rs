@@ -129,8 +129,6 @@ pub async fn init() -> Result<(), Error> {
 		.merge(key::router())
 		.layer(service);
 
-	info!("Starting web server on {}", &opt.bind);
-
 	// Setup the graceful shutdown with no timeout
 	let handle = Handle::new();
 	graceful_shutdown(handle.clone(), None);

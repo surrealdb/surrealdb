@@ -35,7 +35,11 @@ async fn invalidate() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	db.invalidate().await.unwrap();
 	let error = db.create::<Option<RecordId>>(("user", "john")).await.unwrap_err();
-	assert!(error.to_string().contains("You don't have permission to perform this query type"));
+	assert!(
+		error.to_string().contains("Not enough permissions to perform this action"),
+		"Unexpected error: {:?}",
+		error
+	);
 }
 
 #[tokio::test]
@@ -72,7 +76,7 @@ async fn signin_ns() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	db.signin(Namespace {
@@ -91,7 +95,7 @@ async fn signin_db() {
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON DATABASE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON DATABASE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	db.signin(Database {
@@ -151,7 +155,7 @@ async fn authenticate() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE LOGIN {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	let token = db

@@ -10,6 +10,7 @@ use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
+use surrealdb::iam::Error as SurrealIamError;
 use surrealdb::Error as SurrealError;
 use thiserror::Error;
 
@@ -18,11 +19,11 @@ pub enum Error {
 	#[error("The request body contains invalid data")]
 	Request,
 
-	#[error("There was no NS header present in the request")]
-	NoNsHeader,
+	#[error("No namespace was provided in the request")]
+	NoNamespace,
 
-	#[error("There was no DB header present in the request")]
-	NoDbHeader,
+	#[error("No database was provided in the request")]
+	NoDatabase,
 
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
@@ -75,6 +76,9 @@ impl From<Utf8Error> for Error {
 
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
+		if matches!(error, surrealdb::error::Db::InvalidAuth) {
+			return Error::InvalidAuth;
+		}
 		Error::Db(error.into())
 	}
 }
@@ -104,16 +108,25 @@ impl IntoResponse for Error {
 			err @ Error::InvalidAuth | err @ Error::Db(SurrealError::Db(SurrealDbError::InvalidAuth)) => (
 				StatusCode::UNAUTHORIZED,
 				Json(Message {
-					code: 401,
+					code: StatusCode::UNAUTHORIZED.as_u16(),
 					details: Some("Authentication failed".to_string()),
 					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					information: Some(err.to_string()),
+				})
+			),
+			err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
+				StatusCode::FORBIDDEN,
+				Json(Message {
+					code: StatusCode::FORBIDDEN.as_u16(),
+					details: Some("Forbidden".to_string()),
+					description: Some("Not allowed to do this.".to_string()),
 					information: Some(err.to_string()),
 				})
 			),
 			Error::InvalidType => (
 				StatusCode::UNSUPPORTED_MEDIA_TYPE,
 				Json(Message {
-					code: 415,
+					code: StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
 					details: Some("Unsupported media type".to_string()),
 					description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
 					information: None,
@@ -122,7 +135,7 @@ impl IntoResponse for Error {
 			Error::InvalidStorage => (
 				StatusCode::INTERNAL_SERVER_ERROR,
 				Json(Message {
-					code: 500,
+					code: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
 					details: Some("Health check failed".to_string()),
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
 					information: Some(self.to_string()),
@@ -131,7 +144,7 @@ impl IntoResponse for Error {
 			_ => (
 				StatusCode::BAD_REQUEST,
 				Json(Message {
-					code: 400,
+					code: StatusCode::BAD_REQUEST.as_u16(),
 					details: Some("Request problems detected".to_string()),
 					description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
 					information: Some(self.to_string()),

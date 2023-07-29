@@ -13,7 +13,7 @@ async fn use_statement_set_ns() -> Result<(), Error> {
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -39,7 +39,7 @@ async fn use_statement_set_db() -> Result<(), Error> {
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -65,7 +65,7 @@ async fn use_statement_set_both() -> Result<(), Error> {
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//

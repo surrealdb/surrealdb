@@ -137,6 +137,7 @@ impl Transaction {
 		Ok(u64_to_versionstamp(ver))
 	}
 	/// Obtain a new key that is suffixed with the change timestamp
+	#[allow(unused)]
 	pub async fn get_versionstamped_key<K>(
 		&mut self,
 		ts_key: K,

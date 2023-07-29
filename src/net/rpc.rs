@@ -1,4 +1,3 @@
-use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
@@ -22,7 +21,6 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::{QueryType, Response, Session};
-use surrealdb::opt::auth::Root;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
@@ -435,12 +433,7 @@ impl Rpc {
 	#[instrument(skip_all, name = "rpc signin", fields(websocket=self.uuid.to_string()))]
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		let opts = CF.get().unwrap();
-		let root = opts.pass.as_ref().map(|pass| Root {
-			username: &opts.user,
-			password: pass,
-		});
-		surrealdb::iam::signin::signin(kvs, &root, &mut self.session, vars)
+		surrealdb::iam::signin::signin(kvs, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -454,7 +447,7 @@ impl Rpc {
 	#[instrument(skip_all, name = "rpc auth", fields(websocket=self.uuid.to_string()))]
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		surrealdb::iam::verify::token(kvs, &mut self.session, token.0).await?;
+		surrealdb::iam::verify::token(kvs, &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
 

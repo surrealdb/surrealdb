@@ -20,7 +20,7 @@ cargo deb
 ## Testing
 
 ```shell
-sudo dpkg -i target/debian/surreal_1.0.0~beta.5_amd64.deb
+sudo dpkg -i target/debian/surreal_1.0.0~beta.9_amd64.deb
 ```
 
 ## Installing

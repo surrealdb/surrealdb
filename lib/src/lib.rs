@@ -124,14 +124,6 @@ pub mod dbs;
 pub mod env;
 #[doc(hidden)]
 pub mod err;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
 #[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]
