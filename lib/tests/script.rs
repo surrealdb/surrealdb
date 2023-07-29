@@ -282,6 +282,46 @@ async fn script_query_from_script() -> Result<(), Error> {
 		}]"#,
 	);
 	assert_eq!(tmp, val);
+	Ok(())
+}
 
+#[tokio::test]
+async fn script_value_function_params() -> Result<(), Error> {
+	let sql = r#"
+		LET $test = CREATE article:test SET name = "The daily news", issue_number = 3;
+		RETURN function() {
+			return await surrealdb.value(`$test.name`)
+		}
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	let tmp = res.remove(1).result?;
+	let val = Value::parse(r#""The daily news""#);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_value_function_inline_values() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			if(await surrealdb.value(`3`) !== 3){
+				throw new Error(1)
+			}
+			if(await surrealdb.value(`"some string"`) !== "some string"){
+				throw new Error(2)
+			}
+			if(await surrealdb.value(`<future>{ math::floor(13.746189) }`) !== 13){
+				throw new Error(3)
+			}
+		}
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	res.remove(0).result?;
 	Ok(())
 }
