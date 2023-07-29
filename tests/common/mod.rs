@@ -124,7 +124,7 @@ pub async fn start_server(
 		extra_args.push_str(" --auth");
 	}
 
-	let start_args = format!("start --bind {addr} memory --no-banner --log info --user {USER} --pass {PASS} {extra_args}");
+	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
 	println!("starting server with args: {start_args}");
 
@@ -161,14 +161,51 @@ pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 
 pub async fn ws_send_msg(
 	socket: &mut WsStream,
-	msg: Message,
+	msg_req: String,
 ) -> Result<serde_json::Value, Box<dyn Error>> {
-	socket.send(msg).await?;
+	// Use JSON format by default
+	ws_send_msg_with_fmt(socket, msg_req, Format::Json).await
+}
 
-	// Parse and return response
-	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
-	let msg = f.select_next_some().await?;
-	Ok(serde_json::from_str(&msg.to_string())?)
+pub enum Format {
+	Json,
+	Cbor,
+	Pack,
+}
+
+pub async fn ws_send_msg_with_fmt(
+	socket: &mut WsStream,
+	msg_req: String,
+	response_format: Format,
+) -> Result<serde_json::Value, Box<dyn Error>> {
+	tokio::select! {
+		_ = time::sleep(time::Duration::from_millis(100)) => {
+			return Err("timeout waiting for the request to be sent".into());
+		}
+		res = socket.send(Message::Text(msg_req)) => {
+			if let Err(err) = res {
+				return Err(format!("Error sending the message: {}", err).into());
+			}
+		}
+	}
+
+	let mut f = socket.try_filter(|msg| match response_format {
+		Format::Json => futures_util::future::ready(msg.is_text()),
+		Format::Pack | Format::Cbor => futures_util::future::ready(msg.is_binary()),
+	});
+
+	tokio::select! {
+		_ = time::sleep(time::Duration::from_millis(1000)) => {
+			return Err("timeout waiting for the response".into());
+		}
+		res = f.select_next_some() => {
+			match response_format {
+				Format::Json => Ok(serde_json::from_str(&res?.to_string())?),
+				Format::Cbor => Ok(serde_cbor::from_slice(&res?.into_data())?),
+				Format::Pack => Ok(serde_pack::from_slice(&res?.into_data())?),
+			}
+		}
+	}
 }
 
 #[derive(Serialize, Deserialize)]
@@ -206,59 +243,44 @@ pub async fn ws_signin(
 		],
 	});
 
-	if let Err(err) = socket.send(Message::Text(serde_json::to_string(&json).unwrap())).await {
-		panic!("Error sending the message: {}", err);
+	let msg = ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+	match msg.as_object() {
+		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
+			Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
+		}
+		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => {
+			Ok(obj.get("result").unwrap().as_str().unwrap_or_default().to_owned())
+		}
+		_ => {
+			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			Err(format!("unexpected response: {:?}", msg).into())
+		}
 	}
-
-	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
-	let msg = f.select_next_some().await?;
-	let msg: serde_json::Value = serde_json::from_str(&msg.to_string()).unwrap();
-	Ok(msg["result"]["token"].as_str().unwrap_or_default().to_owned())
 }
 
 pub async fn ws_query(
 	socket: &mut WsStream,
 	query: &str,
 ) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
-	let req = socket.send(Message::Text(
-		serde_json::to_string(&json!({
-			"id": "1",
-			"method": "query",
-			"params": [query],
-		}))
-		.unwrap(),
-	));
+	let json = json!({
+		"id": "1",
+		"method": "query",
+		"params": [query],
+	});
 
-	tokio::select! {
-		_ = time::sleep(time::Duration::from_millis(100)) => {
-			return Err("timeout waiting for the request to be sent".into());
-		}
-		res = req => {
-			if let Err(err) = res {
-				return Err(format!("Error sending the message: {}", err).into());
-			}
-		}
-	}
-
-	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
-
-	let msg: serde_json::Value = tokio::select! {
-		_ = time::sleep(time::Duration::from_millis(1000)) => {
-			return Err("timeout waiting for the response".into());
-		}
-		msg = f.select_next_some() => {
-			serde_json::from_str(&msg?.to_string())?
-		}
-	};
+	let msg = ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 	match msg.as_object() {
-		Some(obj) if obj.get("error").is_some() => {
+		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
 			Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
 		}
-		Some(obj) if obj.get("result").is_some() => {
+		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => {
 			Ok(obj.get("result").unwrap().as_array().unwrap().to_owned())
 		}
-		_ => return Err(format!("unexpected response: {:?}", msg).into()),
+		_ => {
+			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			Err(format!("unexpected response: {:?}", msg).into())
+		}
 	}
 }
 
@@ -267,49 +289,25 @@ pub async fn ws_use(
 	ns: Option<&str>,
 	db: Option<&str>,
 ) -> Result<serde_json::Value, Box<dyn Error>> {
-	if let Err(err) = socket
-		.send(Message::Text(
-			serde_json::to_string(&json!({
-				"id": "1",
-				"method": "use",
-				"params": [
-					ns, db
-				],
-			}))
-			.unwrap(),
-		))
-		.await
-	{
-		panic!("Error sending the message: {}", err);
-	}
+	let json = json!({
+		"id": "1",
+		"method": "use",
+		"params": [
+			ns, db
+		],
+	});
 
-	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
-	let msg = f.select_next_some().await?;
-	let msg: serde_json::Value = serde_json::from_str(&msg.to_string())?;
+	let msg = ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 	match msg.as_object() {
-		Some(obj) if obj.get("error").is_some() => {
-			Err(format!("unexpected error from request: {:?}", obj.get("error")).into())
+		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
+			Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
 		}
-		Some(obj) if obj.get("result").is_some() => Ok(obj.get("result").unwrap().to_owned()),
-		_ => return Err(format!("unexpected response: {:?}", msg).into()),
+		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => {
+			Ok(obj.get("result").unwrap().to_owned())
+		}
+		_ => {
+			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			Err(format!("unexpected response: {:?}", msg).into())
+		}
 	}
 }
-
-// pub async fn ws_query(socket: &mut WsStream, query: &str) -> Result<Value, Box<dyn Error>> {
-// 	let req_data: HashMap<String, Value> = HashMap::from([
-// 		("id".to_owned(), Value::from("1")),
-// 		("method".to_owned(), Value::from("query")),
-// 		("params".to_owned(),  Value::from(vec![query.to_owned()])),
-// 	]);
-
-//     if let Err(err) = socket.send(Message::Text(to_value(req_data).unwrap().as_string())).await {
-//         panic!("Error sending the message: {}", err);
-//     }
-
-// 	let mut f = socket.try_filter(|msg| {
-// 		println!("msg: {:#?}", msg);
-// 		futures_util::future::ready(msg.is_text())
-// 	});
-// 	let msg = f.select_next_some().await?;
-// 	surrealdb::sql::json(&msg.into_text()?)
-// }
