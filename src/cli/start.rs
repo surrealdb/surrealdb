@@ -25,12 +25,24 @@ pub struct StartCommandArguments {
 	#[arg(
 		help = "The username for the initial database root user. Only if no other root user exists"
 	)]
-	#[arg(env = "SURREAL_USER", short = 'u', long = "username", visible_alias = "user", requires = "password")]
+	#[arg(
+		env = "SURREAL_USER",
+		short = 'u',
+		long = "username",
+		visible_alias = "user",
+		requires = "password"
+	)]
 	username: Option<String>,
 	#[arg(
 		help = "The password for the initial database root user. Only if no other root user exists"
 	)]
-	#[arg(env = "SURREAL_PASS", short = 'p', long = "password", visible_alias = "pass", requires = "username")]
+	#[arg(
+		env = "SURREAL_PASS",
+		short = 'p',
+		long = "password",
+		visible_alias = "pass",
+		requires = "username"
+	)]
 	password: Option<String>,
 	#[arg(help = "The allowed networks for master authentication")]
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
