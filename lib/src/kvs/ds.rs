@@ -14,6 +14,7 @@ use crate::key::root::hb::Hb;
 use crate::sql;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
+use crate::vs;
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
@@ -47,6 +48,9 @@ pub struct Datastore {
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
 	transaction_timeout: Option<Duration>,
+	// The versionstamp oracle for this datastore.
+	// Used only in some datastores, such as tikv.
+	vso: Arc<Mutex<vs::Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
@@ -244,6 +248,7 @@ impl Datastore {
 			strict: false,
 			query_timeout: None,
 			transaction_timeout: None,
+			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
 		})
 	}
@@ -531,6 +536,7 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
+			vso: self.vso.clone(),
 		})
 	}
 
