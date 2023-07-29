@@ -345,9 +345,6 @@
 "type::int("
 "type::number("
 "type::point("
-# Avoid regex in the fuzzer as it will just slow things down.
-# the rust regex crate is already fuzzed.
-# "type::regex("
 "type::string("
 "type::table("
 "type::thing("
