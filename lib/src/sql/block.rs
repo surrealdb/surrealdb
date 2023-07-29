@@ -1,4 +1,3 @@
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -67,18 +66,7 @@ impl Block {
 		for v in self.iter() {
 			match v {
 				Entry::Set(v) => {
-					// Check if the variable is a protected variable
-					let val = match PROTECTED_PARAM_NAMES.contains(&v.name.as_str()) {
-						// The variable isn't protected and can be stored
-						false => v.compute(&ctx, opt, txn, doc).await,
-						// The user tried to set a protected variable
-						true => {
-							return Err(Error::InvalidParam {
-								name: v.name.to_owned(),
-							})
-						}
-					}?;
-					// Set the parameter
+					let val = v.compute(&ctx, opt, txn, doc).await?;
 					ctx.add_value(v.name.to_owned(), val);
 				}
 				Entry::Ifelse(v) => {
