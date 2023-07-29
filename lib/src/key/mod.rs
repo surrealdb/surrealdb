@@ -21,6 +21,7 @@
 /// crate::key::database::sc             /*{ns}*{db}!sc{sc}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 /// crate::key::database::tk             /*{ns}*{db}!tk{tk}
+/// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::vs             /*{ns}*{db}!vs
 ///
 /// crate::key::scope::all               /*{ns}*{db}±{sc}

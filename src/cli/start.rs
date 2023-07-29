@@ -9,10 +9,12 @@ use crate::env;
 use crate::err::Error;
 use crate::iam;
 use crate::net::{self, client_ip::ClientIp};
+use crate::node;
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -40,6 +42,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "The interval at which to run node agent tick (including garbage collection)")]
+	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "10s")]
+	tick_interval: Duration,
 	#[command(flatten)]
 	dbs: StartCommandDbsOptions,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
@@ -96,6 +102,7 @@ pub async fn init(
 		dbs,
 		web,
 		log: CustomEnvFilter(log),
+		tick_interval,
 		no_banner,
 		..
 	}: StartCommandArguments,
@@ -115,6 +122,7 @@ pub async fn init(
 		path,
 		user,
 		pass,
+		tick_interval,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});
@@ -126,6 +134,9 @@ pub async fn init(
 	dbs::init(dbs).await?;
 	// Start the web server
 	net::init().await?;
+	// Start the node agent
+	#[cfg(feature = "has-storage")]
+	node::init().await?;
 	// All ok
 	Ok(())
 }

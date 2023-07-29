@@ -2360,4 +2360,61 @@ impl Transaction {
 		}
 		Ok(())
 	}
+
+	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
+	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
+	pub(crate) async fn set_timestamp_for_versionstamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		lock: bool,
+	) -> Result<(), Error> {
+		// This also works as an advisory lock on the ts keys so that there is
+		// on other concurrent transactions that can write to the ts_key or the keys after it.
+		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
+
+		// Ensure there are no keys after the ts_key
+		// Otherwise we can go back in time!
+		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let begin = ts_key.encode()?;
+		let end = crate::key::database::ts::suffix(ns, db);
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((k, _)) = latest_ts_pair {
+			let k = crate::key::database::ts::Ts::decode(k)?;
+			let latest_ts = k.ts;
+			if latest_ts >= ts {
+				return Err(Error::Internal(
+					"ts is less than or equal to the latest ts".to_string(),
+				));
+			}
+		}
+		self.set(ts_key, vs).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn get_versionstamp_from_timestamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		_lock: bool,
+	) -> Result<Option<Versionstamp>, Error> {
+		let start = crate::key::database::ts::prefix(ns, db);
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
+		let end = ts_key.encode()?;
+		let ts_pairs = self.getr(start..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((_, v)) = latest_ts_pair {
+			if v.len() == 10 {
+				let mut sl = [0u8; 10];
+				sl.copy_from_slice(v);
+				return Ok(Some(sl));
+			} else {
+				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+			}
+		}
+		Ok(None)
+	}
 }
