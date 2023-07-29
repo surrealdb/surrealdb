@@ -214,7 +214,7 @@ mod tests {
 
 		let mut tx5 = ds.transaction(true, false).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_db(&mut tx5, ns, db, 3, Some(10)).await.unwrap();
+		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(3), Some(10)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 

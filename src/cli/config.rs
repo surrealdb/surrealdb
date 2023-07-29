@@ -7,6 +7,8 @@ use std::{net::SocketAddr, path::PathBuf};
 #[cfg(feature = "has-storage")]
 pub static CF: OnceCell<Config> = OnceCell::new();
 
+use std::time::Duration;
+
 #[derive(Clone, Debug)]
 pub struct Config {
 	pub bind: SocketAddr,
@@ -17,4 +19,5 @@ pub struct Config {
 	pub pass: Option<String>,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
+	pub tick_interval: Duration,
 }

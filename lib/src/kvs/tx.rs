@@ -17,8 +17,10 @@ use crate::sql::statements::DefineUserStatement;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
 use channel::Sender;
+use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -47,6 +49,7 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
+	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -410,6 +413,21 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
+		let use_nonmonontonic = match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => true,
+			_ => false,
+		};
+		let nonmonotonic_vs = if use_nonmonontonic {
+			self.get_non_monotonic_versionstamp().await
+		} else {
+			Err(Error::Internal(
+				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
+			))
+		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -430,7 +448,11 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.get_timestamp(key, lock).await,
+			} => {
+				// TODO Make it configurable to use monotonic or non-monotonic versionstamps
+				// v.get_timestamp(key, lock).await
+				nonmonotonic_vs
+			}
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
@@ -446,6 +468,29 @@ impl Transaction {
 		}
 	}
 
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamp(&mut self) -> Result<Versionstamp, Error> {
+		Ok(self.vso.lock().await.now())
+	}
+
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamped_key<K>(
+		&mut self,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		let prefix: Key = prefix.into();
+		let suffix: Key = suffix.into();
+		let ts = self.get_non_monotonic_versionstamp().await?;
+		let mut k: Vec<u8> = prefix.clone();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.clone());
+		Ok(k)
+	}
+
 	/// Insert or update a key in the datastore.
 	#[allow(unused_variables)]
 	pub async fn set_versionstamped_key<K, V>(
@@ -456,11 +501,25 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
+		let nonmonotonic_key: Result<Vec<u8>, Error> = match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => self.get_non_monotonic_versionstamped_key(prefix.clone(), suffix.clone()).await,
+			// We need this to make the compiler happy.
+			// The below is unreachable only when only the tikv feature is enabled.
+			// It's still reachable if we enabled more than one kv feature.
+			#[allow(unreachable_patterns)]
+			_ => Err(Error::Internal(
+				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
+			)),
+		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -491,7 +550,10 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				// TODO Maybe make it configurable to use monotonic or non-monotonic versionstamps
+				// at the database definition time?
+				// let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				let k = nonmonotonic_key?;
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-fdb")]
@@ -2370,6 +2432,63 @@ impl Transaction {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
 		}
 		Ok(())
+	}
+
+	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
+	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
+	pub(crate) async fn set_timestamp_for_versionstamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		lock: bool,
+	) -> Result<(), Error> {
+		// This also works as an advisory lock on the ts keys so that there is
+		// on other concurrent transactions that can write to the ts_key or the keys after it.
+		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
+
+		// Ensure there are no keys after the ts_key
+		// Otherwise we can go back in time!
+		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let begin = ts_key.encode()?;
+		let end = crate::key::database::ts::suffix(ns, db);
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((k, _)) = latest_ts_pair {
+			let k = crate::key::database::ts::Ts::decode(k)?;
+			let latest_ts = k.ts;
+			if latest_ts >= ts {
+				return Err(Error::Internal(
+					"ts is less than or equal to the latest ts".to_string(),
+				));
+			}
+		}
+		self.set(ts_key, vs).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn get_versionstamp_from_timestamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		_lock: bool,
+	) -> Result<Option<Versionstamp>, Error> {
+		let start = crate::key::database::ts::prefix(ns, db);
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
+		let end = ts_key.encode()?;
+		let ts_pairs = self.getr(start..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((_, v)) = latest_ts_pair {
+			if v.len() == 10 {
+				let mut sl = [0u8; 10];
+				sl.copy_from_slice(v);
+				return Ok(Some(sl));
+			} else {
+				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+			}
+		}
+		Ok(None)
 	}
 }
 

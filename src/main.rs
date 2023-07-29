@@ -26,6 +26,8 @@ mod err;
 #[cfg(feature = "has-storage")]
 mod net;
 #[cfg(feature = "has-storage")]
+mod node;
+#[cfg(feature = "has-storage")]
 mod rpc;
 mod telemetry;
 
