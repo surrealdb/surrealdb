@@ -52,6 +52,7 @@ pub use self::define::DefineScopeStatement;
 pub use self::define::DefineStatement;
 pub use self::define::DefineTableStatement;
 pub use self::define::DefineTokenStatement;
+pub use self::define::DefineUserStatement;
 
 pub use self::remove::RemoveDatabaseStatement;
 pub use self::remove::RemoveEventStatement;
@@ -65,3 +66,4 @@ pub use self::remove::RemoveScopeStatement;
 pub use self::remove::RemoveStatement;
 pub use self::remove::RemoveTableStatement;
 pub use self::remove::RemoveTokenStatement;
+pub use self::remove::RemoveUserStatement;

@@ -165,7 +165,18 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run cargo test (+coverage)
-        run: cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
+
+          cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli_integration --skip http_integration
+          (set -x; df -h)
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
@@ -201,7 +212,7 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
+          (&>/dev/null ./target/debug/surreal start --auth --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
@@ -231,7 +242,7 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
+          (&>/dev/null ./target/debug/surreal start --auth --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -392,5 +403,5 @@ jobs:
       - name: Run cargo test
         run: |
           cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
+          (&>/dev/null ./target/debug/surreal start --auth --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any

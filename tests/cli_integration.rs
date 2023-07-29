@@ -1,4 +1,4 @@
-// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli_integration -- --nocapture
 
 mod common;
 
@@ -35,9 +35,10 @@ fn nonexistent_option() {
 #[tokio::test]
 #[serial]
 async fn all_commands() {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
-	let creds = format!("--user {USER} --pass {PASS}");
-	// Create a record
+	// Commands without credentials when auth is disabled, should succeed
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let creds = ""; // Anonymous user
+				// Create a record
 	{
 		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
 		assert_eq!(
@@ -166,7 +167,7 @@ async fn all_commands() {
 #[tokio::test]
 #[serial]
 async fn start_tls() {
-	let (_, server) = common::start_server(true, false).await.unwrap();
+	let (_, server) = common::start_server(false, true, false).await.unwrap();
 
 	std::thread::sleep(std::time::Duration::from_millis(2000));
 	let output = server.kill().output().err().unwrap();
@@ -178,7 +179,8 @@ async fn start_tls() {
 #[tokio::test]
 #[serial]
 async fn with_root_auth() {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	// Commands with credentials when auth is enabled, should succeed
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let creds = format!("--user {USER} --pass {PASS}");
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -221,6 +223,67 @@ async fn with_root_auth() {
 
 		// TODO: Once backups are functional, update this test.
 		assert_eq!(fs::read_to_string(file).unwrap(), "Save");
+	}
+}
+
+#[tokio::test]
+#[serial]
+async fn with_anon_auth() {
+	// Commands without credentials when auth is enabled, should fail
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let creds = ""; // Anonymous user
+	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+
+	// Can query /sql over HTTP
+	{
+		let args = format!("{sql_args} {creds}");
+		let input = "";
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+	}
+
+	// Can query /sql over HTTP
+	{
+		let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+		let input = "";
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+	}
+
+	// Can't do exports
+	{
+		let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
+		let output = common::run(&args).output();
+		assert!(
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to export: {:?}",
+			output
+		);
+	}
+
+	// Can't do imports
+	{
+		let tmp_file = common::tmp_file("exported.surql");
+		let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
+		let output = common::run(&args).output();
+		assert!(
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to import: {:?}",
+			output
+		);
+	}
+
+	// Can't do backups
+	{
+		let args = format!("backup {creds} http://{addr}");
+		let output = common::run(&args).output();
+		// TODO(sgirones): Once backups are functional, update this test.
+		// assert!(
+		// 	output.unwrap_err().contains("Forbidden"),
+		// 	"anonymous user shouldn't be able to backup",
+		// 	output
+		// );
+		assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
 	}
 }
 

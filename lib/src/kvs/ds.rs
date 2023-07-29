@@ -10,7 +10,10 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
 use crate::key::root::hb::Hb;
+use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
@@ -18,6 +21,7 @@ use crate::vs;
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
+use futures::Future;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,6 +57,8 @@ pub struct Datastore {
 	vso: Arc<Mutex<vs::Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
+	auth_enabled: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -250,6 +256,7 @@ impl Datastore {
 			transaction_timeout: None,
 			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
+			auth_enabled: false,
 		})
 	}
 
@@ -269,6 +276,43 @@ impl Datastore {
 	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
 		self
+	}
+
+	/// Enabled authentication for this Datastore?
+	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
+		self.auth_enabled = enabled;
+		self
+	}
+
+	pub fn is_auth_enabled(&self) -> bool {
+		self.auth_enabled
+	}
+
+	/// Setup the initial credentials
+	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+		let mut txn = self.transaction(false, false).await?;
+		match txn.all_root_users().await {
+			Ok(val) if val.is_empty() => {
+				info!(
+					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
+				);
+
+				let sql = format!(
+					"DEFINE USER {user} ON ROOT PASSWORD '{pass}' ROLES OWNER",
+					user = creds.username,
+					pass = creds.password
+				);
+				let sess = Session::owner();
+				self.execute(&sql, &sess, None).await?;
+				Ok(())
+			}
+			Ok(_) => {
+				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
+				warn!("Consider removing the --user/--pass arguments from the server start.");
+				Ok(())
+			}
+			Err(e) => Err(e),
+		}
 	}
 
 	/// Set a global transaction timeout for this Datastore
@@ -601,7 +645,7 @@ impl Datastore {
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::for_kv();
+	///     let ses = Session::owner();
 	///     let ast = "USE NS test DB test; SELECT * FROM person;";
 	///     let res = ds.execute(ast, &ses, None).await?;
 	///     Ok(())
@@ -631,7 +675,7 @@ impl Datastore {
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::for_kv();
+	///     let ses = Session::owner();
 	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
 	///     let res = ds.process(ast, &ses, None).await?;
 	///     Ok(())
@@ -651,6 +695,7 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
+			.with_auth_enabled(self.auth_enabled)
 			.with_strict(self.strict);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
@@ -684,7 +729,7 @@ impl Datastore {
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::for_kv();
+	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
 	///     let res = ds.compute(val, &ses, None).await?;
 	///     Ok(())
@@ -704,6 +749,7 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
+			.with_auth_enabled(self.auth_enabled)
 			.with_strict(self.strict);
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
@@ -744,7 +790,7 @@ impl Datastore {
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?.with_notifications();
-	///     let ses = Session::for_kv();
+	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
 	///     	while let Ok(v) = channel.recv().await {
 	///     	    println!("Received notification: {v}");
@@ -759,13 +805,45 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(skip(self, chn))]
-	pub async fn export(&self, ns: String, db: String, chn: Sender<Vec<u8>>) -> Result<(), Error> {
-		// Start a new transaction
+	#[instrument(skip(self, sess, chn))]
+	pub async fn prepare_export(
+		&self,
+		sess: &Session,
+		ns: String,
+		db: String,
+		chn: Sender<Vec<u8>>,
+	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		let mut txn = self.transaction(false, false).await?;
-		// Process the export
-		txn.export(&ns, &db, chn).await?;
-		// Everything ok
-		Ok(())
+
+		// Skip auth for Anonymous users if auth is disabled
+		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
+		if !skip_auth {
+			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
+		}
+
+		Ok(async move {
+			// Start a new transaction
+			// Process the export
+			let ns = ns.to_owned();
+			let db = db.to_owned();
+			txn.export(&ns, &db, chn).await?;
+			// Everything ok
+			Ok(())
+		})
+	}
+
+	/// Performs a database import from SQL
+	#[instrument(skip(self, sess, sql))]
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+		// Skip auth for Anonymous users if auth is disabled
+		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
+		if !skip_auth {
+			sess.au.is_allowed(
+				Action::Edit,
+				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
+			)?;
+		}
+
+		self.execute(sql, sess, None).await
 	}
 }

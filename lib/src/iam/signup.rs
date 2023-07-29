@@ -1,8 +1,9 @@
 use crate::cnf::SERVER_NAME;
-use crate::dbs::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
+use crate::iam::Auth;
+use crate::iam::{Actor, Level};
 use crate::kvs::Datastore;
 use crate::sql::Object;
 use crate::sql::Value;
@@ -26,7 +27,7 @@ pub async fn signup(
 			let ns = ns.to_raw_string();
 			let db = db.to_raw_string();
 			let sc = sc.to_raw_string();
-			// Attempt to signin to specified scope
+			// Attempt to signup to specified scope
 			super::signup::sc(kvs, session, ns, db, sc, vars).await
 		}
 		_ => Err(Error::InvalidAuth),
@@ -43,16 +44,16 @@ pub async fn sc(
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied NS Login exists
+	// Check if the supplied Scope login exists
 	match tx.get_sc(&ns, &db, &sc).await {
 		Ok(sv) => {
 			match sv.signup {
-				// This scope allows signin
+				// This scope allows signup
 				Some(val) => {
 					// Setup the query params
 					let vars = Some(vars.0);
-					// Setup the query session
-					let sess = Session::for_db(&ns, &db);
+					// Setup the system session for creating the signup record
+					let sess = Session::editor().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
 					match kvs.compute(val, &sess, vars).await {
 						// The signin value succeeded
@@ -88,8 +89,12 @@ pub async fn sc(
 								session.ns = Some(ns.to_owned());
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
-								session.sd = Some(Value::from(rid));
-								session.au = Arc::new(Auth::Sc(ns, db, sc));
+								session.sd = Some(Value::from(rid.to_owned()));
+								session.au = Arc::new(Auth::new(Actor::new(
+									rid.to_string(),
+									Default::default(),
+									Level::Scope(ns, db, sc),
+								)));
 								// Create the authentication token
 								match enc {
 									// The auth token was created successfully
@@ -101,11 +106,11 @@ pub async fn sc(
 							// No record was returned
 							_ => Err(Error::InvalidAuth),
 						},
-						// The signin query failed
-						_ => Err(Error::InvalidAuth),
+						// The signup query failed
+						Err(_) => Err(Error::InvalidAuth),
 					}
 				}
-				// This scope does not allow signin
+				// This scope does not allow signup
 				_ => Err(Error::InvalidAuth),
 			}
 		}

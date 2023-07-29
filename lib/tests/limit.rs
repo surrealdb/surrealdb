@@ -16,7 +16,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 		SELECT * FROM person LIMIT 1 FETCH tags;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//

@@ -52,7 +52,7 @@ struct Input {
 
 async fn prepare_data() -> Input {
 	let dbs = Datastore::new("memory").await.unwrap();
-	let ses = Session::for_kv().with_ns("bench").with_db("bench");
+	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = format!(
 		r"DEFINE INDEX number ON item FIELDS number;
 		DEFINE ANALYZER simple TOKENIZERS blank,class;

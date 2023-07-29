@@ -24,7 +24,7 @@ async fn subquery_select() -> Result<(), Error> {
 		SELECT * FROM (SELECT age >= 18 AS adult FROM person:test) WHERE adult = true;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -136,7 +136,7 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 		END;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
@@ -251,7 +251,7 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 		END;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//

@@ -2,7 +2,6 @@ use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
-use crate::net::CF;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::options;
@@ -13,7 +12,6 @@ use bytes::Bytes;
 use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
-use surrealdb::opt::auth::Root;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -58,21 +56,13 @@ async fn handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
-	// Get the config options
-	let opts = CF.get().unwrap();
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			let root = opts.pass.as_ref().map(|pass| Root {
-				username: &opts.user,
-				password: pass,
-			});
-			match surrealdb::iam::signin::signin(kvs, &root, &mut session, vars)
-				.await
-				.map_err(Error::from)
+			match surrealdb::iam::signin::signin(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
 				Ok(v) => match maybe_output.as_deref() {

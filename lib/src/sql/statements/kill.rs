@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::{Level, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -26,12 +26,10 @@ impl KillStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
+		// Is realtime enabled?
 		opt.realtime()?;
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::No)?;
+		// Valid options?
+		opt.valid_for_db()?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Fetch the live query key

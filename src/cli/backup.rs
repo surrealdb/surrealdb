@@ -59,27 +59,27 @@ pub async fn init(
 		(from, into) if from_local => {
 			// Copy the data to the destination
 			let from = OpenOptions::new().read(true).open(from).await?;
-			post_http_sync_body(from, into, &user, &pass).await
+			post_http_sync_body(from, into, user.as_deref(), pass.as_deref()).await
 		}
 		// From HTTP -> Into File
 		(from, into) if into_local => {
 			// Try to open the output file
 			let into =
 				OpenOptions::new().write(true).create(true).truncate(true).open(into).await?;
-			backup_http_to_file(from, into, &user, &pass).await
+			backup_http_to_file(from, into, user.as_deref(), pass.as_deref()).await
 		}
 		// From HTTP -> Into Stdout
-		(from, "-") => backup_http_to_file(from, stdout(), &user, &pass).await,
+		(from, "-") => backup_http_to_file(from, stdout(), user.as_deref(), pass.as_deref()).await,
 		// From Stdin -> Into File
 		("-", into) => {
 			let from = Body::wrap_stream(ReaderStream::new(stdin()));
-			post_http_sync_body(from, into, &user, &pass).await
+			post_http_sync_body(from, into, user.as_deref(), pass.as_deref()).await
 		}
 		// From HTTP -> Into HTTP
 		(from, into) => {
 			// Copy the data to the destination
-			let from = get_http_sync_body(from, &user, &pass).await?;
-			post_http_sync_body(from, into, &user, &pass).await
+			let from = get_http_sync_body(from, user.as_deref(), pass.as_deref()).await?;
+			post_http_sync_body(from, into, user.as_deref(), pass.as_deref()).await
 		}
 	}
 }
@@ -87,37 +87,47 @@ pub async fn init(
 async fn post_http_sync_body<B: Into<Body>>(
 	from: B,
 	into: &str,
-	user: &str,
-	pass: &str,
+	user: Option<&str>,
+	pass: Option<&str>,
 ) -> Result<(), Error> {
-	Client::new()
+	let mut req = Client::new()
 		.post(format!("{into}/sync"))
-		.basic_auth(user, Some(pass))
 		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE)
-		.body(from)
-		.send()
-		.await?
-		.error_for_status()?;
+		.body(from);
+
+	// Add authentication if needed
+	if let Some(user) = user {
+		req = req.basic_auth(user, pass);
+	}
+
+	req.send().await?.error_for_status()?;
 	Ok(())
 }
 
-async fn get_http_sync_body(from: &str, user: &str, pass: &str) -> Result<Response, Error> {
-	Ok(Client::new()
+async fn get_http_sync_body(
+	from: &str,
+	user: Option<&str>,
+	pass: Option<&str>,
+) -> Result<Response, Error> {
+	let mut req = Client::new()
 		.get(format!("{from}/sync"))
-		.basic_auth(user, Some(pass))
 		.header(USER_AGENT, SERVER_AGENT)
-		.header(CONTENT_TYPE, TYPE)
-		.send()
-		.await?
-		.error_for_status()?)
+		.header(CONTENT_TYPE, TYPE);
+
+	// Add authentication if needed
+	if let Some(user) = user {
+		req = req.basic_auth(user, pass);
+	}
+
+	Ok(req.send().await?.error_for_status()?)
 }
 
 async fn backup_http_to_file<W: AsyncWrite + Unpin>(
 	from: &str,
 	mut into: W,
-	user: &str,
-	pass: &str,
+	user: Option<&str>,
+	pass: Option<&str>,
 ) -> Result<(), Error> {
 	let mut from = StreamReader::new(
 		get_http_sync_body(from, user, pass)
