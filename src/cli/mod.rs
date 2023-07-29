@@ -34,7 +34,7 @@ on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.co
 
 If you have questions or ideas, join the SurrealDB community (https://surrealdb.com/community).
 
-If you find a bug, submit an issue on Github (https://github.com/surrealdb/surrealdb/issues).
+If you find a bug, submit an issue on GitHub (https://github.com/surrealdb/surrealdb/issues).
 
 We would love it if you could star the repository (https://github.com/surrealdb/surrealdb).
 
