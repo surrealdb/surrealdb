@@ -2,10 +2,8 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::time::Duration;
-use surrealdb::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+use surrealdb::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
 use surrealdb::idx::btree::{BTree, Payload, State};
 use surrealdb::kvs::{Datastore, Key};
@@ -52,7 +50,7 @@ fn setup() -> (usize, Vec<usize>) {
 async fn bench<F, BK>(samples_size: usize, sample_provider: F)
 where
 	F: Fn(usize) -> (Key, Payload),
-	BK: BKeys + Serialize + DeserializeOwned + Default,
+	BK: BKeys + Default,
 {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(true, false).await.unwrap();

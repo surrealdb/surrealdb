@@ -3,10 +3,11 @@ use crate::idx::btree::Payload;
 use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
-use serde::{de, ser, Deserialize, Serialize};
+use serde::ser;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::io;
+use std::io::Cursor;
 
 pub trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
@@ -26,6 +27,8 @@ pub trait BKeys: Display + Sized {
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn get_first_key(&self) -> Option<(Key, Payload)>;
 	fn get_last_key(&self) -> Option<(Key, Payload)>;
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error>;
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error>;
 	fn compile(&mut self) {}
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
@@ -36,11 +39,11 @@ pub struct SplitKeys<BK>
 where
 	BK: BKeys,
 {
-	pub(super) left: BK,
-	pub(super) right: BK,
-	pub(super) median_idx: usize,
-	pub(super) median_key: Key,
-	pub(super) median_payload: Payload,
+	pub(in crate::idx) left: BK,
+	pub(in crate::idx) right: BK,
+	pub(in crate::idx) median_idx: usize,
+	pub(in crate::idx) median_key: Key,
+	pub(in crate::idx) median_payload: Payload,
 }
 
 pub struct FstKeys {
@@ -224,6 +227,23 @@ impl BKeys for FstKeys {
 		}
 	}
 
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error> {
+		let bytes: Vec<u8> = bincode::deserialize_from(c)?;
+		Ok(Self::try_from(bytes)?)
+	}
+
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error> {
+		if let Inner::Map(m) = &self.i {
+			let b = m.as_fst().as_bytes();
+			bincode::serialize_into(c, b)?;
+			Ok(())
+		} else {
+			Err(Error::Serde(ser::Error::custom(
+				"bkeys.to_map() should be called prior serializing",
+			)))
+		}
+	}
+
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
 		F: Fn(Key) -> Result<String, Error>,
@@ -266,29 +286,6 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	}
 }
 
-impl Serialize for FstKeys {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if let Inner::Map(m) = &self.i {
-			serializer.serialize_bytes(m.as_fst().as_bytes())
-		} else {
-			Err(ser::Error::custom("bkeys.to_map() should be called prior serializing"))
-		}
-	}
-}
-
-impl<'de> Deserialize<'de> for FstKeys {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let buf: Vec<u8> = Deserialize::deserialize(deserializer)?;
-		Self::try_from(buf).map_err(de::Error::custom)
-	}
-}
-
 impl Display for FstKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match &self.i {
@@ -314,41 +311,6 @@ impl Display for FstKeys {
 #[derive(Default)]
 pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
-}
-
-impl Serialize for TrieKeys {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let uncompressed = bincode::serialize(&self.keys).unwrap();
-		let mut reader = uncompressed.as_slice();
-		let mut compressed: Vec<u8> = Vec::new();
-		{
-			let mut wtr = snap::write::FrameEncoder::new(&mut compressed);
-			io::copy(&mut reader, &mut wtr).expect("I/O operation failed");
-		}
-		serializer.serialize_bytes(&compressed)
-	}
-}
-
-impl<'de> Deserialize<'de> for TrieKeys {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let compressed: Vec<u8> = Deserialize::deserialize(deserializer)?;
-		let reader = compressed.as_slice();
-		let mut uncompressed: Vec<u8> = Vec::new();
-		{
-			let mut rdr = snap::read::FrameDecoder::new(reader);
-			io::copy(&mut rdr, &mut uncompressed).expect("I/O operation failed");
-		}
-		let keys: Trie<Vec<u8>, u64> = bincode::deserialize(&uncompressed).unwrap();
-		Ok(Self {
-			keys,
-		})
-	}
 }
 
 impl Display for TrieKeys {
@@ -480,6 +442,31 @@ impl BKeys for TrieKeys {
 		self.keys.iter().last().map(|(k, p)| (k.clone(), *p))
 	}
 
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error> {
+		let compressed: Vec<u8> = bincode::deserialize_from(c)?;
+		let mut uncompressed: Vec<u8> = Vec::new();
+		{
+			let mut rdr = snap::read::FrameDecoder::new(compressed.as_slice());
+			io::copy(&mut rdr, &mut uncompressed)?;
+		}
+		let keys: Trie<Vec<u8>, u64> = bincode::deserialize_from(uncompressed.as_slice())?;
+		Ok(Self {
+			keys,
+		})
+	}
+
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error> {
+		let mut uncompressed: Vec<u8> = Vec::new();
+		bincode::serialize_into(&mut uncompressed, &self.keys)?;
+		let mut compressed: Vec<u8> = Vec::new();
+		{
+			let mut wtr = snap::write::FrameEncoder::new(&mut compressed);
+			io::copy(&mut uncompressed.as_slice(), &mut wtr)?;
+		}
+		bincode::serialize_into(c, &compressed)?;
+		Ok(())
+	}
+
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
 		F: Fn(Key) -> Result<String, Error>,
@@ -546,29 +533,35 @@ impl<'a> KeysIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::btree::Payload;
 	use crate::kvs::Key;
 	use std::collections::{HashMap, HashSet, VecDeque};
+	use std::io::Cursor;
 
-	#[test]
-	fn test_fst_keys_serde() {
+	fn test_keys_serde<BK: BKeys>(expected_size: usize) {
 		let key: Key = "a".as_bytes().into();
-		let mut keys = FstKeys::with_key_val(key.clone(), 130).unwrap();
+		let mut keys = BK::with_key_val(key.clone(), 130).unwrap();
 		keys.compile();
-		let buf = bincode::serialize(&keys).unwrap();
-		let keys: FstKeys = bincode::deserialize(&buf).unwrap();
+		// Serialize
+		let mut cur: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+		keys.write_to(&mut cur).unwrap();
+		let buf = cur.into_inner();
+		assert_eq!(buf.len(), expected_size);
+		// Deserialize
+		let mut cur = Cursor::new(buf);
+		let keys = BK::read_from(&mut cur).unwrap();
 		assert_eq!(keys.get(&key), Some(130));
 	}
 
 	#[test]
+	fn test_fst_keys_serde() {
+		test_keys_serde::<FstKeys>(48);
+	}
+
+	#[test]
 	fn test_trie_keys_serde() {
-		let key: Key = "a".as_bytes().into();
-		let mut keys = TrieKeys::with_key_val(key.clone(), 130).unwrap();
-		keys.compile();
-		let buf = bincode::serialize(&keys).unwrap();
-		let keys: TrieKeys = bincode::deserialize(&buf).unwrap();
-		assert_eq!(keys.get(&key), Some(130));
+		test_keys_serde::<TrieKeys>(44);
 	}
 
 	fn test_keys_additions<BK: BKeys>(mut keys: BK) {

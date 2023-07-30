@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::bkeys::TrieKeys;
+use crate::idx::btree::bkeys::TrieKeys;
 use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
 use crate::idx::btree::{BTree, Statistics};
 use crate::idx::{btree, IndexKeyBase, SerdeState};

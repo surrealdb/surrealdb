@@ -1,4 +1,3 @@
-pub mod bkeys;
 pub mod btree;
 pub(crate) mod ft;
 pub(crate) mod planner;

@@ -1,15 +1,16 @@
+pub mod bkeys;
 pub mod store;
 
 use crate::err::Error;
-use crate::idx::bkeys::BKeys;
+use crate::idx::btree::bkeys::BKeys;
 use crate::idx::btree::store::{BTreeNodeStore, StoredNode};
 use crate::idx::SerdeState;
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::io::Cursor;
 use std::marker::PhantomData;
 
 pub type NodeId = u64;
@@ -17,7 +18,7 @@ pub type Payload = u64;
 
 pub struct BTree<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	state: State,
 	full_size: u32,
@@ -64,7 +65,6 @@ impl From<Statistics> for Value {
 	}
 }
 
-#[derive(Serialize, Deserialize)]
 enum Node<BK>
 where
 	BK: BKeys,
@@ -75,8 +75,22 @@ where
 
 impl<'a, BK> Node<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned + 'a,
+	BK: BKeys + 'a,
 {
+	fn try_from_val(val: Val) -> Result<Self, Error> {
+		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
+		let node_type: u8 = bincode::deserialize_from(&mut c)?;
+		let keys = BK::read_from(&mut c)?;
+		match node_type {
+			1u8 => {
+				let child: Vec<NodeId> = bincode::deserialize_from(c)?;
+				Ok(Node::Internal(keys, child))
+			}
+			2u8 => Ok(Node::Leaf(keys)),
+			_ => Err(Error::CorruptedIndex),
+		}
+	}
+
 	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, u32), Error> {
 		if let Some(val) = tx.get(key).await? {
 			let size = val.len() as u32;
@@ -84,6 +98,22 @@ where
 		} else {
 			Err(Error::CorruptedIndex)
 		}
+	}
+
+	fn try_to_val(&self) -> Result<Val, Error> {
+		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+		match self {
+			Node::Internal(keys, child) => {
+				bincode::serialize_into(&mut c, &1u8)?;
+				keys.write_to(&mut c)?;
+				bincode::serialize_into(&mut c, &child)?;
+			}
+			Node::Leaf(keys) => {
+				bincode::serialize_into(&mut c, &2u8)?;
+				keys.write_to(&mut c)?;
+			}
+		};
+		Ok(c.into_inner())
 	}
 
 	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<u32, Error> {
@@ -133,8 +163,6 @@ where
 	}
 }
 
-impl<BK> SerdeState for Node<BK> where BK: BKeys + Serialize + DeserializeOwned {}
-
 struct SplitResult {
 	left_node_id: NodeId,
 	right_node_id: NodeId,
@@ -143,7 +171,7 @@ struct SplitResult {
 
 impl<BK> BTree<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned + Default,
+	BK: BKeys + Default,
 {
 	pub fn new(state: State) -> Self {
 		Self {
@@ -654,15 +682,13 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
 	use crate::idx::btree::{BTree, Node, NodeId, Payload, State, Statistics, StoredNode};
 	use crate::idx::SerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
-	use serde::de::DeserializeOwned;
-	use serde::Serialize;
 	use std::collections::{HashMap, VecDeque};
 	use test_log::test;
 
@@ -699,7 +725,7 @@ mod tests {
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys + Serialize + DeserializeOwned + Default,
+		BK: BKeys + Default,
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
@@ -733,7 +759,7 @@ mod tests {
 				keys_count: 100,
 				max_depth: 3,
 				nodes_count: 22,
-				total_size: 1757,
+				total_size: 1691,
 			}
 		);
 	}
@@ -758,7 +784,7 @@ mod tests {
 				keys_count: 100,
 				max_depth: 3,
 				nodes_count: 18,
-				total_size: 1710,
+				total_size: 1656,
 			}
 		);
 	}
@@ -829,7 +855,7 @@ mod tests {
 				keys_count: 10000,
 				max_depth: 3,
 				nodes_count: 158,
-				total_size: 57960,
+				total_size: 57486,
 			}
 		);
 	}
@@ -854,7 +880,7 @@ mod tests {
 				keys_count: 10000,
 				max_depth: 3,
 				nodes_count: 158,
-				total_size: 75680,
+				total_size: 75206,
 			}
 		);
 	}
@@ -867,7 +893,7 @@ mod tests {
 
 	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> Statistics
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Default,
+		BK: BKeys + Default,
 	{
 		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
 		let mut s = s.lock().await;
@@ -894,7 +920,7 @@ mod tests {
 				keys_count: 17,
 				max_depth: 2,
 				nodes_count: 5,
-				total_size: 436,
+				total_size: 421,
 			}
 		);
 	}
@@ -908,7 +934,7 @@ mod tests {
 				keys_count: 17,
 				max_depth: 1,
 				nodes_count: 1,
-				total_size: 192,
+				total_size: 189,
 			}
 		);
 	}
@@ -922,7 +948,7 @@ mod tests {
 				keys_count: 17,
 				max_depth: 2,
 				nodes_count: 3,
-				total_size: 348,
+				total_size: 339,
 			}
 		);
 	}
@@ -936,7 +962,7 @@ mod tests {
 				keys_count: 17,
 				max_depth: 1,
 				nodes_count: 1,
-				total_size: 232,
+				total_size: 229,
 			}
 		);
 	}
@@ -1060,7 +1086,7 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_clrs_deletion_test<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Default,
+		BK: BKeys + Default,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -1165,7 +1191,7 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_fill_and_empty<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Default,
+		BK: BKeys + Default,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -1250,7 +1276,7 @@ mod tests {
 		expected_keys: Vec<(&str, i32)>,
 		expected_children: Vec<NodeId>,
 	) where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		if let Node::Internal(keys, children) = node {
 			check_keys(keys, expected_keys);
@@ -1262,7 +1288,7 @@ mod tests {
 
 	fn check_is_leaf_node<BK>(node: Node<BK>, expected_keys: Vec<(&str, i32)>)
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		if let Node::Leaf(keys) = node {
 			check_keys(keys, expected_keys);
@@ -1273,7 +1299,7 @@ mod tests {
 
 	async fn print_tree<BK>(tx: &mut Transaction, t: &BTree<BK>)
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		debug!("----------------------------------");
 		t.inspect_nodes(tx, |_count, depth, node_id, node| {
@@ -1287,7 +1313,7 @@ mod tests {
 
 	fn check_keys<BK>(keys: BK, expected_keys: Vec<(&str, i32)>)
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		assert_eq!(keys.len() as usize, expected_keys.len(), "The number of keys does not match");
 		for (key, payload) in expected_keys {
@@ -1302,7 +1328,7 @@ mod tests {
 
 	impl<BK> BTree<BK>
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		/// This is for debugging
 		async fn inspect_nodes<F>(

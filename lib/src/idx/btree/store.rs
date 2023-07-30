@@ -1,11 +1,9 @@
 use crate::err::Error;
-use crate::idx::bkeys::BKeys;
+use crate::idx::btree::bkeys::BKeys;
 use crate::idx::btree::{Node, NodeId};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction};
 use lru::LruCache;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -20,7 +18,7 @@ pub enum BTreeStoreType {
 
 pub enum BTreeNodeStore<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
 	Write(BTreeWriteCache<BK>),
@@ -32,7 +30,7 @@ where
 
 impl<BK> BTreeNodeStore<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	pub fn new(
 		keys: KeyProvider,
@@ -98,7 +96,7 @@ where
 
 pub struct BTreeWriteCache<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	keys: KeyProvider,
 	nodes: HashMap<NodeId, StoredNode<BK>>,
@@ -110,7 +108,7 @@ where
 
 impl<BK> BTreeWriteCache<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	fn new(keys: KeyProvider) -> Self {
 		Self {
@@ -201,7 +199,7 @@ where
 
 pub struct BTreeReadCache<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	keys: KeyProvider,
 	nodes: LruCache<NodeId, StoredNode<BK>>,
@@ -209,7 +207,7 @@ where
 
 impl<BK> BTreeReadCache<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys,
 {
 	fn new(keys: KeyProvider, size: usize) -> Self {
 		Self {
@@ -256,7 +254,7 @@ impl KeyProvider {
 
 	async fn load_node<BK>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<BK>, Error>
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
+		BK: BKeys,
 	{
 		let key = self.get_node_key(id);
 		let (node, size) = Node::<BK>::read(tx, key.clone()).await?;
