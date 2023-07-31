@@ -179,7 +179,7 @@ pub async fn ws_send_msg_with_fmt(
 	response_format: Format,
 ) -> Result<serde_json::Value, Box<dyn Error>> {
 	tokio::select! {
-		_ = time::sleep(time::Duration::from_millis(100)) => {
+		_ = time::sleep(time::Duration::from_millis(500)) => {
 			return Err("timeout waiting for the request to be sent".into());
 		}
 		res = socket.send(Message::Text(msg_req)) => {
