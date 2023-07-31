@@ -12,7 +12,7 @@ async fn live_updates() -> Result<(), Box<dyn std::error::Error>> {
 	let mut headers = reqwest::header::HeaderMap::new();
 	headers.insert("NS", "N".parse()?);
 	headers.insert("DB", "D".parse()?);
-	headers.insert(header::ACCEPT, "application/json".parse()?);
+	headers.insert(header::ACCEPT, "application/json".parse()?); // Not required
 	let client = reqwest::Client::builder()
 		.connect_timeout(Duration::from_millis(10))
 		.default_headers(headers)
@@ -42,9 +42,12 @@ async fn live_updates() -> Result<(), Box<dyn std::error::Error>> {
 	}}"#, table_name = &table_name};
 	println!("{:?}", a);
 	ws.write(a.as_bytes()).await.unwrap();
+	ws.flush().await.unwrap();
 	let mut read_ws_data: Vec<u8> = vec![];
 	ws.read_buf(&mut read_ws_data).await.unwrap();
 	println!("{:?}", read_ws_data);
+	let result = _server.kill().output().unwrap_or_else(|e| e);
+	println!("{}", result);
 	ws.read_buf(&mut read_ws_data).await.unwrap();
 	println!("{:?}", read_ws_data);
 	let msg: serde_json::Value = serde_json::from_slice(&read_ws_data).unwrap();
