@@ -1,12 +1,12 @@
-pub mod trees;
 pub(crate) mod ft;
 pub(crate) mod planner;
+pub mod trees;
 
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::trees::store::NodeId;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
+use crate::idx::trees::store::NodeId;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::Bd;
 use crate::key::index::bf::Bf;

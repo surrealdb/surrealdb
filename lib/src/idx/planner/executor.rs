@@ -1,6 +1,5 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::trees::store::TreeStoreType;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
@@ -11,6 +10,7 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::plan::IndexOption;
 use crate::idx::planner::tree::IndexMap;
+use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
