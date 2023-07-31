@@ -1,12 +1,15 @@
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+
 pub mod otlp;
+pub mod rpc;
 
 const TRACING_TRACER_VAR: &str = "SURREAL_TRACING_TRACER";
 
 // Returns a tracer based on the value of the TRACING_TRACER_VAR env var
-pub fn new<S>() -> Option<Box<dyn Layer<S> + Send + Sync>>
+pub fn new<S>(filter: CustomEnvFilter) -> Option<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
@@ -20,7 +23,7 @@ where
 		// Init the registry with the OTLP tracer
 		"otlp" => {
 			debug!("Setup the OTLP tracer");
-			Some(otlp::new())
+			Some(otlp::new(filter))
 		}
 		tracer => {
 			panic!("unsupported tracer {}", tracer);

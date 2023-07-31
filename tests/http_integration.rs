@@ -1,3 +1,5 @@
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test http_integration -- --nocapture
+
 mod common;
 
 use std::time::Duration;
@@ -427,7 +429,11 @@ async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-		assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		assert!(
+			body["token"].as_str().unwrap().starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"),
+			"body: {}",
+			body
+		);
 	}
 
 	Ok(())
