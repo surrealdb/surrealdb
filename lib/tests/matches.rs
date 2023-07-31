@@ -187,7 +187,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	"
 	);
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
