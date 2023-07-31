@@ -49,14 +49,22 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	//
 	// Setup operations
 	//
+	let res = common::ws_query(socket, "DEFINE TABLE user PERMISSIONS FULL").await;
+	assert!(res.is_ok(), "result: {:?}", res);
 	let res = common::ws_query(
 		socket,
 		r#"
-		DEFINE TABLE user PERMISSIONS FULL;
 		DEFINE SCOPE scope SESSION 24h
 			SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
 			SIGNIN ( SELECT * FROM user WHERE user = $user AND crypto::argon2::compare(pass, $pass) )
 		;
+		"#,
+	)
+	.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = common::ws_query(
+		socket,
+		r#"
 		CREATE user CONTENT {
 			user: 'user',
 			pass: crypto::argon2::generate('pass')
