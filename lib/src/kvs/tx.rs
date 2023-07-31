@@ -32,6 +32,7 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
+use std::backtrace::Backtrace;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
@@ -140,8 +141,9 @@ impl Transaction {
 	///
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
+		let backtrace = Backtrace::capture();
 		#[cfg(debug_assertions)]
-		trace!("Cancel");
+		trace!("Cancel - this is it, {}", backtrace);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {

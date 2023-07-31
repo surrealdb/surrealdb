@@ -1,4 +1,8 @@
 #![allow(dead_code)]
+
+pub mod error;
+
+use crate::common::error::TestError;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -118,7 +122,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+	let start_args =
+		format!("start --bind {addr} memory --log trace --user {USER} --pass {PASS} {extra_args}");
 
 	println!("starting server with args: {start_args}");
 
@@ -151,6 +156,20 @@ pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 	let url = format!("ws://{}/rpc", addr);
 	let (ws_stream, _) = connect_async(url).await?;
 	Ok(ws_stream)
+}
+
+pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box<dyn Error>> {
+	// Parse and return response
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let msg: serde_json::Value = tokio::select! {
+		_ = time::sleep(time::Duration::from_millis(2000)) => {
+			return Err(TestError::NetworkError{message: "timeout waiting for the response".to_string()}.into());
+		}
+		msg = f.select_next_some() => {
+			serde_json::from_str(&msg?.to_string())?
+		}
+	};
+	Ok(serde_json::from_str(&msg.to_string())?)
 }
 
 pub async fn ws_send_msg(
