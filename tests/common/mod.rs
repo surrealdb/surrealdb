@@ -153,6 +153,20 @@ pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 	Ok(ws_stream)
 }
 
+pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box<dyn Error>> {
+	// Parse and return response
+	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let msg: serde_json::Value = tokio::select! {
+		_ = time::sleep(time::Duration::from_millis(1000)) => {
+			return Err("timeout waiting for the response".into());
+		}
+		msg = f.select_next_some() => {
+			serde_json::from_str(&msg?.to_string())?
+		}
+	};
+	Ok(serde_json::from_str(&msg.to_string())?)
+}
+
 pub async fn ws_send_msg(
 	socket: &mut WsStream,
 	msg: Message,

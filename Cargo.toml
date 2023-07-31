@@ -84,7 +84,7 @@ serial_test = "2.0.0"
 indoc = "2.0.3"
 temp-env = "0.3.4"
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.18.0" }
+tokio-tungstenite = { version = "0.20.0" }
 tonic = "0.8.3"
 
 [package.metadata.deb]

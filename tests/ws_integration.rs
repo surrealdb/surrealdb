@@ -6,6 +6,7 @@ use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use serial_test::serial;
+use surrealdb::sql::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::common::{PASS, USER};
@@ -266,7 +267,55 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
-	todo!()
+	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
+	// let a = formatdoc! {
+	// 	r#"{{
+	// 	"id": 1,
+	// 	"method": "live",
+	// 	"params": [
+	// 		"{table_name}"
+	// 	]
+	// }}"#, table_name = &table_name};
+	// println!("{:?}", a);
+
+	let socket = &mut common::connect_ws(&addr).await?;
+	// LIVE query via query endpoint
+	// let lq_res =
+	// 	common::ws_query(socket, format!(" LIVE SELECT * FROM {};", table_name).as_str()).await?;
+	// assert_eq!(lq_res.len(), 1);
+	// let lq_res = lq_res.get(0).unwrap();
+
+	// LIVE query via live endpoint
+	let live_id = common::ws_send_msg(
+		socket,
+		Message::Text(
+			serde_json::to_string(&json!({
+				"id": "1",
+				"method": "live",
+				"params": [
+					table_name
+				],
+			}))
+			.unwrap(),
+		),
+	)
+	.await?;
+
+	// Notification
+	let res = common::ws_recv_msg(socket).await?;
+	assert_eq!(res, live_id, "res: {}", res);
+
+	// Verify response contains no error
+	assert!(res.as_object().unwrap().keys().eq(["id", "result"]), "result: {}", res);
+	// Verify it returns a token
+	assert!(
+		res["result"].as_str().unwrap().starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"),
+		"result: {}",
+		res
+	);
+
+	Ok(())
 }
 
 #[tokio::test]
