@@ -346,6 +346,31 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			)));
 			Ok(())
 		}
+		// Check if this is root level authentication
+		Claims {
+			id: Some(id),
+			..
+		} => {
+			// Log the decoded authentication claims
+			trace!("Authenticating to root level with user `{}`", id);
+			// Create a new readonly transaction
+			let mut tx = kvs.transaction(false, false).await?;
+			// Get the namespace user
+			let de = tx.get_root_user(&id).await?;
+			let cf = config(Algorithm::Hs512, de.code)?;
+			// Verify the token
+			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// Log the success
+			trace!("Authenticated to root level with user `{}`", id);
+			// Set the session
+			session.tk = Some(value);
+			session.au = Arc::new(Auth::new(Actor::new(
+				id.to_string(),
+				de.roles.iter().map(|r| r.into()).collect(),
+				Level::Root,
+			)));
+			Ok(())
+		}
 		// There was an auth error
 		_ => Err(Error::InvalidAuth),
 	}
