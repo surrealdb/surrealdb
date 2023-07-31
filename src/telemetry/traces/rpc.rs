@@ -3,8 +3,7 @@ use uuid::Uuid;
 
 pub fn span_for_request(ws_id: &Uuid) -> Span {
 	let span = tracing::info_span!(
-		parent: None,
-		// Dynamic span names need to be 'recorded', can't be used on the macro
+		// Dynamic span names need to be 'recorded', can't be used on the macro. Use a static name here and overwrite later on
 		"rpc/call",
 		otel.name = field::Empty,
 		otel.kind = "server",

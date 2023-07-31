@@ -133,9 +133,9 @@ impl Rpc {
 		// Wait until all tasks finish
 		tokio::join!(
 			Self::ping(rpc.clone(), internal_sender.clone()),
-			Self::read(rpc.clone(), receiver, internal_sender.clone()).in_current_span(),
-			Self::write(rpc.clone(), sender, internal_receiver.clone()).in_current_span(),
-			Self::lq_notifications(rpc.clone()).in_current_span(),
+			Self::read(rpc.clone(), receiver, internal_sender.clone()),
+			Self::write(rpc.clone(), sender, internal_receiver.clone()),
+			Self::lq_notifications(rpc.clone()),
 		);
 
 		// Remove all live queries

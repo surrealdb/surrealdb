@@ -8,8 +8,11 @@ use crate::{
 	net::rpc::{WebSocketRef, WEBSOCKETS},
 };
 
-/// Start a graceful shutdown on the Axum Handle when a shutdown signal is received.
-/// Stop all WebSocket connections.
+/// Start a graceful shutdown:
+/// * Signal the Axum Handle when a shutdown signal is received.
+/// * Stop all WebSocket connections.
+///
+/// A second signal will force an immediate shutdown.
 pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
 	tokio::spawn(async move {
 		let result = listen().await.expect("Failed to listen to shutdown signal");
