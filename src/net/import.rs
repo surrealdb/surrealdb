@@ -35,31 +35,25 @@ async fn handler(
 	maybe_output: Option<TypedHeader<Accept>>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// Check the permissions
-	match session.au.is_db() {
-		true => {
-			// Get the datastore reference
-			let db = DB.get().unwrap();
-			// Convert the body to a byte slice
-			let sql = bytes_to_utf8(&sql)?;
-			// Execute the sql query in the database
-			match db.execute(sql, &session, None).await {
-				Ok(res) => match maybe_output.as_deref() {
-					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
-					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&res)),
-					// Return nothing
-					Some(Accept::ApplicationOctetStream) => Ok(output::none()),
-					// An incorrect content-type was requested
-					_ => Err(Error::InvalidType),
-				},
-				// There was an error when executing the query
-				Err(err) => Err(Error::from(err)),
-			}
-		}
-		_ => Err(Error::InvalidAuth),
+	// Get the datastore reference
+	let db = DB.get().unwrap();
+	// Convert the body to a byte slice
+	let sql = bytes_to_utf8(&sql)?;
+	// Execute the sql query in the database
+	match db.import(sql, &session).await {
+		Ok(res) => match maybe_output.as_deref() {
+			// Simple serialization
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			// Internal serialization
+			Some(Accept::Surrealdb) => Ok(output::full(&res)),
+			// Return nothing
+			Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+			// An incorrect content-type was requested
+			_ => Err(Error::InvalidType),
+		},
+		// There was an error when executing the query
+		Err(err) => Err(Error::from(err)),
 	}
 }

@@ -7,7 +7,7 @@ use crate::api::opt::IntoEndpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::net::SocketAddr;
 use url::Url;
 

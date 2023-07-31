@@ -449,8 +449,8 @@ where
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
-	/// // Define the login
-	/// let sql = "DEFINE LOGIN johndoe ON NAMESPACE PASSWORD 'password123'";
+	/// // Define the user
+	/// let sql = "DEFINE USER johndoe ON NAMESPACE PASSWORD 'password123'";
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user in
@@ -485,8 +485,8 @@ where
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
-	/// // Define the login
-	/// let sql = "DEFINE LOGIN johndoe ON DATABASE PASSWORD 'password123'";
+	/// // Define the user
+	/// let sql = "DEFINE USER johndoe ON DATABASE PASSWORD 'password123'";
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user in

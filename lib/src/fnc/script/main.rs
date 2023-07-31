@@ -4,7 +4,7 @@ use super::globals;
 use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
-use super::modules::surrealdb::query::QueryData;
+use super::modules::surrealdb::query::QueryContext;
 use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
@@ -38,7 +38,7 @@ pub unsafe fn create_query_data<'a>(
 
 	let object = Class::instance(
 		ctx.clone(),
-		QueryData {
+		QueryContext {
 			context,
 			opt,
 			txn,

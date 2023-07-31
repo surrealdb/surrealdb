@@ -19,7 +19,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 13;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
@@ -102,7 +102,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -151,7 +151,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 		SELECT * FROM person;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
@@ -205,7 +205,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 		SELECT * FROM person;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
@@ -257,7 +257,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 		SELECT * FROM person;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//

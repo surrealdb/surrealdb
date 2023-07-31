@@ -16,22 +16,22 @@ mod classes;
 
 pub use classes::Query;
 
-pub const QUERY_DATA_PROP_NAME: &str = "__query_data__";
+pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
 
 /// A class to carry the data to run subqueries.
-pub struct QueryData<'js> {
+pub struct QueryContext<'js> {
 	pub context: &'js Context<'js>,
 	pub opt: &'js Options,
 	pub txn: &'js Transaction,
 	pub doc: Option<&'js CursorDoc<'js>>,
 }
 
-impl<'js> Trace<'js> for QueryData<'js> {
+impl<'js> Trace<'js> for QueryContext<'js> {
 	fn trace<'a>(&self, _tracer: js::class::Tracer<'a, 'js>) {}
 }
 
-impl<'js> JsClass<'js> for QueryData<'js> {
-	const NAME: &'static str = "QueryData";
+impl<'js> JsClass<'js> for QueryContext<'js> {
+	const NAME: &'static str = "QueryContext";
 
 	type Mutable = Readable;
 
@@ -56,7 +56,7 @@ pub async fn query<'js>(
 	query: Value<'js>,
 	variables: Opt<classes::QueryVariables>,
 ) -> Result<SurValue> {
-	let this = ctx.globals().get::<_, OwnedBorrow<'js, QueryData<'js>>>(QUERY_DATA_PROP_NAME)?;
+	let this = ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
 
 	let mut borrow_store = None;
 	let mut query_store = None;

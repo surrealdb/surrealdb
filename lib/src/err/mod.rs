@@ -1,3 +1,4 @@
+use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
@@ -26,6 +27,10 @@ pub enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic")]
 	Unreachable,
+
+	/// Statement has been deprecated
+	#[error("{0}")]
+	Deprecated(String),
 
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
@@ -185,10 +190,6 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The permissions do not allow for performing the specified query
-	#[error("You don't have permission to perform this query type")]
-	QueryPermissions,
-
 	/// The permissions do not allow for changing to the specified namespace
 	#[error("You don't have permission to change to the {ns} namespace")]
 	NsNotAllowed {
@@ -301,6 +302,27 @@ pub enum Error {
 	#[error("The index '{value}' does not exist")]
 	IxNotFound {
 		value: String,
+	},
+
+	/// The requested root user does not exist
+	#[error("The root user '{value}' does not exist")]
+	UserRootNotFound {
+		value: String,
+	},
+
+	/// The requested namespace user does not exist
+	#[error("The user '{value}' does not exist in the namespace '{ns}'")]
+	UserNsNotFound {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user does not exist
+	#[error("The user '{value}' does not exist in the database '{db}'")]
+	UserDbNotFound {
+		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// Unable to perform the realtime query
@@ -453,11 +475,11 @@ pub enum Error {
 	TryFrom(String, &'static str),
 
 	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request")]
+	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
 	/// There was an error processing a value in parallel
-	#[error("There was an error processing a value in parallel")]
+	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
 	/// Represents an underlying error with Serde encoding / decoding
@@ -530,6 +552,14 @@ pub enum Error {
 
 	#[error("Versionstamp in key is corrupted: {0}")]
 	CorruptedVersionstampInKey(#[from] VersionstampError),
+
+	/// Invalid level
+	#[error("Invalid level '{0}'")]
+	InvalidLevel(String),
+
+	/// Represents an underlying IAM error
+	#[error("IAM error: {0}")]
+	IamError(#[from] IamError),
 }
 
 impl From<Error> for String {

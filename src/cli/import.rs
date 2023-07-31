@@ -38,18 +38,29 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("error").init();
 
-	let root = Root {
-		username: &username,
-		password: &password,
+	let client = if let Some((username, password)) = username.zip(password) {
+		let root = Root {
+			username: &username,
+			password: &password,
+		};
+
+		// Connect to the database engine with authentication
+		//
+		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
+		// * For remote engines, we connect to the endpoint and then signin.
+		#[cfg(feature = "has-storage")]
+		let address = (endpoint, root);
+		#[cfg(not(feature = "has-storage"))]
+		let address = endpoint;
+		let client = connect(address).await?;
+
+		// Sign in to the server
+		client.signin(root).await?;
+		client
+	} else {
+		connect(endpoint).await?
 	};
-	// Connect to the database engine
-	#[cfg(feature = "has-storage")]
-	let address = (endpoint, root);
-	#[cfg(not(feature = "has-storage"))]
-	let address = endpoint;
-	let client = connect(address).await?;
-	// Sign in to the server
-	client.signin(root).await?;
+
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;
 	// Import the data into the database

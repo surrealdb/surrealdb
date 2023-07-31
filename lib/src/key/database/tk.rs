@@ -1,4 +1,4 @@
-/// Stores a DEFINE LOGIN ON DATABASE config definition
+/// Stores a DEFINE TOKEN ON DATABASE config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -15,8 +15,8 @@ pub struct Tk<'a> {
 	pub tk: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tk<'a> {
-	Tk::new(ns, db, tb)
+pub fn new<'a>(ns: &'a str, db: &'a str, tk: &'a str) -> Tk<'a> {
+	Tk::new(ns, db, tk)
 }
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {

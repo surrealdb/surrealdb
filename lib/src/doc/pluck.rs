@@ -3,6 +3,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::iam::Action;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
 use crate::sql::paths::META;
@@ -59,7 +60,7 @@ impl<'a> Document<'a> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
-			if opt.perms && opt.auth.perms() {
+			if opt.check_perms(Action::View) {
 				// Loop through all field statements
 				for fd in self.fd(opt, txn).await?.iter() {
 					// Loop over each field in document
