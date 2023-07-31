@@ -36,7 +36,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower_http::request_id::RequestId;
-use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
