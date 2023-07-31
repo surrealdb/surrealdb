@@ -273,18 +273,6 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	//
 	let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 	assert!(res.is_ok(), "result: {:?}", res);
-	let res = common::ws_use(socket, Some("N"), None).await;
-	assert!(res.is_ok(), "result: {:?}", res);
-	let res =
-		common::ws_query(socket, "DEFINE USER ns_user ON NS PASSWORD 'ns_pass' ROLES OWNER").await;
-	assert!(res.is_ok(), "result: {:?}", res);
-
-	//
-	// Signin to get the user token
-	//
-
-	let res = common::ws_signin(socket, "ns_user", "ns_pass", Some("N"), None, None).await;
-	assert!(res.is_ok(), "result: {:?}", res);
 	let token = res.unwrap();
 
 	// Reconnect so we start with an empty session
@@ -312,7 +300,7 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Verify we have a ROOT session
-	let res = common::ws_query(socket, "DEFINE DATABASE D2").await;
+	let res = common::ws_query(socket, "DEFINE NAMESPACE D2").await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
