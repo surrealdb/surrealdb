@@ -1,46 +1,46 @@
 use crate::err::Error;
-use crate::idx::btree::bkeys::BKeys;
-use crate::idx::btree::{Node, NodeId};
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, Transaction, Val};
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub type NodeId = u64;
+
 #[derive(Clone, Copy)]
-pub enum BTreeStoreType {
+pub enum TreeStoreType {
 	Write,
 	Read,
 	Traversal,
 }
 
-pub enum BTreeNodeStore<BK>
+pub enum TreeNodeStore<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
-	Write(BTreeWriteCache<BK>),
+	Write(TreeWriteCache<N>),
 	/// Uses an LRU cache to keep in memory the last node read
-	Read(BTreeReadCache<BK>),
+	Read(TreeReadCache<N>),
 	/// Read the nodes from the KV store without any cache
-	Traversal(KeyProvider),
+	Traversal(TreeNodeProvider),
 }
 
-impl<BK> BTreeNodeStore<BK>
+impl<N> TreeNodeStore<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
 	pub fn new(
-		keys: KeyProvider,
-		store_type: BTreeStoreType,
+		keys: TreeNodeProvider,
+		store_type: TreeStoreType,
 		read_size: usize,
 	) -> Arc<Mutex<Self>> {
 		Arc::new(Mutex::new(match store_type {
-			BTreeStoreType::Write => Self::Write(BTreeWriteCache::new(keys)),
-			BTreeStoreType::Read => Self::Read(BTreeReadCache::new(keys, read_size)),
-			BTreeStoreType::Traversal => Self::Traversal(keys),
+			TreeStoreType::Write => Self::Write(TreeWriteCache::new(keys)),
+			TreeStoreType::Read => Self::Read(TreeReadCache::new(keys, read_size)),
+			TreeStoreType::Traversal => Self::Traversal(keys),
 		}))
 	}
 
@@ -48,18 +48,18 @@ where
 		&mut self,
 		tx: &mut Transaction,
 		node_id: NodeId,
-	) -> Result<StoredNode<BK>, Error> {
+	) -> Result<StoredNode<N>, Error> {
 		match self {
-			BTreeNodeStore::Write(w) => w.get_node(tx, node_id).await,
-			BTreeNodeStore::Read(r) => r.get_node(tx, node_id).await,
-			BTreeNodeStore::Traversal(keys) => keys.load_node::<BK>(tx, node_id).await,
+			TreeNodeStore::Write(w) => w.get_node(tx, node_id).await,
+			TreeNodeStore::Read(r) => r.get_node(tx, node_id).await,
+			TreeNodeStore::Traversal(keys) => keys.load::<N>(tx, node_id).await,
 		}
 	}
 
-	pub(super) fn set_node(&mut self, node: StoredNode<BK>, updated: bool) -> Result<(), Error> {
+	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		match self {
-			BTreeNodeStore::Write(w) => w.set_node(node, updated),
-			BTreeNodeStore::Read(r) => {
+			TreeNodeStore::Write(w) => w.set_node(node, updated),
+			TreeNodeStore::Read(r) => {
 				if updated {
 					Err(Error::Unreachable)
 				} else {
@@ -67,26 +67,26 @@ where
 					Ok(())
 				}
 			}
-			BTreeNodeStore::Traversal(_) => Ok(()),
+			TreeNodeStore::Traversal(_) => Ok(()),
 		}
 	}
 
-	pub(super) fn new_node(&mut self, id: NodeId, node: Node<BK>) -> Result<StoredNode<BK>, Error> {
+	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
-			BTreeNodeStore::Write(w) => Ok(w.new_node(id, node)),
+			TreeNodeStore::Write(w) => Ok(w.new_node(id, node)),
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		match self {
-			BTreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
+			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
-		if let BTreeNodeStore::Write(w) = self {
+		if let TreeNodeStore::Write(w) = self {
 			w.finish(tx).await
 		} else {
 			Err(Error::Unreachable)
@@ -94,25 +94,25 @@ where
 	}
 }
 
-pub struct BTreeWriteCache<BK>
+pub struct TreeWriteCache<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
-	keys: KeyProvider,
-	nodes: HashMap<NodeId, StoredNode<BK>>,
+	np: TreeNodeProvider,
+	nodes: HashMap<NodeId, StoredNode<N>>,
 	updated: HashSet<NodeId>,
 	removed: HashMap<NodeId, Key>,
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
 
-impl<BK> BTreeWriteCache<BK>
+impl<N> TreeWriteCache<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
-	fn new(keys: KeyProvider) -> Self {
+	fn new(keys: TreeNodeProvider) -> Self {
 		Self {
-			keys,
+			np: keys,
 			nodes: HashMap::new(),
 			updated: HashSet::new(),
 			removed: HashMap::new(),
@@ -125,16 +125,16 @@ where
 		&mut self,
 		tx: &mut Transaction,
 		node_id: NodeId,
-	) -> Result<StoredNode<BK>, Error> {
+	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
 		self.out.insert(node_id);
 		if let Some(n) = self.nodes.remove(&node_id) {
 			return Ok(n);
 		}
-		self.keys.load_node::<BK>(tx, node_id).await
+		self.np.load::<N>(tx, node_id).await
 	}
 
-	fn set_node(&mut self, node: StoredNode<BK>, updated: bool) -> Result<(), Error> {
+	fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		self.out.remove(&node.id);
 		if updated {
@@ -147,13 +147,13 @@ where
 		Ok(())
 	}
 
-	fn new_node(&mut self, id: NodeId, node: Node<BK>) -> StoredNode<BK> {
+	fn new_node(&mut self, id: NodeId, node: N) -> StoredNode<N> {
 		#[cfg(debug_assertions)]
 		self.out.insert(id);
 		StoredNode {
 			node,
 			id,
-			key: self.keys.get_node_key(id),
+			key: self.np.get_key(id),
 			size: 0,
 		}
 	}
@@ -180,8 +180,8 @@ where
 			}
 		}
 		for node_id in &self.updated {
-			if let Some(mut node) = self.nodes.remove(node_id) {
-				node.node.write(tx, node.key).await?;
+			if let Some(node) = self.nodes.remove(node_id) {
+				self.np.save(tx, node).await?;
 			} else {
 				return Err(Error::Unreachable);
 			}
@@ -197,19 +197,19 @@ where
 	}
 }
 
-pub struct BTreeReadCache<BK>
+pub struct TreeReadCache<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
-	keys: KeyProvider,
-	nodes: LruCache<NodeId, StoredNode<BK>>,
+	keys: TreeNodeProvider,
+	nodes: LruCache<NodeId, StoredNode<N>>,
 }
 
-impl<BK> BTreeReadCache<BK>
+impl<N> TreeReadCache<N>
 where
-	BK: BKeys,
+	N: TreeNode,
 {
-	fn new(keys: KeyProvider, size: usize) -> Self {
+	fn new(keys: TreeNodeProvider, size: usize) -> Self {
 		Self {
 			keys,
 			nodes: LruCache::new(NonZeroUsize::new(size).unwrap()),
@@ -220,20 +220,20 @@ where
 		&mut self,
 		tx: &mut Transaction,
 		node_id: NodeId,
-	) -> Result<StoredNode<BK>, Error> {
+	) -> Result<StoredNode<N>, Error> {
 		if let Some(n) = self.nodes.pop(&node_id) {
 			return Ok(n);
 		}
-		self.keys.load_node::<BK>(tx, node_id).await
+		self.keys.load::<N>(tx, node_id).await
 	}
 
-	fn set_node(&mut self, node: StoredNode<BK>) {
+	fn set_node(&mut self, node: StoredNode<N>) {
 		self.nodes.put(node.id, node);
 	}
 }
 
 #[derive(Clone)]
-pub enum KeyProvider {
+pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
 	Postings(IndexKeyBase),
@@ -241,38 +241,57 @@ pub enum KeyProvider {
 	Debug,
 }
 
-impl KeyProvider {
-	pub(in crate::idx) fn get_node_key(&self, node_id: NodeId) -> Key {
+impl TreeNodeProvider {
+	pub(in crate::idx) fn get_key(&self, node_id: NodeId) -> Key {
 		match self {
-			KeyProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
-			KeyProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
-			KeyProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
-			KeyProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
-			KeyProvider::Debug => node_id.to_be_bytes().to_vec(),
+			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
+			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
+			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
+			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
+			TreeNodeProvider::Debug => node_id.to_be_bytes().to_vec(),
 		}
 	}
 
-	async fn load_node<BK>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<BK>, Error>
+	async fn load<N>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<N>, Error>
 	where
-		BK: BKeys,
+		N: TreeNode,
 	{
-		let key = self.get_node_key(id);
-		let (node, size) = Node::<BK>::read(tx, key.clone()).await?;
-		Ok(StoredNode {
-			node,
-			id,
-			key,
-			size,
-		})
+		let key = self.get_key(id);
+		if let Some(val) = tx.get(key.clone()).await? {
+			let size = val.len() as u32;
+			let node = N::try_from_val(val)?;
+			Ok(StoredNode {
+				node,
+				id,
+				key,
+				size,
+			})
+		} else {
+			Err(Error::CorruptedIndex)
+		}
+	}
+
+	async fn save<N>(&self, tx: &mut Transaction, mut node: StoredNode<N>) -> Result<(), Error>
+	where
+		N: TreeNode,
+	{
+		let val = node.node.try_into_val()?;
+		tx.set(node.key, val).await?;
+		Ok(())
 	}
 }
 
-pub(super) struct StoredNode<BK>
-where
-	BK: BKeys,
-{
-	pub(super) node: Node<BK>,
+pub(super) struct StoredNode<N> {
+	pub(super) node: N,
 	pub(super) id: NodeId,
 	pub(super) key: Key,
 	pub(super) size: u32,
+}
+
+pub trait TreeNode
+where
+	Self: Sized,
+{
+	fn try_from_val(val: Val) -> Result<Self, Error>;
+	fn try_into_val(&mut self) -> Result<Val, Error>;
 }

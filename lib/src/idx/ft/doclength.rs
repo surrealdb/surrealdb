@@ -1,9 +1,9 @@
 use crate::err::Error;
-use crate::idx::btree::bkeys::TrieKeys;
-use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
-use crate::idx::btree::{BTree, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
-use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::idx::trees::bkeys::TrieKeys;
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
+use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::{IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -21,15 +21,16 @@ impl DocLengths {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
-		store_type: BTreeStoreType,
+		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bl_key(None);
-		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
-			btree::State::try_from_val(val)?
+		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
+			BState::try_from_val(val)?
 		} else {
-			btree::State::new(default_btree_order)
+			BState::new(default_btree_order)
 		};
-		let store = BTreeNodeStore::new(KeyProvider::DocLengths(index_key_base), store_type, 20);
+		let store =
+			TreeNodeStore::new(TreeNodeProvider::DocLengths(index_key_base), store_type, 20);
 		Ok(Self {
 			state_key,
 			btree: BTree::new(state),
@@ -65,7 +66,7 @@ impl DocLengths {
 		self.btree.delete(tx, &mut store, doc_id.to_be_bytes().to_vec()).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
@@ -80,8 +81,8 @@ impl DocLengths {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::doclength::DocLengths;
+	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 
@@ -97,7 +98,7 @@ mod tests {
 			&mut tx,
 			IndexKeyBase::default(),
 			BTREE_ORDER,
-			BTreeStoreType::Traversal,
+			TreeStoreType::Traversal,
 		)
 		.await
 		.unwrap();
@@ -107,7 +108,7 @@ mod tests {
 
 		// Set a doc length
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
 				.await
 				.unwrap();
 		l.set_doc_length(&mut tx, 99, 199).await.unwrap();
@@ -118,7 +119,7 @@ mod tests {
 
 		// Update doc length
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
 				.await
 				.unwrap();
 		l.set_doc_length(&mut tx, 99, 299).await.unwrap();
@@ -129,7 +130,7 @@ mod tests {
 
 		// Remove doc lengths
 		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, BTreeStoreType::Write)
+			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
 				.await
 				.unwrap();
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));

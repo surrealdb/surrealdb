@@ -1,9 +1,6 @@
-pub mod bkeys;
-pub mod store;
-
 use crate::err::Error;
-use crate::idx::btree::bkeys::BKeys;
-use crate::idx::btree::store::{BTreeNodeStore, StoredNode};
+use crate::idx::trees::bkeys::BKeys;
+use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
 use crate::idx::SerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
@@ -13,29 +10,31 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
 
-pub type NodeId = u64;
 pub type Payload = u64;
+
+type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
+pub(in crate::idx) type BTreeNodeStore<BK> = TreeNodeStore<BTreeNode<BK>>;
 
 pub struct BTree<BK>
 where
 	BK: BKeys,
 {
-	state: State,
+	state: BState,
 	full_size: u32,
 	updated: bool,
 	bk: PhantomData<BK>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct State {
+pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
 
-impl SerdeState for State {}
+impl SerdeState for BState {}
 
-impl State {
+impl BState {
 	pub fn new(minimum_degree: u32) -> Self {
 		assert!(minimum_degree >= 2, "Minimum degree should be >= 2");
 		Self {
@@ -47,15 +46,15 @@ impl State {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub(super) struct Statistics {
-	pub(super) keys_count: u64,
-	pub(super) max_depth: u32,
-	pub(super) nodes_count: u32,
-	pub(super) total_size: u64,
+pub(in crate::idx) struct BStatistics {
+	pub(in crate::idx) keys_count: u64,
+	pub(in crate::idx) max_depth: u32,
+	pub(in crate::idx) nodes_count: u32,
+	pub(in crate::idx) total_size: u64,
 }
 
-impl From<Statistics> for Value {
-	fn from(stats: Statistics) -> Self {
+impl From<BStatistics> for Value {
+	fn from(stats: BStatistics) -> Self {
 		let mut res = Object::default();
 		res.insert("keys_count".to_owned(), Value::from(stats.keys_count));
 		res.insert("max_depth".to_owned(), Value::from(stats.max_depth));
@@ -65,7 +64,7 @@ impl From<Statistics> for Value {
 	}
 }
 
-enum Node<BK>
+pub enum BTreeNode<BK>
 where
 	BK: BKeys,
 {
@@ -73,9 +72,9 @@ where
 	Leaf(BK),
 }
 
-impl<'a, BK> Node<BK>
+impl<BK> TreeNode for BTreeNode<BK>
 where
-	BK: BKeys + 'a,
+	BK: BKeys,
 {
 	fn try_from_val(val: Val) -> Result<Self, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
@@ -84,64 +83,53 @@ where
 		match node_type {
 			1u8 => {
 				let child: Vec<NodeId> = bincode::deserialize_from(c)?;
-				Ok(Node::Internal(keys, child))
+				Ok(BTreeNode::Internal(keys, child))
 			}
-			2u8 => Ok(Node::Leaf(keys)),
+			2u8 => Ok(BTreeNode::Leaf(keys)),
 			_ => Err(Error::CorruptedIndex),
 		}
 	}
 
-	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, u32), Error> {
-		if let Some(val) = tx.get(key).await? {
-			let size = val.len() as u32;
-			Ok((Node::try_from_val(val)?, size))
-		} else {
-			Err(Error::CorruptedIndex)
-		}
-	}
-
-	fn try_to_val(&self) -> Result<Val, Error> {
+	fn try_into_val(&mut self) -> Result<Val, Error> {
+		self.keys_mut().compile();
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
-			Node::Internal(keys, child) => {
+			BTreeNode::Internal(keys, child) => {
 				bincode::serialize_into(&mut c, &1u8)?;
 				keys.write_to(&mut c)?;
 				bincode::serialize_into(&mut c, &child)?;
 			}
-			Node::Leaf(keys) => {
+			BTreeNode::Leaf(keys) => {
 				bincode::serialize_into(&mut c, &2u8)?;
 				keys.write_to(&mut c)?;
 			}
 		};
 		Ok(c.into_inner())
 	}
+}
 
-	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<u32, Error> {
-		self.keys_mut().compile();
-		let val = self.try_to_val()?;
-		let size = val.len();
-		tx.set(key, val).await?;
-		Ok(size as u32)
-	}
-
+impl<BK> BTreeNode<BK>
+where
+	BK: BKeys,
+{
 	fn keys(&self) -> &BK {
 		match self {
-			Node::Internal(keys, _) => keys,
-			Node::Leaf(keys) => keys,
+			BTreeNode::Internal(keys, _) => keys,
+			BTreeNode::Leaf(keys) => keys,
 		}
 	}
 
 	fn keys_mut(&mut self) -> &mut BK {
 		match self {
-			Node::Internal(keys, _) => keys,
-			Node::Leaf(keys) => keys,
+			BTreeNode::Internal(keys, _) => keys,
+			BTreeNode::Leaf(keys) => keys,
 		}
 	}
 
-	fn append(&mut self, key: Key, payload: Payload, node: Node<BK>) -> Result<(), Error> {
+	fn append(&mut self, key: Key, payload: Payload, node: BTreeNode<BK>) -> Result<(), Error> {
 		match self {
-			Node::Internal(keys, children) => {
-				if let Node::Internal(append_keys, mut append_children) = node {
+			BTreeNode::Internal(keys, children) => {
+				if let BTreeNode::Internal(append_keys, mut append_children) = node {
 					keys.insert(key, payload);
 					keys.append(append_keys);
 					children.append(&mut append_children);
@@ -150,8 +138,8 @@ where
 					Err(Error::CorruptedIndex)
 				}
 			}
-			Node::Leaf(keys) => {
-				if let Node::Leaf(append_keys) = node {
+			BTreeNode::Leaf(keys) => {
+				if let BTreeNode::Leaf(append_keys) = node {
 					keys.insert(key, payload);
 					keys.append(append_keys);
 					Ok(())
@@ -171,9 +159,9 @@ struct SplitResult {
 
 impl<BK> BTree<BK>
 where
-	BK: BKeys + Default,
+	BK: BKeys,
 {
-	pub fn new(state: State) -> Self {
+	pub fn new(state: BState) -> Self {
 		Self {
 			full_size: state.minimum_degree * 2 - 1,
 			state,
@@ -195,7 +183,7 @@ where
 				store.set_node(current, false)?;
 				return Ok(Some(payload));
 			}
-			if let Node::Internal(keys, children) = &current.node {
+			if let BTreeNode::Internal(keys, children) = &current.node {
 				let child_idx = keys.get_child_idx(searched_key);
 				next_node.replace(children[child_idx]);
 			}
@@ -215,8 +203,8 @@ where
 			let root = store.get_node(tx, root_id).await?;
 			if root.node.keys().len() == self.full_size {
 				let new_root_id = self.new_node_id();
-				let new_root =
-					store.new_node(new_root_id, Node::Internal(BK::default(), vec![root_id]))?;
+				let new_root = store
+					.new_node(new_root_id, BTreeNode::Internal(BK::default(), vec![root_id]))?;
 				self.state.root = Some(new_root.id);
 				self.split_child(store, new_root, 0, root).await?;
 				self.insert_non_full(tx, store, new_root_id, key, payload).await?;
@@ -228,7 +216,7 @@ where
 		} else {
 			let new_root_id = self.new_node_id();
 			let new_root_node =
-				store.new_node(new_root_id, Node::Leaf(BK::with_key_val(key, payload)?))?;
+				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
 			store.set_node(new_root_node, true)?;
 			self.state.root = Some(new_root_id);
 		}
@@ -249,11 +237,11 @@ where
 			let mut node = store.get_node(tx, node_id).await?;
 			let key: Key = key.clone();
 			match &mut node.node {
-				Node::Leaf(keys) => {
+				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
 					store.set_node(node, true)?;
 				}
-				Node::Internal(keys, children) => {
+				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
 						store.set_node(node, true)?;
@@ -284,21 +272,21 @@ where
 	async fn split_child(
 		&mut self,
 		store: &mut BTreeNodeStore<BK>,
-		mut parent_node: StoredNode<BK>,
+		mut parent_node: BStoredNode<BK>,
 		idx: usize,
-		child_node: StoredNode<BK>,
+		child_node: BStoredNode<BK>,
 	) -> Result<SplitResult, Error> {
 		let (left_node, right_node, median_key, median_payload) = match child_node.node {
-			Node::Internal(keys, children) => self.split_internal_node(keys, children)?,
-			Node::Leaf(keys) => self.split_leaf_node(keys)?,
+			BTreeNode::Internal(keys, children) => self.split_internal_node(keys, children)?,
+			BTreeNode::Leaf(keys) => self.split_leaf_node(keys)?,
 		};
 		let right_node_id = self.new_node_id();
 		match parent_node.node {
-			Node::Internal(ref mut keys, ref mut children) => {
+			BTreeNode::Internal(ref mut keys, ref mut children) => {
 				keys.insert(median_key.clone(), median_payload);
 				children.insert(idx + 1, right_node_id);
 			}
-			Node::Leaf(ref mut keys) => {
+			BTreeNode::Leaf(ref mut keys) => {
 				keys.insert(median_key.clone(), median_payload);
 			}
 		};
@@ -322,18 +310,21 @@ where
 		&mut self,
 		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> Result<(Node<BK>, Node<BK>, Key, Payload), Error> {
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
 		let r = keys.split_keys()?;
 		let right_children = left_children.split_off(r.median_idx + 1);
-		let left_node = Node::Internal(r.left, left_children);
-		let right_node = Node::Internal(r.right, right_children);
+		let left_node = BTreeNode::Internal(r.left, left_children);
+		let right_node = BTreeNode::Internal(r.right, right_children);
 		Ok((left_node, right_node, r.median_key, r.median_payload))
 	}
 
-	fn split_leaf_node(&mut self, keys: BK) -> Result<(Node<BK>, Node<BK>, Key, Payload), Error> {
+	fn split_leaf_node(
+		&mut self,
+		keys: BK,
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
 		let r = keys.split_keys()?;
-		let left_node = Node::Leaf(r.left);
-		let right_node = Node::Leaf(r.right);
+		let left_node = BTreeNode::Leaf(r.left);
+		let right_node = BTreeNode::Leaf(r.right);
 		Ok((left_node, right_node, r.median_key, r.median_payload))
 	}
 
@@ -343,7 +334,7 @@ where
 		new_node_id
 	}
 
-	pub(super) async fn delete(
+	pub(in crate::idx) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
@@ -357,7 +348,7 @@ where
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
 				let mut node = store.get_node(tx, node_id).await?;
 				match &mut node.node {
-					Node::Leaf(keys) => {
+					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
 						if let Some(payload) = keys.get(&key_to_delete) {
 							if is_main_key {
@@ -379,7 +370,7 @@ where
 							store.set_node(node, false)?;
 						}
 					}
-					Node::Internal(keys, children) => {
+					BTreeNode::Internal(keys, children) => {
 						// CLRS: 2
 						if let Some(payload) = keys.get(&key_to_delete) {
 							if is_main_key {
@@ -566,8 +557,8 @@ where
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut child_stored_node: StoredNode<BK>,
-		mut right_child_stored_node: StoredNode<BK>,
+		mut child_stored_node: BStoredNode<BK>,
+		mut right_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.node.keys().get_first_key()
@@ -594,8 +585,8 @@ where
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut child_stored_node: StoredNode<BK>,
-		mut left_child_stored_node: StoredNode<BK>,
+		mut child_stored_node: BStoredNode<BK>,
+		mut left_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		if let Some((ascending_key, ascending_payload)) =
 			left_child_stored_node.node.keys().get_last_key()
@@ -624,8 +615,8 @@ where
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut left_child: StoredNode<BK>,
-		right_child: StoredNode<BK>,
+		mut left_child: BStoredNode<BK>,
+		right_child: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		if let Some(descending_key) = keys.get_key(child_idx) {
 			if let Some(descending_payload) = keys.remove(&descending_key) {
@@ -641,12 +632,12 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
-	pub(super) async fn statistics(
+	pub(in crate::idx) async fn statistics(
 		&self,
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
-	) -> Result<Statistics, Error> {
-		let mut stats = Statistics::default();
+	) -> Result<BStatistics, Error> {
+		let mut stats = BStatistics::default();
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 1));
@@ -659,7 +650,7 @@ where
 			}
 			stats.nodes_count += 1;
 			stats.total_size += stored.size as u64;
-			if let Node::Internal(_, children) = &stored.node {
+			if let BTreeNode::Internal(_, children) = &stored.node {
 				let depth = depth + 1;
 				for child_id in children.iter() {
 					node_queue.push_front((*child_id, depth));
@@ -670,11 +661,11 @@ where
 		Ok(stats)
 	}
 
-	pub(super) fn get_state(&self) -> &State {
+	pub(in crate::idx) fn get_state(&self) -> &BState {
 		&self.state
 	}
 
-	pub(super) fn is_updated(&self) -> bool {
+	pub(in crate::idx) fn is_updated(&self) -> bool {
 		self.updated
 	}
 }
@@ -682,9 +673,13 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
-	use crate::idx::btree::{BTree, Node, NodeId, Payload, State, Statistics, StoredNode};
+	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::trees::btree::{
+		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeNodeStore, Payload,
+	};
+	use crate::idx::trees::store::{
+		NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
+	};
 	use crate::idx::SerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::SliceRandom;
@@ -694,9 +689,9 @@ mod tests {
 
 	#[test]
 	fn test_btree_state_serde() {
-		let s = State::new(3);
+		let s = BState::new(3);
 		let val = s.try_to_val().unwrap();
-		let s: State = State::try_from_val(val).unwrap();
+		let s: BState = BState::try_from_val(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);
@@ -704,17 +699,17 @@ mod tests {
 
 	#[test]
 	fn test_node_serde_internal() {
-		let mut node = Node::Internal(FstKeys::default(), vec![]);
+		let mut node = BTreeNode::Internal(FstKeys::default(), vec![]);
 		node.keys_mut().compile();
-		let val = node.try_to_val().unwrap();
-		let _: Node<FstKeys> = Node::try_from_val(val).unwrap();
+		let val = node.try_into_val().unwrap();
+		let _: BTreeNode<FstKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
 
 	#[test]
 	fn test_node_serde_leaf() {
-		let node = Node::Leaf(TrieKeys::default());
-		let val = node.try_to_val().unwrap();
-		let _: Node<TrieKeys> = Node::try_from_val(val).unwrap();
+		let mut node = BTreeNode::Leaf(TrieKeys::default());
+		let val = node.try_into_val().unwrap();
+		let _: BTreeNode<TrieKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
 
 	async fn insertions_test<F, BK>(
@@ -725,7 +720,7 @@ mod tests {
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys + Default,
+		BK: BKeys,
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
@@ -742,9 +737,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
-		let mut t = BTree::new(State::new(5));
+		let mut t = BTree::new(BState::new(5));
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		insertions_test::<_, FstKeys>(&mut tx, &mut s, &mut t, 100, get_key_value).await;
@@ -752,10 +747,10 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
 				.unwrap(),
-			Statistics {
+			BStatistics {
 				keys_count: 100,
 				max_depth: 3,
 				nodes_count: 22,
@@ -766,9 +761,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
-		let mut t = BTree::new(State::new(6));
+		let mut t = BTree::new(BState::new(6));
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		insertions_test::<_, TrieKeys>(&mut tx, &mut s, &mut t, 100, get_key_value).await;
@@ -777,10 +772,10 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
 				.unwrap(),
-			Statistics {
+			BStatistics {
 				keys_count: 100,
 				max_depth: 3,
 				nodes_count: 18,
@@ -791,11 +786,11 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_random_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(State::new(8));
+		let mut t = BTree::new(BState::new(8));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
@@ -806,7 +801,7 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t
-			.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 100);
@@ -814,11 +809,11 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_random_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(State::new(75));
+		let mut t = BTree::new(BState::new(75));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
@@ -829,7 +824,7 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t
-			.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 100);
@@ -837,21 +832,21 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(State::new(60));
+		let mut t = BTree::new(BState::new(60));
 		insertions_test::<_, FstKeys>(&mut tx, &mut s, &mut t, 10000, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
 				.unwrap(),
-			Statistics {
+			BStatistics {
 				keys_count: 10000,
 				max_depth: 3,
 				nodes_count: 158,
@@ -862,21 +857,21 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_large_order_sequential_insertions() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(State::new(60));
+		let mut t = BTree::new(BState::new(60));
 		insertions_test::<_, TrieKeys>(&mut tx, &mut s, &mut t, 10000, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
 				.unwrap(),
-			Statistics {
+			BStatistics {
 				keys_count: 10000,
 				max_depth: 3,
 				nodes_count: 158,
@@ -891,15 +886,15 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> Statistics
+	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> BStatistics
 	where
-		BK: BKeys + Default,
+		BK: BKeys,
 	{
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(State::new(default_minimum_degree));
+		let mut t = BTree::new(BState::new(default_minimum_degree));
 		insertions_test::<_, BK>(&mut tx, &mut s, &mut t, REAL_WORLD_TERMS.len(), |i| {
 			(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 		})
@@ -908,7 +903,7 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		t.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug)).await.unwrap()
+		t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug)).await.unwrap()
 	}
 
 	#[test(tokio::test)]
@@ -916,7 +911,7 @@ mod tests {
 		let s = test_btree_read_world_insertions::<FstKeys>(4).await;
 		assert_eq!(
 			s,
-			Statistics {
+			BStatistics {
 				keys_count: 17,
 				max_depth: 2,
 				nodes_count: 5,
@@ -930,7 +925,7 @@ mod tests {
 		let s = test_btree_read_world_insertions::<FstKeys>(100).await;
 		assert_eq!(
 			s,
-			Statistics {
+			BStatistics {
 				keys_count: 17,
 				max_depth: 1,
 				nodes_count: 1,
@@ -944,7 +939,7 @@ mod tests {
 		let s = test_btree_read_world_insertions::<TrieKeys>(6).await;
 		assert_eq!(
 			s,
-			Statistics {
+			BStatistics {
 				keys_count: 17,
 				max_depth: 2,
 				nodes_count: 3,
@@ -958,7 +953,7 @@ mod tests {
 		let s = test_btree_read_world_insertions::<TrieKeys>(100).await;
 		assert_eq!(
 			s,
-			Statistics {
+			BStatistics {
 				keys_count: 17,
 				max_depth: 1,
 				nodes_count: 1,
@@ -998,10 +993,10 @@ mod tests {
 	#[test(tokio::test)]
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn clrs_insertion_test() {
-		let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::<TrieKeys>::new(State::new(3));
+		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in CLRS_EXAMPLE {
 			t.insert(&mut tx, &mut s, key.into(), payload).await.unwrap();
@@ -1011,7 +1006,7 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t
-			.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 23);
@@ -1086,12 +1081,12 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_clrs_deletion_test<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys + Default,
+		BK: BKeys,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1103,7 +1098,7 @@ mod tests {
 
 		{
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 				let mut s = s.lock().await;
 				let mut tx = ds.transaction(true, false).await.unwrap();
 				debug!("Delete {}", key);
@@ -1115,7 +1110,7 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t
-			.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 18);
@@ -1178,27 +1173,27 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_clrs_deletion_test() {
-		let t = BTree::<TrieKeys>::new(State::new(3));
+		let t = BTree::<TrieKeys>::new(BState::new(3));
 		test_btree_clrs_deletion_test(t).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_clrs_deletion_test() {
-		let t = BTree::<FstKeys>::new(State::new(3));
+		let t = BTree::<FstKeys>::new(BState::new(3));
 		test_btree_clrs_deletion_test(t).await
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_fill_and_empty<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys + Default,
+		BK: BKeys,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
 		let mut expected_keys = HashMap::new();
 
 		{
-			let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1219,7 +1214,7 @@ mod tests {
 			debug!("Delete {}", key);
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 				let mut s = s.lock().await;
 				t.delete(&mut tx, &mut s, key.into()).await.unwrap();
 				print_tree::<BK>(&mut tx, &t).await;
@@ -1232,7 +1227,7 @@ mod tests {
 
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Read, 20);
+				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20);
 				let mut s = s.lock().await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
@@ -1245,7 +1240,7 @@ mod tests {
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t
-			.statistics(&mut tx, &mut BTreeNodeStore::Traversal(KeyProvider::Debug))
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 0);
@@ -1257,13 +1252,13 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_fill_and_empty() {
-		let t = BTree::<TrieKeys>::new(State::new(3));
+		let t = BTree::<TrieKeys>::new(BState::new(3));
 		test_btree_fill_and_empty(t).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_fill_and_empty() {
-		let t = BTree::<FstKeys>::new(State::new(3));
+		let t = BTree::<FstKeys>::new(BState::new(3));
 		test_btree_fill_and_empty(t).await
 	}
 
@@ -1272,13 +1267,13 @@ mod tests {
 	/////////////
 
 	fn check_is_internal_node<BK>(
-		node: Node<BK>,
+		node: BTreeNode<BK>,
 		expected_keys: Vec<(&str, i32)>,
 		expected_children: Vec<NodeId>,
 	) where
 		BK: BKeys,
 	{
-		if let Node::Internal(keys, children) = node {
+		if let BTreeNode::Internal(keys, children) = node {
 			check_keys(keys, expected_keys);
 			assert_eq!(children, expected_children, "The children are not matching");
 		} else {
@@ -1286,11 +1281,11 @@ mod tests {
 		}
 	}
 
-	fn check_is_leaf_node<BK>(node: Node<BK>, expected_keys: Vec<(&str, i32)>)
+	fn check_is_leaf_node<BK>(node: BTreeNode<BK>, expected_keys: Vec<(&str, i32)>)
 	where
 		BK: BKeys,
 	{
-		if let Node::Leaf(keys) = node {
+		if let BTreeNode::Leaf(keys) = node {
 			check_keys(keys, expected_keys);
 		} else {
 			panic!("An internal node was expected, we got a leaf node");
@@ -1337,17 +1332,17 @@ mod tests {
 			inspect_func: F,
 		) -> Result<usize, Error>
 		where
-			F: Fn(usize, usize, NodeId, StoredNode<BK>),
+			F: Fn(usize, usize, NodeId, BStoredNode<BK>),
 		{
 			let mut node_queue = VecDeque::new();
 			if let Some(node_id) = self.state.root {
 				node_queue.push_front((node_id, 1));
 			}
 			let mut count = 0;
-			let mut s = BTreeNodeStore::Traversal(KeyProvider::Debug);
+			let mut s = TreeNodeStore::Traversal(TreeNodeProvider::Debug);
 			while let Some((node_id, depth)) = node_queue.pop_front() {
 				let stored_node = s.get_node(tx, node_id).await?;
-				if let Node::Internal(_, children) = &stored_node.node {
+				if let BTreeNode::Internal(_, children) = &stored_node.node {
 					let depth = depth + 1;
 					for child_id in children {
 						node_queue.push_back((*child_id, depth));
@@ -1360,7 +1355,7 @@ mod tests {
 		}
 	}
 
-	impl<BK> Node<BK>
+	impl<BK> BTreeNode<BK>
 	where
 		BK: BKeys,
 	{
@@ -1369,12 +1364,12 @@ mod tests {
 			F: Fn(Key) -> Result<String, Error>,
 		{
 			match self {
-				Node::Internal(keys, children) => {
+				BTreeNode::Internal(keys, children) => {
 					keys.debug(to_string)?;
 					debug!("Children{:?}", children);
 					Ok(())
 				}
-				Node::Leaf(keys) => keys.debug(to_string),
+				BTreeNode::Leaf(keys) => keys.debug(to_string),
 			}
 		}
 	}

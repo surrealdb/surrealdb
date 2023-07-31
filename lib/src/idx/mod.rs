@@ -1,10 +1,10 @@
-pub mod btree;
+pub mod trees;
 pub(crate) mod ft;
 pub(crate) mod planner;
 
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::btree::NodeId;
+use crate::idx::trees::store::NodeId;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::key::index::bc::Bc;

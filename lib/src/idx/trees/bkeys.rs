@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::btree::Payload;
+use crate::idx::trees::btree::Payload;
 use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
@@ -9,7 +9,7 @@ use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::Cursor;
 
-pub trait BKeys: Display + Sized {
+pub trait BKeys: Default + Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
 	fn is_empty(&self) -> bool;
@@ -533,8 +533,8 @@ impl<'a> KeysIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::Payload;
+	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::trees::btree::Payload;
 	use crate::kvs::Key;
 	use std::collections::{HashMap, HashSet, VecDeque};
 	use std::io::Cursor;

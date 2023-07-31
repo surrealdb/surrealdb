@@ -3,9 +3,9 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use std::time::Duration;
-use surrealdb::idx::btree::bkeys::{BKeys, FstKeys, TrieKeys};
-use surrealdb::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
-use surrealdb::idx::btree::{BTree, Payload, State};
+use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
+use surrealdb::idx::trees::btree::{BState, BTree, Payload};
+use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use surrealdb::kvs::{Datastore, Key};
 
 macro_rules! get_key_value {
@@ -22,12 +22,12 @@ fn bench_index_btree(c: &mut Criterion) {
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(30));
 
-	group.bench_function("btree-insertion-fst", |b| {
+	group.bench_function("trees-insertion-fst", |b| {
 		b.to_async(FuturesExecutor)
 			.iter(|| bench::<_, FstKeys>(samples_len, |i| get_key_value!(samples[i])))
 	});
 
-	group.bench_function("btree-insertion-trie", |b| {
+	group.bench_function("trees-insertion-trie", |b| {
 		b.to_async(FuturesExecutor)
 			.iter(|| bench::<_, TrieKeys>(samples_len, |i| get_key_value!(samples[i])))
 	});
@@ -54,8 +54,8 @@ where
 {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(true, false).await.unwrap();
-	let mut t = BTree::<BK>::new(State::new(100));
-	let s = BTreeNodeStore::new(KeyProvider::Debug, BTreeStoreType::Write, 20);
+	let mut t = BTree::<BK>::new(BState::new(100));
+	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 	let mut s = s.lock().await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);
