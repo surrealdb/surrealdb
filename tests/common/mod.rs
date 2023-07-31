@@ -195,7 +195,7 @@ pub async fn ws_send_msg_with_fmt(
 	});
 
 	tokio::select! {
-		_ = time::sleep(time::Duration::from_millis(1000)) => {
+		_ = time::sleep(time::Duration::from_millis(2000)) => {
 			Err("timeout waiting for the response".into())
 		}
 		res = f.select_next_some() => {
