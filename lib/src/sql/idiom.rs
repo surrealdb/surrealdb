@@ -375,11 +375,11 @@ mod tests {
 
 	#[test]
 	fn idiom_start_param_local_field() {
-		let sql = "$test.temporary[0].embedded";
+		let sql = "$test.temporary[0].embedded…";
 		let res = idiom(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("$test.temporary[0].embedded", format!("{}", out));
+		assert_eq!("$test.temporary[0].embedded…", format!("{}", out));
 		assert_eq!(
 			out,
 			Idiom(vec![
@@ -387,6 +387,7 @@ mod tests {
 				Part::from("temporary"),
 				Part::Index(Number::Int(0)),
 				Part::from("embedded"),
+				Part::Flatten,
 			])
 		);
 	}

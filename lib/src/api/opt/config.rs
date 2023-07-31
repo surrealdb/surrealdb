@@ -1,3 +1,11 @@
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+))]
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout

@@ -113,7 +113,7 @@ impl fmt::Display for Part {
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{v}"),
-			Part::Flatten => f.write_str("[+]"),
+			Part::Flatten => f.write_str("…"),
 			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -183,9 +183,8 @@ pub fn index(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn flatten(i: &str) -> IResult<&str, Part> {
-	let (i, _) = openbracket(i)?;
-	let (i, _) = char('+')(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, _) = alt((tag("…"), tag("...")))(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, Part::Flatten))
 }
 
@@ -255,11 +254,21 @@ mod tests {
 
 	#[test]
 	fn part_flatten() {
-		let sql = "[+]";
+		let sql = "...";
 		let res = part(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("[+]", format!("{}", out));
+		assert_eq!("…", format!("{}", out));
+		assert_eq!(out, Part::Flatten);
+	}
+
+	#[test]
+	fn part_flatten_ellipsis() {
+		let sql = "…";
+		let res = part(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("…", format!("{}", out));
 		assert_eq!(out, Part::Flatten);
 	}
 

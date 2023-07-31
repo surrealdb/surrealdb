@@ -124,7 +124,7 @@ async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 #[tokio::test]
 async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, tags[+], emails[+] UNIQUE;
+		DEFINE INDEX test ON user FIELDS account, tags…, emails... UNIQUE;
 		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
 		CREATE user:3 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
@@ -159,7 +159,7 @@ async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Erro
 #[tokio::test]
 async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, tags, emails[+] UNIQUE;
+		DEFINE INDEX test ON user FIELDS account, tags, emails... UNIQUE;
 		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
 	";
@@ -185,7 +185,7 @@ async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error
 #[tokio::test]
 async fn create_with_unique_index_on_one_field_with_flattened_sub_values() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, tags, emails.*.value[+] UNIQUE;
+		DEFINE INDEX test ON user FIELDS account, tags, emails.*.value… UNIQUE;
 		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = [ { value:'a@example.com'} , { value:'b@example.com' } ];
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = [ { value:'a@example.com'} , { value:'b@example.com' } ];
 	";
