@@ -146,6 +146,20 @@ pub enum Error {
 	/// it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]
 	BackupsNotSupported,
+
+	/// The version of the server is not compatible with the versions supported by this SDK
+	#[error("server version `{server_version}` does not match the range supported by the client `{supported_versions}`")]
+	VersionMismatch {
+		server_version: semver::Version,
+		supported_versions: String,
+	},
+
+	/// The build metadata of the server is older than the minimum supported by this SDK
+	#[error("server build `{server_metadata}` is older than the minimum supported build `{supported_metadata}`")]
+	BuildMetadataMismatch {
+		server_metadata: semver::BuildMetadata,
+		supported_metadata: semver::BuildMetadata,
+	},
 }
 
 #[cfg(feature = "protocol-http")]
