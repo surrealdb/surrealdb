@@ -102,7 +102,7 @@ async fn create_with_id() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.value(0).result?;
+	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
@@ -112,7 +112,7 @@ async fn create_with_id() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.value(0).result?;
+	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
@@ -122,7 +122,7 @@ async fn create_with_id() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.value(0).result?;
+	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
