@@ -1,11 +1,7 @@
-use js::{
-	function::Params,
-	prelude::{Func, Rest},
-	Ctx,
-};
+use js::{prelude::Rest, Ctx};
 
 use super::run;
-use crate::{fnc::script::modules::impl_module_def, sql::value::Value};
+use crate::sql::value::Value;
 
 mod uuid;
 
@@ -26,10 +22,10 @@ impl js::module::ModuleDef for Package {
 		Ok(())
 	}
 	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
-		let default = js::Function::new(
-			ctx.clone(),
-			Func::new(|ctx: Ctx<'js>, args: Rest<Value>| run(ctx, "rand", args.0)),
-		)?;
+		let default = js::Function::new(ctx.clone(), |ctx: Ctx<'js>, args: Rest<Value>| {
+			run(ctx, "rand", args.0)
+		})?
+		.with_name("rand")?;
 		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "bool", run,);
 		exports.export("bool", value.clone())?;
 		default.set("bool", value)?;
