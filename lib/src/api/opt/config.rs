@@ -1,22 +1,6 @@
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
 #[derive(Debug, Default)]
 pub struct Config {
 	pub(crate) strict: bool,
@@ -24,25 +8,7 @@ pub struct Config {
 	pub(crate) query_timeout: Option<Duration>,
 	pub(crate) transaction_timeout: Option<Duration>,
 }
-#[cfg(not(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-)))]
-#[derive(Debug, Default)]
-pub struct Config();
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
 impl Config {
 	///Create a default config that can be modified to configure a connection
 	pub fn new() -> Self {
