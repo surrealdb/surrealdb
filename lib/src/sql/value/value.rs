@@ -2692,6 +2692,7 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((map(binary, Value::from), single))(i)
 }
 
@@ -2818,6 +2819,8 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive()?;
+
 	// Use a specific parser for JSON objects
 	pub fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;
