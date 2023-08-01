@@ -103,7 +103,7 @@ impl Value {
 				// Current value at path is an array
 				Value::Array(v) => match p {
 					// Current path is an `*` part
-					Part::All => {
+					Part::All | Part::Flatten => {
 						let path = path.next();
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, doc, path));
 						try_join_all_buffered(futs).await.map(Into::into)
@@ -222,8 +222,14 @@ impl Value {
 						},
 					}
 				}
-				// Ignore everything else
-				_ => Ok(Value::None),
+				v => {
+					if matches!(p, Part::Flatten) {
+						v.get(ctx, opt, txn, None, path.next()).await
+					} else {
+						// Ignore everything else
+						Ok(Value::None)
+					}
+				}
 			},
 			// No more parts so get the value
 			None => Ok(self.clone()),

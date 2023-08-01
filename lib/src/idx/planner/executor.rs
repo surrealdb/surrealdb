@@ -136,7 +136,7 @@ impl QueryExecutor {
 			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
 				opt,
 				io.ix(),
-				io.value(),
+				io.array(),
 			)?)));
 		}
 		Ok(None)
@@ -150,7 +150,7 @@ impl QueryExecutor {
 			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
 				opt,
 				io.ix(),
-				io.value(),
+				io.array(),
 			)?)));
 		}
 		Ok(None)

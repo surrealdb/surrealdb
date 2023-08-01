@@ -5,13 +5,14 @@ use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, Fmt};
-use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, start, Part};
+use crate::sql::part::{flatten, Next};
 use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::value::Value;
 use md5::Digest;
 use md5::Md5;
 use nom::branch::alt;
+use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::multi::{many0, many1};
 use serde::{Deserialize, Serialize};
@@ -181,6 +182,11 @@ impl Display for Idiom {
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(alt((all, index, field)))(i)?;
+	// Flatten is only allowed at the end
+	let (i, flat) = opt(flatten)(i)?;
+	if let Some(p) = flat {
+		v.push(p);
+	}
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }
@@ -375,11 +381,11 @@ mod tests {
 
 	#[test]
 	fn idiom_start_param_local_field() {
-		let sql = "$test.temporary[0].embedded";
+		let sql = "$test.temporary[0].embedded…";
 		let res = idiom(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("$test.temporary[0].embedded", format!("{}", out));
+		assert_eq!("$test.temporary[0].embedded…", format!("{}", out));
 		assert_eq!(
 			out,
 			Idiom(vec![
@@ -387,6 +393,7 @@ mod tests {
 				Part::from("temporary"),
 				Part::Index(Number::Int(0)),
 				Part::from("embedded"),
+				Part::Flatten,
 			])
 		);
 	}
