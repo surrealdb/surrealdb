@@ -7,10 +7,11 @@ use http::{header, Method};
 use reqwest::Client;
 use serde_json::json;
 use serial_test::serial;
+use test_log::test;
 
 use crate::common::{PASS, USER};
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -52,7 +53,7 @@ async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -133,14 +134,14 @@ async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO: test the client IP extractor
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn export_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -184,7 +185,7 @@ async fn export_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -196,7 +197,7 @@ async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -269,7 +270,7 @@ async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -303,7 +304,7 @@ async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -372,7 +373,7 @@ async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -435,7 +436,7 @@ async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -547,7 +548,7 @@ async fn sql_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -581,7 +582,7 @@ async fn sync_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn version_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -623,7 +624,7 @@ async fn seed_table(
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -700,7 +701,7 @@ async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -763,7 +764,7 @@ async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -833,7 +834,7 @@ async fn key_endpoint_update_all() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -903,7 +904,7 @@ async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -957,7 +958,7 @@ async fn key_endpoint_delete_all() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -998,7 +999,7 @@ async fn key_endpoint_select_one() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -1095,7 +1096,7 @@ async fn key_endpoint_create_one() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -1168,7 +1169,7 @@ async fn key_endpoint_update_one() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -1246,7 +1247,7 @@ async fn key_endpoint_modify_one() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn key_endpoint_delete_one() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();

@@ -5036,6 +5036,7 @@ dependencies = [
  "base64 0.21.2",
  "bytes 1.4.0",
  "clap 4.3.19",
+ "env_logger",
  "futures 0.3.28",
  "futures-util",
  "glob",
@@ -5061,6 +5062,7 @@ dependencies = [
  "surrealdb",
  "temp-env",
  "tempfile",
+ "test-log",
  "thiserror",
  "tokio 1.29.1",
  "tokio-stream",
@@ -5267,6 +5269,7 @@ version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9547444bfe52cbd79515c6c8087d8ae6ca8d64d2d31a27746320f5cb81d1a15c"
 dependencies = [
+ "futures 0.3.28",
  "parking_lot 0.12.1",
 ]
 

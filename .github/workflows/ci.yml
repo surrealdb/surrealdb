@@ -118,6 +118,8 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
+        env:
+          RUST_LOG: info
         run: cargo test --locked --no-default-features --features storage-mem --workspace --test cli_integration
 
   http-server:
@@ -140,6 +142,8 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
+        env:
+          RUST_LOG: info
         run: cargo test --locked --no-default-features --features storage-mem --workspace --test http_integration
 
   ws-server:
@@ -162,6 +166,8 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
+        env:
+          RUST_LOG: info
         run: cargo test --locked --no-default-features --features storage-mem --workspace --test ws_integration
 
   test:
@@ -187,6 +193,8 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run cargo test (+coverage)
+        env:
+          RUST_LOG: info
         run: |
           (set -x; df -h)
           # Free up some disk space by removing unused files

@@ -4,13 +4,15 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
-use std::fs;
+use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::{env, fs};
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tracing::{error, info};
 
 pub const USER: &str = "root";
 pub const PASS: &str = "root";
@@ -58,7 +60,12 @@ impl Drop for Child {
 	}
 }
 
-pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child {
+pub fn run_internal<P: AsRef<Path>>(
+	args: &str,
+	current_dir: Option<P>,
+	stdout: Stdio,
+	stderr: Stdio,
+) -> Child {
 	let mut path = std::env::current_exe().unwrap();
 	assert!(path.pop());
 	if path.ends_with("deps") {
@@ -74,8 +81,8 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	}
 	cmd.env_clear();
 	cmd.stdin(Stdio::piped());
-	cmd.stdout(Stdio::piped());
-	cmd.stderr(Stdio::piped());
+	cmd.stdout(stdout);
+	cmd.stderr(stderr);
 	cmd.args(args.split_ascii_whitespace());
 	Child {
 		inner: Some(cmd.spawn().unwrap()),
@@ -84,17 +91,30 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 
 /// Run the CLI with the given args
 pub fn run(args: &str) -> Child {
-	run_internal::<String>(args, None)
+	run_internal::<String>(args, None, Stdio::piped(), Stdio::piped())
 }
 
 /// Run the CLI with the given args inside a temporary directory
 pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
-	run_internal(args, Some(current_dir))
+	run_internal(args, Some(current_dir), Stdio::piped(), Stdio::piped())
 }
 
 pub fn tmp_file(name: &str) -> String {
 	let path = Path::new(env!("OUT_DIR")).join(name);
 	path.to_string_lossy().into_owned()
+}
+
+fn parse_server_stdio_from_var(var: &str) -> Result<Stdio, Box<dyn Error>> {
+	match env::var(var).as_deref() {
+		Ok("inherit") => Ok(Stdio::inherit()),
+		Ok("null") => Ok(Stdio::null()),
+		Ok("piped") => Ok(Stdio::piped()),
+		Ok(val) if val.starts_with("file://") => {
+			Ok(Stdio::from(File::create(val.trim_start_matches("file://"))?))
+		}
+		Ok(val) => Err(format!("Unsupported stdio value: {val:?}").into()),
+		_ => Ok(Stdio::null()),
+	}
 }
 
 pub async fn start_server(
@@ -126,9 +146,12 @@ pub async fn start_server(
 
 	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
-	println!("starting server with args: {start_args}");
+	info!("starting server with args: {start_args}");
 
-	let server = run(&start_args);
+	// Configure where the logs go when running the test
+	let stdout = parse_server_stdio_from_var("SURREAL_TEST_SERVER_STDOUT")?;
+	let stderr = parse_server_stdio_from_var("SURREAL_TEST_SERVER_STDERR")?;
+	let server = run_internal::<String>(&start_args, None, stdout, stderr);
 
 	if !wait_is_ready {
 		return Ok((addr, server));
@@ -136,18 +159,18 @@ pub async fn start_server(
 
 	// Wait 5 seconds for the server to start
 	let mut interval = time::interval(time::Duration::from_millis(500));
-	println!("Waiting for server to start...");
+	info!("Waiting for server to start...");
 	for _i in 0..10 {
 		interval.tick().await;
 
 		if run(&format!("isready --conn http://{addr}")).output().is_ok() {
-			println!("Server ready!");
+			info!("Server ready!");
 			return Ok((addr, server));
 		}
 	}
 
 	let server_out = server.kill().output().err().unwrap();
-	println!("server output: {server_out}");
+	error!("server output: {server_out}");
 	Err("server failed to start".into())
 }
 
@@ -252,7 +275,7 @@ pub async fn ws_signin(
 			Ok(obj.get("result").unwrap().as_str().unwrap_or_default().to_owned())
 		}
 		_ => {
-			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
 			Err(format!("unexpected response: {:?}", msg).into())
 		}
 	}
@@ -278,7 +301,7 @@ pub async fn ws_query(
 			Ok(obj.get("result").unwrap().as_array().unwrap().to_owned())
 		}
 		_ => {
-			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
 			Err(format!("unexpected response: {:?}", msg).into())
 		}
 	}
@@ -306,7 +329,7 @@ pub async fn ws_use(
 			Ok(obj.get("result").unwrap().to_owned())
 		}
 		_ => {
-			println!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+			error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
 			Err(format!("unexpected response: {:?}", msg).into())
 		}
 	}

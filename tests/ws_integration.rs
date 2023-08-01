@@ -4,10 +4,11 @@ mod common;
 
 use serde_json::json;
 use serial_test::serial;
+use test_log::test;
 
 use crate::common::{PASS, USER};
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -32,7 +33,7 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -99,7 +100,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -154,7 +155,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -228,7 +229,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -270,7 +271,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -315,21 +316,21 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO: implement
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO: implement
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -382,7 +383,7 @@ async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -445,7 +446,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -489,7 +490,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -535,7 +536,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -575,7 +576,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -625,7 +626,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -707,7 +708,7 @@ async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -812,7 +813,7 @@ async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -874,7 +875,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -920,7 +921,7 @@ async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -978,7 +979,7 @@ async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -1036,7 +1037,7 @@ async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
@@ -1080,7 +1081,7 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
