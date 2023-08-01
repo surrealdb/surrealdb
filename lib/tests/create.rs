@@ -103,7 +103,7 @@ async fn create_with_id() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn create_on_non_values_with_unique_index() -> Result<(), Error> {
+async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX national_id_idx ON foo FIELDS national_id UNIQUE;
 		CREATE foo SET name = 'John Doe';
@@ -117,6 +117,119 @@ async fn create_on_non_values_with_unique_index() -> Result<(), Error> {
 	//
 	for _ in 0..3 {
 		let _ = res.remove(0).result?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX test ON user FIELDS account, tags…, emails... UNIQUE;
+		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:3 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:4 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	for _ in 0..3 {
+		let _ = res.remove(0).result?;
+	}
+	//
+	let tmp = res.remove(0).result;
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['one', 'two'], ['a@example.com', 'b@example.com']], with record `user:3`");
+	} else {
+		panic!("An error was expected.")
+	}
+	//
+	let tmp = res.remove(0).result;
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['two', 'three'], ['a@example.com', 'b@example.com']], with record `user:4`");
+	} else {
+		panic!("An error was expected.")
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX test ON user FIELDS account, tags, emails... UNIQUE;
+		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let _ = res.remove(0).result?;
+	}
+	//
+	let tmp = res.remove(0).result;
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:2`");
+	} else {
+		panic!("An error was expected.")
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_unique_index_on_one_field_with_flattened_sub_values() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX test ON user FIELDS account, tags, emails.*.value… UNIQUE;
+		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = [ { value:'a@example.com'} , { value:'b@example.com' } ];
+		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = [ { value:'a@example.com'} , { value:'b@example.com' } ];
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let _ = res.remove(0).result?;
+	}
+	//
+	let tmp = res.remove(0).result;
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:2`");
+	} else {
+		panic!("An error was expected.")
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX test ON user FIELDS account, tags, emails UNIQUE;
+		CREATE user:1 SET account = 'Apple', tags = ['one', 'two'], emails = ['a@example.com', 'b@example.com'];
+		CREATE user:2 SET account = 'Apple', tags = ['two', 'one'], emails = ['b@example.com', 'c@example.com'];
+	";
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result;
+	//
+	if let Err(e) = tmp {
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', 'b@example.com'], with record `user:2`");
+	} else {
+		panic!("An error was expected.")
 	}
 	Ok(())
 }

@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::Node;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
-use crate::sql::Object;
+use crate::sql::{Array, Object};
 use crate::sql::{Expression, Idiom, Operator, Value};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -127,7 +127,7 @@ pub(crate) struct IndexOption(Arc<Inner>);
 pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
-	v: Value,
+	a: Array,
 	qs: Option<String>,
 	op: Operator,
 	mr: Option<MatchRef>,
@@ -138,7 +138,7 @@ impl IndexOption {
 		ix: DefineIndexStatement,
 		id: Idiom,
 		op: Operator,
-		v: Value,
+		a: Array,
 		qs: Option<String>,
 		mr: Option<MatchRef>,
 	) -> Self {
@@ -146,7 +146,7 @@ impl IndexOption {
 			ix,
 			id,
 			op,
-			v,
+			a,
 			qs,
 			mr,
 		}))
@@ -160,8 +160,8 @@ impl IndexOption {
 		&self.0.op
 	}
 
-	pub(super) fn value(&self) -> &Value {
-		&self.0.v
+	pub(super) fn array(&self) -> &Array {
+		&self.0.a
 	}
 
 	pub(super) fn qs(&self) -> Option<&String> {
@@ -177,10 +177,15 @@ impl IndexOption {
 	}
 
 	pub(crate) fn explain(&self) -> Value {
+		let v = if self.0.a.len() == 1 {
+			self.0.a[0].clone()
+		} else {
+			Value::Array(self.0.a.clone())
+		};
 		Value::Object(Object::from(HashMap::from([
 			("index", Value::from(self.ix().name.0.to_owned())),
 			("operator", Value::from(self.op().to_string())),
-			("value", self.value().clone()),
+			("value", v),
 		])))
 	}
 }
@@ -189,7 +194,7 @@ impl IndexOption {
 mod tests {
 	use crate::idx::planner::plan::IndexOption;
 	use crate::sql::statements::DefineIndexStatement;
-	use crate::sql::{Idiom, Operator, Value};
+	use crate::sql::{Array, Idiom, Operator};
 	use std::collections::HashSet;
 
 	#[test]
@@ -199,7 +204,7 @@ mod tests {
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
-			Value::from("test"),
+			Array::from(vec!["test"]),
 			None,
 			None,
 		);
@@ -208,7 +213,7 @@ mod tests {
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
-			Value::from("test"),
+			Array::from(vec!["test"]),
 			None,
 			None,
 		);

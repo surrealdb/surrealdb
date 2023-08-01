@@ -23,7 +23,7 @@ use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{Array, Idiom, Object, Thing, Value};
+use crate::sql::{Idiom, Object, Thing, Value};
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -195,7 +195,7 @@ impl FtIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		field_content: &Array,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
@@ -206,12 +206,12 @@ impl FtIndex {
 		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
 			let (dl, tf, ofs) = self
 				.analyzer
-				.extract_terms_with_frequencies_with_offsets(&mut t, tx, field_content)
+				.extract_terms_with_frequencies_with_offsets(&mut t, tx, content)
 				.await?;
 			(dl, tf, Some(ofs))
 		} else {
 			let (dl, tf) =
-				self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
+				self.analyzer.extract_terms_with_frequencies(&mut t, tx, content).await?;
 			(dl, tf, None)
 		};
 
@@ -456,7 +456,7 @@ mod tests {
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
 	use crate::sql::statements::DefineAnalyzerStatement;
-	use crate::sql::{Array, Thing};
+	use crate::sql::{Thing, Value};
 	use std::collections::HashMap;
 	use std::sync::Arc;
 	use test_log::test;
@@ -537,7 +537,7 @@ mod tests {
 			// Add one document
 			let (mut tx, mut fti) =
 				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc1, &Array::from(vec!["hello the world"]))
+			fti.index_document(&mut tx, &doc1, &vec![Value::from("hello the world")])
 				.await
 				.unwrap();
 			finish(tx, fti).await;
@@ -547,8 +547,8 @@ mod tests {
 			// Add two documents
 			let (mut tx, mut fti) =
 				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc2, &Array::from(vec!["a yellow hello"])).await.unwrap();
-			fti.index_document(&mut tx, &doc3, &Array::from(vec!["foo bar"])).await.unwrap();
+			fti.index_document(&mut tx, &doc2, &vec![Value::from("a yellow hello")]).await.unwrap();
+			fti.index_document(&mut tx, &doc3, &vec![Value::from("foo bar")]).await.unwrap();
 			finish(tx, fti).await;
 		}
 
@@ -585,7 +585,7 @@ mod tests {
 			// Reindex one document
 			let (mut tx, mut fti) =
 				tx_fti(&ds, BTreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc3, &Array::from(vec!["nobar foo"])).await.unwrap();
+			fti.index_document(&mut tx, &doc3, &vec![Value::from("nobar foo")]).await.unwrap();
 			finish(tx, fti).await;
 
 			let (mut tx, fti) = tx_fti(&ds, BTreeStoreType::Read, &az, btree_order, false).await;
@@ -643,28 +643,28 @@ mod tests {
 				fti.index_document(
 					&mut tx,
 					&doc1,
-					&Array::from(vec!["the quick brown fox jumped over the lazy dog"]),
+					&vec![Value::from("the quick brown fox jumped over the lazy dog")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc2,
-					&Array::from(vec!["the fast fox jumped over the lazy dog"]),
+					&vec![Value::from("the fast fox jumped over the lazy dog")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc3,
-					&Array::from(vec!["the dog sat there and did nothing"]),
+					&vec![Value::from("the dog sat there and did nothing")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc4,
-					&Array::from(vec!["the other animals sat there watching"]),
+					&vec![Value::from("the other animals sat there watching")],
 				)
 				.await
 				.unwrap();

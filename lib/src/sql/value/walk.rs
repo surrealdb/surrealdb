@@ -26,11 +26,6 @@ impl Value {
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
-					Part::All => v
-						.iter()
-						.enumerate()
-						.flat_map(|(i, v)| v._walk(path.next(), prev.clone().push(Part::from(i))))
-						.collect::<Vec<_>>(),
 					Part::First => match v.first() {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => vec![],
