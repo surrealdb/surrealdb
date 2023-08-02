@@ -2,13 +2,17 @@
 
 mod common;
 
+use common::error;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use serial_test::serial;
+use std::collections::HashMap;
+use surrealdb::err::Error;
 use surrealdb::sql::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::common::error::TestError;
 use crate::common::{PASS, USER};
 
 #[tokio::test]
@@ -280,6 +284,12 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// println!("{:?}", a);
 
 	let socket = &mut common::connect_ws(&addr).await?;
+
+	let ns = "3498b03b44b5452a9d3f15252b454db1";
+	let db = "2cf93e52ff0a42f39d271412404a01f6";
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+
 	// LIVE query via query endpoint
 	// let lq_res =
 	// 	common::ws_query(socket, format!(" LIVE SELECT * FROM {};", table_name).as_str()).await?;
@@ -302,9 +312,38 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	)
 	.await?;
 
+	// Create some data for notification
+
+	let query = format!(r#"INSERT INTO {} {{"id": "an-id-goes-here", "name": "ok"}};"#, table_name);
+	println!("query: {}", query);
+	let created = common::ws_query(socket, query.as_str()).await?;
+	assert_eq!(created.len(), 1);
+	// println!("{}", _server.kill().output().unwrap_or_else(|e| format!("Erroreerer:\n{}", e)));
+
 	// Notification
 	let res = common::ws_recv_msg(socket).await?;
-	assert_eq!(res, live_id, "res: {}", res);
+	let notification = &res[0]
+		.as_object()
+		.ok_or(TestError {
+			message: "missing json object".to_string(),
+		})
+		.unwrap()["result"];
+	let action = notification["action"].as_str().unwrap();
+	let result = notification["result"].as_object().unwrap();
+	//  {"action": String("CREATE"), "id": String("f0acf1b6-883e-457a-a7f2-f4b33894de8c"), "result": Object {"id": String("table_FD40A9A361884C56B5908A934164884A:pv7om2rpx3vzcr0inu60"), "name": String("ok")}}}`
+	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
+	assert_eq!(
+		result["id"].as_str().unwrap(),
+		serde_json::to_value(table_name.as_str()).unwrap(),
+		"result: {:?}",
+		res
+	);
+	assert_eq!(
+		result["name"].as_str().unwrap(),
+		serde_json::to_value("ok").unwrap(),
+		"result: {:?}",
+		res
+	);
 
 	// Verify response contains no error
 	assert!(res.as_object().unwrap().keys().eq(["id", "result"]), "result: {}", res);

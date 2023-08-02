@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+
+pub mod error;
+
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -118,7 +121,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+	let start_args =
+		format!("start --bind {addr} memory --log trace --user {USER} --pass {PASS} {extra_args}");
 
 	println!("starting server with args: {start_args}");
 
@@ -157,7 +161,7 @@ pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box
 	// Parse and return response
 	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
 	let msg: serde_json::Value = tokio::select! {
-		_ = time::sleep(time::Duration::from_millis(1000)) => {
+		_ = time::sleep(time::Duration::from_millis(2000)) => {
 			return Err("timeout waiting for the response".into());
 		}
 		msg = f.select_next_some() => {
