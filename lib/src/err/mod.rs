@@ -10,6 +10,7 @@ use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
@@ -485,6 +486,10 @@ pub enum Error {
 	/// Represents an underlying error with Serde encoding / decoding
 	#[error("Serde error: {0}")]
 	Serde(#[from] SerdeError),
+
+	/// Represents an underlying error with IO encoding / decoding
+	#[error("I/O error: {0}")]
+	Io(#[from] IoError),
 
 	/// Represents an error when encoding a key-value entry
 	#[error("Key encoding error: {0}")]
