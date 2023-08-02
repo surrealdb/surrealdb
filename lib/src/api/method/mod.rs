@@ -72,15 +72,15 @@ use crate::api::opt::auth::Jwt;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
-use crate::api::ExtractRouter;
+use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::sql::to_value;
 use crate::sql::Uuid;
 use crate::sql::Value;
-use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::OnceLock;
 
 impl Method {
 	#[allow(dead_code)] // used by `ws` and `http`
@@ -207,7 +207,7 @@ where
 	/// ```
 	pub const fn init() -> Self {
 		Self {
-			router: OnceCell::new(),
+			router: OnceLock::new(),
 		}
 	}
 

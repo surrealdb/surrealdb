@@ -13,7 +13,6 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
 use std::fmt::Debug;
@@ -22,6 +21,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -35,7 +35,7 @@ pub trait Connection: conn::Connection {}
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Connect<'r, C: Connection, Response> {
-	router: Option<&'r OnceCell<Arc<Router<C>>>>,
+	router: Option<&'r OnceLock<Arc<Router<C>>>>,
 	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
@@ -134,7 +134,7 @@ pub(crate) enum ExtraFeatures {
 /// A database client instance for embedded or remote databases
 #[derive(Debug)]
 pub struct Surreal<C: Connection> {
-	router: OnceCell<Arc<Router<C>>>,
+	router: OnceLock<Arc<Router<C>>>,
 }
 
 impl<C> Surreal<C>
@@ -176,14 +176,22 @@ where
 	}
 }
 
-trait ExtractRouter<C>
+trait OnceLockExt<C>
 where
 	C: Connection,
 {
+	fn with_value(value: Arc<Router<C>>) -> OnceLock<Arc<Router<C>>> {
+		let cell = OnceLock::new();
+		match cell.set(value) {
+			Ok(()) => cell,
+			Err(_) => unreachable!("don't have exclusive access to `cell`"),
+		}
+	}
+
 	fn extract(&self) -> Result<&Router<C>>;
 }
 
-impl<C> ExtractRouter<C> for OnceCell<Arc<Router<C>>>
+impl<C> OnceLockExt<C> for OnceLock<Arc<Router<C>>>
 where
 	C: Connection,
 {

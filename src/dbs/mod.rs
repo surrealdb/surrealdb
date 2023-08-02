@@ -1,12 +1,12 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::auth::Root;
 
-pub static DB: OnceCell<Datastore> = OnceCell::new();
+pub static DB: OnceLock<Datastore> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {

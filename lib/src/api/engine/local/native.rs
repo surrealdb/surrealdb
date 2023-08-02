@@ -8,6 +8,7 @@ use crate::api::engine::local::Db;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
@@ -17,7 +18,6 @@ use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
-use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -25,6 +25,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 impl crate::api::Connection for Db {}
 
@@ -55,7 +56,7 @@ impl Connection for Db {
 			features.insert(ExtraFeatures::Backup);
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: OnceLock::with_value(Arc::new(Router {
 					features,
 					conn: PhantomData,
 					sender: route_tx,

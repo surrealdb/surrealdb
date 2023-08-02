@@ -6,13 +6,13 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::opt::Endpoint;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
 use indexmap::IndexMap;
-use once_cell::sync::OnceCell;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
@@ -21,6 +21,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use url::Url;
 use wasm_bindgen_futures::spawn_local;
 
@@ -50,7 +51,7 @@ impl Connection for Client {
 			conn_rx.into_recv_async().await??;
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: OnceLock::with_value(Arc::new(Router {
 					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,
