@@ -16,16 +16,22 @@ pub(super) enum Vector {
 }
 
 impl Vector {
-	pub(super) fn new(a: &[Value], vt: &VectorType, d: usize) -> Result<Self, Error> {
-		Self::check_dim(a, d)?;
-		match vt {
-			VectorType::I64 => Self::new_i64(a, d),
-			VectorType::F64 => Self::new_f64(a, d),
-			VectorType::U32 => Self::new_u32(a, d),
-			VectorType::I32 => Self::new_i32(a, d),
-			VectorType::F32 => Self::new_f32(a, d),
-			VectorType::U16 => Self::new_u16(a, d),
-			VectorType::I16 => Self::new_i16(a, d),
+	pub(super) fn new(v: &Value, vt: &VectorType, d: usize) -> Result<Self, Error> {
+		if let Value::Array(a) = v {
+			Self::check_dim(a, d)?;
+			match vt {
+				VectorType::I64 => Self::new_i64(a, d),
+				VectorType::F64 => Self::new_f64(a, d),
+				VectorType::U32 => Self::new_u32(a, d),
+				VectorType::I32 => Self::new_i32(a, d),
+				VectorType::F32 => Self::new_f32(a, d),
+				VectorType::U16 => Self::new_u16(a, d),
+				VectorType::I16 => Self::new_i16(a, d),
+			}
+		} else {
+			Err(Error::InvalidVectorValue {
+				current: v.to_string(),
+			})
 		}
 	}
 

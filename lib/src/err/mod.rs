@@ -187,6 +187,12 @@ pub enum Error {
 		expected: &'static str,
 	},
 
+	/// The size of the vector is incorrect
+	#[error("The value '{current}' is not a vector.")]
+	InvalidVectorValue {
+		current: String,
+	},
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -517,10 +523,10 @@ pub enum Error {
 	#[error("Index is corrupted")]
 	CorruptedIndex,
 
-	/// The query planner did not find an index able to support the match @@ operator on a given expression
-	#[error("There was no suitable full-text index supporting the expression '{value}'")]
-	NoIndexFoundForMatch {
-		value: String,
+	/// The query planner did not find an index able to support the given expression
+	#[error("There was no suitable index supporting the expression '{exp}'")]
+	NoIndexFoundForExpression {
+		exp: String,
 	},
 
 	/// Represents an error when analyzing a value

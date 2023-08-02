@@ -127,38 +127,47 @@ pub(crate) struct IndexOption(Arc<Inner>);
 pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
-	a: Array,
 	op: Operator,
-	params: Params,
+	lo: Lookup,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
-pub(super) enum Params {
-	Ft {
+pub(super) enum Lookup {
+	FtMatches {
 		qs: String,
 		mr: Option<MatchRef>,
 	},
-	Mt {
+	MtKnn {
+		a: Array,
 		k: u32,
 	},
-	Idx,
-	Uniq,
+	IdxEqual(Value),
+	UniqEqual(Value),
+}
+
+impl Lookup {
+	pub(super) fn value(&self) -> Value {
+		match self {
+			Lookup::FtMatches {
+				qs,
+				..
+			} => Value::from(qs.to_string()),
+			Lookup::IdxEqual(v) | Lookup::UniqEqual(v) => v.to_owned(),
+			Lookup::MtKnn {
+				a,
+				..
+			} => Value::Array(a.to_owned()),
+		}
+	}
 }
 
 impl IndexOption {
-	pub(super) fn new(
-		ix: DefineIndexStatement,
-		id: Idiom,
-		op: Operator,
-		a: Array,
-		params: Params,
-	) -> Self {
+	pub(super) fn new(ix: DefineIndexStatement, id: Idiom, op: Operator, lo: Lookup) -> Self {
 		Self(Arc::new(Inner {
 			ix,
 			id,
 			op,
-			a,
-			params,
+			lo,
 		}))
 	}
 
@@ -170,12 +179,8 @@ impl IndexOption {
 		&self.0.op
 	}
 
-	pub(super) fn array(&self) -> &Array {
-		&self.0.a
-	}
-
-	pub(super) fn params(&self) -> &Params {
-		&self.0.params
+	pub(super) fn lo(&self) -> &Lookup {
+		&self.0.lo
 	}
 
 	pub(super) fn id(&self) -> &Idiom {
@@ -183,24 +188,19 @@ impl IndexOption {
 	}
 
 	pub(crate) fn explain(&self) -> Value {
-		let v = if self.0.a.len() == 1 {
-			self.0.a[0].clone()
-		} else {
-			Value::Array(self.0.a.clone())
-		};
 		Value::Object(Object::from(HashMap::from([
 			("index", Value::from(self.ix().name.0.to_owned())),
 			("operator", Value::from(self.op().to_string())),
-			("value", v),
+			("value", self.lo().value()),
 		])))
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::{IndexOption, Params};
+	use crate::idx::planner::plan::{IndexOption, Lookup};
 	use crate::sql::statements::DefineIndexStatement;
-	use crate::sql::{Array, Idiom, Operator};
+	use crate::sql::{Array, Idiom, Operator, Value};
 	use std::collections::HashSet;
 
 	#[test]
@@ -210,8 +210,8 @@ mod tests {
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
-			Array::from(vec!["test"]),
-			Params::Mt {
+			Lookup::MtKnn {
+				a: Array(vec![Value::from(1)]),
 				k: 0,
 			},
 		);
@@ -220,8 +220,8 @@ mod tests {
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
-			Array::from(vec!["test"]),
-			Params::Mt {
+			Lookup::MtKnn {
+				a: Array(vec![Value::from(1)]),
 				k: 0,
 			},
 		);

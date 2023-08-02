@@ -1476,7 +1476,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::index::{SearchParams, VectorType};
+	use crate::sql::index::{MTreeParams, SearchParams, VectorType};
 	use crate::sql::scoring::Scoring;
 	use crate::sql::Part;
 
@@ -1544,7 +1544,11 @@ mod tests {
 				}),
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) \
+		DOC_IDS_ORDER 101 DOC_LENGTHS_ORDER 102 POSTINGS_ORDER 103 TERMS_ORDER 104 HIGHLIGHTS"
+		);
 	}
 
 	#[test]
@@ -1558,17 +1562,20 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
-					order: 100
-				},
+					doc_ids_order: 100,
+					doc_lengths_order: 100,
+					postings_order: 100,
+					terms_order: 100,
+				}),
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
 		);
 	}
 
@@ -1582,12 +1589,12 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::MTree {
+				index: Index::MTree(MTreeParams {
 					dimension: 4,
 					vector_type: VectorType::F64,
 					capacity: 40,
 					doc_ids_order: 100,
-				},
+				}),
 			}
 		);
 		assert_eq!(
@@ -1605,8 +1612,8 @@ mod tests {
 		assert_eq!(sql, format!("{}", out));
 
 		let serialized = out.to_vec();
-		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 
 	#[test]
@@ -1618,7 +1625,7 @@ mod tests {
 		assert_eq!(sql, format!("{}", out));
 
 		let serialized = out.to_vec();
-		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 }

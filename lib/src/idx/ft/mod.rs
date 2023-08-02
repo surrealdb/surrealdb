@@ -453,6 +453,7 @@ mod tests {
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
+	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
 	use crate::sql::statements::DefineAnalyzerStatement;
@@ -507,9 +508,15 @@ mod tests {
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
-			order,
-			&Scoring::bm25(),
-			hl,
+			&SearchParams {
+				az: az.name.clone(),
+				doc_ids_order: order,
+				doc_lengths_order: order,
+				postings_order: order,
+				terms_order: order,
+				sc: Scoring::bm25(),
+				hl,
+			},
 			TreeStoreType::Write,
 		)
 		.await

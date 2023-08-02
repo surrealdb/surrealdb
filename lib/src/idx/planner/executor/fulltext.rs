@@ -7,13 +7,13 @@ use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::executor::{IteratorRef, QueryExecutor};
 use crate::idx::planner::iterators::{MatchesThingIterator, ThingIterator};
-use crate::idx::planner::plan::{IndexOption, Params};
+use crate::idx::planner::plan::{IndexOption, Lookup};
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::SearchParams;
-use crate::sql::{Expression, Operator, Thing, Value};
+use crate::sql::{Expression, Thing, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -40,10 +40,10 @@ impl QueryExecutor {
 		};
 
 		if let Some(e) = entry {
-			if let Params::Ft {
+			if let Lookup::FtMatches {
 				mr,
 				..
-			} = e.0.index_option.params()
+			} = e.0.index_option.lo()
 			{
 				if let Some(mr) = mr {
 					if self.ft_mr.insert(*mr, e.clone()).is_some() {
@@ -58,26 +58,24 @@ impl QueryExecutor {
 		Ok(())
 	}
 
-	pub(super) async fn new_search_index_iterator(
+	pub(super) async fn new_ft_index_matches_iterator(
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(exp) = self.iterators.get(ir as usize) {
-			if let Operator::Matches(_) = io.op() {
-				let ixn = &io.ix().name.0;
-				if let Some(fti) = self.ft_map.get(ixn) {
-					if let Some(fte) = self.ft_exp.get(exp) {
-						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
-						return Ok(Some(ThingIterator::Matches(it)));
-					}
+			let ixn = &io.ix().name.0;
+			if let Some(fti) = self.ft_map.get(ixn) {
+				if let Some(fte) = self.ft_exp.get(exp) {
+					let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
+					return Ok(Some(ThingIterator::Matches(it)));
 				}
 			}
 		}
 		Ok(None)
 	}
 
-	pub(super) async fn new_mtree_index_iterator(
+	pub(super) async fn new_mtree_index_knn_iterator(
 		&self,
 		_ir: IteratorRef,
 		_io: IndexOption,
@@ -121,8 +119,8 @@ impl QueryExecutor {
 		}
 
 		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
+		Err(Error::NoIndexFoundForExpression {
+			exp: exp.to_string(),
 		})
 	}
 
@@ -226,10 +224,10 @@ impl FtEntry {
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
-		if let Params::Ft {
+		if let Lookup::FtMatches {
 			qs,
 			..
-		} = io.params()
+		} = io.lo()
 		{
 			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
 			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);

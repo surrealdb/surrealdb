@@ -50,13 +50,15 @@ impl MTreeIndex {
 		rid: &Thing,
 		content: &[Value],
 	) -> Result<(), Error> {
-		// Extract the point
-		let point = Vector::new(content, &self.vt, self.dim)?;
-
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
-		self.mtree.write().await.insert(point, doc_id)?;
+
+		for v in content {
+			// Extract the point
+			let point = Vector::new(v, &self.vt, self.dim)?;
+			self.mtree.write().await.insert(point, doc_id)?;
+		}
 		Ok(())
 	}
 
@@ -82,8 +84,7 @@ impl MTreeIndex {
 	}
 
 	pub(crate) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
-		self.doc_ids.write().await.finish(tx).await?;
-		todo!()
+		self.doc_ids.write().await.finish(tx).await
 	}
 }
 

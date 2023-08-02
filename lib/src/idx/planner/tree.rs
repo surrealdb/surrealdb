@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::{IndexOption, Params};
+use crate::idx::planner::plan::{IndexOption, Lookup};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub(super) struct Tree {}
 
 impl Tree {
-	/// Traverse the all the conditions and extract every expression
+	/// Traverse condition and extract every expression
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
 		ctx: &'a Context<'_>,
@@ -74,10 +74,10 @@ impl<'a> TreeBuilder<'a> {
 		Ok(match v {
 			Value::Expression(e) => self.eval_expression(e).await?,
 			Value::Idiom(i) => self.eval_idiom(i).await?,
-			Value::Strand(_) => Node::Scalar(v.to_owned()),
-			Value::Number(_) => Node::Scalar(v.to_owned()),
-			Value::Bool(_) => Node::Scalar(v.to_owned()),
-			Value::Thing(_) => Node::Scalar(v.to_owned()),
+			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
+				Node::Scalar(v.to_owned())
+			}
+			Value::Array(a) => self.eval_array(a),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
@@ -85,6 +85,16 @@ impl<'a> TreeBuilder<'a> {
 			}
 			_ => Node::Unsupported,
 		})
+	}
+
+	fn eval_array(&mut self, a: &Array) -> Node {
+		// Check if it is a numeric vector
+		for v in &a.0 {
+			if !v.is_number() {
+				return Node::Unsupported;
+			}
+		}
+		Node::Vector(a.to_owned())
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
@@ -141,58 +151,63 @@ impl<'a> TreeBuilder<'a> {
 		v: &Node,
 		e: &Expression,
 	) -> Option<IndexOption> {
-		if let Some(v) = v.is_scalar() {
-			let params = match &ix.index {
-				Index::Idx => {
-					if Operator::Equal.eq(op) {
-						Some(Params::Idx)
-					} else {
-						None
-					}
-				}
-				Index::Uniq => {
-					if Operator::Equal.eq(op) {
-						Some(Params::Uniq)
-					} else {
-						None
-					}
-				}
-				Index::Search {
-					..
-				} => {
-					if let Operator::Matches(mr) = op {
-						Some(Params::Ft {
-							qs: v.clone().to_raw_string(),
-							mr: *mr,
-						})
-					} else {
-						None
-					}
-				}
-				Index::MTree {
-					..
-				} => {
-					if let Operator::Knn(k) = op {
-						Some(Params::Mt {
-							k: *k,
-						})
-					} else {
-						None
-					}
-				}
-			};
-			if let Some(p) = params {
-				let io = IndexOption::new(
-					ix.clone(),
-					id.clone(),
-					op.to_owned(),
-					Array::from(v.clone()),
-					p,
-				);
-				self.index_map.0.insert(e.clone(), io.clone());
-				return Some(io);
-			}
+		let params = match &ix.index {
+			Index::Idx => Self::lookup_idx_option(op, v),
+			Index::Uniq => Self::lookup_uniq_option(op, v),
+			Index::Search {
+				..
+			} => Self::lookup_ftindex_option(op, v),
+			Index::MTree {
+				..
+			} => Self::lookup_mtree_option(op, v),
 		};
+		if let Some(p) = params {
+			let io = IndexOption::new(ix.clone(), id.clone(), op.to_owned(), p);
+			self.index_map.0.insert(e.clone(), io.clone());
+			return Some(io);
+		}
+		None
+	}
+
+	fn lookup_idx_option(op: &Operator, n: &Node) -> Option<Lookup> {
+		if Operator::Equal.eq(op) {
+			if let Node::Scalar(v) = n {
+				return Some(Lookup::IdxEqual(v.to_owned()));
+			}
+		}
+		None
+	}
+
+	fn lookup_uniq_option(op: &Operator, n: &Node) -> Option<Lookup> {
+		if Operator::Equal.eq(op) {
+			if let Node::Scalar(v) = n {
+				return Some(Lookup::UniqEqual(v.to_owned()));
+			}
+		}
+		None
+	}
+
+	fn lookup_ftindex_option(op: &Operator, v: &Node) -> Option<Lookup> {
+		if let Operator::Matches(mr) = op {
+			if let Node::Scalar(v) = v {
+				return Some(Lookup::FtMatches {
+					qs: v.to_owned().to_raw_string(),
+					mr: *mr,
+				});
+			}
+		}
+		None
+	}
+
+	fn lookup_mtree_option(op: &Operator, v: &Node) -> Option<Lookup> {
+		if let Operator::Knn(k) = op {
+			if let Node::Vector(a) = v {
+				return Some(Lookup::MtKnn {
+					a: a.to_owned(),
+					k: *k,
+				});
+			}
+		}
 		None
 	}
 
@@ -225,18 +240,11 @@ pub(super) enum Node {
 	IndexedField(Idiom, DefineIndexStatement),
 	NonIndexedField,
 	Scalar(Value),
+	Vector(Array),
 	Unsupported,
 }
 
 impl Node {
-	pub(super) fn is_scalar(&self) -> Option<&Value> {
-		if let Node::Scalar(v) = self {
-			Some(v)
-		} else {
-			None
-		}
-	}
-
 	pub(super) fn is_indexed_field(&self) -> Option<(&Idiom, &DefineIndexStatement)> {
 		if let Node::IndexedField(id, ix) = self {
 			Some((id, ix))

@@ -6,16 +6,15 @@ use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-#[ignore]
 async fn select_where_mtree_knn() -> Result<(), Error> {
 	let sql = r"
-		CREATE vec:1 SET point = [1,2,3,4];
-		CREATE vec:2 SET point = [4,5,6,7];
-		CREATE vec:3 SET point = [8,9,10,11];
-		DEFINE INDEX bt_vec ON point FIELDS point MTREE DIMENSION 4;
-		LET $pt = RETURN [2,3,4,5];
-		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM vec WHERE point <2> $pt;
-		SELECT id FROM vec WHERE point <2> $pt EXPLAIN;
+		CREATE pts:1 SET point = [1,2,3,4];
+		CREATE pts:2 SET point = [4,5,6,7];
+		CREATE pts:3 SET point = [8,9,10,11];
+		DEFINE INDEX bt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		LET $pt = [2,3,4,5];
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
+		SELECT id FROM pts WHERE point <2> $pt EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -29,11 +28,11 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				id: vec:1,
+				id: pts:1,
 				dist: 1.5f
 			},
 			{
-				id: vec:2,
+				id: pts:2,
 				dist: 1.8f
 			}
 		]",

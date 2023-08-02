@@ -6,11 +6,11 @@ use crate::idx::planner::executor::mtree::MtEntry;
 use crate::idx::planner::iterators::{
 	NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
 };
-use crate::idx::planner::plan::IndexOption;
+use crate::idx::planner::plan::{IndexOption, Lookup};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Operator, Table, Thing, Value};
+use crate::sql::{Array, Expression, Table, Thing, Value};
 use std::collections::HashMap;
 
 mod fulltext;
@@ -82,41 +82,20 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		match &io.ix().index {
-			Index::Idx => Self::new_index_iterator(opt, io),
-			Index::Uniq => Self::new_unique_index_iterator(opt, io),
-			Index::Search {
+		Ok(match &io.lo() {
+			Lookup::IdxEqual(v) => Some(ThingIterator::NonUniqueEqual(
+				NonUniqueEqualThingIterator::new(opt, io.ix(), &Array::from(v.to_owned()))?,
+			)),
+			Lookup::UniqEqual(v) => Some(ThingIterator::UniqueEqual(
+				UniqueEqualThingIterator::new(opt, io.ix(), &Array::from(v.to_owned()))?,
+			)),
+			Lookup::FtMatches {
 				..
-			} => self.new_search_index_iterator(ir, io).await,
-			Index::MTree {
+			} => self.new_ft_index_matches_iterator(ir, io).await?,
+			Lookup::MtKnn {
 				..
-			} => self.new_mtree_index_iterator(ir, io).await,
-		}
-	}
-
-	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
-		}
-		Ok(None)
-	}
-
-	fn new_unique_index_iterator(
-		opt: &Options,
-		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
-		}
-		Ok(None)
+			} => self.new_mtree_index_knn_iterator(ir, io).await?,
+		})
 	}
 
 	pub(crate) async fn knn(
@@ -126,8 +105,8 @@ impl QueryExecutor {
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
+		Err(Error::NoIndexFoundForExpression {
+			exp: exp.to_string(),
 		})
 	}
 }
