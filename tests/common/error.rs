@@ -1,18 +1,14 @@
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
+use thiserror::Error;
 
-#[derive(Debug)]
-pub struct TestError {
-	pub message: String,
-}
-
-impl Display for TestError {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.message)
-	}
-}
-
-impl std::error::Error for TestError {
-	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-		None
-	}
+#[derive(Debug, Error)]
+pub enum TestError {
+	#[error("A network error occurred: {message}")]
+	NetworkError {
+		message: String,
+	},
+	#[error("An assertion failed as part of an invocation stack: {message}")]
+	AssertionError {
+		message: String,
+	},
 }

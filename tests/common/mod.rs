@@ -2,6 +2,7 @@
 
 pub mod error;
 
+use crate::common::error::TestError;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -162,7 +163,7 @@ pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box
 	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
 	let msg: serde_json::Value = tokio::select! {
 		_ = time::sleep(time::Duration::from_millis(2000)) => {
-			return Err("timeout waiting for the response".into());
+			return Err(TestError::NetworkError{message: "timeout waiting for the response".to_string()}.into());
 		}
 		msg = f.select_next_some() => {
 			serde_json::from_str(&msg?.to_string())?
