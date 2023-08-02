@@ -1,7 +1,10 @@
 name: Continuous integration
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - main
   pull_request:
   merge_group:
 
