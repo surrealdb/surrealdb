@@ -171,8 +171,8 @@ script = """
    set +e
    echo "Waiting for tiup playground to be ready..."
    tries=0
-   while [[ $tries < 15 ]]; do
-           ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 1
+   while [[ $tries < 10 ]]; do
+           ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
            tries=$((tries + 1))
    done
    set -e
