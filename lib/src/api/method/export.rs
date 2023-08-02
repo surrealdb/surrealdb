@@ -76,6 +76,12 @@ impl IntoExportable for &Path {
 	}
 }
 
+impl IntoExportable for &PathBuf {
+	fn into_exportable(self) -> Exportable {
+		Exportable::File(self.to_owned())
+	}
+}
+
 impl IntoExportable for PathBuf {
 	fn into_exportable(self) -> Exportable {
 		Exportable::File(self)
