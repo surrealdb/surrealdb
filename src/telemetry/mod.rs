@@ -32,7 +32,6 @@ pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
 
 	// If no external service.name is set, set it to surrealdb
 	if res.get("service.name".into()).unwrap_or("".into()).as_str() == "unknown_service" {
-		debug!("No service.name detected, use 'surrealdb'");
 		res.merge(&Resource::new([KeyValue::new("service.name", "surrealdb")]))
 	} else {
 		res
@@ -102,7 +101,7 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, tracing_subscriber::filte
 		"error" => Ok(EnvFilter::default().add_directive(Level::ERROR.into())),
 		// Specify the log level for each code area
 		"warn" | "info" | "debug" | "trace" => EnvFilter::builder()
-			.parse(format!("error,surreal={v},surrealdb={v},surrealdb::txn=error")),
+			.parse(format!("error,surreal={v},surrealdb={v},surrealdb::kvs::tx=error")),
 		// Let's try to parse the custom log level
 		_ => EnvFilter::builder().parse(v),
 	}

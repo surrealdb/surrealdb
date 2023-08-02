@@ -78,13 +78,14 @@ nix = "0.26.2"
 
 [dev-dependencies]
 assert_fs = "1.0.13"
+env_logger = "0.10.0"
 opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
 rcgen = "0.10.0"
 serial_test = "2.0.0"
-indoc = "2.0.3"
-temp-env = "0.3.4"
+temp-env = { version = "0.3.4", features = ["async_closure"] }
+test-log = { version = "0.2.12", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.20.0" }
+tokio-tungstenite = { version = "0.18.0" }
 tonic = "0.8.3"
 
 [package.metadata.deb]

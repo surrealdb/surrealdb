@@ -1,10 +1,13 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
+	use once_cell::sync::Lazy;
 	use serde::Deserialize;
 	use serde::Serialize;
 	use serde_json::json;
 	use std::borrow::Cow;
 	use std::ops::Bound;
+	use std::sync::Arc;
+	use std::sync::Mutex;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
@@ -30,6 +33,9 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
+	// Used to ensure that only one test at a time is setting up the underlaying datastore.
+	// When auth is enabled, multiple tests may try to create the same root user at the same time.
+	static SETUP_MUTEX: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
 
 	#[derive(Debug, Serialize)]
 	struct Record<'a> {
@@ -72,6 +78,7 @@ mod api_integration {
 		use surrealdb::engine::remote::ws::Ws;
 
 		async fn new_db() -> Surreal<Client> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
@@ -93,6 +100,7 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Http;
 
 		async fn new_db() -> Surreal<Client> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
@@ -114,6 +122,7 @@ mod api_integration {
 		use surrealdb::engine::any;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::Mem;
+		use surrealdb::iam;
 
 		async fn new_db() -> Surreal<Db> {
 			init_logger();
@@ -167,8 +176,9 @@ mod api_integration {
 			.await
 			.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
-			let Error::Db(DbError::QueryPermissions) = db.create(Resource::from("item:foo")).await.unwrap_err() else {
-                panic!("record not found");
+			let res = db.create(Resource::from("item:foo")).await;
+			let Error::Db(DbError::IamError(iam::Error::NotAllowed { actor: _, action: _, resource: _ })) = res.unwrap_err() else {
+                panic!("expected permissions error");
             };
 		}
 
@@ -183,6 +193,7 @@ mod api_integration {
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> Surreal<Db> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
@@ -205,9 +216,16 @@ mod api_integration {
 		use surrealdb::engine::local::RocksDb;
 
 		async fn new_db() -> Surreal<Db> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
-			Surreal::new::<RocksDb>(path.as_str()).await.unwrap()
+			let root = Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			};
+			let db = Surreal::new::<RocksDb>((path.as_str(), root)).await.unwrap();
+			db.signin(root).await.unwrap();
+			db
 		}
 
 		include!("api/mod.rs");
@@ -221,9 +239,16 @@ mod api_integration {
 		use surrealdb::engine::local::SpeeDb;
 
 		async fn new_db() -> Surreal<Db> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
-			Surreal::new::<SpeeDb>(path.as_str()).await.unwrap()
+			let root = Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			};
+			let db = Surreal::new::<SpeeDb>((path.as_str(), root)).await.unwrap();
+			db.signin(root).await.unwrap();
+			db
 		}
 
 		include!("api/mod.rs");
@@ -237,6 +262,7 @@ mod api_integration {
 		use surrealdb::engine::local::TiKv;
 
 		async fn new_db() -> Surreal<Db> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let root = Root {
 				username: ROOT_USER,
@@ -258,6 +284,7 @@ mod api_integration {
 		use surrealdb::engine::local::FDb;
 
 		async fn new_db() -> Surreal<Db> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let root = Root {
 				username: ROOT_USER,
@@ -278,6 +305,7 @@ mod api_integration {
 		use surrealdb::engine::any::Any;
 
 		async fn new_db() -> Surreal<Any> {
+			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {

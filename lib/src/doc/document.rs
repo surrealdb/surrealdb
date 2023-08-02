@@ -1,8 +1,9 @@
-use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
 use crate::idx::ft::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::sql::statements::define::DefineEventStatement;
@@ -12,6 +13,7 @@ use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Base;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -125,16 +127,16 @@ impl<'a> Document<'a> {
 			// The table doesn't exist
 			Err(Error::TbNotFound {
 				value: _,
-			}) => match opt.auth.check(Level::Db) {
+			}) => {
+				// Allowed to run?
+				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+
 				// We can create the table automatically
-				true => {
-					run.add_and_cache_ns(opt.ns(), opt.strict).await?;
-					run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
-					run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
-				}
-				// We can't create the table so error
-				false => Err(Error::QueryPermissions),
-			},
+				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
+				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+			}
+
 			// There was an error
 			Err(err) => Err(err),
 			// The table exists

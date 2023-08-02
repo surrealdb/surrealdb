@@ -1,8 +1,8 @@
 use crate::cnf;
-use crate::dbs::Auth;
-use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::err::Error;
+use crate::iam::{Action, Auth, ResourceKind, Role};
+use crate::sql::Base;
 use channel::Sender;
 use std::sync::Arc;
 
@@ -24,6 +24,8 @@ pub struct Options {
 	dive: u8,
 	/// Connection authentication data
 	pub auth: Arc<Auth>,
+	/// Is authentication enabled?
+	pub auth_enabled: bool,
 	/// Whether live queries are allowed?
 	pub live: bool,
 	/// Should we force tables/events to re-run?
@@ -69,8 +71,9 @@ impl Options {
 			tables: true,
 			indexes: true,
 			futures: false,
+			auth_enabled: true,
 			sender: None,
-			auth: Arc::new(Auth::No),
+			auth: Arc::new(Auth::default()),
 		}
 	}
 
@@ -179,6 +182,12 @@ impl Options {
 		self.fields = !import;
 		self.events = !import;
 		self.tables = !import;
+		self
+	}
+
+	/// Create a new Options object with auth enabled
+	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
+		self.auth_enabled = auth_enabled;
 		self
 	}
 
@@ -305,6 +314,16 @@ impl Options {
 		}
 	}
 
+	// Get currently selected base
+	pub fn selected_base(&self) -> Result<Base, Error> {
+		match (self.ns.as_ref(), self.db.as_ref()) {
+			(None, None) => Ok(Base::Root),
+			(Some(_), None) => Ok(Base::Ns),
+			(Some(_), Some(_)) => Ok(Base::Db),
+			(None, Some(_)) => Err(Error::NsEmpty),
+		}
+	}
+
 	/// Create a new Options object for a function/subquery/future/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
@@ -352,22 +371,90 @@ impl Options {
 		Ok(())
 	}
 
-	/// Check whether the authentication permissions are ok
-	pub fn check(&self, level: Level) -> Result<(), Error> {
-		if !self.auth.check(level) {
-			return Err(Error::QueryPermissions);
+	// Validate Options for Namespace
+	pub fn valid_for_ns(&self) -> Result<(), Error> {
+		if self.ns.is_none() {
+			return Err(Error::NsEmpty);
 		}
 		Ok(())
 	}
 
-	/// Check whether the necessary NS / DB options have been set
-	pub fn needs(&self, level: Level) -> Result<(), Error> {
-		if self.ns.is_none() && matches!(level, Level::Ns | Level::Db) {
-			return Err(Error::NsEmpty);
-		}
-		if self.db.is_none() && matches!(level, Level::Db) {
+	// Validate Options for Database
+	pub fn valid_for_db(&self) -> Result<(), Error> {
+		self.valid_for_ns()?;
+
+		if self.db.is_none() {
 			return Err(Error::DbEmpty);
 		}
 		Ok(())
+	}
+
+	/// Check if the current auth is allowed to perform an action on a given resource
+	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> Result<(), Error> {
+		// If auth is disabled, allow all actions for anonymous users
+		if !self.auth_enabled && self.auth.is_anon() {
+			return Ok(());
+		}
+
+		let res = match base {
+			Base::Root => res.on_root(),
+			Base::Ns => {
+				self.valid_for_ns()?;
+				res.on_ns(self.ns())
+			}
+			Base::Db => {
+				self.valid_for_db()?;
+				res.on_db(self.ns(), self.db())
+			}
+			Base::Sc(sc) => {
+				self.valid_for_db()?;
+				res.on_scope(self.ns(), self.db(), sc)
+			}
+		};
+
+		self.auth.is_allowed(action, &res).map_err(Error::IamError)
+	}
+
+	/// Whether or not to check table permissions
+	///
+	/// TODO: This method is called a lot during data operations, so we decided to bypass the system's authorization mechanism.
+	/// This is a temporary solution, until we optimize the new authorization system.
+	pub fn check_perms(&self, action: Action) -> bool {
+		// If permissions are disabled, don't check permissions
+		if !self.perms {
+			return false;
+		}
+
+		// If auth is disabled and actor is anonymous, don't check permissions
+		if !self.auth_enabled && self.auth.is_anon() {
+			return false;
+		}
+
+		// Is the actor allowed to view?
+		let can_view =
+			[Role::Viewer, Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
+		// Is the actor allowed to edit?
+		let can_edit = [Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
+		// Is the target database in the actor's level?
+		let db_in_actor_level = self.auth.is_root()
+			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()
+			|| self.auth.is_db()
+				&& self.auth.level().ns().unwrap() == self.ns()
+				&& self.auth.level().db().unwrap() == self.db();
+
+		// Is the actor allowed to do the action on the selected database?
+		let is_allowed = match action {
+			Action::View => {
+				// Today all users have at least View permissions, so if the target database belongs to the user's level, don't check permissions
+				can_view && db_in_actor_level
+			}
+			Action::Edit => {
+				// Editor and Owner roles are allowed to edit, but only if the target database belongs to the user's level
+				can_edit && db_in_actor_level
+			}
+		};
+
+		// Check permissions if the autor is not already allowed to do the action
+		!is_allowed
 	}
 }

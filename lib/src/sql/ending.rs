@@ -42,6 +42,7 @@ pub fn ident(i: &str) -> IResult<&str, ()> {
 		map(char(';'), |_| ()),   // SET k = a;
 		map(char(','), |_| ()),   // [a, b]
 		map(char('.'), |_| ()),   // a.k
+		map(char('…'), |_| ()),   // a…
 		map(char('['), |_| ()),   // a[0]
 		map(eof, |_| ()),         // SET k = a
 	)))(i)

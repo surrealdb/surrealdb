@@ -1,18 +1,20 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
-use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::dbs::Options;
+use crate::dbs::QueryType;
 use crate::dbs::Transaction;
-use crate::dbs::{Auth, QueryType};
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
+use crate::sql::Base;
 use channel::Receiver;
 use futures::lock::Mutex;
 use std::sync::Arc;
@@ -206,10 +208,8 @@ impl<'a> Executor<'a> {
 			let res = match stm {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
-					// Selected DB?
-					opt.needs(Level::Db)?;
 					// Allowed to run?
-					opt.check(Level::Db)?;
+					opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 					// Convert to uppercase
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
@@ -252,32 +252,10 @@ impl<'a> Executor<'a> {
 				// Switch to a different NS or DB
 				Statement::Use(stm) => {
 					if let Some(ref ns) = stm.ns {
-						match &*opt.auth {
-							Auth::No => self.set_ns(&mut ctx, &mut opt, ns).await,
-							Auth::Kv => self.set_ns(&mut ctx, &mut opt, ns).await,
-							Auth::Ns(v) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
-							Auth::Db(v, _) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
-							_ => {
-								opt.set_ns(None);
-								return Err(Error::NsNotAllowed {
-									ns: ns.to_owned(),
-								});
-							}
-						}
+						self.set_ns(&mut ctx, &mut opt, ns).await;
 					}
 					if let Some(ref db) = stm.db {
-						match &*opt.auth {
-							Auth::No => self.set_db(&mut ctx, &mut opt, db).await,
-							Auth::Kv => self.set_db(&mut ctx, &mut opt, db).await,
-							Auth::Ns(_) => self.set_db(&mut ctx, &mut opt, db).await,
-							Auth::Db(_, v) if v == db => self.set_db(&mut ctx, &mut opt, db).await,
-							_ => {
-								opt.set_db(None);
-								return Err(Error::DbNotAllowed {
-									db: db.to_owned(),
-								});
-							}
-						}
+						self.set_db(&mut ctx, &mut opt, db).await;
 					}
 					Ok(Value::None)
 				}
@@ -444,5 +422,88 @@ impl<'a> Executor<'a> {
 		}
 		// Return responses
 		Ok(out)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::{dbs::Session, iam::Role, kvs::Datastore};
+
+	#[tokio::test]
+	async fn check_execute_option_permissions() {
+		let tests = vec![
+			// Root level
+			(Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at root level should be able to set options"),
+			(Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at root level should be able to set options"),
+			(Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at root level should not be able to set options"),
+
+			// Namespace level
+			(Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at namespace level should be able to set options on its namespace"),
+			(Session::for_level(("NS",).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at namespace level should not be able to set options on another namespace"),
+			(Session::for_level(("NS",).into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at namespace level should be able to set options on its namespace"),
+			(Session::for_level(("NS",).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at namespace level should not be able to set options on another namespace"),
+			(Session::for_level(("NS",).into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at namespace level should not be able to set options on its namespace"),
+
+			// Database level
+			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at database level should be able to set options on its database"),
+			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("OTHER_DB"), false, "owner at database level should not be able to set options on another database"),
+			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at database level should not be able to set options on another namespace even if the database name matches"),
+			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at database level should be able to set options on its database"),
+			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("OTHER_DB"), false, "editor at database level should not be able to set options on another database"),
+			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
+			(Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
+		];
+		let statement = "OPTION FIELDS = false";
+
+		for test in tests.iter() {
+			let (session, should_succeed, msg) = test;
+
+			{
+				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+
+				let res = ds.execute(statement, &session, None).await;
+
+				if *should_succeed {
+					assert!(res.is_ok(), "{}: {:?}", msg, res);
+				} else {
+					let err = res.unwrap_err().to_string();
+					assert!(
+						err.contains("Not enough permissions to perform this action"),
+						"{}: {}",
+						msg,
+						err
+					)
+				}
+			}
+		}
+
+		// Anonymous with auth enabled
+		{
+			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+
+			let res =
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+
+			let err = res.unwrap_err().to_string();
+			assert!(
+				err.contains("Not enough permissions to perform this action"),
+				"anonymous user should not be able to set options: {}",
+				err
+			)
+		}
+
+		// Anonymous with auth disabled
+		{
+			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
+
+			let res =
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+
+			assert!(
+				res.is_ok(),
+				"anonymous user should be able to set options when auth is disabled: {:?}",
+				res
+			)
+		}
 	}
 }

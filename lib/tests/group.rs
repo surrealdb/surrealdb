@@ -21,7 +21,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 		SELECT count(), time::year(time) AS year, country FROM temperature GROUP BY country, year;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
 	//
@@ -245,7 +245,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 		SELECT group, math::sum(two) AS two, math::sum(one) AS one FROM test GROUP BY group;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
@@ -350,7 +350,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 		SELECT group, math::sum(math::ceil(one)) AS one, math::sum(math::ceil(two)) AS two FROM test GROUP BY group;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//

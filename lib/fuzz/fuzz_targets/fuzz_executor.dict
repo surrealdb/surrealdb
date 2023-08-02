@@ -125,6 +125,7 @@
 "UPDATE"
 "UPPERCASE"
 "USE"
+"USER"
 "VALUE"
 "VALUES"
 "VERSION"
@@ -345,9 +346,6 @@
 "type::int("
 "type::number("
 "type::point("
-# Avoid regex in the fuzzer as it will just slow things down.
-# the rust regex crate is already fuzzed.
-# "type::regex("
 "type::string("
 "type::table("
 "type::thing("
@@ -372,4 +370,3 @@
 "vector::similarity::pearson("
 "vector::similarity::spearman("
 # TODO: Add Javascript keywords
-

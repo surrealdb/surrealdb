@@ -16,7 +16,7 @@ impl<'a> Document<'a> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
-			if opt.perms && opt.auth.perms() {
+			if opt.check_perms(stm.into()) {
 				// Get the table
 				let tb = self.tb(opt, txn).await?;
 				// Get the permission clause

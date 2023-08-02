@@ -51,18 +51,29 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("warn").init();
 
-	let root = Root {
-		username: &username,
-		password: &password,
+	let client = if let Some((username, password)) = username.zip(password) {
+		let root = Root {
+			username: &username,
+			password: &password,
+		};
+
+		// Connect to the database engine with authentication
+		//
+		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
+		// * For remote engines, we connect to the endpoint and then signin.
+		#[cfg(feature = "has-storage")]
+		let address = (endpoint, root);
+		#[cfg(not(feature = "has-storage"))]
+		let address = endpoint;
+		let client = connect(address).await?;
+
+		// Sign in to the server
+		client.signin(root).await?;
+		client
+	} else {
+		connect(endpoint).await?
 	};
-	// Connect to the database engine
-	#[cfg(feature = "has-storage")]
-	let address = (endpoint, root);
-	#[cfg(not(feature = "has-storage"))]
-	let address = endpoint;
-	let client = connect(address).await?;
-	// Sign in to the server
-	client.signin(root).await?;
+
 	// Create a new terminal REPL
 	let mut rl = Editor::new().unwrap();
 	// Set custom input validation
@@ -73,7 +84,7 @@ pub async fn init(
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
-	// Use namespace / database if specified
+	// Keep track of current namespace/database.
 	if let Some(DatabaseSelectionOptionalArguments {
 		namespace,
 		database,
@@ -93,7 +104,8 @@ pub async fn init(
 			}
 			_ => {}
 		}
-	}
+	};
+
 	// Loop over each command-line input
 	loop {
 		// Prompt the user to input SQL and check the input.

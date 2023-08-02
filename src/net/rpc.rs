@@ -1,4 +1,3 @@
-use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
@@ -28,7 +27,6 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::{Receiver, Sender};
 use surrealdb::dbs::{QueryType, Response, Session};
-use surrealdb::opt::auth::Root;
 use surrealdb::sql::serde::deserialize;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
@@ -38,7 +36,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower_http::request_id::RequestId;
-use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -135,9 +132,9 @@ impl Rpc {
 		// Wait until all tasks finish
 		tokio::join!(
 			Self::ping(rpc.clone(), internal_sender.clone()),
-			Self::read(rpc.clone(), receiver, internal_sender.clone()).in_current_span(),
-			Self::write(rpc.clone(), sender, internal_receiver.clone()).in_current_span(),
-			Self::lq_notifications(rpc.clone()).in_current_span(),
+			Self::read(rpc.clone(), receiver, internal_sender.clone()),
+			Self::write(rpc.clone(), sender, internal_receiver.clone()),
+			Self::lq_notifications(rpc.clone()),
 		);
 
 		// Remove all live queries
@@ -579,12 +576,7 @@ impl Rpc {
 
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		let opts = CF.get().unwrap();
-		let root = opts.pass.as_ref().map(|pass| Root {
-			username: &opts.user,
-			password: pass,
-		});
-		surrealdb::iam::signin::signin(kvs, &root, &mut self.session, vars)
+		surrealdb::iam::signin::signin(kvs, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -596,7 +588,7 @@ impl Rpc {
 
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
 		let kvs = DB.get().unwrap();
-		surrealdb::iam::verify::token(kvs, &mut self.session, token.0).await?;
+		surrealdb::iam::verify::token(kvs, &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
 
