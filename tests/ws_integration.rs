@@ -306,7 +306,6 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(created.len(), 1);
 
 	// Receive notification
-	// println!("{}", _server.kill().output().unwrap_or_else(|e| format!("Erroreerer:\n{}", e)));
 	let res = common::ws_recv_msg(socket).await.unwrap();
 
 	// Verify response contains no error
@@ -329,6 +328,13 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 			message: format!("missing json object, res: {:?}", res).to_string(),
 		})
 		.unwrap()["result"];
+	assert_eq!(
+		&notification["id"],
+		live_id["result"].as_str().unwrap(),
+		"expected a notification id to match the live query id: {} but was {}",
+		&notification,
+		live_id
+	);
 	let action = notification["action"].as_str().unwrap();
 	let result = notification["result"].as_object().unwrap();
 
