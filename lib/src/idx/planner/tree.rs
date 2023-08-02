@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::IndexOption;
+use crate::idx::planner::plan::{IndexOption, Params};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
@@ -142,32 +142,57 @@ impl<'a> TreeBuilder<'a> {
 		e: &Expression,
 	) -> Option<IndexOption> {
 		if let Some(v) = v.is_scalar() {
-			let (found, mr, qs) = match &ix.index {
-				Index::Idx => (Operator::Equal.eq(op), None, None),
-				Index::Uniq => (Operator::Equal.eq(op), None, None),
+			let params = match &ix.index {
+				Index::Idx => {
+					if Operator::Equal.eq(op) {
+						Some(Params::Idx)
+					} else {
+						None
+					}
+				}
+				Index::Uniq => {
+					if Operator::Equal.eq(op) {
+						Some(Params::Uniq)
+					} else {
+						None
+					}
+				}
 				Index::Search {
 					..
 				} => {
 					if let Operator::Matches(mr) = op {
-						(true, *mr, Some(v.clone().to_raw_string()))
+						Some(Params::Ft {
+							qs: v.clone().to_raw_string(),
+							mr: *mr,
+						})
 					} else {
-						(false, None, None)
+						None
+					}
+				}
+				Index::MTree {
+					..
+				} => {
+					if let Operator::Knn(k) = op {
+						Some(Params::Mt {
+							k: *k,
+						})
+					} else {
+						None
 					}
 				}
 			};
-			if found {
+			if let Some(p) = params {
 				let io = IndexOption::new(
 					ix.clone(),
 					id.clone(),
 					op.to_owned(),
 					Array::from(v.clone()),
-					qs,
-					mr,
+					p,
 				);
 				self.index_map.0.insert(e.clone(), io.clone());
 				return Some(io);
 			}
-		}
+		};
 		None
 	}
 

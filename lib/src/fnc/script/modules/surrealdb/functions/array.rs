@@ -30,6 +30,7 @@ impl_module_def!(
 	"insert" => run,
 	"intersect" => run,
 	"join" => run,
+	"knn" => run,
 	"last" => run,
 	"len" => run,
 	"logical_and" => run,

@@ -5,6 +5,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::ft::FtIndex;
+use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
@@ -44,25 +45,17 @@ impl AnalyzeStatement {
 				let ikb = IndexKeyBase::new(opt, &ix);
 
 				// Index operation dispatching
-				let stats = match &ix.index {
-					Index::Search {
-						az,
-						order,
-						sc,
-						hl,
-					} => {
-						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(
-							&mut run,
-							az,
-							ikb,
-							*order,
-							sc,
-							*hl,
-							TreeStoreType::Traversal,
-						)
-						.await?;
-						ft.statistics(&mut run).await?
+				let value: Value = match &ix.index {
+					Index::Search(p) => {
+						let az = run.get_az(opt.ns(), opt.db(), p.az.as_str()).await?;
+						let ft =
+							FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Traversal).await?;
+						ft.statistics(&mut run).await?.into()
+					}
+					Index::MTree(p) => {
+						let mt =
+							MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Traversal).await?;
+						mt.statistics(&mut run).await?.into()
 					}
 					_ => {
 						return Err(Error::FeatureNotYetImplemented {
@@ -71,7 +64,7 @@ impl AnalyzeStatement {
 					}
 				};
 				// Return the result object
-				Value::from(stats).ok()
+				Ok(value)
 			}
 		}
 	}

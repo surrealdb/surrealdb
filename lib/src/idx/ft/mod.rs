@@ -1,5 +1,4 @@
 pub(crate) mod analyzer;
-pub(crate) mod docids;
 mod doclength;
 mod highlighter;
 mod offsets;
@@ -9,8 +8,8 @@ pub(super) mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
@@ -22,6 +21,7 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::{IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
@@ -64,15 +64,15 @@ impl Default for Bm25Params {
 	}
 }
 
-pub(crate) struct Statistics {
+pub(crate) struct FtStatistics {
 	doc_ids: BStatistics,
 	terms: BStatistics,
 	doc_lengths: BStatistics,
 	postings: BStatistics,
 }
 
-impl From<Statistics> for Value {
-	fn from(stats: Statistics) -> Self {
+impl From<FtStatistics> for Value {
+	fn from(stats: FtStatistics) -> Self {
 		let mut res = Object::default();
 		res.insert("doc_ids".to_owned(), Value::from(stats.doc_ids));
 		res.insert("terms".to_owned(), Value::from(stats.terms));
@@ -95,9 +95,7 @@ impl FtIndex {
 		tx: &mut Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
-		order: u32,
-		scoring: &Scoring,
-		hl: bool,
+		p: &SearchParams,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
@@ -107,27 +105,28 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(tx, index_key_base.clone(), order, store_type).await?,
+			DocIds::new(tx, index_key_base.clone(), p.doc_ids_order, store_type).await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
-			DocLengths::new(tx, index_key_base.clone(), order, store_type).await?,
+			DocLengths::new(tx, index_key_base.clone(), p.doc_lengths_order, store_type).await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(tx, index_key_base.clone(), order, store_type).await?,
+			Postings::new(tx, index_key_base.clone(), p.postings_order, store_type).await?,
 		));
-		let terms =
-			Arc::new(RwLock::new(Terms::new(tx, index_key_base.clone(), order, store_type).await?));
+		let terms = Arc::new(RwLock::new(
+			Terms::new(tx, index_key_base.clone(), p.terms_order, store_type).await?,
+		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
 		let mut bm25 = None;
 		if let Scoring::Bm {
 			k1,
 			b,
-		} = scoring
+		} = p.sc
 		{
 			bm25 = Some(Bm25Params {
-				k1: *k1,
-				b: *b,
+				k1,
+				b,
 			});
 		}
 		Ok(Self {
@@ -135,7 +134,7 @@ impl FtIndex {
 			state_key,
 			index_key_base,
 			bm25,
-			highlighting: hl,
+			highlighting: p.hl,
 			analyzer: az.into(),
 			doc_ids,
 			doc_lengths,
@@ -402,9 +401,9 @@ impl FtIndex {
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
-		Ok(Statistics {
+		Ok(FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(tx).await?,
 			terms: self.terms.read().await.statistics(tx).await?,
 			doc_lengths: self.doc_lengths.read().await.statistics(tx).await?,

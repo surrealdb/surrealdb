@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, Val};

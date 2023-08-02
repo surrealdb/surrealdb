@@ -1,162 +1,64 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::{DocId, DocIds};
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
-use crate::idx::planner::iterators::{
-	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
-};
-use crate::idx::planner::plan::IndexOption;
-use crate::idx::planner::tree::IndexMap;
+use crate::idx::planner::executor::{IteratorRef, QueryExecutor};
+use crate::idx::planner::iterators::{MatchesThingIterator, ThingIterator};
+use crate::idx::planner::plan::{IndexOption, Params};
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
-use crate::sql::index::Index;
-use crate::sql::{Expression, Operator, Table, Thing, Value};
-use std::collections::HashMap;
+use crate::sql::index::SearchParams;
+use crate::sql::{Expression, Operator, Thing, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) type IteratorRef = u16;
-
-pub(crate) struct QueryExecutor {
-	table: String,
-	ft_map: HashMap<String, FtIndex>,
-	mr_entries: HashMap<MatchRef, FtEntry>,
-	exp_entries: HashMap<Expression, FtEntry>,
-	iterators: Vec<Expression>,
-}
-
 impl QueryExecutor {
-	pub(super) async fn new(
+	pub(super) async fn check_search_entry(
+		&mut self,
 		opt: &Options,
-		txn: &Transaction,
-		table: &Table,
-		index_map: IndexMap,
-	) -> Result<Self, Error> {
-		let mut run = txn.lock().await;
+		run: &mut kvs::Transaction,
+		io: &IndexOption,
+		exp: Expression,
+		p: &SearchParams,
+	) -> Result<(), Error> {
+		let ixn = &io.ix().name.0;
+		let entry = if let Some(ft) = self.ft_map.get(ixn) {
+			FtEntry::new(run, ft, io.clone()).await?
+		} else {
+			let ikb = IndexKeyBase::new(opt, io.ix());
+			let az = run.get_az(opt.ns(), opt.db(), p.az.as_str()).await?;
+			let ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Read).await?;
+			let ixn = ixn.to_owned();
+			let entry = FtEntry::new(run, &ft, io.clone()).await?;
+			self.ft_map.insert(ixn, ft);
+			entry
+		};
 
-		let mut mr_entries = HashMap::default();
-		let mut exp_entries = HashMap::default();
-		let mut ft_map = HashMap::default();
-
-		// Create all the instances of FtIndex
-		// Build the FtEntries and map them to Expressions and MatchRef
-		for (exp, io) in index_map.consume() {
-			let mut entry = None;
-			if let Index::Search {
-				az,
-				order,
-				sc,
-				hl,
-			} = &io.ix().index
+		if let Some(e) = entry {
+			if let Params::Ft {
+				mr,
+				..
+			} = e.0.index_option.params()
 			{
-				let ixn = &io.ix().name.0;
-				if let Some(ft) = ft_map.get(ixn) {
-					if entry.is_none() {
-						entry = FtEntry::new(&mut run, ft, io).await?;
-					}
-				} else {
-					let ikb = IndexKeyBase::new(opt, io.ix());
-					let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl, TreeStoreType::Read)
-						.await?;
-					let ixn = ixn.to_owned();
-					if entry.is_none() {
-						entry = FtEntry::new(&mut run, &ft, io).await?;
-					}
-					ft_map.insert(ixn, ft);
-				}
-			}
-
-			if let Some(e) = entry {
-				if let Some(mr) = e.0.index_option.match_ref() {
-					if mr_entries.insert(*mr, e.clone()).is_some() {
+				if let Some(mr) = mr {
+					if self.ft_mr.insert(*mr, e.clone()).is_some() {
 						return Err(Error::DuplicatedMatchRef {
 							mr: *mr,
 						});
 					}
 				}
-				exp_entries.insert(exp, e);
+				self.ft_exp.insert(exp, e);
 			}
 		}
-
-		Ok(Self {
-			table: table.0.clone(),
-			ft_map,
-			mr_entries,
-			exp_entries,
-			iterators: Vec::new(),
-		})
+		Ok(())
 	}
 
-	pub(super) fn add_iterator(&mut self, exp: Expression) -> IteratorRef {
-		let ir = self.iterators.len();
-		self.iterators.push(exp);
-		ir as IteratorRef
-	}
-
-	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
-		(ir as usize) < self.iterators.len()
-	}
-
-	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
-		self.iterators.get(ir as usize)
-	}
-
-	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
-		if let Value::Number(n) = match_ref {
-			let m = n.to_int() as u8;
-			Some(m)
-		} else {
-			None
-		}
-	}
-
-	pub(crate) async fn new_iterator(
-		&self,
-		opt: &Options,
-		ir: IteratorRef,
-		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
-		match &io.ix().index {
-			Index::Idx => Self::new_index_iterator(opt, io),
-			Index::Uniq => Self::new_unique_index_iterator(opt, io),
-			Index::Search {
-				..
-			} => self.new_search_index_iterator(ir, io).await,
-		}
-	}
-
-	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
-		}
-		Ok(None)
-	}
-
-	fn new_unique_index_iterator(
-		opt: &Options,
-		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
-		}
-		Ok(None)
-	}
-
-	async fn new_search_index_iterator(
+	pub(super) async fn new_search_index_iterator(
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
@@ -165,7 +67,7 @@ impl QueryExecutor {
 			if let Operator::Matches(_) = io.op() {
 				let ixn = &io.ix().name.0;
 				if let Some(fti) = self.ft_map.get(ixn) {
-					if let Some(fte) = self.exp_entries.get(exp) {
+					if let Some(fte) = self.ft_exp.get(exp) {
 						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}
@@ -175,16 +77,23 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
+	pub(super) async fn new_mtree_index_iterator(
+		&self,
+		_ir: IteratorRef,
+		_io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		todo!()
+	}
+
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
 	) -> Result<Value, Error> {
-		// Otherwise, we look for the first possible index options, and evaluate the expression
 		// Does the record id match this executor's table?
 		if thg.tb.eq(&self.table) {
-			if let Some(ft) = self.exp_entries.get(exp) {
+			if let Some(ft) = self.ft_exp.get(exp) {
 				let mut run = txn.lock().await;
 				let doc_key: Key = thg.into();
 				if let Some(doc_id) =
@@ -217,9 +126,18 @@ impl QueryExecutor {
 		})
 	}
 
+	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
+		if let Value::Number(n) = match_ref {
+			let m = n.to_int() as u8;
+			Some(m)
+		} else {
+			None
+		}
+	}
+
 	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
 		if let Some(mr) = Self::get_match_ref(match_ref) {
-			self.mr_entries.get(&mr)
+			self.ft_mr.get(&mr)
 		} else {
 			None
 		}
@@ -292,7 +210,7 @@ impl QueryExecutor {
 }
 
 #[derive(Clone)]
-struct FtEntry(Arc<Inner>);
+pub(super) struct FtEntry(Arc<Inner>);
 
 struct Inner {
 	index_option: IndexOption,
@@ -308,7 +226,11 @@ impl FtEntry {
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
-		if let Some(qs) = io.qs() {
+		if let Params::Ft {
+			qs,
+			..
+		} = io.params()
+		{
 			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
 			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {

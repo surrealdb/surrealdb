@@ -128,9 +128,21 @@ pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
 	a: Array,
-	qs: Option<String>,
 	op: Operator,
-	mr: Option<MatchRef>,
+	params: Params,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub(super) enum Params {
+	Ft {
+		qs: String,
+		mr: Option<MatchRef>,
+	},
+	Mt {
+		k: u32,
+	},
+	Idx,
+	Uniq,
 }
 
 impl IndexOption {
@@ -139,16 +151,14 @@ impl IndexOption {
 		id: Idiom,
 		op: Operator,
 		a: Array,
-		qs: Option<String>,
-		mr: Option<MatchRef>,
+		params: Params,
 	) -> Self {
 		Self(Arc::new(Inner {
 			ix,
 			id,
 			op,
 			a,
-			qs,
-			mr,
+			params,
 		}))
 	}
 
@@ -164,16 +174,12 @@ impl IndexOption {
 		&self.0.a
 	}
 
-	pub(super) fn qs(&self) -> Option<&String> {
-		self.0.qs.as_ref()
+	pub(super) fn params(&self) -> &Params {
+		&self.0.params
 	}
 
 	pub(super) fn id(&self) -> &Idiom {
 		&self.0.id
-	}
-
-	pub(super) fn match_ref(&self) -> Option<&MatchRef> {
-		self.0.mr.as_ref()
 	}
 
 	pub(crate) fn explain(&self) -> Value {
@@ -192,7 +198,7 @@ impl IndexOption {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::IndexOption;
+	use crate::idx::planner::plan::{IndexOption, Params};
 	use crate::sql::statements::DefineIndexStatement;
 	use crate::sql::{Array, Idiom, Operator};
 	use std::collections::HashSet;
@@ -205,8 +211,9 @@ mod tests {
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
 			Array::from(vec!["test"]),
-			None,
-			None,
+			Params::Mt {
+				k: 0,
+			},
 		);
 
 		let io2 = IndexOption::new(
@@ -214,8 +221,9 @@ mod tests {
 			Idiom::from("a.b".to_string()),
 			Operator::Equal,
 			Array::from(vec!["test"]),
-			None,
-			None,
+			Params::Mt {
+				k: 0,
+			},
 		);
 
 		set.insert(io1);

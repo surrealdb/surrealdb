@@ -1476,6 +1476,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::index::{SearchParams, VectorType};
 	use crate::sql::scoring::Scoring;
 	use crate::sql::Part;
 
@@ -1521,7 +1522,7 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 101 DOC_LENGTHS_ORDER 102 POSTINGS_ORDER 103 TERMS_ORDER 104 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -1529,15 +1530,18 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: true,
 					sc: Scoring::Bm {
 						k1: 1.2,
 						b: 0.75,
 					},
-					order: 1000
-				},
+					doc_ids_order: 101,
+					doc_lengths_order: 102,
+					postings_order: 103,
+					terms_order: 104,
+				}),
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
@@ -1565,6 +1569,30 @@ mod tests {
 		assert_eq!(
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
+		);
+	}
+
+	#[test]
+	fn check_create_mtree_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col MTREE DIMENSION 4";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::MTree {
+					dimension: 4,
+					vector_type: VectorType::F64,
+					capacity: 40,
+					doc_ids_order: 100,
+				},
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100"
 		);
 	}
 
