@@ -314,7 +314,8 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Create some data for notification
 
-	let query = format!(r#"INSERT INTO {} {{"id": "an-id-goes-here", "name": "ok"}};"#, table_name);
+	let id = "an-id-goes-here";
+	let query = format!(r#"INSERT INTO {} {{"id": {}, "name": "ok"}};"#, table_name, id);
 	println!("query: {}", query);
 	let created = common::ws_query(socket, query.as_str()).await?;
 	assert_eq!(created.len(), 1);
@@ -322,10 +323,11 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Notification
 	let res = common::ws_recv_msg(socket).await?;
-	let notification = &res[0]
+	// assert_eq!(&res, &serde_json::to_value("blaa").unwrap(), "result: {:?}", res);
+	let notification = &res
 		.as_object()
 		.ok_or(TestError {
-			message: "missing json object".to_string(),
+			message: format!("missing json object, res: {:?}", res).to_string(),
 		})
 		.unwrap()["result"];
 	let action = notification["action"].as_str().unwrap();
@@ -333,8 +335,10 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	//  {"action": String("CREATE"), "id": String("f0acf1b6-883e-457a-a7f2-f4b33894de8c"), "result": Object {"id": String("table_FD40A9A361884C56B5908A934164884A:pv7om2rpx3vzcr0inu60"), "name": String("ok")}}}`
 	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
 	assert_eq!(
-		result["id"].as_str().unwrap(),
-		serde_json::to_value(table_name.as_str()).unwrap(),
+		result["id"].as_str().ok_or(TestError {
+			message: format!("missing id, res: {:?}", res).to_string(),
+		})?,
+		format!("{}:⟨{}⟩", table_name, id),
 		"result: {:?}",
 		res
 	);
