@@ -4,8 +4,8 @@ use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::FtIndex;
-use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -59,7 +59,7 @@ impl AnalyzeStatement {
 							*order,
 							sc,
 							*hl,
-							TreeStoreType::Traversal,
+							BTreeStoreType::Traversal,
 						)
 						.await?;
 						ft.statistics(&mut run).await?

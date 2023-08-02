@@ -54,9 +54,8 @@ impl Value {
 					// The record is from the same table
 					true => Ok(id),
 					// The record id is from another table
-					false => Ok(Thing {
-						tb: tb.to_string(),
-						id: id.id,
+					false => Err(Error::IdInvalid {
+						value: id.to_string(),
 					}),
 				},
 			},

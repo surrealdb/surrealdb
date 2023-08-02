@@ -1,5 +1,5 @@
 //! Stores BTree nodes for terms
-use crate::idx::trees::store::NodeId;
+use crate::idx::btree::NodeId;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 

@@ -1,5 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::btree::store::BTreeStoreType;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
@@ -10,7 +11,6 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::plan::IndexOption;
 use crate::idx::planner::tree::IndexMap;
-use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
@@ -62,7 +62,7 @@ impl QueryExecutor {
 				} else {
 					let ikb = IndexKeyBase::new(opt, io.ix());
 					let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl, TreeStoreType::Read)
+					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl, BTreeStoreType::Read)
 						.await?;
 					let ixn = ixn.to_owned();
 					if entry.is_none() {

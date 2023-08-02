@@ -1,8 +1,8 @@
 use crate::err::Error;
-use crate::idx::trees::bkeys::FstKeys;
-use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
-use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::bkeys::FstKeys;
+use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
+use crate::idx::btree::{BTree, Statistics};
+use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ impl Terms {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
-		store_type: TreeStoreType,
+		store_type: BTreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bt_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -34,8 +34,7 @@ impl Terms {
 		} else {
 			State::new(default_btree_order)
 		};
-		let store =
-			TreeNodeStore::new(TreeNodeProvider::Terms(index_key_base.clone()), store_type, 20);
+		let store = BTreeNodeStore::new(KeyProvider::Terms(index_key_base.clone()), store_type, 20);
 		Ok(Self {
 			state_key,
 			index_key_base,
@@ -115,7 +114,7 @@ impl Terms {
 		Ok(())
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
@@ -136,7 +135,7 @@ impl Terms {
 
 #[derive(Serialize, Deserialize)]
 struct State {
-	btree: BState,
+	btree: btree::State,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
@@ -146,7 +145,7 @@ impl SerdeState for State {}
 impl State {
 	fn new(default_btree_order: u32) -> Self {
 		Self {
-			btree: BState::new(default_btree_order),
+			btree: btree::State::new(default_btree_order),
 			available_ids: None,
 			next_term_id: 0,
 		}
@@ -155,9 +154,9 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::Terms;
-	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 	use rand::{thread_rng, Rng};
@@ -190,7 +189,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t =
-				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 			t.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();
 		}
@@ -199,7 +198,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t =
-				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
 			t.finish(&mut tx).await.unwrap();
@@ -210,7 +209,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t =
-				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
 			t.finish(&mut tx).await.unwrap();
@@ -221,7 +220,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t =
-				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
 			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
 
@@ -234,7 +233,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut t =
-				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+				Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 
 			assert_eq!(t.resolve_term_id(&mut tx, "A").await.unwrap(), 2);
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
@@ -256,7 +255,7 @@ mod tests {
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t =
-			Terms::new(&mut tx, idx.clone(), BTREE_ORDER, TreeStoreType::Write).await.unwrap();
+			Terms::new(&mut tx, idx.clone(), BTREE_ORDER, BTreeStoreType::Write).await.unwrap();
 
 		// Check removing an non-existing term id returns None
 		assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
@@ -299,7 +298,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..100 {
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, TreeStoreType::Write)
+			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, BTreeStoreType::Write)
 				.await
 				.unwrap();
 			let terms_string = random_term_freq_vec(50);
@@ -316,7 +315,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..10 {
 			let mut tx = ds.transaction(true, false).await.unwrap();
-			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, TreeStoreType::Write)
+			let mut t = Terms::new(&mut tx, IndexKeyBase::default(), 100, BTreeStoreType::Write)
 				.await
 				.unwrap();
 			for _ in 0..10 {

@@ -23,7 +23,7 @@ async fn handler() -> impl IntoResponse {
 		// The transaction was successful
 		Ok(mut tx) => {
 			// Cancel the transaction
-			error!("Ingnore the cancelled tx, its health");
+			error!("Health endpoint cancelling transaction");
 			let _ = tx.cancel().await;
 			// Return the response
 			Ok(())

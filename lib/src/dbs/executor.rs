@@ -334,7 +334,6 @@ impl<'a> Executor<'a> {
 							false => {
 								let mut ctx = Context::new(&ctx);
 								// Process the statement
-								trace!("statement timeout: {:?}", stm.timeout());
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
@@ -351,21 +350,12 @@ impl<'a> Executor<'a> {
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
-								if let Err(_err) = &res {
-									trace!("Error {} is in fact after the compure, here is the statement: {}", _err, stm);
-								}
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
 									false => res,
 								};
 								// Finalise transaction and return the result.
-								trace!(
-									"Conditions are resok={} and write={}, timedout={}",
-									res.is_ok(),
-									stm.writeable(),
-									ctx.is_timedout(),
-								);
 								if res.is_ok() && stm.writeable() {
 									if let Err(e) = self.commit(loc).await {
 										// Clear live query notification details
@@ -376,13 +366,11 @@ impl<'a> Executor<'a> {
 										})
 									} else {
 										// Flush the live query change notifications
-										trace!("Flushing live query notifications");
 										self.flush(&ctx, recv.clone()).await;
 										// Successful, committed result
 										res
 									}
 								} else {
-									trace!("Transaction failed, clearing pending notifications");
 									self.cancel(loc).await;
 									// Clear live query notification details
 									self.clear(&ctx, recv.clone()).await;
