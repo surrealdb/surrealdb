@@ -5,6 +5,7 @@ mod common;
 use serde_json::json;
 use serial_test::serial;
 use test_log::test;
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::common::error::TestError;
 use crate::common::{PASS, USER};
@@ -327,7 +328,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -340,16 +341,14 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	// LIVE query via live endpoint
 	let live_id = common::ws_send_msg(
 		socket,
-		Message::Text(
-			serde_json::to_string(&json!({
+		serde_json::to_string(&json!({
 				"id": "1",
 				"method": "live",
 				"params": [
 					table_name
 				],
-			}))
-			.unwrap(),
-		),
+		}))
+		.unwrap(),
 	)
 	.await?;
 
@@ -416,7 +415,7 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 #[serial]
 async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -432,7 +431,7 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(lq_res.len(), 1);
 	let live_id = lq_res
 		.get(0)
-		.ok_or(AssertionError {
+		.ok_or(TestError::AssertionError {
 			message: "Expected 1 result after len check".to_string(),
 		})
 		.unwrap();
@@ -500,7 +499,7 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(false, true, true).await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
