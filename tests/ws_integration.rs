@@ -499,7 +499,7 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, true, true).await.unwrap();
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//

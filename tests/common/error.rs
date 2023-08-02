@@ -7,6 +7,7 @@ pub enum TestError {
 	NetworkError {
 		message: String,
 	},
+
 	#[error("An assertion failed as part of an invocation stack: {message}")]
 	AssertionError {
 		message: String,
