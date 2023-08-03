@@ -14,6 +14,7 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
 		Value::Bytes(bytes) => req.header(CONTENT_TYPE, "application/octet-stream").body(bytes.0),
+		Value::Strand(s) => req.header(CONTENT_TYPE, "application/x-www-form-urlencoded").body(s.0),
 		_ if body.is_some() => req.json(&body.into_json()),
 		_ => req,
 	}
@@ -102,7 +103,7 @@ pub async fn put(
 ) -> Result<Value, Error> {
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
-	// Start a new GET request
+	// Start a new PUT request
 	let mut req = cli.put(uri.as_str());
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
@@ -132,7 +133,7 @@ pub async fn post(
 ) -> Result<Value, Error> {
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
-	// Start a new GET request
+	// Start a new POST request
 	let mut req = cli.post(uri.as_str());
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
@@ -162,7 +163,7 @@ pub async fn patch(
 ) -> Result<Value, Error> {
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
-	// Start a new GET request
+	// Start a new PATCH request
 	let mut req = cli.patch(uri.as_str());
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
@@ -191,7 +192,7 @@ pub async fn delete(
 ) -> Result<Value, Error> {
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
-	// Start a new GET request
+	// Start a new DELETE request
 	let mut req = cli.delete(uri.as_str());
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
