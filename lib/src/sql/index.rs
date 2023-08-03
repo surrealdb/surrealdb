@@ -3,6 +3,7 @@ use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::scoring::{scoring, Scoring};
+use crate::sql::Number;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::u16 as uint16;
@@ -38,32 +39,30 @@ pub struct SearchParams {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct MTreeParams {
 	pub dimension: u16,
-	pub vector_type: VectorType,
+	pub distance: Distance,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub enum VectorType {
-	I64,
-	F64,
-	U32,
-	I32,
-	F32,
-	U16,
-	I16,
+pub enum Distance {
+	Euclidean,
+	Manhattan,
+	Cosine,
+	Hamming,
+	Mahalanobis,
+	Minkowski(Number),
 }
 
-impl Display for VectorType {
+impl Display for Distance {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
-			VectorType::I64 => f.write_str("I64"),
-			VectorType::F64 => f.write_str("F64"),
-			VectorType::U32 => f.write_str("U32"),
-			VectorType::I32 => f.write_str("I32"),
-			VectorType::F32 => f.write_str("F32"),
-			VectorType::U16 => f.write_str("U16"),
-			VectorType::I16 => f.write_str("I16"),
+			Self::Euclidean => f.write_str("EUCLIDEAN"),
+			Self::Manhattan => f.write_str("MANHATTAN"),
+			Self::Cosine => f.write_str("COSINE"),
+			Self::Hamming => f.write_str("HAMMING"),
+			Self::Mahalanobis => f.write_str("MAHALANOBIS"),
+			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
 		}
 	}
 }
@@ -98,8 +97,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} TYPE {} CAPACITY {} DOC_IDS_ORDER {}",
-					p.dimension, p.vector_type, p.capacity, p.doc_ids_order
+					"MTREE DIMENSION {} DIST {} CAPACITY {} DOC_IDS_ORDER {}",
+					p.dimension, p.distance, p.capacity, p.doc_ids_order
 				)
 			}
 		}
@@ -182,18 +181,24 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 	))
 }
 
-pub fn vector_type(i: &str) -> IResult<&str, VectorType> {
+pub fn distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag_no_case("TYPE")(i)?;
+	let (i, _) = tag_no_case("DIST")(i)?;
 	alt((
-		map(tag_no_case("I64"), |_| VectorType::I64),
-		map(tag_no_case("F64"), |_| VectorType::F64),
-		map(tag_no_case("U32"), |_| VectorType::U32),
-		map(tag_no_case("I32"), |_| VectorType::I32),
-		map(tag_no_case("F32"), |_| VectorType::F32),
-		map(tag_no_case("U16"), |_| VectorType::U16),
-		map(tag_no_case("I16"), |_| VectorType::I16),
+		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
+		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
+		map(tag_no_case("COSINE"), |_| Distance::Manhattan),
+		map(tag_no_case("HAMMING"), |_| Distance::Manhattan),
+		map(tag_no_case("MAHALANOBIS"), |_| Distance::Manhattan),
+		minkowski,
 	))(i)
+}
+
+pub fn minkowski(i: &str) -> IResult<&str, Distance> {
+	let (i, _) = tag_no_case("MINKOWSKI")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, order) = uint32(i)?;
+	Ok((i, Distance::Minkowski(order.into())))
 }
 
 pub fn dimension(i: &str) -> IResult<&str, u16> {
@@ -215,14 +220,14 @@ pub fn capacity(i: &str) -> IResult<&str, u16> {
 pub fn mtree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("MTREE")(i)?;
 	let (i, dimension) = dimension(i)?;
-	let (i, vector_type) = opt(vector_type)(i)?;
+	let (i, distance) = opt(distance)(i)?;
 	let (i, capacity) = opt(capacity)(i)?;
 	let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
 	Ok((
 		i,
 		Index::MTree(MTreeParams {
 			dimension,
-			vector_type: vector_type.unwrap_or(VectorType::F64),
+			distance: distance.unwrap_or(Distance::Euclidean),
 			capacity: capacity.unwrap_or(40),
 			doc_ids_order: doc_ids_order.unwrap_or(100),
 		}),

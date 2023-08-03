@@ -75,7 +75,7 @@ pub mod distance {
 	}
 
 	pub fn minkowski((a, b, o): (Vec<Number>, Vec<Number>, Number)) -> Result<Value, Error> {
-		Ok(a.minkowski_distance(&b, o)?.into())
+		Ok(a.minkowski_distance(&b, &o)?.into())
 	}
 }
 

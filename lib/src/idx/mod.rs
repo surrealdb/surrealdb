@@ -2,7 +2,6 @@ pub(crate) mod docids;
 pub(crate) mod ft;
 pub(crate) mod planner;
 pub mod trees;
-mod vector;
 
 use crate::dbs::Options;
 use crate::err::Error;
