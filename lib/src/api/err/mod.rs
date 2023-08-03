@@ -109,8 +109,8 @@ pub enum Error {
 		error: String,
 	},
 
-	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{string}` to JSON string: {error}")]
+	/// Failed to deserialize from JSON string to `sql::Value`
+	#[error("Failed to deserialize `{string}` to sql::Value: {error}")]
 	FromJsonString {
 		string: String,
 		error: String,
