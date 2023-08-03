@@ -1,18 +1,18 @@
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceError;
 use opentelemetry_otlp::WithExportConfig;
-use tracing::{Level, Subscriber};
-use tracing_subscriber::{EnvFilter, Layer};
+use tracing::Subscriber;
+use tracing_subscriber::Layer;
 
-use crate::telemetry::OTEL_DEFAULT_RESOURCE;
+use crate::{
+	cli::validator::parser::env_filter::CustomEnvFilter, telemetry::OTEL_DEFAULT_RESOURCE,
+};
 
-const TRACING_FILTER_VAR: &str = "SURREAL_TRACING_FILTER";
-
-pub fn new<S>() -> Box<dyn Layer<S> + Send + Sync>
+pub fn new<S>(filter: CustomEnvFilter) -> Box<dyn Layer<S> + Send + Sync>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
-	tracing_opentelemetry::layer().with_tracer(tracer().unwrap()).with_filter(filter()).boxed()
+	tracing_opentelemetry::layer().with_tracer(tracer().unwrap()).with_filter(filter.0).boxed()
 }
 
 fn tracer() -> Result<Tracer, TraceError> {
@@ -23,17 +23,4 @@ fn tracer() -> Result<Tracer, TraceError> {
 			opentelemetry::sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()),
 		)
 		.install_batch(opentelemetry::runtime::Tokio)
-}
-
-/// Create a filter for the OTLP subscriber
-///
-/// It creates an EnvFilter based on the TRACING_FILTER_VAR's value
-///
-/// TRACING_FILTER_VAR accepts the same syntax as RUST_LOG
-fn filter() -> EnvFilter {
-	EnvFilter::builder()
-		.with_env_var(TRACING_FILTER_VAR)
-		.with_default_directive(Level::INFO.into())
-		.from_env()
-		.unwrap()
 }

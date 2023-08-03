@@ -133,7 +133,7 @@ jobs:
           args: ci-clippy
 
   cli:
-    name: Test command line
+    name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
 
@@ -163,7 +163,7 @@ jobs:
           args: ci-cli-integration
 
   http-server:
-    name: Test HTTP server
+    name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
 
@@ -191,6 +191,28 @@ jobs:
         with:
           command: make
           args: ci-http-integration
+
+  ws-server:
+    name: WebSocket integration tests
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: cargo test --locked --no-default-features --features storage-mem --workspace --test ws_integration
 
   test:
     name: Test workspace
