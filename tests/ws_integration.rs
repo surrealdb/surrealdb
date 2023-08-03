@@ -325,7 +325,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 #[serial]
 async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
