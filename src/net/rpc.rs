@@ -445,6 +445,11 @@ impl Rpc {
 				Ok(v) if v.is_uuid() => {
 					rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into)
 				}
+				Ok(v) => {
+					// Danny Deleto
+					error!("Value for kill param was {}", v);
+					Err(Failure::INVALID_PARAMS)
+				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Setup a live query on a specific table
