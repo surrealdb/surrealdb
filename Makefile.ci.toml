@@ -145,7 +145,7 @@ script = """
    echo "Waiting for surreal to be ready..."
    tries=0
    while [[ $tries < 5 ]]; do
-           target/debug/surreal is-ready && echo "Ready!" && exit 0 || sleep 1
+           target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
            tries=$((tries + 1))
    done
 
