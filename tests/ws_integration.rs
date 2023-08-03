@@ -5,7 +5,6 @@ mod common;
 use serde_json::json;
 use serial_test::serial;
 use test_log::test;
-use tokio_tungstenite::tungstenite::Message;
 
 use crate::common::error::TestError;
 use crate::common::{PASS, USER};

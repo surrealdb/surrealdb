@@ -196,8 +196,24 @@ pub async fn ws_send_msg(
 }
 
 pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box<dyn Error>> {
+	ws_recv_msg_with_fmt(socket, Format::Json).await
+}
+
+pub enum Format {
+	Json,
+	Cbor,
+	Pack,
+}
+
+pub async fn ws_recv_msg_with_fmt(
+	socket: &mut WsStream,
+	format: Format,
+) -> Result<serde_json::Value, Box<dyn Error>> {
 	// Parse and return response
-	let mut f = socket.try_filter(|msg| futures_util::future::ready(msg.is_text()));
+	let mut f = socket.try_filter(|msg| match format {
+		Format::Json => futures_util::future::ready(msg.is_text()),
+		Format::Pack | Format::Cbor => futures_util::future::ready(msg.is_binary()),
+	});
 	let msg: serde_json::Value = tokio::select! {
 			_ = time::sleep(time::Duration::from_millis(2000)) => {
 					return Err(TestError::NetworkError{message: "timeout waiting for the response".to_string()}.into());
@@ -207,12 +223,6 @@ pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box
 			}
 	};
 	Ok(serde_json::from_str(&msg.to_string())?)
-}
-
-pub enum Format {
-	Json,
-	Cbor,
-	Pack,
 }
 
 pub async fn ws_send_msg_with_fmt(
