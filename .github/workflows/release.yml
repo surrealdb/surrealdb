@@ -16,24 +16,44 @@ jobs:
     runs-on: ubuntu-latest-16-cores
     steps:
 
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Free up some disk space
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run cargo test (+coverage)
-        run: |
-          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
-          cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test workspace + coverage
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-workspace-coverage-complete
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
@@ -53,7 +73,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -61,20 +80,35 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Run cargo check
-        run: cargo check --workspace
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-      - name: Check format of code
-        run: cargo fmt --all --check
+      - name: Check workspace
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check
 
-      - name: Check format of unlinked tests
-        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-format
 
-      - name: Check linting with clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Check wasm
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check-wasm
 
-      - name: Run WebAssembly check
-        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
+      - name: Check clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-clippy
 
   build:
     name: Build ${{ matrix.arch }}
@@ -116,10 +150,7 @@ jobs:
       - name: Install dependencies
         if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-msvc')
         run: |
-          vcpkg upgrade
           vcpkg integrate install
-          vcpkg install openssl:x64-windows-static
-          choco install protoc
 
       - name: Install dependencies
         if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
@@ -132,7 +163,6 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')

@@ -53,7 +53,7 @@ opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.10"
 rand = "0.8.5"
-reqwest = { version = "0.11.18", features = ["blocking"] }
+reqwest = { version = "0.11.18", default-features = false, features = ["blocking"] }
 rustyline = { version = "11.0.0", features = ["derive"] }
 serde = { version = "1.0.171", features = ["derive"] }
 serde_cbor = "0.11.2"
