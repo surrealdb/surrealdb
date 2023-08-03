@@ -291,7 +291,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		.send()
 		.await?;
 
-	if let Err(_) = res.error_for_status_ref() {
+	if res.error_for_status_ref().is_err() {
 		let body: serde_json::Value = res.json().await?;
 		let error_msg =
 			format!("\n{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into()));
