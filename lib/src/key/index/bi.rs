@@ -1,5 +1,5 @@
 //! Stores doc keys for doc_ids
-use crate::idx::btree::NodeId;
+use crate::idx::trees::store::NodeId;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
