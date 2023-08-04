@@ -354,7 +354,6 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	// Create some data for notification
 	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	println!("query: {}", query);
 	let created = common::ws_query(socket, query.as_str()).await.unwrap();
 	assert_eq!(created.len(), 1);
 
@@ -438,7 +437,6 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	// Create some data for notification
 	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	println!("query: {}", query);
 	let created = common::ws_query(socket, query.as_str()).await.unwrap();
 	assert_eq!(created.len(), 1);
 
