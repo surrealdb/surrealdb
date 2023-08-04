@@ -331,7 +331,7 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
 
 	// LIVE query via live endpoint
-	let live_id = common::ws_send_msg(
+	let live_response = common::ws_send_msg(
 		socket,
 		serde_json::to_string(&json!({
 				"id": "BE282C96-A64C-414C-BADF-15DCCE534D6D",
@@ -344,12 +344,23 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	)
 	.await
 	.unwrap();
+	let live_id = live_response
+		.as_object()
+		.ok_or(TestError::AssertionError {
+			message: "Expected live query response to be object".to_string(),
+		})
+		.unwrap()
+		.get("result")
+		.ok_or(TestError::AssertionError {
+			message: "Expected live query response to contain a result entry".to_string(),
+		})
+		.unwrap();
 
 	// KILL query via kill endpoint
 	let kill_res = common::ws_send_msg(
 		socket,
 		serde_json::to_string(&json!({
-				"id": "D1254FB226A849599E2B1C47D4586258",
+				"id": "F35647F1-E87F-4A05-A629-2C8A7377F7B7",
 				"method": "kill",
 				"params": [
 					live_id
@@ -359,8 +370,6 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	)
 	.await
 	.unwrap();
-	println!("Ded: {:?}", _server.kill().output());
-	panic!("End expected");
 	assert_eq!(kill_res["status"], "OK", "result: {:?}", kill_res);
 
 	// Create some data for notification
