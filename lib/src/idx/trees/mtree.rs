@@ -4,15 +4,17 @@ use crate::fnc::util::math::vector::{
 };
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::{TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::store::{
+	NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
+};
 use crate::idx::{IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Number, Object, Thing, Value};
+use indexmap::map::Entry;
+use indexmap::IndexMap;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -170,11 +172,11 @@ impl MTree {
 	}
 
 	async fn insert_node(
-		&self,
+		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		center: Option<&Vector>,
+		center: Option<Vector>,
 		v: Vector,
 		id: DocId,
 	) -> Result<(), Error> {
@@ -182,12 +184,18 @@ impl MTree {
 		while let Some((node_id, parent_center)) = next_node.take() {
 			let mut node = store.get_node(tx, node_id).await?;
 			match &mut node.n {
-				MTreeNode::Routing(_routings) => {
-					todo!()
+				MTreeNode::Routing(routings) => {
+					let idx = self.find_closest(routings, &v)?;
+					let r = &routings[idx];
+					next_node = Some((r.node, Some(r.center.clone())));
+					// Bring the node back to the cache
+					store.set_node(node, false)?;
 				}
 				MTreeNode::Leaf(objects) => {
-					if self.insert_node_leaf(objects, v, parent_center, id) {
-						return self.split_node(store, node_id, objects);
+					if self.insert_node_leaf(objects, v, parent_center.as_ref(), id) {
+						// The node need to be split
+						self.split_node(store, node_id, node.key, objects)?;
+						return Ok(());
 					}
 					store.set_node(node, true)?;
 					return Ok(());
@@ -197,9 +205,23 @@ impl MTree {
 		Ok(())
 	}
 
+	fn find_closest(
+		&self,
+		routings: &Vec<MRoutingProperties>,
+		vec: &Vector,
+	) -> Result<usize, Error> {
+		let res = routings.iter().enumerate().min_by(|&(_, a), &(_, b)| {
+			let distance_a = self.calculate_distance(&a.center, &vec);
+			let distance_b = self.calculate_distance(&b.center, &vec);
+			distance_a.partial_cmp(&distance_b).unwrap()
+		});
+		let (idx, _) = res.ok_or(Error::Unreachable)?;
+		Ok(idx)
+	}
+
 	fn insert_node_leaf(
 		&self,
-		objects: &mut HashMap<Vector, MObjectProperties>,
+		objects: &mut IndexMap<Vector, MObjectProperties>,
 		v: Vector,
 		parent_center: Option<&Vector>,
 		id: DocId,
@@ -210,7 +232,7 @@ impl MTree {
 				false
 			}
 			Entry::Vacant(e) => {
-				let d = self.distance(parent_center, e.key());
+				let d = parent_center.map_or(0f64, |v| self.calculate_distance(v, e.key()));
 				e.insert(MObjectProperties::new(d, id));
 				objects.len() > self.state.capacity as usize
 			}
@@ -218,49 +240,119 @@ impl MTree {
 	}
 
 	fn split_node(
-		&self,
-		_store: &mut MTreeNodeStore,
-		_node_id: NodeId,
-		objects: &mut HashMap<Vector, MObjectProperties>,
+		&mut self,
+		store: &mut MTreeNodeStore,
+		node_id: NodeId,
+		node_key: Key,
+		objects: &mut IndexMap<Vector, MObjectProperties>,
 	) -> Result<(), Error> {
-		let (_p1, _p2) = self.select_promotion_objects(objects)?;
-		todo!()
-	}
+		let distances = self.compute_distance_matrix(objects)?;
+		let (p1, p2) = Self::select_promotion_objects(&distances);
 
-	fn select_promotion_objects<'a>(
-		&self,
-		objects: &'a mut HashMap<Vector, MObjectProperties>,
-	) -> Result<(&'a Vector, &'a Vector), Error> {
-		let mut max_distance = 0.0;
-		let mut promo = None;
-		// Compare each pair of objects
-		for (i1, vec1) in objects.keys().enumerate() {
-			for (i2, vec2) in objects.keys().enumerate() {
-				if i1 != i2 {
-					let distance = self.distance(Some(vec1), vec2);
-					// If this pair is further apart than the current maximum, update the promotion objects
-					if distance > max_distance {
-						promo = Some((vec1, vec2));
-						max_distance = distance;
-					}
+		// Extract the promoted vectors
+		let (promo1, _) = objects.get_index(p1).ok_or(Error::Unreachable)?;
+		let (promo2, _) = objects.get_index(p2).ok_or(Error::Unreachable)?;
+		let promo1 = promo1.clone();
+		let promo2 = promo2.clone();
+
+		let mut leaf1 = IndexMap::new();
+		let mut leaf2 = IndexMap::new();
+
+		let (mut r1, mut r2) = (0f64, 0f64);
+
+		// Distribute entries and calculate radius
+		for (i, (v, p)) in objects.drain(..).enumerate() {
+			if distances[i][p1] <= distances[i][p2] {
+				leaf1.insert(v, p);
+				let d = distances[i][p1];
+				if d > r1 {
+					r1 = d;
+				}
+			} else {
+				leaf2.insert(v, p);
+				let d = distances[i][p2];
+				if d > r2 {
+					r2 = d;
 				}
 			}
 		}
-		promo.ok_or(Error::CorruptedIndex)
+
+		// Store the new leaf nodes
+		let n1 = self.new_node_id();
+		let n2 = self.new_node_id();
+
+		// Update the store/cache
+		let n = store.new_node(n1, MTreeNode::Leaf(leaf1))?;
+		store.set_node(n, true)?;
+		let n = store.new_node(n2, MTreeNode::Leaf(leaf2))?;
+		store.set_node(n, true)?;
+
+		// Update the splitted node
+		let r1 = MRoutingProperties {
+			node: n1,
+			center: promo1.clone(),
+			radius: r1,
+		};
+		let r2 = MRoutingProperties {
+			node: n2,
+			center: promo2.clone(),
+			radius: r2,
+		};
+		let node = StoredNode {
+			n: MTreeNode::Routing(vec![r1, r2]),
+			id: node_id,
+			key: node_key,
+			size: 0,
+		};
+		// Update the store/cache
+		store.set_node(node, true)?;
+		Ok(())
 	}
 
-	fn distance(&self, parent_center: Option<&Vector>, v: &Vector) -> f64 {
-		if let Some(c) = parent_center {
-			match &self.distance {
-				Distance::Euclidean => c.euclidean_distance(v).unwrap().as_float(),
-				Distance::Manhattan => c.manhattan_distance(v).unwrap().as_float(),
-				Distance::Cosine => c.cosine_similarity(v).unwrap().as_float(),
-				Distance::Hamming => c.hamming_distance(v).unwrap().as_float(),
-				Distance::Mahalanobis => c.manhattan_distance(v).unwrap().as_float(),
-				Distance::Minkowski(order) => c.minkowski_distance(v, order).unwrap().as_float(),
+	fn select_promotion_objects(distances: &Vec<Vec<f64>>) -> (usize, usize) {
+		let mut promo = (0, 1);
+		let mut max_distance = distances[0][1];
+		// Compare each pair of objects
+		let n = distances.len();
+		for i in 0..n {
+			for j in i + 1..n {
+				let distance = distances[i][j];
+				// If this pair is further apart than the current maximum, update the promotion objects
+				if distance > max_distance {
+					promo = (i, j);
+					max_distance = distance;
+				}
 			}
-		} else {
-			0.0
+		}
+		promo
+	}
+
+	fn compute_distance_matrix(
+		&self,
+		objects: &IndexMap<Vector, MObjectProperties>,
+	) -> Result<Vec<Vec<f64>>, Error> {
+		let n = objects.len();
+		let mut distances = vec![vec![0.0; n]; n];
+		for i in 0..n {
+			let (v1, _) = objects.get_index(i).ok_or(Error::Unreachable)?;
+			for j in i + 1..n {
+				let (v2, _) = objects.get_index(j).ok_or(Error::Unreachable)?;
+				let distance = self.calculate_distance(v1, v2);
+				distances[i][j] = distance;
+				distances[j][i] = distance; // Because the distance function is symmetric
+			}
+		}
+		Ok(distances)
+	}
+
+	fn calculate_distance(&self, v1: &Vector, v2: &Vector) -> f64 {
+		match &self.distance {
+			Distance::Euclidean => v1.euclidean_distance(v2).unwrap().as_float(),
+			Distance::Manhattan => v1.manhattan_distance(v2).unwrap().as_float(),
+			Distance::Cosine => v1.cosine_similarity(v2).unwrap().as_float(),
+			Distance::Hamming => v1.hamming_distance(v2).unwrap().as_float(),
+			Distance::Mahalanobis => v1.manhattan_distance(v2).unwrap().as_float(),
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order).unwrap().as_float(),
 		}
 	}
 
@@ -272,17 +364,15 @@ impl MTree {
 	}
 }
 
-pub(crate) type NodeId = u64;
-
 pub(in crate::idx) enum MTreeNode {
 	Routing(Vec<MRoutingProperties>),
-	Leaf(HashMap<Vector, MObjectProperties>),
+	Leaf(IndexMap<Vector, MObjectProperties>),
 }
 
 impl MTreeNode {
 	fn new_leaf_root(v: Vector, id: DocId) -> Self {
 		let p = MObjectProperties::new_root(id);
-		let mut o = HashMap::with_capacity(1);
+		let mut o = IndexMap::with_capacity(1);
 		o.insert(v, p);
 		Self::Leaf(o)
 	}
@@ -293,7 +383,7 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: HashMap<Vector, MObjectProperties> = bincode::deserialize_from(c)?;
+				let objects: IndexMap<Vector, MObjectProperties> = bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
@@ -355,11 +445,12 @@ impl MState {
 
 #[derive(Serialize, Deserialize)]
 pub(in crate::idx) struct MRoutingProperties {
+	// Reference to the node
+	node: NodeId,
+	// Center of the node
 	center: Vector,
 	// Covering radius
 	radius: f64,
-	// Distance to its parent object
-	parent_dist: f64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -389,32 +480,177 @@ impl SerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::mtree::{MState, MTree, Vector};
-	use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+	use crate::idx::trees::mtree::{
+		MObjectProperties, MRoutingProperties, MState, MTree, MTreeNode, MTreeNodeStore, Vector,
+	};
+	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 	use crate::kvs::Datastore;
+	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
+	use indexmap::IndexMap;
 	use test_log::test;
 
 	#[test(tokio::test)]
-	async fn test_mtree_insertions() -> Result<(), Error> {
+	async fn test_mtree_insertions() {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
-		let ds = Datastore::new("memory").await?;
-		let mut tx = ds.transaction(true, false).await?;
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 
-		let samples: Vec<(DocId, Vector)> = vec![
-			(1, vec![1.into(), 2.into(), 3.into(), 4.into()]),
-			(1, vec![5.into(), 6.into(), 7.into(), 8.into()]),
-			(1, vec![9.into(), 10.into(), 11.into(), 12.into()]),
-			(1, vec![(-1).into(), (-2).into(), (-3).into(), (-4).into()]),
-			(1, vec![0.1.into(), 0.2.into(), 0.3.into(), 0.4.into()]),
-		];
-		for (id, vec) in samples {
-			t.insert(&mut tx, &mut s, vec, id).await?;
+		// Insert single element
+		let vec1 = vec![1.into()];
+		{
+			t.insert(&mut tx, &mut s, vec1.clone(), 1).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_leaf(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 1);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+			})
+			.await;
 		}
-		Ok(())
+
+		// insert second element
+		let vec2 = vec![2.into()];
+		{
+			t.insert(&mut tx, &mut s, vec2.clone(), 2).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_leaf(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 0.0, &[2]);
+			})
+			.await;
+		}
+
+		// insert new doc to existing vector
+		{
+			t.insert(&mut tx, &mut s, vec2.clone(), 3).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_leaf(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 0.0, &[2, 3]);
+			})
+			.await;
+		}
+
+		// insert third vector
+		let vec3 = vec![3.into()];
+		{
+			t.insert(&mut tx, &mut s, vec3.clone(), 3).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_leaf(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 3);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 0.0, &[2, 3]);
+				check_leaf_vec(m, 2, &vec3, 0.0, &[3]);
+			})
+			.await;
+		}
+
+		// Check split node
+		let vec4 = vec![4.into()];
+		{
+			t.insert(&mut tx, &mut s, vec4.clone(), 4).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_routing(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_routing_vec(m, 0, &vec1, 1, 1.0);
+				check_routing_vec(m, 1, &vec4, 2, 1.0);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 1, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 1.0, &[2, 3]); // Right???
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 2, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec3, 1.0, &[3]);
+				check_leaf_vec(m, 1, &vec4, 0.0, &[4]);
+			})
+			.await;
+		}
+	}
+
+	fn check_leaf_vec(
+		m: &IndexMap<Vector, MObjectProperties>,
+		idx: usize,
+		vec: &Vector,
+		parent_dist: f64,
+		docs: &[DocId],
+	) {
+		let (v, p) = m.get_index(idx).unwrap();
+		assert_eq!(v, vec);
+		assert_eq!(p.docs.len(), docs.len() as u64);
+		for doc in docs {
+			assert!(p.docs.contains(*doc));
+		}
+		assert_eq!(p.parent_dist, parent_dist);
+	}
+
+	fn check_routing_vec(
+		m: &Vec<MRoutingProperties>,
+		idx: usize,
+		center: &Vector,
+		node_id: NodeId,
+		radius: f64,
+	) {
+		let p = &m[idx];
+		assert_eq!(center, &p.center);
+		assert_eq!(node_id, p.node);
+		assert_eq!(radius, p.radius);
+	}
+
+	async fn check_node<F>(
+		tx: &mut Transaction,
+		s: &mut MTreeNodeStore,
+		node_id: NodeId,
+		check_func: F,
+	) where
+		F: FnOnce(&MTreeNode),
+	{
+		let n = s.get_node(tx, node_id).await.unwrap();
+		check_func(&n.n);
+		s.set_node(n, false).unwrap();
+	}
+
+	async fn check_leaf<F>(
+		tx: &mut Transaction,
+		s: &mut MTreeNodeStore,
+		node_id: NodeId,
+		check_func: F,
+	) where
+		F: FnOnce(&IndexMap<Vector, MObjectProperties>),
+	{
+		check_node(tx, s, node_id, |n| {
+			if let MTreeNode::Leaf(m) = n {
+				check_func(m);
+			} else {
+				panic!("The node is not a leaf node: {node_id}")
+			}
+		})
+		.await
+	}
+
+	async fn check_routing<F>(
+		tx: &mut Transaction,
+		s: &mut MTreeNodeStore,
+		node_id: NodeId,
+		check_func: F,
+	) where
+		F: FnOnce(&Vec<MRoutingProperties>),
+	{
+		check_node(tx, s, node_id, |n| {
+			if let MTreeNode::Routing(m) = n {
+				check_func(m);
+			} else {
+				panic!("The node is not a routing node: {node_id}")
+			}
+		})
+		.await
 	}
 }
