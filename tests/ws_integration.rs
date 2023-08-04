@@ -6,6 +6,7 @@ use serde_json::json;
 use serial_test::serial;
 use test_log::test;
 
+use crate::common::error::TestError;
 use crate::common::{PASS, USER};
 
 #[test(tokio::test)]
@@ -325,8 +326,170 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 #[serial]
-async fn live() -> Result<(), Box<dyn std::error::Error>> {
-	// TODO: implement
+async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
+
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	let ns = "3498b03b44b5452a9d3f15252b454db1";
+	let db = "2cf93e52ff0a42f39d271412404a01f6";
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+
+	// LIVE query via live endpoint
+	let live_id = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+				"id": "1",
+				"method": "live",
+				"params": [
+					table_name
+				],
+		}))
+		.unwrap(),
+	)
+	.await?;
+
+	// Create some data for notification
+	let id = "an-id-goes-here";
+	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
+	let created = common::ws_query(socket, query.as_str()).await.unwrap();
+	assert_eq!(created.len(), 1);
+
+	// Receive notification
+	let res = common::ws_recv_msg(socket).await.unwrap();
+
+	// Verify response contains no error
+	assert!(
+		res.as_object()
+			.ok_or(TestError::AssertionError {
+				message: format!("Unable to retrieve object from result: {}", res)
+			})
+			.unwrap()
+			.keys()
+			.eq(["result"]),
+		"result: {}",
+		res
+	);
+
+	// Unwrap
+	let notification = &res
+		.as_object()
+		.ok_or(TestError::NetworkError {
+			message: format!("missing json object, res: {:?}", res).to_string(),
+		})
+		.unwrap()["result"];
+	assert_eq!(
+		&notification["id"],
+		live_id["result"].as_str().unwrap(),
+		"expected a notification id to match the live query id: {} but was {}",
+		&notification,
+		live_id
+	);
+	let action = notification["action"].as_str().unwrap();
+	let result = notification["result"].as_object().unwrap();
+
+	// Verify message on individual keys since the notification ID is random
+	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
+	assert_eq!(
+		result["id"].as_str().ok_or(TestError::AssertionError {
+			message: format!("missing id, res: {:?}", res).to_string(),
+		})?,
+		format!("{}:⟨{}⟩", table_name, id),
+		"result: {:?}",
+		res
+	);
+	assert_eq!(
+		result["name"].as_str().unwrap(),
+		serde_json::to_value("ok").unwrap(),
+		"result: {:?}",
+		res
+	);
+
+	Ok(())
+}
+
+#[test(tokio::test)]
+#[serial]
+async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
+
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	let ns = "3498b03b44b5452a9d3f15252b454db1";
+	let db = "2cf93e52ff0a42f39d271412404a01f6";
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+
+	// LIVE query via query endpoint
+	let lq_res =
+		common::ws_query(socket, format!("LIVE SELECT * FROM {};", table_name).as_str()).await?;
+	assert_eq!(lq_res.len(), 1);
+	let live_id = lq_res
+		.get(0)
+		.ok_or(TestError::AssertionError {
+			message: "Expected 1 result after len check".to_string(),
+		})
+		.unwrap();
+
+	// Create some data for notification
+	let id = "an-id-goes-here";
+	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
+	let created = common::ws_query(socket, query.as_str()).await.unwrap();
+	assert_eq!(created.len(), 1);
+
+	// Receive notification
+	let res = common::ws_recv_msg(socket).await.unwrap();
+
+	// Verify response contains no error
+	assert!(
+		res.as_object()
+			.ok_or(TestError::AssertionError {
+				message: format!("Unable to retrieve object from result: {}", res)
+			})
+			.unwrap()
+			.keys()
+			.eq(["result"]),
+		"result: {}",
+		res
+	);
+
+	// Unwrap
+	let notification = &res
+		.as_object()
+		.ok_or(TestError::NetworkError {
+			message: format!("missing json object, res: {:?}", res).to_string(),
+		})
+		.unwrap()["result"];
+	assert_eq!(
+		&notification["id"],
+		live_id["result"].as_str().unwrap(),
+		"expected a notification id to match the live query id: {} but was {}",
+		&notification,
+		live_id
+	);
+	let action = notification["action"].as_str().unwrap();
+	let result = notification["result"].as_object().unwrap();
+
+	// Verify message on individual keys since the notification ID is random
+	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
+	assert_eq!(
+		result["id"].as_str().ok_or(TestError::AssertionError {
+			message: format!("missing id, res: {:?}", res).to_string(),
+		})?,
+		format!("{}:⟨{}⟩", table_name, id),
+		"result: {:?}",
+		res
+	);
+	assert_eq!(
+		result["name"].as_str().unwrap(),
+		serde_json::to_value("ok").unwrap(),
+		"result: {:?}",
+		res
+	);
+
 	Ok(())
 }
 
