@@ -25,6 +25,10 @@ pub enum Operation {
 		path: Idiom,
 		from: Idiom,
 	},
+	Move {
+		path: Idiom,
+		from: Idiom,
+	},
 	Test {
 		path: Idiom,
 		value: Value,

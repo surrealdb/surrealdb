@@ -96,6 +96,14 @@ impl From<Operation> for Object {
 				String::from("path") => path.to_path().into(),
 				String::from("from") => from.to_path().into()
 			},
+			Operation::Move {
+				path,
+				from,
+			} => map! {
+				String::from("op") => Value::from("move"),
+				String::from("path") => path.to_path().into(),
+				String::from("from") => from.to_path().into()
+			},
 			Operation::Test {
 				path,
 				value,
@@ -176,6 +184,11 @@ impl Object {
 						}),
 						// Copy operation
 						"copy" => Ok(Operation::Copy {
+							path,
+							from: from?,
+						}),
+						// Copy operation
+						"move" => Ok(Operation::Move {
 							path,
 							from: from?,
 						}),
