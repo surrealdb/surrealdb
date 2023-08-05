@@ -17,6 +17,7 @@ pub enum Op {
 	Remove,
 	Replace,
 	Change,
+	Test,
 }
 
 impl From<&Value> for Op {
@@ -26,6 +27,7 @@ impl From<&Value> for Op {
 			"remove" => Op::Remove,
 			"replace" => Op::Replace,
 			"change" => Op::Change,
+			"test" => Op::Test,
 			_ => Op::None,
 		}
 	}

@@ -64,6 +64,7 @@ impl From<Operation> for Object {
 				Op::Remove => "remove",
 				Op::Replace => "replace",
 				Op::Change => "change",
+				Op::Test => "test"
 			}),
 			String::from("path") => v.path.to_path().into(),
 			String::from("value") => v.value,
