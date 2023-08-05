@@ -157,10 +157,9 @@ impl Object {
 							message: String::from("'from' key missing"),
 						});
 
-					let value =
-						self.get("value").map(|value| value.clone()).ok_or(Error::InvalidPatch {
-							message: String::from("'value' key missing"),
-						});
+					let value = self.get("value").cloned().ok_or(Error::InvalidPatch {
+						message: String::from("'value' key missing"),
+					});
 
 					match op_val.clone().as_string().as_str() {
 						// Add operation
