@@ -7,7 +7,7 @@ use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::operation::{Op, Operation};
+use crate::sql::operation::Operation;
 use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -57,17 +57,45 @@ impl From<Option<Self>> for Object {
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Self(map! {
-			String::from("op") => Value::from(match v.op {
-				Op::None => "none",
-				Op::Add => "add",
-				Op::Remove => "remove",
-				Op::Replace => "replace",
-				Op::Change => "change",
-				Op::Test => "test"
-			}),
-			String::from("path") => v.path.to_path().into(),
-			String::from("value") => v.value,
+		Self(match v {
+			Operation::Add {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("add"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+			Operation::Remove {
+				path,
+			} => map! {
+				String::from("op") => Value::from("remove"),
+				String::from("path") => path.to_path().into()
+			},
+			Operation::Replace {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("replace"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+			Operation::Change {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("change"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+			Operation::Test {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("test"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
 		})
 	}
 }
@@ -104,15 +132,44 @@ impl Object {
 	/// Convert this object to a diff-match-patch operation
 	pub fn to_operation(&self) -> Result<Operation, Error> {
 		match self.get("op") {
-			Some(o) => match self.get("path") {
-				Some(p) => Ok(Operation {
-					op: o.into(),
-					path: p.jsonpath(),
-					value: match self.get("value") {
-						Some(v) => v.clone(),
-						None => Value::Null,
-					},
-				}),
+			Some(op_val) => match self.get("path") {
+				Some(path_val) => {
+					let path = path_val.jsonpath();
+					let value =
+						self.get("value").map(|value| value.clone()).ok_or(Error::InvalidPatch {
+							message: String::from("'value' key missing"),
+						});
+
+					match op_val.clone().as_string().as_str() {
+						// Add operation
+						"add" => Ok(Operation::Add {
+							path,
+							value: value?,
+						}),
+						// Remove operation
+						"remove" => Ok(Operation::Remove {
+							path,
+						}),
+						// Replace operation
+						"replace" => Ok(Operation::Replace {
+							path,
+							value: value?,
+						}),
+						// Change operation
+						"change" => Ok(Operation::Change {
+							path,
+							value: value?,
+						}),
+						// Test operation
+						"test" => Ok(Operation::Test {
+							path,
+							value: value?,
+						}),
+						unknown_op => Err(Error::InvalidPatch {
+							message: format!("unknown op '{unknown_op}'"),
+						}),
+					}
+				}
 				_ => Err(Error::InvalidPatch {
 					message: String::from("'path' key missing"),
 				}),

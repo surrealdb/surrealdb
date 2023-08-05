@@ -1,22 +1,33 @@
 use crate::err::Error;
-use crate::sql::operation::Op;
+use crate::sql::operation::Operation;
 use crate::sql::value::Value;
 
 impl Value {
-	pub(crate) fn patch(&mut self, val: Value) -> Result<(), Error> {
+	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
 		let mut tmp_val = self.clone();
 
-		for o in val.to_operations()?.into_iter() {
-			match o.op {
-				Op::Add => match tmp_val.pick(&o.path) {
-					Value::Array(_) => tmp_val.inc(&o.path, o.value),
-					_ => tmp_val.put(&o.path, o.value),
+		for operation in ops.to_operations()?.into_iter() {
+			match operation {
+				Operation::Add {
+					path,
+					value,
+				} => match tmp_val.pick(&path) {
+					Value::Array(_) => tmp_val.inc(&path, value),
+					_ => tmp_val.put(&path, value),
 				},
-				Op::Remove => tmp_val.cut(&o.path),
-				Op::Replace => tmp_val.put(&o.path, o.value),
-				Op::Change => {
-					if let Value::Strand(p) = o.value {
-						if let Value::Strand(v) = tmp_val.pick(&o.path) {
+				Operation::Remove {
+					path,
+				} => tmp_val.cut(&path),
+				Operation::Replace {
+					path,
+					value,
+				} => tmp_val.put(&path, value),
+				Operation::Change {
+					path,
+					value,
+				} => {
+					if let Value::Strand(p) = value {
+						if let Value::Strand(v) = tmp_val.pick(&path) {
 							let dmp = dmp::new();
 							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
 								Error::InvalidPatch {
@@ -29,21 +40,23 @@ impl Value {
 								}
 							})?;
 							let txt = txt.into_iter().collect::<String>();
-							tmp_val.put(&o.path, Value::from(txt));
+							tmp_val.put(&path, Value::from(txt));
 						}
 					}
 				}
-				Op::Test => {
-					let found_val = tmp_val.pick(&o.path);
+				Operation::Test {
+					path,
+					value,
+				} => {
+					let found_val = tmp_val.pick(&path);
 
-					if o.value != tmp_val.pick(&o.path) {
+					if value != tmp_val.pick(&path) {
 						return Err(Error::PatchTestFail {
-							expected: o.value,
+							expected: value,
 							got: found_val,
 						});
 					}
 				}
-				Op::None => (),
 			}
 		}
 
