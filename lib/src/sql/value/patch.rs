@@ -4,6 +4,8 @@ use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
+		// This value is for test operation, value itself shouldn't change until all operations done.
+		// If test operations fails, nothing in value will be changed.
 		let mut tmp_val = self.clone();
 
 		for operation in ops.to_operations()?.into_iter() {
