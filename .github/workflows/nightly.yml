@@ -212,7 +212,7 @@ jobs:
             target/${{ matrix.arch }}/release/${{ matrix.file }}.exe
 
   docker:
-    name: Build and publish Docker image
+    name: Build and publish Docker image to Docker Hub and AWS ECR
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -283,14 +283,40 @@ jobs:
           done
 
       # This second build reuses the cache from the build above
-      - name: Push the Docker image
+      - name: Push the Docker image to Docker Hub
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           tags: surrealdb/surrealdb:${{ env.VERSION }}
+      
+      # The following steps publish the docker image to AWS ECR public repository
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          aws-region: us-east-2
 
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: public
+        
+      - name: tag and push the image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ env.VERSION }}
+        run: |
+          # Build a docker container and push it to ECR 
+          docker tag surrealdb/surrealdb:${{ env.VERSION }} $ECR_REGISTRY/surrealdb:$IMAGE_TAG
+          echo "Pushing image to ECR..."
+          docker push $ECR_REGISTRY/surrealdb:$IMAGE_TAG
+          echo "name=image::$ECR_REGISTRY/surrealdb:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      
   publish:
     name: Publish binaries for ${{ matrix.arch }}
     needs: [docker]
