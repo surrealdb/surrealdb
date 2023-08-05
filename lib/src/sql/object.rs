@@ -88,6 +88,14 @@ impl From<Operation> for Object {
 				String::from("path") => path.to_path().into(),
 				String::from("value") => value
 			},
+			Operation::Copy {
+				path,
+				from,
+			} => map! {
+				String::from("op") => Value::from("copy"),
+				String::from("path") => path.to_path().into(),
+				String::from("from") => from.to_path().into()
+			},
 			Operation::Test {
 				path,
 				value,
@@ -135,6 +143,12 @@ impl Object {
 			Some(op_val) => match self.get("path") {
 				Some(path_val) => {
 					let path = path_val.jsonpath();
+
+					let from =
+						self.get("from").map(|value| value.jsonpath()).ok_or(Error::InvalidPatch {
+							message: String::from("'from' key missing"),
+						});
+
 					let value =
 						self.get("value").map(|value| value.clone()).ok_or(Error::InvalidPatch {
 							message: String::from("'value' key missing"),
@@ -159,6 +173,11 @@ impl Object {
 						"change" => Ok(Operation::Change {
 							path,
 							value: value?,
+						}),
+						// Copy operation
+						"copy" => Ok(Operation::Copy {
+							path,
+							from: from?,
 						}),
 						// Test operation
 						"test" => Ok(Operation::Test {

@@ -21,6 +21,10 @@ pub enum Operation {
 		path: Idiom,
 		value: Value,
 	},
+	Copy {
+		path: Idiom,
+		from: Idiom,
+	},
 	Test {
 		path: Idiom,
 		value: Value,

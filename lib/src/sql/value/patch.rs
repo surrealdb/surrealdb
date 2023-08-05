@@ -44,6 +44,13 @@ impl Value {
 						}
 					}
 				}
+				Operation::Copy {
+					path,
+					from,
+				} => {
+					let found_val = tmp_val.pick(&from);
+					tmp_val.put(&path, found_val);
+				}
 				Operation::Test {
 					path,
 					value,
@@ -110,6 +117,15 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn patch_copy_simple() {
+		let mut val = Value::parse("{ test: 123, temp: true }");
+		let ops = Value::parse("[{ op: 'copy', path: '/temp', from: '/test' }]");
+		let res = Value::parse("{ test: 123, temp: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
 	async fn patch_test_simple() {
 		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
 		let ops = Value::parse("[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]");
@@ -152,6 +168,15 @@ mod tests {
 			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
 		);
 		let res = Value::parse("{ test: { other: 'text', something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_copy_embedded() {
+		let mut val = Value::parse("{ test: { other: null }, temp: 123 }");
+		let ops = Value::parse("[{ op: 'copy', path: '/test/other', from: '/temp' }]");
+		let res = Value::parse("{ test: { other: 123 }, temp: 123 }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
