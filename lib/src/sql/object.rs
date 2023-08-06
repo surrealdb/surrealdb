@@ -186,7 +186,7 @@ impl Object {
 							path,
 							from: from?,
 						}),
-						// Copy operation
+						// Move operation
 						"move" => Ok(Operation::Move {
 							path,
 							from: from?,
