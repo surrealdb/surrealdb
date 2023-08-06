@@ -67,8 +67,8 @@ impl Value {
 				} => {
 					let found_val = tmp_val.pick(&path);
 
-					if value != tmp_val.pick(&path) {
-						return Err(Error::PatchTestFail {
+					if value != found_val {
+						return Err(Error::PatchTestFailure {
 							expected: value,
 							got: found_val,
 						});

@@ -109,7 +109,7 @@ pub enum Error {
 
 	/// Given test operation failed for JSON Patch
 	#[error("Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead.")]
-	PatchTestFail {
+	PatchTestFailure {
 		expected: Value,
 		got: Value,
 	},
