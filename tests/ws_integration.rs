@@ -4,7 +4,6 @@ mod common;
 
 use serde_json::json;
 use serial_test::serial;
-use surrealdb::sql::Value;
 use test_log::test;
 
 use crate::common::error::TestError;
@@ -384,7 +383,10 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let res = common::ws_recv_msg(socket).await;
 	match &res {
 		Err(e) => {
-			if let Some(test_err) = e.downcast_ref::<TestError>() {
+			if let Some(TestError::NetworkError {
+				..
+			}) = e.downcast_ref::<TestError>()
+			{
 			} else {
 				panic!("Expected a network error, but got: {:?}", e)
 			}
@@ -450,7 +452,7 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	)
 	.await
 	.unwrap();
-	let response_error = kill_res["result"].as_object().map(|map| map.get("error")).flatten();
+	let response_error = kill_res["result"].as_object().and_then(|map| map.get("error"));
 	assert!(response_error.is_none(), "resp error: {:?}, response: {:?}", response_error, kill_res);
 	assert_eq!(kill_res["status"], serde_json::Value::Null, "result: {:?}", kill_res);
 
@@ -465,7 +467,10 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let res = common::ws_recv_msg(socket).await;
 	match &res {
 		Err(e) => {
-			if let Some(test_err) = e.downcast_ref::<TestError>() {
+			if let Some(TestError::NetworkError {
+				..
+			}) = e.downcast_ref::<TestError>()
+			{
 			} else {
 				panic!("Expected a network error, but got: {:?}", e)
 			}
