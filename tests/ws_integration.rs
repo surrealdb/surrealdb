@@ -385,8 +385,6 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	match &res {
 		Err(e) => {
 			if let Some(test_err) = e.downcast_ref::<TestError>() {
-				// Handle the TestError::NetworkError variant here
-				// You can access the `TestError` enum as `test_err`
 			} else {
 				panic!("Expected a network error, but got: {:?}", e)
 			}
@@ -401,7 +399,81 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	// TODO: implement
+	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let table_name = "table_8B5E5635869E4FF2A35C94E8FC2CAE9A".to_string();
+
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	let ns = "3CB1D26373AF45F78D836EF2F78384A2";
+	let db = "622772B60DEB46958B6450EE43ED2515";
+	let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+
+	// LIVE query via live endpoint
+	let live_response = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+				"id": "29EE2E72-D472-4AEF-BB50-6576DF69577F",
+				"method": "live",
+				"params": [
+					table_name
+				],
+		}))
+		.unwrap(),
+	)
+	.await
+	.unwrap();
+	let live_id = live_response
+		.as_object()
+		.ok_or(TestError::AssertionError {
+			message: "Expected live query response to be object".to_string(),
+		})
+		.unwrap()
+		.get("result")
+		.ok_or(TestError::AssertionError {
+			message: "Expected live query response to contain a result entry".to_string(),
+		})
+		.unwrap();
+
+	// KILL query via kill endpoint
+	let kill_query = format!("KILL {live_id}");
+	let kill_res = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+				"id": "9215D428-1D42-419E-9554-FA23568795DF",
+				"method": "query",
+				"params": [
+					kill_query
+				],
+		}))
+		.unwrap(),
+	)
+	.await
+	.unwrap();
+	let response_error = kill_res["result"].as_object().map(|map| map.get("error")).flatten();
+	assert!(response_error.is_none(), "resp error: {:?}, response: {:?}", response_error, kill_res);
+	assert_eq!(kill_res["status"], serde_json::Value::Null, "result: {:?}", kill_res);
+
+	// Create some data for notification
+	let id = "FFE4CB54709840D3ACBE6C86E1148035";
+	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
+	println!("query: {}", query);
+	let created = common::ws_query(socket, query.as_str()).await.unwrap();
+	assert_eq!(created.len(), 1);
+
+	// Receive notification
+	let res = common::ws_recv_msg(socket).await;
+	match &res {
+		Err(e) => {
+			if let Some(test_err) = e.downcast_ref::<TestError>() {
+			} else {
+				panic!("Expected a network error, but got: {:?}", e)
+			}
+		}
+		Ok(v) => {
+			panic!("Expected a network error, but got: {:?}", v)
+		}
+	}
 	Ok(())
 }
 
