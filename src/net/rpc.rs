@@ -442,17 +442,7 @@ impl Rpc {
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
-				Ok(v) if v.is_uuid() => {
-					trace!("Kill live query with id={}", v);
-					let res = rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into);
-					trace!("Kill live query with res={:?}", &res);
-					res
-				}
-				Ok(v) => {
-					// Danny Deleto
-					error!("Value for kill param was {} and is uuid={}", v, v.is_uuid());
-					Err(Failure::INVALID_PARAMS)
-				}
+				Ok(v) => rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Setup a live query on a specific table
@@ -645,7 +635,7 @@ impl Rpc {
 		let sql = "KILL $id";
 		// Specify the query parameters
 		let var = map! {
-			String::from("id") => id,
+			String::from("id") => id, // NOTE: id can be parameter
 			=> &self.vars
 		};
 		// Execute the query on the database
