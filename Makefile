@@ -52,3 +52,7 @@ quick: check-deps
 .PHONY: build
 build: check-deps
 	cargo make build
+
+.PHONY: lint
+lint:
+	cargo make ci-clippy
