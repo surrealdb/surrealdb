@@ -75,7 +75,7 @@ fuzzy-matcher = "0.3.7"
 geo = { version = "0.25.1", features = ["use-serde"] }
 indexmap = { version = "1.9.3", features = ["serde"] }
 indxdb = { version = "0.3.0", optional = true }
-js = { version = "0.4.0-beta.2" , package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
+js = { version = "0.4.0-beta.3" , package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = "8.3.0"
 lexicmp = "0.1.0"
 lru = "0.10.1"
@@ -105,13 +105,16 @@ sha2 = "0.10.7"
 speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.43"
-tikv = { version = "0.2.0-surreal.1", package = "surrealdb-tikv-client", optional = true }
+# TODO: Uncomment when surrealdb-tikv-client 0.2.0-surreal.2 is published to crates.io is published
+#tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
+tikv = { git = "https://github.com/surrealdb/tikv-client.git", tag = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tokio-util = { version = "0.7.8", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.4.0"
 bytes = "1.4.0"
+cedar-policy = "2.2.0"
 
 [dev-dependencies]
 criterion = { version="0.4", features= [  "async_futures" ] }

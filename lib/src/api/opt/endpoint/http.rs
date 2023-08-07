@@ -7,7 +7,7 @@ use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Tls;
 use crate::api::Endpoint;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::net::SocketAddr;
 use url::Url;
 
@@ -18,7 +18,7 @@ impl IntoEndpoint<Http> for &str {
 		let url = format!("http://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -35,7 +35,7 @@ impl IntoEndpoint<Http> for SocketAddr {
 		let url = format!("http://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -52,7 +52,7 @@ impl IntoEndpoint<Http> for String {
 		let url = format!("http://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -69,7 +69,7 @@ impl IntoEndpoint<Https> for &str {
 		let url = format!("https://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -86,7 +86,7 @@ impl IntoEndpoint<Https> for SocketAddr {
 		let url = format!("https://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -103,7 +103,7 @@ impl IntoEndpoint<Https> for String {
 		let url = format!("https://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,

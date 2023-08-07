@@ -18,8 +18,10 @@ mod tikv;
 
 use crate::api::Connection;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use url::Url;
+
+use super::Config;
 
 /// A server address used to connect to the server
 #[derive(Debug)]
@@ -27,7 +29,7 @@ use url::Url;
 pub struct Endpoint {
 	pub(crate) endpoint: Url,
 	#[allow(dead_code)] // used by the embedded database
-	pub(crate) strict: bool,
+	pub(crate) config: Config,
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	pub(crate) tls_config: Option<super::Tls>,
 	// Only used by the local engines

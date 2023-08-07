@@ -16,6 +16,7 @@ use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
+use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
 use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
@@ -49,6 +50,7 @@ use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
+use nom::sequence::terminated;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -2482,7 +2484,9 @@ impl Value {
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
+			Value::Function(v) => {
+				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
+			}
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2695,10 +2699,15 @@ pub fn value(i: &str) -> IResult<&str, Value> {
 pub fn single(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
-			map(tag_no_case("NONE"), |_| Value::None),
-			map(tag_no_case("NULL"), |_| Value::Null),
-			map(tag_no_case("true"), |_| Value::Bool(true)),
-			map(tag_no_case("false"), |_| Value::Bool(false)),
+			terminated(
+				alt((
+					map(tag_no_case("NONE"), |_| Value::None),
+					map(tag_no_case("NULL"), |_| Value::Null),
+					map(tag_no_case("true"), |_| Value::Bool(true)),
+					map(tag_no_case("false"), |_| Value::Bool(false)),
+				)),
+				keyword,
+			),
 			map(idiom::multi, Value::from),
 		)),
 		alt((
@@ -2967,10 +2976,10 @@ mod tests {
 	#[test]
 	fn serialize_deserialize() {
 		let val = Value::parse(
-			"{ test: { something: [1, 'two', null, test:tobie, { something: false }] } }",
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
 		let res = Value::parse(
-			"{ test: { something: [1, 'two', null, test:tobie, { something: false }] } }",
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
 		let enc: Vec<u8> = val.into();
 		let dec: Value = enc.into();

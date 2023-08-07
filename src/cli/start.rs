@@ -7,12 +7,13 @@ use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
-use crate::iam;
 use crate::net::{self, client_ip::ClientIp};
+use crate::node;
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -21,12 +22,27 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
-	#[arg(help = "The master username for the database")]
-	#[arg(env = "SURREAL_USER", short = 'u', long = "username", visible_alias = "user")]
-	#[arg(default_value = "root")]
-	username: String,
-	#[arg(help = "The master password for the database")]
-	#[arg(env = "SURREAL_PASS", short = 'p', long = "password", visible_alias = "pass")]
+	#[arg(
+		help = "The username for the initial database root user. Only if no other root user exists"
+	)]
+	#[arg(
+		env = "SURREAL_USER",
+		short = 'u',
+		long = "username",
+		visible_alias = "user",
+		requires = "password"
+	)]
+	username: Option<String>,
+	#[arg(
+		help = "The password for the initial database root user. Only if no other root user exists"
+	)]
+	#[arg(
+		env = "SURREAL_PASS",
+		short = 'p',
+		long = "password",
+		visible_alias = "pass",
+		requires = "username"
+	)]
 	password: Option<String>,
 	#[arg(help = "The allowed networks for master authentication")]
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
@@ -40,6 +56,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "The interval at which to run node agent tick (including garbage collection)")]
+	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "10s")]
+	tick_interval: Duration,
 	#[command(flatten)]
 	dbs: StartCommandDbsOptions,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
@@ -95,7 +115,8 @@ pub async fn init(
 		listen_addresses,
 		dbs,
 		web,
-		log: CustomEnvFilter(log),
+		log,
+		tick_interval,
 		no_banner,
 		..
 	}: StartCommandArguments,
@@ -115,17 +136,19 @@ pub async fn init(
 		path,
 		user,
 		pass,
+		tick_interval,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});
 	// Initiate environment
 	env::init().await?;
-	// Initiate master auth
-	iam::init().await?;
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the web server
 	net::init().await?;
+	// Start the node agent
+	#[cfg(feature = "has-storage")]
+	node::init().await?;
 	// All ok
 	Ok(())
 }

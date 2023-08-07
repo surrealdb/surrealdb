@@ -5,7 +5,8 @@ use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
+use crate::opt::Config;
 use url::Url;
 
 impl IntoEndpoint<Mem> for () {
@@ -14,7 +15,7 @@ impl IntoEndpoint<Mem> for () {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		Ok(Endpoint {
 			endpoint: Url::parse("mem://").unwrap(),
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,
@@ -29,7 +30,17 @@ impl IntoEndpoint<Mem> for Strict {
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(())?;
-		endpoint.strict = true;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+impl IntoEndpoint<Mem> for Config {
+	type Client = Db;
+
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(())?;
+		endpoint.config = self;
 		Ok(endpoint)
 	}
 }
@@ -39,7 +50,7 @@ impl IntoEndpoint<Mem> for Root<'_> {
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(())?;
-		endpoint.auth = Level::Kv;
+		endpoint.auth = Level::Root;
 		endpoint.username = self.username.to_owned();
 		endpoint.password = self.password.to_owned();
 		Ok(endpoint)
@@ -52,7 +63,18 @@ impl IntoEndpoint<Mem> for (Strict, Root<'_>) {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (_, root) = self;
 		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(root)?;
-		endpoint.strict = true;
+		endpoint.config.strict = true;
+		Ok(endpoint)
+	}
+}
+
+impl IntoEndpoint<Mem> for (Config, Root<'_>) {
+	type Client = Db;
+
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (config, root) = self;
+		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(root)?;
+		endpoint.config = config;
 		Ok(endpoint)
 	}
 }

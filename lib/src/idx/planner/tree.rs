@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::idx::planner::plan::IndexOption;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Cond, Expression, Idiom, Operator, Subquery, Table, Value};
+use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -156,7 +156,14 @@ impl<'a> TreeBuilder<'a> {
 				}
 			};
 			if found {
-				let io = IndexOption::new(ix.clone(), id.clone(), op.to_owned(), v.clone(), qs, mr);
+				let io = IndexOption::new(
+					ix.clone(),
+					id.clone(),
+					op.to_owned(),
+					Array::from(v.clone()),
+					qs,
+					mr,
+				);
 				self.index_map.0.insert(e.clone(), io.clone());
 				return Some(io);
 			}

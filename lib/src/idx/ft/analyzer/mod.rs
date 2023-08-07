@@ -7,7 +7,7 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::{Array, Value};
+use crate::sql::Value;
 use filter::Filter;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -64,7 +64,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &Array,
+		field_content: &[Value],
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -101,13 +101,13 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &Array,
+		content: &[Value],
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
-		let mut inputs = Vec::with_capacity(field_content.len());
-		self.analyze_content(field_content, &mut inputs)?;
+		let mut inputs = Vec::with_capacity(content.len());
+		self.analyze_content(content, &mut inputs)?;
 		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -135,8 +135,8 @@ impl Analyzer {
 		Ok((dl, tfid, osid))
 	}
 
-	fn analyze_content(&self, field_content: &Array, tks: &mut Vec<Tokens>) -> Result<(), Error> {
-		for v in &field_content.0 {
+	fn analyze_content(&self, content: &[Value], tks: &mut Vec<Tokens>) -> Result<(), Error> {
+		for v in content {
 			self.analyze_value(v, tks)?;
 		}
 		Ok(())
@@ -149,6 +149,11 @@ impl Analyzer {
 			Value::Bool(b) => tks.push(self.analyze(b.to_string())?),
 			Value::Array(a) => {
 				for v in &a.0 {
+					self.analyze_value(v, tks)?;
+				}
+			}
+			Value::Object(o) => {
+				for v in o.0.values() {
 					self.analyze_value(v, tks)?;
 				}
 			}

@@ -24,9 +24,9 @@ mod dbs;
 mod env;
 mod err;
 #[cfg(feature = "has-storage")]
-mod iam;
-#[cfg(feature = "has-storage")]
 mod net;
+#[cfg(feature = "has-storage")]
+mod node;
 #[cfg(feature = "has-storage")]
 mod rpc;
 mod telemetry;
@@ -41,7 +41,7 @@ fn main() -> ExitCode {
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
 fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
-	let stack_size = 8 * 1024 * 1024;
+	let stack_size = 10 * 1024 * 1024;
 
 	// Stack frames are generally larger in debug mode.
 	#[cfg(debug_assertions)]

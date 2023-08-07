@@ -1,50 +1,54 @@
-DEV_FEATURES := --no-default-features --features storage-mem,http,scripting
-
 .PHONY: default
 default:
 	@echo "Choose a Makefile target:"
 	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print "  - " $$1}}' | sort
 
+.PHONY: check-deps
+check-deps:
+	@cargo make --help >/dev/null 2>&1 || { \
+		echo >&2 "ERROR: Install cargo-make to use make tasks."; \
+		echo >&2 "$ cargo install --no-default-features --force cargo-make"; \
+		echo >&2 "More info: https://sagiegurari.github.io/cargo-make"; \
+		echo >&2; \
+		exit 1; \
+	}
+
 .PHONY: setup
-setup:
-	cargo upgrade --pinned
-	cargo update
+setup: check-deps
+	cargo make setup
 
 .PHONY: docs
-docs:
-	cargo doc --open --no-deps --package surrealdb --features rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-speedb,kv-rocksdb,kv-tikv,http,scripting
+docs: check-deps
+	cargo make docs
 
 .PHONY: test
-test:
-	cargo test --workspace
+test: check-deps
+	cargo make test
 
 .PHONY: check
-check:
-	cargo check --workspace
-	cargo fmt --all --check
-	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
-	cargo clippy --all-targets --all-features -- -D warnings
+check: check-deps
+	cargo make check
 
 .PHONY: clean
-clean:
-	cargo clean
+clean: check-deps
+	cargo make clean
 
 .PHONY: bench
-bench:
-	cargo bench --package surrealdb --no-default-features --features kv-mem,http,scripting
+bench: check-deps
+	cargo make bench
 
 .PHONY: serve
-serve:
-	cargo run $(DEV_FEATURES) -- start --log trace --user root --pass root memory
+serve: check-deps
+	cargo make serve
 
 .PHONY: sql
-sql:
-	cargo run $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --multi --pretty
+sql: check-deps
+	cargo make sql
 
 .PHONY: quick
-quick:
-	cargo build
+quick: check-deps
+	cargo make quick
 
 .PHONY: build
-build:
-	cargo build --release
+build: check-deps
+	cargo make build

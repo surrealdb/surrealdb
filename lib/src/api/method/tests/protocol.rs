@@ -11,7 +11,7 @@ use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
+use crate::iam::Level;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
 use std::collections::HashSet;
@@ -31,7 +31,7 @@ impl IntoEndpoint<Test> for () {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		Ok(Endpoint {
 			endpoint: Url::parse("test://")?,
-			strict: false,
+			config: Default::default(),
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
 			auth: Level::No,

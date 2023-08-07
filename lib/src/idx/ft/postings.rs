@@ -1,10 +1,10 @@
 use crate::err::Error;
-use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::store::{BTreeNodeStore, BTreeStoreType, KeyProvider};
-use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::idx::trees::bkeys::TrieKeys;
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
+use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::{IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -23,16 +23,16 @@ impl Postings {
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
-		store_type: BTreeStoreType,
+		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bp_key(None);
-		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
-			btree::State::try_from_val(val)?
+		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
+			BState::try_from_val(val)?
 		} else {
-			btree::State::new(order)
+			BState::new(order)
 		};
 		let store =
-			BTreeNodeStore::new(KeyProvider::Postings(index_key_base.clone()), store_type, 20);
+			TreeNodeStore::new(TreeNodeProvider::Postings(index_key_base.clone()), store_type, 20);
 		Ok(Self {
 			state_key,
 			index_key_base,
@@ -75,7 +75,7 @@ impl Postings {
 		self.btree.delete(tx, &mut store, key).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
@@ -91,8 +91,8 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::btree::store::BTreeStoreType;
 	use crate::idx::ft::postings::Postings;
+	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 	use test_log::test;
@@ -108,7 +108,7 @@ mod tests {
 			&mut tx,
 			IndexKeyBase::default(),
 			DEFAULT_BTREE_ORDER,
-			BTreeStoreType::Write,
+			TreeStoreType::Write,
 		)
 		.await
 		.unwrap();
@@ -126,7 +126,7 @@ mod tests {
 			&mut tx,
 			IndexKeyBase::default(),
 			DEFAULT_BTREE_ORDER,
-			BTreeStoreType::Write,
+			TreeStoreType::Write,
 		)
 		.await
 		.unwrap();

@@ -1,7 +1,14 @@
 mod parse;
+
+mod helpers;
+use helpers::*;
+
+use std::collections::HashMap;
+
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
@@ -10,20 +17,21 @@ use surrealdb::sql::{Part, Value};
 async fn define_statement_namespace() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE test;
-		INFO FOR KV;
+		INFO FOR ROOT;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -38,7 +46,7 @@ async fn define_statement_database() -> Result<(), Error> {
 		INFO FOR NS;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -51,6 +59,7 @@ async fn define_statement_database() -> Result<(), Error> {
 			databases: { test: 'DEFINE DATABASE test' },
 			logins: {},
 			tokens: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -67,7 +76,7 @@ async fn define_statement_function() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -86,6 +95,7 @@ async fn define_statement_function() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -100,7 +110,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -117,6 +127,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -131,7 +142,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -148,6 +159,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -163,7 +175,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -183,6 +195,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -197,7 +210,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -214,6 +227,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -237,7 +251,7 @@ async fn define_statement_event() -> Result<(), Error> {
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -294,7 +308,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -351,7 +365,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -400,7 +414,7 @@ async fn define_statement_field() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -432,7 +446,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -464,7 +478,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -496,7 +510,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -528,7 +542,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -564,7 +578,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 		UPDATE user:2 SET age = 11;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -612,7 +626,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -656,7 +670,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -708,7 +722,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -766,7 +780,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 12);
 	//
@@ -841,7 +855,7 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
@@ -888,7 +902,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 		INFO FOR TABLE user;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -924,7 +938,6 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS tags UNIQUE;
@@ -934,7 +947,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 		CREATE user:2 SET tags = ['two', 'three'];
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -960,16 +973,19 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:2`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains 'two', with record `user:2`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, tags UNIQUE;
@@ -981,7 +997,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		CREATE user:4 SET account = 'tesla', tags = ['two', 'three'];
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -1007,20 +1023,28 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'tesla', tags: ['one', 'two'] }]");
+	let val = Value::parse("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['apple', 'two'], with record `user:3`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:4`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['tesla', 'two'], with record `user:4`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }
@@ -1033,7 +1057,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
@@ -1056,7 +1080,8 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: {}
+			tables: {},
+			users: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1077,7 +1102,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
@@ -1102,12 +1127,12 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(65)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
 
 	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(59)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
 
 	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
 	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
@@ -1122,6 +1147,146 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn define_statement_user_root() -> Result<(), Error> {
+	let sql = "
+		DEFINE USER test ON ROOT PASSWORD 'test';
+
+		INFO FOR ROOT;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner();
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
+
+	assert!(define_str
+		.strip_prefix("\"")
+		.unwrap()
+		.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_ns() -> Result<(), Error> {
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		DEFINE USER test ON NS PASSWORD 'test';
+		
+		INFO FOR USER test;
+		INFO FOR USER test ON NS;
+		INFO FOR USER test ON NAMESPACE;
+		INFO FOR USER test ON ROOT;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res[1].result.is_ok());
+	assert!(res[2].result.is_ok());
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert_eq!(
+		res[5].result.as_ref().unwrap_err().to_string(),
+		"The root user 'test' does not exist"
+	); // User doesn't exist at the NS level
+
+	assert!(res[2]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON NS PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_db() -> Result<(), Error> {
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test ON DB PASSWORD 'test';
+		
+		INFO FOR USER test;
+		INFO FOR USER test ON DB;
+		INFO FOR USER test ON DATABASE;
+		INFO FOR USER test ON NS;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res[2].result.is_ok());
+	assert!(res[3].result.is_ok());
+	assert!(res[4].result.is_ok());
+	assert!(res[5].result.is_ok());
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"The user 'test' does not exist in the namespace 'ns'"
+	); // User doesn't exist at the NS level
+
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON DB PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
 fn check_path<F>(val: &Value, path: &[&str], check: F)
 where
 	F: Fn(Value),
@@ -1132,4 +1297,634 @@ where
 		assert_eq!(Idiom(part.clone()), i);
 		check(v);
 	}
+}
+
+//
+// Permissions
+//
+
+#[tokio::test]
+async fn permissions_checks_define_ns() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE NAMESPACE NS"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
+		vec!["{ namespaces: {  }, users: {  } }"],
+	];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_db() {
+	let scenario =
+		HashMap::from([("prepare", ""), ("test", "DEFINE DATABASE DB"), ("check", "INFO FOR NS")]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+		vec![
+			"{ databases: { DB: 'DEFINE DATABASE DB' }, logins: {  }, tokens: {  }, users: {  } }",
+		],
+		vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: {  } }"],
+	];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_function() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE FUNCTION fn::greet() {RETURN \"Hello\";}"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; }\" }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_analyzer() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE ANALYZER analyzer TOKENIZERS BLANK"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_token_ns() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE TOKEN token ON NS TYPE HS512 VALUE 'secret'"),
+		("check", "INFO FOR NS"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ databases: {  }, logins: {  }, tokens: { token: \"DEFINE TOKEN token ON NAMESPACE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_token_db() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE TOKEN token ON DB TYPE HS512 VALUE 'secret'"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_user_root() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ namespaces: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_user_ns() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER"),
+		("check", "INFO FOR NS"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_user_db() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_scope() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE SCOPE account SESSION 1h;"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_param() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE PARAM $param VALUE 'foo'"),
+		("check", "INFO FOR DB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo'\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_table() {
+	let scenario =
+		HashMap::from([("prepare", ""), ("test", "DEFINE TABLE TB"), ("check", "INFO FOR DB")]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS' }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_event() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE EVENT event ON TABLE TB WHEN true THEN RETURN 'foo'"),
+		("check", "INFO FOR TABLE TB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_field() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE FIELD field ON TABLE TB"),
+		("check", "INFO FOR TABLE TB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_define_index() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE INDEX index ON TABLE TB FIELDS field"),
+		("check", "INFO FOR TABLE TB"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
 }

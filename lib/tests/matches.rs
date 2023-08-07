@@ -15,7 +15,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 		SELECT id, search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE title @1@ 'Hello';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -63,7 +63,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 		SELECT id,search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE (title @0@ 'hello' AND identifier > 0) OR (title @1@ 'world' AND identifier < 99);
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
@@ -118,7 +118,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	"
 	);
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -171,6 +171,76 @@ async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(
 	select_where_matches_using_index_and_arrays(true).await
 }
 
+async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<(), Error> {
+	let p = if parallel {
+		"PARALLEL"
+	} else {
+		""
+	};
+	let sql = format!(
+		r"
+		CREATE blog:1 SET content = {{ 'title':'Hello World!', 'content':'Be Bop', 'tags': ['Foo', 'Bãr'] }};
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		SELECT id FROM blog WHERE content @1@ 'Hello Bãr' {p} EXPLAIN;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr' {p};
+	"
+	);
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						detail: {
+							plan: {
+								index: 'blog_content',
+								operator: '@1@',
+								value: 'Hello Bãr'
+							},
+							table: 'blog',
+						},
+						operation: 'Iterate Index'
+					}
+			]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				content: [
+					'Be Bop',
+					'Foo',
+					'<em>Bãr</em>',
+					'<em>Hello</em> World!'
+				]
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_objects_non_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_objects(false).await
+}
+
+#[tokio::test]
+async fn select_where_matches_using_index_and_objects_with_parallel() -> Result<(), Error> {
+	select_where_matches_using_index_and_objects(true).await
+}
+
 #[tokio::test]
 async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let sql = r"
@@ -181,8 +251,8 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	for _ in 0..4 {
@@ -219,7 +289,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 		SELECT id,search::score(1) AS score FROM blog WHERE title @1@ 'animals';
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
@@ -257,7 +327,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 			OR (title @2@ 'dummy2' AND label = 'test');
 	";
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//

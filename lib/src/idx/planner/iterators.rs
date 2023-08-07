@@ -6,7 +6,7 @@ use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::key;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Thing, Value};
+use crate::sql::{Array, Thing};
 
 pub(crate) enum ThingIterator {
 	NonUniqueEqual(NonUniqueEqualThingIterator),
@@ -37,11 +37,10 @@ impl NonUniqueEqualThingIterator {
 	pub(super) fn new(
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		v: &Value,
+		v: &Array,
 	) -> Result<NonUniqueEqualThingIterator, Error> {
-		let v = Array::from(v.clone());
 		let (beg, end) =
-			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, &v);
+			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, v);
 		Ok(Self {
 			beg,
 			end,
@@ -70,9 +69,8 @@ pub(crate) struct UniqueEqualThingIterator {
 }
 
 impl UniqueEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
-		let v = Array::from(v.clone());
-		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, v, None).into();
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Result<Self, Error> {
+		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, a, None).into();
 		Ok(Self {
 			key: Some(key),
 		})
