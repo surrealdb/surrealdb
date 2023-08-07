@@ -1,4 +1,5 @@
 use axum::extract::ws::Message;
+use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
 use serde_json::{json, Value as Json};
 use std::borrow::Cow;
@@ -11,6 +12,7 @@ use tracing::Span;
 
 use crate::err;
 use crate::rpc::CONN_CLOSED_ERR;
+use crate::telemetry::metrics::ws::record_rpc;
 
 #[derive(Debug, Clone)]
 pub enum OutputFormat {
@@ -62,7 +64,7 @@ impl From<Notification> for Data {
 pub struct Response {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	id: Option<Value>,
-	result: Result<Data, Failure>,
+	pub result: Result<Data, Failure>,
 }
 
 impl Response {
@@ -96,6 +98,7 @@ impl Response {
 
 		info!("Process RPC response");
 
+		let is_error = self.result.is_err();
 		if let Err(err) = &self.result {
 			span.record("otel.status_code", "Error");
 			span.record(
@@ -106,30 +109,33 @@ impl Response {
 			span.record("rpc.jsonrpc.error_message", err.message.as_ref());
 		}
 
-		let message = match out {
+		let (res_size, message) = match out {
 			OutputFormat::Json => {
 				let res = serde_json::to_string(&self.simplify()).unwrap();
-				Message::Text(res)
+				(res.len(), Message::Text(res))
 			}
 			OutputFormat::Cbor => {
 				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
-				Message::Binary(res)
+				(res.len(), Message::Binary(res))
 			}
 			OutputFormat::Pack => {
 				let res = serde_pack::to_vec(&self.simplify()).unwrap();
-				Message::Binary(res)
+				(res.len(), Message::Binary(res))
 			}
 			OutputFormat::Full => {
 				let res = surrealdb::sql::serde::serialize(&self).unwrap();
-				Message::Binary(res)
+				(res.len(), Message::Binary(res))
 			}
 		};
 
 		if let Err(err) = chn.send(message).await {
 			if err.to_string() != CONN_CLOSED_ERR {
 				error!("Error sending response: {}", err);
+				return;
 			}
 		};
+
+		record_rpc(&TelemetryContext::current(), res_size, is_error);
 	}
 }
 

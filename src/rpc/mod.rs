@@ -1,5 +1,44 @@
 pub mod args;
-pub mod paths;
+pub mod connection;
+pub mod processor;
+pub mod request;
 pub mod res;
 
-pub(crate) static CONN_CLOSED_ERR: &str = "Connection closed normally";
+use std::{collections::HashMap, time::Duration};
+
+use axum::extract::ws::Message;
+use once_cell::sync::Lazy;
+use surrealdb::channel::Sender;
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+static CONN_CLOSED_ERR: &str = "Connection closed normally";
+
+// Mapping of WebSocketID to WebSocket
+pub struct WebSocketRef(Sender<Message>, CancellationToken);
+type WebSockets = RwLock<HashMap<Uuid, WebSocketRef>>;
+// Mapping of LiveQueryID to WebSocketID
+type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
+
+pub(crate) static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
+pub(crate) static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
+
+pub(crate) async fn graceful_shutdown() {
+	// Close all WebSocket connections. Queued messages will still be processed.
+	for (_, WebSocketRef(_, cancel_token)) in WEBSOCKETS.read().await.iter() {
+		cancel_token.cancel();
+	}
+
+	// Wait for all existing WebSocket connections to gracefully close
+	while WEBSOCKETS.read().await.len() > 0 {
+		tokio::time::sleep(Duration::from_millis(100)).await;
+	}
+}
+
+pub(crate) fn shutdown() {
+	// Close all WebSocket connections immediately
+	if let Ok(mut writer) = WEBSOCKETS.try_write() {
+		writer.drain();
+	}
+}
