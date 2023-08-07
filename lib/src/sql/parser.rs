@@ -146,7 +146,7 @@ pub(crate) mod depth {
 	/// Scale down `MAX_COMPUTATION_DEPTH` for parsing because:
 	///  - Only a few intermediate parsers, collectively sufficient to limit depth, call dive.
 	///  - Some of the depth budget during execution is for futures, graph traversal, and
-	///    other operatinos that don't exist during parsing.
+	///    other operations that don't exist during parsing.
 	///  - The parser currently runs in exponential time, so a lower limit guards against
 	///    CPU-intensive, time-consuming parsing.
 	const DEPTH_PER_DIVE: u8 = 4;
