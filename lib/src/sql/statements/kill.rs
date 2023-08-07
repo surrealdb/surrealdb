@@ -94,7 +94,6 @@ impl fmt::Display for KillStatement {
 pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 	let (i, _) = tag_no_case("KILL")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	trace!("kill stm eval {} uuid = {:?}", i, uuid(i));
 	let (i, v) = alt((map(uuid, Value::from), map(param, Value::from)))(i)?;
 	Ok((
 		i,
