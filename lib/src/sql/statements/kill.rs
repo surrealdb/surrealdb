@@ -111,7 +111,6 @@ mod tests {
 
 	#[test]
 	fn kill_uuid() {
-		// let uuid_str = Uuid::new_v4().to_string();
 		let uuid_str = "c005b8da-63a4-48bc-a371-07e95b39d58e";
 		let uuid_str_wrapped = format!("'{}'", uuid_str);
 		let sql = format!("kill {}", uuid_str_wrapped);

@@ -442,6 +442,7 @@ impl Rpc {
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
+				// NOTE: The return type of kill is OK(()). That converts to Data::Other(Value::Null), meaning result=Null
 				Ok(v) => rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
@@ -640,6 +641,7 @@ impl Rpc {
 		};
 		// Execute the query on the database
 		let mut res = self.query_with(Strand::from(sql), Object::from(var)).await?;
+		trace!("Query result: {:?}", res);
 		// Extract the first query result
 		let response = res.remove(0);
 		match response.result {

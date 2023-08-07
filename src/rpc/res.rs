@@ -73,11 +73,11 @@ impl Response {
 			Ok(data) => {
 				let value = match data {
 					Data::Query(vec) => sql::to_value(vec).unwrap(),
-					Data::Live(nofication) => sql::to_value(nofication).unwrap(),
+					Data::Live(notification) => sql::to_value(notification).unwrap(),
 					Data::Other(value) => value,
 				};
 				json!({
-					"result": Json::from(value),
+					"result": Json::from(value), // The KILL value is Ok(Null), so this is resulting in result: null
 				})
 			}
 			Err(failure) => json!({
@@ -179,9 +179,11 @@ impl Failure {
 
 /// Create a JSON RPC result response
 pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
+	let d = data.into();
+	trace!("Success response: id {:?} and data {:?}", &id, &d);
 	Response {
 		id,
-		result: Ok(data.into()),
+		result: Ok(d),
 	}
 }
 
