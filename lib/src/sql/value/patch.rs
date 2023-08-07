@@ -68,9 +68,9 @@ impl Value {
 					let found_val = tmp_val.pick(&path);
 
 					if value != found_val {
-						return Err(Error::PatchTestFailure {
-							expected: value,
-							got: found_val,
+						return Err(Error::PatchTest {
+							expected: value.to_string(),
+							got: found_val.to_string(),
 						});
 					}
 				}

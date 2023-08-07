@@ -109,9 +109,9 @@ pub enum Error {
 
 	/// Given test operation failed for JSON Patch
 	#[error("Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead.")]
-	PatchTestFailure {
-		expected: Value,
-		got: Value,
+	PatchTest {
+		expected: String,
+		got: String,
 	},
 
 	/// Remote HTTP request functions are not enabled
