@@ -140,6 +140,14 @@ impl Default for StartServerArguments {
 	}
 }
 
+pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		auth: false,
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments::default()).await
 }

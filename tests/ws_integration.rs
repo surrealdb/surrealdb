@@ -327,7 +327,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -413,7 +413,7 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
