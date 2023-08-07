@@ -129,6 +129,21 @@ pub struct StartServerArguments {
 	pub tick_interval: time::Duration,
 }
 
+impl Default for StartServerArguments {
+	fn default() -> Self {
+		Self {
+			auth: true,
+			tls: false,
+			wait_is_ready: true,
+			tick_interval: time::Duration::new(1, 0),
+		}
+	}
+}
+
+pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments::default()).await
+}
+
 pub async fn start_server(
 	StartServerArguments {
 		auth,
