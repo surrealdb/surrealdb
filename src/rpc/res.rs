@@ -77,7 +77,7 @@ impl Response {
 					Data::Other(value) => value,
 				};
 				json!({
-					"result": Json::from(value), // The KILL value is Ok(Null), so this is resulting in result: null
+					"result": Json::from(value),
 				})
 			}
 			Err(failure) => json!({
@@ -179,11 +179,9 @@ impl Failure {
 
 /// Create a JSON RPC result response
 pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
-	let d = data.into();
-	trace!("Success response: id {:?} and data {:?}", &id, &d);
 	Response {
 		id,
-		result: Ok(d),
+		result: Ok(data.into()),
 	}
 }
 

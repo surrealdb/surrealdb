@@ -52,44 +52,41 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 			// There was unparsed SQL remaining
 			Ok((_, _)) => Err(Error::QueryRemaining),
 			// There was an error when parsing the query
-			Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-				error!("parser error: {:?}", e);
-				Err(match e {
-					// There was a parsing error
-					Parser(e) => {
-						// Locate the parser position
-						let (s, l, c) = locate(input, e);
-						// Return the parser error
-						Error::InvalidQuery {
-							line: l,
-							char: c,
-							sql: s.to_string(),
-						}
+			Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(match e {
+				// There was a parsing error
+				Parser(e) => {
+					// Locate the parser position
+					let (s, l, c) = locate(input, e);
+					// Return the parser error
+					Error::InvalidQuery {
+						line: l,
+						char: c,
+						sql: s.to_string(),
 					}
-					// There was a SPLIT ON error
-					Field(e, f) => Error::InvalidField {
-						line: locate(input, e).1,
-						field: f,
-					},
-					// There was a SPLIT ON error
-					Split(e, f) => Error::InvalidSplit {
-						line: locate(input, e).1,
-						field: f,
-					},
-					// There was a ORDER BY error
-					Order(e, f) => Error::InvalidOrder {
-						line: locate(input, e).1,
-						field: f,
-					},
-					// There was a GROUP BY error
-					Group(e, f) => Error::InvalidGroup {
-						line: locate(input, e).1,
-						field: f,
-					},
-					// There was an error parsing the ROLE
-					Role(_, role) => Error::IamError(IamError::InvalidRole(role)),
-				})
-			}
+				}
+				// There was a SPLIT ON error
+				Field(e, f) => Error::InvalidField {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a SPLIT ON error
+				Split(e, f) => Error::InvalidSplit {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a ORDER BY error
+				Order(e, f) => Error::InvalidOrder {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a GROUP BY error
+				Group(e, f) => Error::InvalidGroup {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was an error parsing the ROLE
+				Role(_, role) => Error::IamError(IamError::InvalidRole(role)),
+			}),
 			_ => unreachable!(),
 		},
 	}
