@@ -99,7 +99,7 @@ pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 	Ok((
 		i,
 		KillStatement {
-			id: v, // TODO change to value
+			id: v,
 		},
 	))
 }
