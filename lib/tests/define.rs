@@ -938,7 +938,6 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS tags UNIQUE;
@@ -974,16 +973,19 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:2`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains 'two', with record `user:2`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }
 
 #[tokio::test]
-#[ignore]
 async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, tags UNIQUE;
@@ -1021,20 +1023,28 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'tesla', tags: ['one', 'two'] }]");
+	let val = Value::parse("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['apple', 'two'], with record `user:3`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Database index `test` already contains `user:4`"
-	));
+	if let Err(e) = tmp {
+		assert_eq!(
+			e.to_string(),
+			"Database index `test` already contains ['tesla', 'two'], with record `user:4`"
+		);
+	} else {
+		panic!("An error was expected.")
+	}
 	//
 	Ok(())
 }
@@ -1117,12 +1127,12 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(65)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
 
 	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(59)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
 
 	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
 	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
