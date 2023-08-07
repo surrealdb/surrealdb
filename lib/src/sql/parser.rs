@@ -143,6 +143,14 @@ pub(crate) mod depth {
 		static DEPTH: Cell<u8> = Cell::default();
 	}
 
+	/// Scale down `MAX_COMPUTATION_DEPTH` for parsing because:
+	///  - Only a few intermediate parsers, collectively sufficient to limit depth, call dive.
+	///  - Some of the depth budget during execution is for futures, graph traversal, and
+	///    other operatinos that don't exist during parsing.
+	///  - The parser currently runs in exponential time, so a lower limit guards against
+	///    CPU-intensive, time-consuming parsing.
+	const DEPTH_PER_DIVE: u8 = 4;
+
 	/// Call when starting the parser to reset the recursion depth.
 	#[inline(never)]
 	pub(super) fn reset() {
@@ -157,7 +165,7 @@ pub(crate) mod depth {
 	#[must_use = "must store and implicitly drop when returning"]
 	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
 		DEPTH.with(|cell| {
-			let depth = cell.get().saturating_add(4);
+			let depth = cell.get().saturating_add(DEPTH_PER_DIVE);
 			if depth <= *MAX_COMPUTATION_DEPTH {
 				cell.replace(depth);
 				Ok(Diving)
@@ -174,7 +182,7 @@ pub(crate) mod depth {
 	impl Drop for Diving {
 		fn drop(&mut self) {
 			DEPTH.with(|cell| {
-				if let Some(depth) = cell.get().checked_sub(1) {
+				if let Some(depth) = cell.get().checked_sub(DEPTH_PER_DIVE) {
 					cell.replace(depth);
 				} else {
 					debug_assert!(panicking());
