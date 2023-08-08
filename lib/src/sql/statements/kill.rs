@@ -38,8 +38,8 @@ impl KillStatement {
 		// Resolve live query id
 		let live_query_id = match &self.id {
 			Value::Uuid(id) => id.clone(),
-			Value::Param(param) => *match param.compute(ctx, opt, txn, None).await? {
-				Value::Uuid(id) => Box::new(id),
+			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
+				Value::Uuid(id) => id,
 				_ => {
 					return Err(Error::KillStatement {
 						value: self.id.to_string(),
