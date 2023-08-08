@@ -169,10 +169,14 @@ async fn changefeed_with_ts() {
 		)
 		.unwrap()
 	);
+	// Save timestamp 3
+	let ts3_dt = "2023-08-01T00:00:10Z";
+	let ts3 = DateTime::parse_from_rfc3339(ts3_dt.clone()).unwrap();
+	db.tick(ts3.timestamp().try_into().unwrap()).await.unwrap();
 	//
-	// Show changes using timestamp 2
+	// Show changes using timestamp 3
 	//
-	let sql = format!("SHOW CHANGES FOR TABLE user SINCE '{ts2_dt}' LIMIT 10;");
+	let sql = format!("SHOW CHANGES FOR TABLE user SINCE '{ts3_dt}' LIMIT 10;");
 	let mut response = db.query(sql).await.unwrap();
 	let value: Value = response.take(0).unwrap();
 	let Value::Array(array) = value.clone() else { unreachable!() };
