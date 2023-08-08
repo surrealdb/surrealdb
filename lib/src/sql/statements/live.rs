@@ -62,13 +62,14 @@ impl LiveStatement {
 			},
 			..self.clone()
 		};
+		trace!("Evaluated live query auth to {:?}", self_override.auth);
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
 		match self_override.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
 				// Clone the current statement
-				let mut stm = self.clone();
+				let mut stm = self_override.clone();
 				// Store the current Node ID
 				if let Err(e) = opt.id() {
 					trace!("No ID for live query {:?}, error={:?}", stm, e)
@@ -88,6 +89,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
+		trace!("Live query after processing: {:?}", self_override);
 		Ok(self_override.id.clone().into())
 	}
 

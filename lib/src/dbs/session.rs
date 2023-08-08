@@ -56,7 +56,7 @@ impl Session {
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add scope auth data
 		let val: Value = self.sd.to_owned().into();
-		ctx.add_value("scope_auth", val);
+		ctx.add_value("auth", val);
 		// Add scope data
 		let val: Value = self.sc.to_owned().into();
 		ctx.add_value("scope", val);

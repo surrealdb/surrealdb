@@ -138,7 +138,6 @@ impl Statement {
 			_ => unreachable!(),
 		}
 	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
