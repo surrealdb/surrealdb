@@ -558,7 +558,6 @@ pub enum Error {
 	#[error("Cannot convert from '{0}' to '{1}'")]
 	TryFrom(String, &'static str),
 
-	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
@@ -791,6 +790,13 @@ impl<T> From<channel::SendError<T>> for Error {
 #[cfg(feature = "http")]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
+		Error::Http(e.to_string())
+	}
+}
+
+#[cfg(feature = "http")]
+impl From<hyper::Error> for Error {
+	fn from(e: hyper::Error) -> Error {
 		Error::Http(e.to_string())
 	}
 }

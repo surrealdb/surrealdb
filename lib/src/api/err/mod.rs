@@ -173,6 +173,13 @@ impl From<reqwest::Error> for crate::Error {
 	}
 }
 
+#[cfg(feature = "protocol-http")]
+impl From<hyper::Error> for crate::Error {
+	fn from(e: hyper::Error) -> Self {
+		Self::Api(Error::Http(e.to_string()))
+	}
+}
+
 #[cfg(all(feature = "protocol-ws", not(target_arch = "wasm32")))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", not(target_arch = "wasm32")))))]
 impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {

@@ -15,6 +15,7 @@ use crate::api::Surreal;
 use flume::Receiver;
 use futures::StreamExt;
 use indexmap::IndexMap;
+use once_cell::sync::OnceCell;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;

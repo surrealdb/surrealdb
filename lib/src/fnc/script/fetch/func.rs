@@ -1,19 +1,14 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::{
-	fetch::{
-		body::{Body, BodyData, BodyKind},
-		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-		RequestError,
-	},
-	modules::surrealdb::query::{QueryContext, QUERY_DATA_PROP_NAME},
+use crate::fnc::script::fetch::{
+	body::{Body, BodyData, BodyKind},
+	classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
+	RequestError,
 };
 use futures::TryStreamExt;
-use js::{class::OwnedBorrow, function::Opt, Class, Ctx, Exception, Result, Value};
-use reqwest::{
-	header::{HeaderValue, CONTENT_TYPE},
-	redirect, Body as ReqBody,
-};
+use http::header::{HeaderValue, CONTENT_TYPE};
+use js::{function::Opt, Class, Ctx, Exception, Result, Value};
+use reqwest::{redirect, Body as ReqBody};
 use std::sync::Arc;
 
 use super::classes::Headers;
@@ -133,4 +128,147 @@ pub async fn fetch<'js>(
 		was_redirected: false,
 	};
 	Ok(response)
+}
+
+#[cfg(test)]
+mod test {
+	use crate::fnc::script::fetch::test::create_test_context;
+
+	#[tokio::test]
+	async fn test_fetch_get() {
+		use js::{promise::Promise, CatchResultExt};
+		use wiremock::{
+			matchers::{header, method, path},
+			Mock, MockServer, ResponseTemplate,
+		};
+
+		let server = MockServer::start().await;
+
+		Mock::given(method("GET"))
+			.and(path("/hello"))
+			.and(header("some-header", "some-value"))
+			.respond_with(ResponseTemplate::new(200).set_body_string("some body once told me"))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let server_ref = &server;
+
+		create_test_context!(ctx => {
+			ctx.globals().set("SERVER_URL",server_ref.uri()).unwrap();
+
+			ctx.eval::<Promise<()>,_>(r#"
+				(async () => {
+					let res = await fetch(SERVER_URL + '/hello',{
+                        headers: {
+                            "some-header": "some-value",
+                        }
+                    });
+					assert.seq(res.status,200);
+					let body = await res.text();
+					assert.seq(body,'some body once told me');
+				})()
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap()
+		})
+		.await;
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn test_fetch_put() {
+		use js::{promise::Promise, CatchResultExt};
+		use wiremock::{
+			matchers::{body_string, header, method, path},
+			Mock, MockServer, ResponseTemplate,
+		};
+
+		let server = MockServer::start().await;
+
+		Mock::given(method("PUT"))
+			.and(path("/hello"))
+			.and(header("some-header", "some-value"))
+			.and(body_string("some text"))
+			.respond_with(ResponseTemplate::new(201).set_body_string("some body once told me"))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let server_ref = &server;
+
+		create_test_context!(ctx => {
+			ctx.globals().set("SERVER_URL",server_ref.uri()).unwrap();
+
+			ctx.eval::<Promise<()>,_>(r#"
+				(async () => {
+					let res = await fetch(SERVER_URL + '/hello',{
+                        method: "PuT",
+                        headers: {
+                            "some-header": "some-value",
+                        },
+                        body: "some text",
+                    });
+					assert.seq(res.status,201);
+					assert(res.ok);
+					let body = await res.text();
+					assert.seq(body,'some body once told me');
+				})()
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap()
+		})
+		.await;
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn test_fetch_error() {
+		use js::{promise::Promise, CatchResultExt};
+		use wiremock::{
+			matchers::{body_string, header, method, path},
+			Mock, MockServer, ResponseTemplate,
+		};
+
+		let server = MockServer::start().await;
+
+		Mock::given(method("PROPPATCH"))
+			.and(path("/hello"))
+			.and(header("some-header", "some-value"))
+			.and(body_string("some text"))
+			.respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+				"foo": "bar",
+				"baz": 2,
+			})))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let server_ref = &server;
+
+		create_test_context!(ctx => {
+			ctx.globals().set("SERVER_URL",server_ref.uri()).unwrap();
+
+			ctx.eval::<Promise<()>,_>(r#"
+				(async () => {
+                    let req = new Request(SERVER_URL + '/hello',{
+                        method: "PROPPATCH",
+                        headers: {
+                            "some-header": "some-value",
+                        },
+                        body: "some text",
+                    })
+					let res = await fetch(req);
+					assert.seq(res.status,500);
+					assert(!res.ok);
+					let body = await res.json();
+					assert(body.foo !== undefined, "body.foo not defined");
+					assert(body.baz !== undefined, "body.foo not defined");
+					assert.seq(body.foo, "bar");
+					assert.seq(body.baz, 2);
+				})()
+			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap()
+		})
+		.await;
+
+		server.verify().await;
+	}
 }

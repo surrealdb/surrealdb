@@ -112,6 +112,7 @@ mod ctx;
 mod doc;
 mod exe;
 mod fnc;
+mod http;
 mod vs;
 
 pub mod sql;

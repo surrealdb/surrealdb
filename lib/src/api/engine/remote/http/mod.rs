@@ -29,12 +29,12 @@ use crate::sql::Strand;
 use crate::sql::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
-use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::ACCEPT;
+use http::header::HeaderMap;
+use http::header::HeaderValue;
+use http::header::ACCEPT;
 #[cfg(not(target_arch = "wasm32"))]
-use reqwest::header::CONTENT_TYPE;
+use http::header::CONTENT_TYPE;
+use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;

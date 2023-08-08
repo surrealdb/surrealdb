@@ -4,12 +4,12 @@ use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
 use crate::sql::{json, Bytes};
-use reqwest::header::CONTENT_TYPE;
+use http::header::CONTENT_TYPE;
 use reqwest::{Client, RequestBuilder, Response};
 use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
-	reqwest::Url::parse(uri).is_ok()
+	url::Url::parse(uri).is_ok()
 }
 
 fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
@@ -42,7 +42,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			},
 			_ => Ok(Value::None),
 		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
+		s => Err(Error::Reqwest(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
 }
 
@@ -71,7 +71,7 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => Ok(Value::None),
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
+		s => Err(Error::Reqwest(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
 }
 

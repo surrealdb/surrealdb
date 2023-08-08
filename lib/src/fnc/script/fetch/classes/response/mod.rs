@@ -17,7 +17,7 @@ pub enum ResponseType {
 	OpaqueRedirect,
 }
 
-use reqwest::Url;
+use url::Url;
 
 use crate::fnc::script::fetch::{
 	body::{Body, BodyKind},

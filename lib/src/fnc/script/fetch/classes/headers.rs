@@ -2,12 +2,12 @@
 
 use std::str::FromStr;
 
+use http::header::{HeaderMap, HeaderName, HeaderValue};
 use js::{
 	class::Trace,
 	prelude::{Coerced, List},
 	Array, Ctx, Exception, Result, Value,
 };
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Clone, Trace)]
 #[js::class]
