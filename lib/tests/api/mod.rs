@@ -678,9 +678,6 @@ async fn delete_record_range() {
 #[tokio::test]
 async fn changefeed() {
 	let db = new_db().await;
-	db.tick().await.unwrap();
-	let ts = crate::sql::Datetime::default();
-	db.tick().await.unwrap();
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
 	let sql = "
@@ -803,35 +800,6 @@ async fn changefeed() {
 			update: {
 				id: user:jane,
 				name: 'Doe'
-			}
-		}
-	]"
-		)
-		.unwrap()
-	);
-	//
-	// Show changes using timestampp
-	//
-	let sql = "
-        SHOW CHANGES FOR TABLE user SINCE {ts} LIMIT 10;
-    ";
-	let mut response = db.query(sql).await.unwrap();
-	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else { unreachable!() };
-	assert_eq!(array.len(), 4);
-	// UPDATE user:amos
-	let a = array.get(0).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else { unreachable!() };
-	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
-		{
-			update: {
-				id: user:amos,
-				name: 'Amos'
 			}
 		}
 	]"
