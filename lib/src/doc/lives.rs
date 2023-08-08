@@ -36,8 +36,8 @@ impl<'a> Document<'a> {
 				}
 				// Check authorization
 				trace!("Checking live query auth: {:?}", lv);
-				let lq_options =
-					opt.clone().with_auth(Arc::from(lv.auth.clone().ok_or(Error::UnknownAuth)?));
+				let lq_options = Options::new_with_perms(opt, true)
+					.with_auth(Arc::from(lv.auth.clone().ok_or(Error::UnknownAuth)?));
 				if self.allow(ctx, &lq_options, txn, &lq).await.is_err() {
 					continue;
 				}
