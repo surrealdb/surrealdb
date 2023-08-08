@@ -301,6 +301,82 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 
+	// Start Live Query
+	let table_name = "test_tableBB4B0A788C7E46E798720AEF938CBCF6";
+	let live_query_response = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+				"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
+				"method": "live",
+				"params": [
+					table_name
+				],
+		}))
+		.unwrap(),
+	)
+	.await
+	.unwrap_or_else(|e| panic!("Error sending message: {}", e))
+	.as_object()
+	.unwrap_or_else(|| panic!("Expected object, got {:?}", res));
+
+	// Wait 2 seconds for auth to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+	// Start second connection
+	let socket2 = &mut common::connect_ws(&addr).await?;
+
+	// Signin
+	let res = common::ws_send_msg(
+		socket2,
+		serde_json::to_string(&json!({
+			"id": "95128766-5218-4CEE-92D4-0FD4906709B9",
+			"method": "signin",
+			"params": [{
+				"ns": "N",
+				"db": "D",
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}],
+		}))
+		.unwrap(),
+	)
+	.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+
+	// Insert
+	let id = "A23A05ABC15C420E9A7E13D2C8657890";
+	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
+	let created = common::ws_query(socket2, query.as_str()).await.unwrap();
+	assert_eq!(created.len(), 1);
+
+	// Validate live query from first session didnt produce a result
+	let res = common::ws_recv_msg(socket).await;
+	match &res {
+		Err(e) => {
+			if let Some(TestError::NetworkError {
+				..
+			}) = e.downcast_ref::<TestError>()
+			{
+			} else {
+				panic!("Expected a network error, but got: {:?}", e)
+			}
+		}
+		Ok(v) => {
+			panic!("Expected a network error, but got: {:?}", v)
+		}
+	}
 	Ok(())
 }
 
