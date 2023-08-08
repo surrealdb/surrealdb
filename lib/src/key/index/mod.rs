@@ -16,6 +16,7 @@ use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
@@ -61,11 +62,11 @@ struct PrefixIds<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Array,
+	pub fd: Cow<'a, Array>,
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &Array) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -77,7 +78,7 @@ impl<'a> PrefixIds<'a> {
 			_d: b'+',
 			ix,
 			_e: b'*',
-			fd: fd.to_owned(),
+			fd: Cow::Borrowed(fd),
 		}
 	}
 }
@@ -94,8 +95,8 @@ pub struct Index<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Array,
-	pub id: Option<Id>,
+	pub fd: Cow<'a, Array>,
+	pub id: Option<Cow<'a, Id>>,
 }
 
 impl<'a> Index<'a> {
@@ -104,8 +105,8 @@ impl<'a> Index<'a> {
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		fd: Array,
-		id: Option<Id>,
+		fd: &'a Array,
+		id: Option<&'a Id>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -118,8 +119,8 @@ impl<'a> Index<'a> {
 			_d: b'+',
 			ix,
 			_e: b'*',
-			fd,
-			id,
+			fd: Cow::Borrowed(fd),
+			id: id.map(Cow::Borrowed),
 		}
 	}
 
@@ -146,14 +147,9 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Index::new(
-			"testns",
-			"testdb",
-			"testtb",
-			"testix",
-			vec!["testfd1", "testfd2"].into(),
-			Some("testid".into()),
-		);
+		let fd = vec!["testfd1", "testfd2"].into();
+		let id = "testid".into();
+		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode(&val).unwrap();
 		assert_eq!(
 			enc,

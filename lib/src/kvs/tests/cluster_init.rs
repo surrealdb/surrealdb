@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use crate::ctx::context;
 
-use crate::dbs::{Auth, Options, Session};
+use crate::dbs::{Options, Session};
+use crate::iam::{Auth, Role};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -79,7 +80,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		cond: None,
 		fetch: None,
 		archived: Some(crate::sql::uuid::Uuid::from(old_node.0)),
-		auth: Some(Auth::Kv),
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let ctx = context::Context::background();
 	let (sender, _) = channel::unbounded();
