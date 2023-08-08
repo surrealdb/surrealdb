@@ -1,7 +1,8 @@
 use clap::builder::{NonEmptyStringValueParser, PossibleValue, TypedValueParser};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
-use tracing::Level;
 use tracing_subscriber::EnvFilter;
+
+use crate::telemetry::filter_from_value;
 
 #[derive(Debug)]
 pub struct CustomEnvFilter(pub EnvFilter);
@@ -37,20 +38,7 @@ impl TypedValueParser for CustomEnvFilterParser {
 
 		let inner = NonEmptyStringValueParser::new();
 		let v = inner.parse_ref(cmd, arg, value)?;
-		let filter = (match v.as_str() {
-			// Don't show any logs at all
-			"none" => Ok(EnvFilter::default()),
-			// Check if we should show all log levels
-			"full" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
-			// Otherwise, let's only show errors
-			"error" => Ok(EnvFilter::default().add_directive(Level::ERROR.into())),
-			// Specify the log level for each code area
-			"warn" | "info" | "debug" | "trace" => EnvFilter::builder()
-				.parse(format!("error,surreal={v},surrealdb={v},surrealdb::txn=error")),
-			// Let's try to parse the custom log level
-			_ => EnvFilter::builder().parse(v),
-		})
-		.map_err(|e| {
+		let filter = filter_from_value(v.as_str()).map_err(|e| {
 			let mut err = clap::Error::new(ErrorKind::ValueValidation).with_cmd(cmd);
 			err.insert(ContextKind::Custom, ContextValue::String(e.to_string()));
 			err.insert(

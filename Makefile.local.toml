@@ -1,0 +1,96 @@
+# Setup
+[tasks.cargo-upgrade]
+private = true
+command = "cargo"
+args = ["upgrade", "--pinned"]
+
+[tasks.cargo-update]
+private = true
+command = "cargo"
+args = ["update"]
+
+[tasks.setup]
+category = "LOCAL USAGE"
+dependencies = ["cargo-upgrade", "cargo-update"]
+
+# Docs
+[tasks.docs]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-speedb,kv-rocksdb,kv-tikv,http,scripting"]
+
+# Test
+[tasks.test]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["test", "--workspace"]
+
+# Check
+[tasks.cargo-check]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["check", "--workspace"]
+
+[tasks.cargo-fmt]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+
+[tasks.cargo-fmt-unlinked]
+category = "LOCAL USAGE"
+script = """
+	set -e
+	cd ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/
+	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+"""
+
+[tasks.cargo-clippy]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.check]
+category = "LOCAL USAGE"
+dependencies = ["cargo-check", "cargo-fmt", "cargo-fmt-unlinked", "cargo-clippy"]
+
+# Clean
+[tasks.clean]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["clean"]
+
+# Bench
+[tasks.bench]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting"]
+
+# Serve
+[tasks.serve]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "start"]
+
+# SQL
+[tasks.sql]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--conn", "ws://0.0.0.0:8000", "--multi", "--pretty"]
+
+# Quick
+[tasks.quick]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["build"]
+
+# Build
+[tasks.build]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["build", "--release"]
+
+# Default
+[tasks.default]
+category = "LOCAL USAGE"
+clear = true
+dependencies = ["check", "test", "quick"]
