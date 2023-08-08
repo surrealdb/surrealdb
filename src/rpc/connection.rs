@@ -59,7 +59,7 @@ impl Connection {
 			return Err("websocket ID is in use".into());
 		}
 
-		self.ws_id = ws_id.clone();
+		self.ws_id = ws_id;
 		self.processor.ws_id = ws_id;
 		Ok(())
 	}
