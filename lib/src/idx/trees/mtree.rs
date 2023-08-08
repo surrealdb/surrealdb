@@ -160,57 +160,116 @@ impl MTree {
 		id: DocId,
 	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
-			self.insert_node(tx, store, root_id, None, v, id).await?;
+			self.insert_from_root(tx, store, root_id, Arc::new(v), id).await?;
 		} else {
-			let new_root_id = self.new_node_id();
-			let new_leaf_root = MTreeNode::new_leaf_root(v, id);
-			let new_root_node = store.new_node(new_root_id, new_leaf_root)?;
-			store.set_node(new_root_node, true)?;
-			self.state.root = Some(new_root_id);
+			self.create_new_root(store, v, id)?;
 		}
 		Ok(())
 	}
 
-	async fn insert_node(
+	fn create_new_root(
+		&mut self,
+		store: &mut MTreeNodeStore,
+		v: Vec<Number>,
+		id: DocId,
+	) -> Result<(), Error> {
+		let new_root_id = self.new_node_id();
+		let new_leaf_root = MTreeNode::new_leaf_root(v, id);
+		let new_root_node = store.new_node(new_root_id, new_leaf_root)?;
+		store.set_node(new_root_node, true)?;
+		self.state.root = Some(new_root_id);
+		Ok(())
+	}
+
+	async fn insert_from_root(
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		node_id: NodeId,
-		center: Option<Vector>,
-		v: Vector,
+		root_id: NodeId,
+		v: Arc<Vector>,
 		id: DocId,
 	) -> Result<(), Error> {
-		let mut next_node = Some((node_id, center));
-		while let Some((node_id, parent_center)) = next_node.take() {
+		let mut recompute_radius = vec![];
+		let mut next_node = Some((root_id, None, v, id));
+		while let Some((node_id, parent_center, v, id)) = next_node.take() {
 			let mut node = store.get_node(tx, node_id).await?;
 			match &mut node.n {
-				MTreeNode::Routing(routings) => {
-					let idx = self.find_closest(routings, &v)?;
-					let r = &routings[idx];
-					next_node = Some((r.node, Some(r.center.clone())));
-					// Bring the node back to the cache
-					store.set_node(node, false)?;
+				MTreeNode::Routing(entries) => {
+					let idx = self.find_closest(entries, &v)?;
+					let r = &entries[idx];
+					next_node = Some((r.node, Some(r.center.clone()), v, id));
+					// The radius of the routing node will be recalculated
+					recompute_radius.push((node, idx));
 				}
 				MTreeNode::Leaf(objects) => {
-					if self.insert_node_leaf(objects, v, parent_center.as_ref(), id) {
+					if self.insert_node_leaf(objects, v, parent_center, id) {
 						// The node need to be split
 						self.split_node(store, node_id, node.key, objects)?;
-						return Ok(());
+					} else {
+						store.set_node(node, true)?;
 					}
-					store.set_node(node, true)?;
-					return Ok(());
 				}
 			};
 		}
+		// Recompute radiuses
+		while let Some((mut node, idx)) = recompute_radius.pop() {
+			if let MTreeNode::Routing(entries) = &mut node.n {
+				let r = &mut entries[idx];
+				let child = store.get_node(tx, r.node).await?;
+				let mut update = false;
+				let new_radius = match &child.n {
+					MTreeNode::Routing(entries) => {
+						self.compute_routing_radius(r.center.as_ref(), entries)
+					}
+					MTreeNode::Leaf(indexmap) => {
+						self.compute_leaf_radius(r.center.as_ref(), indexmap)
+					}
+				};
+				store.set_node(child, false)?;
+				if new_radius != r.radius {
+					r.radius = new_radius;
+					update = true;
+				}
+				println!("Recompute radius {:?} {} {}", node.id, r.node, update);
+				store.set_node(node, update)?;
+			}
+		}
+
 		Ok(())
+	}
+
+	fn compute_routing_radius(&self, center: &Vector, entries: &Vec<MRoutingProperties>) -> f64 {
+		let mut max_radius = f64::MIN;
+		for e in entries {
+			let radius = self.calculate_distance(e.center.as_ref(), center.as_ref()) + e.radius;
+			if radius > max_radius {
+				max_radius = radius;
+			}
+		}
+		max_radius
+	}
+
+	fn compute_leaf_radius(
+		&self,
+		center: &Vector,
+		indexmap: &IndexMap<Arc<Vector>, MObjectProperties>,
+	) -> f64 {
+		let mut max_radius = f64::MIN;
+		for v in indexmap.keys() {
+			let radius = self.calculate_distance(v, center);
+			if radius > max_radius {
+				max_radius = radius;
+			}
+		}
+		max_radius
 	}
 
 	fn find_closest(
 		&self,
-		routings: &Vec<MRoutingProperties>,
+		entries: &Vec<MRoutingProperties>,
 		vec: &Vector,
 	) -> Result<usize, Error> {
-		let res = routings.iter().enumerate().min_by(|&(_, a), &(_, b)| {
+		let res = entries.iter().enumerate().min_by(|&(_, a), &(_, b)| {
 			let distance_a = self.calculate_distance(&a.center, &vec);
 			let distance_b = self.calculate_distance(&b.center, &vec);
 			distance_a.partial_cmp(&distance_b).unwrap()
@@ -221,9 +280,9 @@ impl MTree {
 
 	fn insert_node_leaf(
 		&self,
-		objects: &mut IndexMap<Vector, MObjectProperties>,
-		v: Vector,
-		parent_center: Option<&Vector>,
+		objects: &mut IndexMap<Arc<Vector>, MObjectProperties>,
+		v: Arc<Vector>,
+		parent_center: Option<Arc<Vector>>,
 		id: DocId,
 	) -> bool {
 		match objects.entry(v) {
@@ -232,7 +291,8 @@ impl MTree {
 				false
 			}
 			Entry::Vacant(e) => {
-				let d = parent_center.map_or(0f64, |v| self.calculate_distance(v, e.key()));
+				let d =
+					parent_center.map_or(0f64, |v| self.calculate_distance(v.as_ref(), e.key()));
 				e.insert(MObjectProperties::new(d, id));
 				objects.len() > self.state.capacity as usize
 			}
@@ -244,7 +304,7 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
-		objects: &mut IndexMap<Vector, MObjectProperties>,
+		objects: &mut IndexMap<Arc<Vector>, MObjectProperties>,
 	) -> Result<(), Error> {
 		let distances = self.compute_distance_matrix(objects)?;
 		let (p1, p2) = Self::select_promotion_objects(&distances);
@@ -260,19 +320,21 @@ impl MTree {
 
 		let (mut r1, mut r2) = (0f64, 0f64);
 
-		// Distribute entries and calculate radius
-		for (i, (v, p)) in objects.drain(..).enumerate() {
-			if distances[i][p1] <= distances[i][p2] {
+		// Distribute entries, update parent_dist and calculate radius
+		for (i, (v, mut p)) in objects.drain(..).enumerate() {
+			let dist_p1 = distances[i][p1];
+			let dist_p2 = distances[i][p2];
+			if dist_p1 <= dist_p2 {
+				p.parent_dist = dist_p1;
 				leaf1.insert(v, p);
-				let d = distances[i][p1];
-				if d > r1 {
-					r1 = d;
+				if dist_p1 > r1 {
+					r1 = dist_p1;
 				}
 			} else {
+				p.parent_dist = dist_p2;
 				leaf2.insert(v, p);
-				let d = distances[i][p2];
-				if d > r2 {
-					r2 = d;
+				if dist_p2 > r2 {
+					r2 = dist_p2;
 				}
 			}
 		}
@@ -329,7 +391,7 @@ impl MTree {
 
 	fn compute_distance_matrix(
 		&self,
-		objects: &IndexMap<Vector, MObjectProperties>,
+		objects: &IndexMap<Arc<Vector>, MObjectProperties>,
 	) -> Result<Vec<Vec<f64>>, Error> {
 		let n = objects.len();
 		let mut distances = vec![vec![0.0; n]; n];
@@ -366,14 +428,14 @@ impl MTree {
 
 pub(in crate::idx) enum MTreeNode {
 	Routing(Vec<MRoutingProperties>),
-	Leaf(IndexMap<Vector, MObjectProperties>),
+	Leaf(IndexMap<Arc<Vector>, MObjectProperties>),
 }
 
 impl MTreeNode {
 	fn new_leaf_root(v: Vector, id: DocId) -> Self {
 		let p = MObjectProperties::new_root(id);
 		let mut o = IndexMap::with_capacity(1);
-		o.insert(v, p);
+		o.insert(Arc::new(v), p);
 		Self::Leaf(o)
 	}
 }
@@ -383,12 +445,13 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: IndexMap<Vector, MObjectProperties> = bincode::deserialize_from(c)?;
+				let objects: IndexMap<Arc<Vector>, MObjectProperties> =
+					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
-				let routings: Vec<MRoutingProperties> = bincode::deserialize_from(c)?;
-				Ok(MTreeNode::Routing(routings))
+				let entries: Vec<MRoutingProperties> = bincode::deserialize_from(c)?;
+				Ok(MTreeNode::Routing(entries))
 			}
 			_ => Err(Error::CorruptedIndex),
 		}
@@ -401,9 +464,9 @@ impl TreeNode for MTreeNode {
 				bincode::serialize_into(&mut c, &1u8)?;
 				bincode::serialize_into(&mut c, objects)?;
 			}
-			MTreeNode::Routing(routings) => {
+			MTreeNode::Routing(entries) => {
 				bincode::serialize_into(&mut c, &2u8)?;
-				bincode::serialize_into(&mut c, routings)?;
+				bincode::serialize_into(&mut c, entries)?;
 			}
 		};
 		Ok(c.into_inner())
@@ -448,7 +511,7 @@ pub(in crate::idx) struct MRoutingProperties {
 	// Reference to the node
 	node: NodeId,
 	// Center of the node
-	center: Vector,
+	center: Arc<Vector>,
 	// Covering radius
 	radius: f64,
 }
@@ -489,6 +552,7 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
 	use indexmap::IndexMap;
+	use std::sync::Arc;
 	use test_log::test;
 
 	#[test(tokio::test)]
@@ -564,7 +628,7 @@ mod tests {
 			check_leaf(&mut tx, &mut s, 1, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, 1, &vec2, 1.0, &[2, 3]); // Right???
+				check_leaf_vec(m, 1, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
 			check_leaf(&mut tx, &mut s, 2, |m| {
@@ -574,17 +638,80 @@ mod tests {
 			})
 			.await;
 		}
+
+		// Insert vec extending the radius of the last node, calling compute_leaf_radius
+		let vec6 = vec![6.into()];
+		{
+			t.insert(&mut tx, &mut s, vec6.clone(), 6).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_routing(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_routing_vec(m, 0, &vec1, 1, 1.0);
+				check_routing_vec(m, 1, &vec4, 2, 2.0);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 1, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 1.0, &[2, 3]);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 2, |m| {
+				assert_eq!(m.len(), 3);
+				check_leaf_vec(m, 0, &vec3, 1.0, &[3]);
+				check_leaf_vec(m, 1, &vec4, 0.0, &[4]);
+				check_leaf_vec(m, 2, &vec6, 2.0, &[6]);
+			})
+			.await;
+		}
+
+		// Insert vec extending the radius of the last node, calling compute_routing_radius
+		let vec8 = vec![8.into()];
+		{
+			t.insert(&mut tx, &mut s, vec8.clone(), 8).await.unwrap();
+			assert_eq!(t.state.root, Some(0));
+			check_routing(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_routing_vec(m, 0, &vec1, 1, 1.0);
+				check_routing_vec(m, 1, &vec4, 2, 5.0);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 1, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
+				check_leaf_vec(m, 1, &vec2, 1.0, &[2, 3]);
+			})
+			.await;
+			check_routing(&mut tx, &mut s, 2, |m| {
+				assert_eq!(m.len(), 2);
+				check_routing_vec(m, 0, &vec3, 3, 1.0);
+				check_routing_vec(m, 1, &vec8, 4, 2.0);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 3, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec3, 0.0, &[3]);
+				check_leaf_vec(m, 1, &vec4, 1.0, &[4]);
+			})
+			.await;
+			check_leaf(&mut tx, &mut s, 4, |m| {
+				assert_eq!(m.len(), 2);
+				check_leaf_vec(m, 0, &vec6, 2.0, &[6]);
+				check_leaf_vec(m, 1, &vec8, 0.0, &[8]);
+			})
+			.await;
+		}
 	}
 
 	fn check_leaf_vec(
-		m: &IndexMap<Vector, MObjectProperties>,
+		m: &IndexMap<Arc<Vector>, MObjectProperties>,
 		idx: usize,
 		vec: &Vector,
 		parent_dist: f64,
 		docs: &[DocId],
 	) {
 		let (v, p) = m.get_index(idx).unwrap();
-		assert_eq!(v, vec);
+		assert_eq!(v.as_ref(), vec);
 		assert_eq!(p.docs.len(), docs.len() as u64);
 		for doc in docs {
 			assert!(p.docs.contains(*doc));
@@ -600,7 +727,7 @@ mod tests {
 		radius: f64,
 	) {
 		let p = &m[idx];
-		assert_eq!(center, &p.center);
+		assert_eq!(center, p.center.as_ref());
 		assert_eq!(node_id, p.node);
 		assert_eq!(radius, p.radius);
 	}
@@ -624,7 +751,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&IndexMap<Vector, MObjectProperties>),
+		F: FnOnce(&IndexMap<Arc<Vector>, MObjectProperties>),
 	{
 		check_node(tx, s, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
