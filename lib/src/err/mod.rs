@@ -5,9 +5,9 @@ use crate::sql::value::Value;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-use bung::encode::Error as SerdeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use revision::Error as RevisionError;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::io::Error as IoError;
@@ -490,10 +490,6 @@ pub enum Error {
 	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
-	/// Represents an underlying error with Serde encoding / decoding
-	#[error("Serde error: {0}")]
-	Serde(#[from] SerdeError),
-
 	/// Represents an underlying error with IO encoding / decoding
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
@@ -505,6 +501,10 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// Represents an underlying error with versioned data encoding / decoding
+	#[error("Versioned error: {0}")]
+	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]

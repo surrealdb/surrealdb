@@ -16,10 +16,12 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::combinator::opt;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Fields,

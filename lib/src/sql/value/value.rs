@@ -51,6 +51,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
+use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -65,6 +66,7 @@ use std::str::FromStr;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -105,6 +107,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to

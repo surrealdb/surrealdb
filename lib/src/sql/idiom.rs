@@ -15,6 +15,7 @@ use nom::branch::alt;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::multi::{many0, many1};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -23,6 +24,7 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -45,6 +47,7 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
+#[revisioned(revision = 1)]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {

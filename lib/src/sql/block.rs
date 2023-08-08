@@ -22,6 +22,7 @@ use nom::combinator::map;
 use nom::multi::many0;
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
@@ -31,6 +32,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Block")]
+#[revisioned(revision = 1)]
 pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
@@ -167,6 +169,7 @@ pub fn block(i: &str) -> IResult<&str, Block> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Entry {
 	Value(Value),
 	Set(SetStatement),

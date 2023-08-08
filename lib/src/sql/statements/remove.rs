@@ -19,10 +19,12 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
@@ -109,6 +111,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 }
@@ -161,6 +164,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 }
@@ -213,6 +217,7 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
 }
@@ -270,6 +275,7 @@ fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 }
@@ -319,6 +325,7 @@ fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -389,6 +396,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -468,6 +476,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
 }
@@ -520,6 +529,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 }
@@ -570,6 +580,7 @@ fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 }
@@ -622,6 +633,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -681,6 +693,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -741,6 +754,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -803,7 +817,7 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-#[format(Named)]
+#[revisioned(revision = 1)]
 pub struct RemoveUserStatement {
 	pub name: Ident,
 	pub base: Base,

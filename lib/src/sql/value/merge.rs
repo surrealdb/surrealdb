@@ -5,9 +5,9 @@ impl Value {
 	pub(crate) fn merge(&mut self, val: Value) -> Result<(), Error> {
 		if val.is_object() {
 			for k in val.every(None, false, false).iter() {
-				match val.pick(&k.0) {
-					Value::None => self.cut(&k.0),
-					v => self.put(&k.0, v),
+				match val.pick(&k) {
+					Value::None => self.cut(&k),
+					v => self.put(&k, v),
 				}
 			}
 		}

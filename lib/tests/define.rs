@@ -1183,7 +1183,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 	let sql = "
 		USE NS ns;
 		DEFINE USER test ON NS PASSWORD 'test';
-		
+
 		INFO FOR USER test;
 		INFO FOR USER test ON NS;
 		INFO FOR USER test ON NAMESPACE;
@@ -1240,7 +1240,7 @@ async fn define_statement_user_db() -> Result<(), Error> {
 		USE NS ns;
 		USE DB db;
 		DEFINE USER test ON DB PASSWORD 'test';
-		
+
 		INFO FOR USER test;
 		INFO FOR USER test ON DB;
 		INFO FOR USER test ON DATABASE;

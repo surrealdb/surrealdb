@@ -36,12 +36,14 @@ use nom::combinator::map;
 use nom::multi::many0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct Statements(pub Vec<Statement>);
 
 impl Deref for Statements {
@@ -75,6 +77,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub enum Statement {
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
