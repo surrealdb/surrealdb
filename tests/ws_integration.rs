@@ -232,6 +232,80 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 #[serial]
+async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
+	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let socket = &mut common::connect_ws(&addr).await?;
+
+	//
+	// Prepare the connection
+	//
+	let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = common::ws_use(socket, Some("N"), Some("D")).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+
+	// Setup scope
+	let res = common::ws_query(socket, r#"
+        DEFINE SCOPE scope SESSION 2s
+            SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        ;"#).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+
+	// Signup
+	let res = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "signup",
+			"params": [{
+				"ns": "N",
+				"db": "D",
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}],
+		}))
+		.unwrap(),
+	)
+	.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+
+	// Sign in
+	let res = common::ws_send_msg(
+		socket,
+		serde_json::to_string(&json!({
+			"id": "1",
+			"method": "signin",
+			"params": [{
+				"ns": "N",
+				"db": "D",
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}],
+		}))
+		.unwrap(),
+	)
+	.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+
+	Ok(())
+}
+
+#[test(tokio::test)]
+#[serial]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
