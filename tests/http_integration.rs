@@ -338,6 +338,8 @@ async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
+#[test(tokio::test)]
+#[serial]
 async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
 	let url = &format!("http://{addr}/rpc");
@@ -363,7 +365,7 @@ async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
 		.upgrade()
 		.await;
 	assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
-	let ws = res.unwrap();
+	let _ws = res.unwrap();
 
 	Ok(())
 }

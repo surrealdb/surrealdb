@@ -303,7 +303,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Start Live Query
 	let table_name = "test_tableBB4B0A788C7E46E798720AEF938CBCF6";
-	let live_query_response = common::ws_send_msg(
+	let _live_query_response = common::ws_send_msg(
 		socket,
 		serde_json::to_string(&json!({
 				"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
