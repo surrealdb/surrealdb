@@ -442,7 +442,6 @@ impl Rpc {
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
-				// NOTE: The return type of kill is OK(()). That converts to Data::Other(Value::Null), meaning result=Null
 				Ok(v) => rpc.read().await.kill(v).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
