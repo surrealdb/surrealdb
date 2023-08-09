@@ -413,21 +413,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
-		let use_nonmonontonic = match self {
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => true,
-			_ => false,
-		};
-		let nonmonotonic_vs = if use_nonmonontonic {
-			self.get_non_monotonic_versionstamp().await
-		} else {
-			Err(Error::Internal(
-				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
-			))
-		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -448,11 +433,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => {
-				// TODO Make it configurable to use monotonic or non-monotonic versionstamps
-				// v.get_timestamp(key, lock).await
-				nonmonotonic_vs
-			}
+			} => v.get_timestamp(key, lock).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
@@ -506,20 +487,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
-		let nonmonotonic_key: Result<Vec<u8>, Error> = match self {
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => self.get_non_monotonic_versionstamped_key(prefix.clone(), suffix.clone()).await,
-			// We need this to make the compiler happy.
-			// The below is unreachable only when only the tikv feature is enabled.
-			// It's still reachable if we enabled more than one kv feature.
-			#[allow(unreachable_patterns)]
-			_ => Err(Error::Internal(
-				"Non-monotonic versionstamps are only supported on TiKV".to_string(),
-			)),
-		};
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -550,10 +517,7 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => {
-				// TODO Maybe make it configurable to use monotonic or non-monotonic versionstamps
-				// at the database definition time?
-				// let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				let k = nonmonotonic_key?;
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-fdb")]
