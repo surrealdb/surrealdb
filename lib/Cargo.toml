@@ -91,7 +91,7 @@ radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 regex = "1.9.1"
 reqwest = { version = "0.11.18", default-features = false, features = ["json", "stream","multipart"], optional = true }
-revision = { version = "0.1.0", path = "../../revision" }
+revision = "0.2.0"
 roaring = { version = "0.10.1", features = ["serde"] }
 rocksdb = { version = "0.21.0", optional = true }
 rust_decimal = { version = "1.30.0", features = [ "maths" ] }
