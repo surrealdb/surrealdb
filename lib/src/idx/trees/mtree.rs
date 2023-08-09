@@ -468,12 +468,120 @@ impl MTree {
 		}
 	}
 
+	async fn remove(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		v: Vector,
+		doc_id: DocId,
+	) -> Result<bool, Error> {
+		if let Some(root_id) = self.state.root {
+			let (del, nodes) = self.remove_vector(tx, store, root_id, Arc::new(v), doc_id).await?;
+			match del {
+				Deletion::KeyRemoved => {
+					// TODO if underflow
+					// Either Can borrow siblings or Merge with siblings
+
+					// TODO is Root Empty?
+
+					for node in nodes {
+						store.set_node(node, false)?;
+					}
+				}
+				Deletion::DocRemoved | Deletion::None => {
+					for node in nodes {
+						store.set_node(node, false)?;
+					}
+				}
+			}
+			return Ok(del != Deletion::None);
+		}
+		Ok(false)
+	}
+
+	async fn remove_vector(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		root_id: NodeId,
+		v: Arc<Vector>,
+		doc_id: DocId,
+	) -> Result<(Deletion, Vec<StoredNode<MTreeNode>>), Error> {
+		let mut nodes = vec![];
+		let mut current = Some(root_id);
+		while let Some(node_id) = current.take() {
+			let mut node = store.get_node(tx, node_id).await?;
+			match &mut node.n {
+				MTreeNode::Routing(entries) => {
+					current = self.find_next_entry(entries, v.as_ref());
+					if current.is_none() {
+						store.set_node(node, false)?;
+					} else {
+						nodes.push(node);
+					}
+				}
+				MTreeNode::Leaf(indexmap) => {
+					match self.delete_entry(indexmap, v.clone(), doc_id)? {
+						Deletion::KeyRemoved => {
+							store.set_node(node, true)?;
+							return Ok((Deletion::KeyRemoved, nodes));
+						}
+						Deletion::DocRemoved => {
+							store.set_node(node, true)?;
+							return Ok((Deletion::DocRemoved, nodes));
+						}
+						Deletion::None => {
+							store.set_node(node, false)?;
+						}
+					}
+				}
+			}
+		}
+		Ok((Deletion::None, nodes))
+	}
+
+	fn delete_entry(
+		&self,
+		indexmap: &mut IndexMap<Arc<Vector>, MObjectProperties>,
+		v: Arc<Vector>,
+		doc_id: DocId,
+	) -> Result<Deletion, Error> {
+		if let Entry::Occupied(mut e) = indexmap.entry(v) {
+			let p = e.get_mut();
+			if p.docs.remove(doc_id) {
+				if p.docs.is_empty() {
+					e.remove();
+					return Ok(Deletion::KeyRemoved);
+				}
+				return Ok(Deletion::DocRemoved);
+			}
+		}
+		Ok(Deletion::None)
+	}
+
+	fn find_next_entry(&self, entries: &Vec<MRoutingProperties>, v: &Vector) -> Option<NodeId> {
+		for entry in entries {
+			let d = self.calculate_distance(v.as_ref(), entry.center.as_ref());
+			if d <= entry.radius {
+				return Some(entry.node);
+			}
+		}
+		None
+	}
+
 	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
 		if self.state.updated {
 			tx.set(key, self.state.try_to_val()?).await?;
 		}
 		Ok(())
 	}
+}
+
+#[derive(PartialEq)]
+enum Deletion {
+	KeyRemoved,
+	DocRemoved,
+	None,
 }
 
 #[derive(PartialEq)]
@@ -859,6 +967,40 @@ mod tests {
 			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec4, 2).await.unwrap();
 			check_knn(&res, vec![(&vec4, 0.0), (&vec3, 1.0)]);
 			check_docs(&docs, vec![3, 4]);
+		}
+
+		// Delete vec2 (not key removal, just doc_id: 3)
+		{
+			assert!(t.remove(&mut tx, &mut s, vec2.clone(), 3).await.unwrap());
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec8, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![
+					(&vec8, 0.0),
+					(&vec6, 2.0),
+					(&vec4, 4.0),
+					(&vec3, 5.0),
+					(&vec2, 6.0),
+					(&vec1, 7.0),
+				],
+			);
+			check_docs(&docs, vec![1, 2, 3, 4, 6, 8]);
+		}
+
+		// Remove again vec2 / docid: 3
+		{
+			assert!(!t.remove(&mut tx, &mut s, vec2.clone(), 3).await.unwrap());
+		}
+
+		// Delete vec8
+		{
+			t.remove(&mut tx, &mut s, vec8.clone(), 8).await.unwrap();
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec8, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![(&vec6, 2.0), (&vec4, 4.0), (&vec3, 5.0), (&vec2, 6.0), (&vec1, 7.0)],
+			);
+			check_docs(&docs, vec![1, 2, 3, 4, 6]);
 		}
 	}
 
