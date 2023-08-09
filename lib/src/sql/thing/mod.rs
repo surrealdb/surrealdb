@@ -14,13 +14,17 @@ use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt;
 use std::str::FromStr;
 
+mod de;
+// is this 100% necessary
+use de::*;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
 pub struct Thing {
 	pub tb: String,
@@ -244,6 +248,63 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_serde_str() {
+		use serde_json::from_str;
+
+		let sql = "test:['GBR', 2022]";
+		let res = from_str::<Thing>(sql);
+		assert!(res.is_ok());
+
+		let out = res.unwrap();
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_serde_seq() {
+		use serde_json::{from_value, json};
+
+		let sql = json!(["test", ["GBR", 2022]]);
+		let res = from_value::<Thing>(sql);
+		assert!(res.is_ok());
+
+		let out = res.unwrap();
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_serde_map() {
+		use serde_json::{from_value, json};
+
+		let sql = json!({ tb: "test", id: ["GBR", 2022] });
+		let res = from_value::<Thing>(sql);
+		assert!(res.is_ok());
+
+		let out = res.unwrap();
 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(
 			out,
