@@ -64,6 +64,7 @@ pub use use_ns::UseNs;
 pub use version::Version;
 
 use crate::api::conn::Method;
+use crate::api::method::export::IntoExportable;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -971,13 +972,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn export<P>(&self, file: P) -> Export<C>
+	pub fn export<E>(&self, target: E) -> Export<C>
 	where
-		P: AsRef<Path>,
+		E: IntoExportable,
 	{
 		Export {
 			router: self.router.extract(),
-			file: file.as_ref().to_owned(),
+			target: target.into_exportable(),
 		}
 	}
 
