@@ -54,82 +54,72 @@ pub enum Exportable {
 }
 
 pub trait IntoExportable {
-	fn into_exportable(&self) -> Exportable;
+	fn into_exportable(self) -> Exportable;
 }
 
 impl IntoExportable for &str {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File(<str as AsRef<Path>>::as_ref(self).to_owned())
 	}
 }
 
 impl IntoExportable for String {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File(<str as AsRef<Path>>::as_ref(&self).to_owned())
 	}
 }
 
 impl IntoExportable for &String {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File(<str as AsRef<Path>>::as_ref(self).to_owned())
 	}
 }
 
 impl IntoExportable for &Path {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File((*self).to_owned())
 	}
 }
 
 impl IntoExportable for &PathBuf {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File((*self).to_owned())
 	}
 }
 
 impl IntoExportable for PathBuf {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		Exportable::File(self.to_owned())
 	}
 }
 
-impl IntoExportable for Path {
-	fn into_exportable(&self) -> Exportable {
-		Exportable::File(self.to_owned())
-	}
-}
 impl IntoExportable for Component<'_> {
-	fn into_exportable(&self) -> Exportable {
-		<Component as AsRef<Path>>::as_ref(self).into_exportable()
+	fn into_exportable(self) -> Exportable {
+		<Component as AsRef<Path>>::as_ref(&self).into_exportable()
 	}
 }
 impl IntoExportable for Components<'_> {
-	fn into_exportable(&self) -> Exportable {
-		<Components<'_> as AsRef<Path>>::as_ref(self).into_exportable()
+	fn into_exportable(self) -> Exportable {
+		<Components<'_> as AsRef<Path>>::as_ref(&self).into_exportable()
 	}
 }
 impl IntoExportable for Cow<'_, OsStr> {
-	fn into_exportable(&self) -> Exportable {
-		<Cow<'_, OsStr> as AsRef<Path>>::as_ref(self).into_exportable()
+	fn into_exportable(self) -> Exportable {
+		<Cow<'_, OsStr> as AsRef<Path>>::as_ref(&self).into_exportable()
 	}
 }
 impl IntoExportable for std::path::Iter<'_> {
-	fn into_exportable(&self) -> Exportable {
+	fn into_exportable(self) -> Exportable {
 		self.as_path().into_exportable()
 	}
 }
-impl IntoExportable for OsStr {
-	fn into_exportable(&self) -> Exportable {
-		<OsStr as AsRef<Path>>::as_ref(self).into_exportable()
-	}
-}
 impl IntoExportable for OsString {
-	fn into_exportable(&self) -> Exportable {
-		<OsString as AsRef<Path>>::as_ref(self).into_exportable()
+	fn into_exportable(self) -> Exportable {
+		<OsString as AsRef<Path>>::as_ref(&self).into_exportable()
 	}
 }
 impl IntoExportable for Sender<Vec<u8>> {
-	fn into_exportable(&self) -> Exportable {
-		Exportable::Send(self.clone())
+	fn into_exportable(self) -> Exportable {
+		Exportable::Send(self)
 	}
 }

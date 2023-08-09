@@ -8,7 +8,6 @@ use crate::api::Surreal;
 use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
-use channel;
 use flume::Receiver;
 use flume::Sender;
 use serde::de::DeserializeOwned;
