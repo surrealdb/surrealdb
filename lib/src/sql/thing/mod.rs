@@ -19,8 +19,6 @@ use std::fmt;
 use std::str::FromStr;
 
 mod de;
-// is this 100% necessary
-use de::*;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
