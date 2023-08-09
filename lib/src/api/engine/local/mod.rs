@@ -77,11 +77,12 @@ use tokio::io::AsyncWriteExt;
 /// Instantiating a global instance
 ///
 /// ```
+/// use once_cell::sync::Lazy;
 /// use surrealdb::{Result, Surreal};
 /// use surrealdb::engine::local::Db;
 /// use surrealdb::engine::local::Mem;
 ///
-/// static DB: Surreal<Db> = Surreal::init();
+/// static DB: Lazy<Surreal<Db>> = Lazy::new(|| Surreal::init());
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
@@ -343,7 +344,7 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,

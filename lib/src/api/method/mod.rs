@@ -80,6 +80,7 @@ use crate::sql::Value;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 impl Method {
@@ -114,18 +115,19 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	/// Creates a new static instance of the client
+	/// Initialises a new unconnected instance of the client
 	///
-	/// The static singleton ensures that a single database instance is available across very large
-	/// or complicated applications. With the singleton, only one connection to the database is
-	/// instantiated, and the database connection does not have to be shared across components
-	/// or controllers.
+	/// This makes it easy to create a static singleton of the client. The static singleton
+	/// ensures that a single database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database is instantiated,
+	/// and the database connection does not have to be shared across components or controllers.
 	///
 	/// # Examples
 	///
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
@@ -134,7 +136,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Client> = Surreal::init();
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -168,6 +170,7 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
@@ -175,7 +178,7 @@ where
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Any> = Surreal::init();
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(|| Surreal::init());
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -205,9 +208,9 @@ where
 	///     Ok(())
 	/// }
 	/// ```
-	pub const fn init() -> Self {
+	pub fn init() -> Self {
 		Self {
-			router: OnceLock::new(),
+			router: Arc::new(OnceLock::new()),
 		}
 	}
 
@@ -230,9 +233,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<'static, C, Self> {
+	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<C, Self> {
 		Connect {
-			router: None,
+			router: Arc::new(OnceLock::new()),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,

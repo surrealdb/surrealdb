@@ -162,7 +162,7 @@ impl Connection for Any {
 			}
 
 			Ok(Surreal {
-				router: OnceLock::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features,
 					conn: PhantomData,
 					sender: route_tx,

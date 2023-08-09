@@ -53,7 +53,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -87,7 +87,7 @@ impl Connection for Client {
 			};
 			server::mock(route_rx);
 			Ok(Surreal {
-				router: OnceLock::with_value(Arc::new(router)),
+				router: Arc::new(OnceLock::with_value(router)),
 			})
 		})
 	}

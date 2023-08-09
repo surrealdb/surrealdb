@@ -125,6 +125,8 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::iam::Level;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use url::Url;
 
 /// A trait for converting inputs to a server address object
@@ -583,10 +585,11 @@ impl Surreal<Any> {
 	/// # Examples
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	///
-	/// static DB: Surreal<Any> = Surreal::init();
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(|| Surreal::init());
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -596,7 +599,7 @@ impl Surreal<Any> {
 	/// ```
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -643,9 +646,9 @@ impl Surreal<Any> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>> {
+pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 	Connect {
-		router: None,
+		router: Arc::new(OnceLock::new()),
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,

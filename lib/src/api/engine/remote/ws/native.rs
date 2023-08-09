@@ -130,7 +130,7 @@ impl Connection for Client {
 			router(url, maybe_connector, capacity, config, socket, route_rx);
 
 			Ok(Surreal {
-				router: OnceLock::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,

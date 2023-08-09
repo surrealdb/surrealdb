@@ -34,15 +34,15 @@ pub trait Connection: conn::Connection {}
 /// The future returned when creating a new SurrealDB instance
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Connect<'r, C: Connection, Response> {
-	router: Option<&'r OnceLock<Arc<Router<C>>>>,
+pub struct Connect<C: Connection, Response> {
+	router: Arc<OnceLock<Router<C>>>,
 	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,
 }
 
-impl<C, R> Connect<'_, C, R>
+impl<C, R> Connect<C, R>
 where
 	C: Connection,
 {
@@ -78,12 +78,12 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Connect<'r, Client, Surreal<Client>>
+impl<Client> IntoFuture for Connect<Client, Surreal<Client>>
 where
 	Client: Connection,
 {
 	type Output = Result<Surreal<Client>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -94,32 +94,23 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Connect<'r, Client, ()>
+impl<Client> IntoFuture for Connect<Client, ()>
 where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			match self.router {
-				Some(router) => {
-					let option =
-						Client::connect(self.address?, self.capacity).await?.router.into_inner();
-					match option {
-						Some(client) => {
-							if router.set(client).is_ok() {
-								let client = Surreal {
-									router: router.clone(),
-								};
-								client.check_server_version().await?;
-							}
-						}
-						None => unreachable!(),
-					}
-				}
-				None => unreachable!(),
+			let arc = Client::connect(self.address?, self.capacity).await?.router;
+			let cell = Arc::into_inner(arc).expect("new connection to have no references");
+			let router = cell.into_inner().expect("router to be set");
+			if self.router.set(router).is_ok() {
+				let client = Surreal {
+					router: self.router,
+				};
+				client.check_server_version().await?;
 			}
 			Ok(())
 		})
@@ -134,7 +125,7 @@ pub(crate) enum ExtraFeatures {
 /// A database client instance for embedded or remote databases
 #[derive(Debug)]
 pub struct Surreal<C: Connection> {
-	router: OnceLock<Arc<Router<C>>>,
+	router: Arc<OnceLock<Router<C>>>,
 }
 
 impl<C> Surreal<C>
@@ -180,7 +171,7 @@ trait OnceLockExt<C>
 where
 	C: Connection,
 {
-	fn with_value(value: Arc<Router<C>>) -> OnceLock<Arc<Router<C>>> {
+	fn with_value(value: Router<C>) -> OnceLock<Router<C>> {
 		let cell = OnceLock::new();
 		match cell.set(value) {
 			Ok(()) => cell,
@@ -191,7 +182,7 @@ where
 	fn extract(&self) -> Result<&Router<C>>;
 }
 
-impl<C> OnceLockExt<C> for OnceLock<Arc<Router<C>>>
+impl<C> OnceLockExt<C> for OnceLock<Router<C>>
 where
 	C: Connection,
 {
