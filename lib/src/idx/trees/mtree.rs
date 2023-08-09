@@ -16,7 +16,7 @@ use indexmap::IndexMap;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BTreeSet, BinaryHeap};
 use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -156,13 +156,13 @@ impl MTree {
 		k: usize,
 	) -> Result<(Vec<(Arc<Vector>, f64)>, RoaringTreemap), Error> {
 		let mut queue = BinaryHeap::new();
-		let mut results = Vec::with_capacity(k);
+		let mut res = BTreeSet::new();
 		if let Some(root_id) = self.state.root {
-			queue.push(PriorityNode(root_id, 0.0));
+			queue.push(PriorityNode(0.0, root_id));
 		}
 		let mut max_dist = f64::INFINITY;
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.0).await?;
+			let node = store.get_node(tx, current.1).await?;
 			match node.n {
 				MTreeNode::Leaf(ref indexmap) => {
 					for (o, p) in indexmap {
@@ -170,10 +170,9 @@ impl MTree {
 						if max_dist == f64::INFINITY || d > max_dist {
 							max_dist = d;
 						}
-						results.push((o.clone(), d, p.docs.clone()));
-						results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-						if results.len() > k {
-							results.pop();
+						res.insert(PriorityResult(d, o.clone(), p.docs.clone()));
+						if res.len() > k {
+							res.pop_last();
 						}
 					}
 				}
@@ -181,8 +180,8 @@ impl MTree {
 					for entry in entries {
 						let d = self.calculate_distance(entry.center.as_ref(), v);
 						let min_dist = (d - entry.radius).abs();
-						if results.len() < k || min_dist < max_dist {
-							queue.push(PriorityNode(entry.node, min_dist));
+						if res.len() < k || min_dist < max_dist {
+							queue.push(PriorityNode(min_dist, entry.node));
 						}
 					}
 				}
@@ -190,13 +189,11 @@ impl MTree {
 			store.set_node(node, false)?;
 		}
 		let mut global_docs = RoaringTreemap::new();
-		let results = results
-			.into_iter()
-			.map(|(v, d, docs)| {
-				global_docs |= docs;
-				(v, d)
-			})
-			.collect();
+		let mut results = Vec::with_capacity(res.len());
+		for r in res {
+			global_docs |= r.2;
+			results.push((r.1, r.0));
+		}
 		Ok((results, global_docs))
 	}
 
@@ -480,21 +477,39 @@ impl MTree {
 }
 
 #[derive(PartialEq)]
-struct PriorityNode(NodeId, f64);
-
-impl Ord for PriorityNode {
-	fn cmp(&self, other: &Self) -> Ordering {
-		other.1.partial_cmp(&self.1).unwrap()
-	}
-}
+struct PriorityNode(f64, NodeId);
 
 impl PartialOrd for PriorityNode {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
+		other.0.partial_cmp(&self.0)
+	}
+}
+
+impl Ord for PriorityNode {
+	fn cmp(&self, other: &Self) -> Ordering {
+		other.0.total_cmp(&self.0)
 	}
 }
 
 impl Eq for PriorityNode {}
+
+#[derive(PartialEq, Debug)]
+struct PriorityResult(f64, Arc<Vector>, RoaringTreemap);
+
+impl PartialOrd for PriorityResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.0.partial_cmp(&other.0)
+	}
+}
+
+impl Ord for PriorityResult {
+	// We want the priority result to be sorted by ascending distance
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0.total_cmp(&other.0)
+	}
+}
+
+impl Eq for PriorityResult {}
 
 pub(in crate::idx) enum MTreeNode {
 	Routing(Vec<MRoutingProperties>),
