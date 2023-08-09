@@ -15,6 +15,8 @@ use indexmap::map::Entry;
 use indexmap::IndexMap;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -146,6 +148,58 @@ impl MTree {
 		}
 	}
 
+	async fn knn_search(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		v: &Vector,
+		k: usize,
+	) -> Result<(Vec<(Arc<Vector>, f64)>, RoaringTreemap), Error> {
+		let mut queue = BinaryHeap::new();
+		let mut results = Vec::with_capacity(k);
+		if let Some(root_id) = self.state.root {
+			queue.push(PriorityNode(root_id, 0.0));
+		}
+		let mut max_dist = f64::INFINITY;
+		while let Some(current) = queue.pop() {
+			let node = store.get_node(tx, current.0).await?;
+			match node.n {
+				MTreeNode::Leaf(ref indexmap) => {
+					for (o, p) in indexmap {
+						let d = self.calculate_distance(o.as_ref(), v);
+						if max_dist == f64::INFINITY || d > max_dist {
+							max_dist = d;
+						}
+						results.push((o.clone(), d, p.docs.clone()));
+						results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+						if results.len() > k {
+							results.pop();
+						}
+					}
+				}
+				MTreeNode::Routing(ref entries) => {
+					for entry in entries {
+						let d = self.calculate_distance(entry.center.as_ref(), v);
+						let min_dist = (d - entry.radius).abs();
+						if results.len() < k || min_dist < max_dist {
+							queue.push(PriorityNode(entry.node, min_dist));
+						}
+					}
+				}
+			}
+			store.set_node(node, false)?;
+		}
+		let mut global_docs = RoaringTreemap::new();
+		let results = results
+			.into_iter()
+			.map(|(v, d, docs)| {
+				global_docs |= docs;
+				(v, d)
+			})
+			.collect();
+		Ok((results, global_docs))
+	}
+
 	fn new_node_id(&mut self) -> NodeId {
 		let new_node_id = self.state.next_node_id;
 		self.state.next_node_id += 1;
@@ -230,7 +284,6 @@ impl MTree {
 					r.radius = new_radius;
 					update = true;
 				}
-				println!("Recompute radius {:?} {} {}", node.id, r.node, update);
 				store.set_node(node, update)?;
 			}
 		}
@@ -426,6 +479,23 @@ impl MTree {
 	}
 }
 
+#[derive(PartialEq)]
+struct PriorityNode(NodeId, f64);
+
+impl Ord for PriorityNode {
+	fn cmp(&self, other: &Self) -> Ordering {
+		other.1.partial_cmp(&self.1).unwrap()
+	}
+}
+
+impl PartialOrd for PriorityNode {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Eq for PriorityNode {}
+
 pub(in crate::idx) enum MTreeNode {
 	Routing(Vec<MRoutingProperties>),
 	Leaf(IndexMap<Arc<Vector>, MObjectProperties>),
@@ -552,6 +622,7 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
 	use indexmap::IndexMap;
+	use roaring::RoaringTreemap;
 	use std::sync::Arc;
 	use test_log::test;
 
@@ -563,8 +634,14 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
 
-		// Insert single element
 		let vec1 = vec![1.into()];
+		// First the index is empty
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
+			check_knn(&res, vec![]);
+			check_docs(&docs, vec![]);
+		}
+		// Insert single element
 		{
 			t.insert(&mut tx, &mut s, vec1.clone(), 1).await.unwrap();
 			assert_eq!(t.state.root, Some(0));
@@ -573,6 +650,12 @@ mod tests {
 				check_leaf_vec(m, 0, &vec1, 0.0, &[1]);
 			})
 			.await;
+		}
+		// Check KNN
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
+			check_knn(&res, vec![(&vec1, 0.0)]);
+			check_docs(&docs, vec![1]);
 		}
 
 		// insert second element
@@ -587,6 +670,18 @@ mod tests {
 			})
 			.await;
 		}
+		// vec1 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
+			check_knn(&res, vec![(&vec1, 0.0), (&vec2, 1.0)]);
+			check_docs(&docs, vec![1, 2]);
+		}
+		// vec2 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
+			check_knn(&res, vec![(&vec2, 0.0), (&vec1, 1.0)]);
+			check_docs(&docs, vec![1, 2]);
+		}
 
 		// insert new doc to existing vector
 		{
@@ -598,6 +693,12 @@ mod tests {
 				check_leaf_vec(m, 1, &vec2, 0.0, &[2, 3]);
 			})
 			.await;
+		}
+		// vec2 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
+			check_knn(&res, vec![(&vec2, 0.0), (&vec1, 1.0)]);
+			check_docs(&docs, vec![1, 2, 3]);
 		}
 
 		// insert third vector
@@ -612,6 +713,12 @@ mod tests {
 				check_leaf_vec(m, 2, &vec3, 0.0, &[3]);
 			})
 			.await;
+		}
+		// vec3 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec3, 10).await.unwrap();
+			check_knn(&res, vec![(&vec3, 0.0), (&vec2, 1.0), (&vec1, 2.0)]);
+			check_docs(&docs, vec![1, 2, 3]);
 		}
 
 		// Check split node
@@ -637,6 +744,12 @@ mod tests {
 				check_leaf_vec(m, 1, &vec4, 0.0, &[4]);
 			})
 			.await;
+		}
+		// vec4 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec4, 10).await.unwrap();
+			check_knn(&res, vec![(&vec4, 0.0), (&vec3, 1.0), (&vec2, 2.0), (&vec1, 3.0)]);
+			check_docs(&docs, vec![1, 2, 3, 4]);
 		}
 
 		// Insert vec extending the radius of the last node, calling compute_leaf_radius
@@ -664,6 +777,15 @@ mod tests {
 			})
 			.await;
 		}
+		// vec6 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec6, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![(&vec6, 0.0), (&vec4, 2.0), (&vec3, 3.0), (&vec2, 4.0), (&vec1, 5.0)],
+			);
+			check_docs(&docs, vec![1, 2, 3, 4, 6]);
+		}
 
 		// Insert vec extending the radius of the last node, calling compute_routing_radius
 		let vec8 = vec![8.into()];
@@ -673,7 +795,7 @@ mod tests {
 			check_routing(&mut tx, &mut s, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, 0, &vec1, 1, 1.0);
-				check_routing_vec(m, 1, &vec4, 2, 5.0);
+				check_routing_vec(m, 1, &vec4, 2, 6.0);
 			})
 			.await;
 			check_leaf(&mut tx, &mut s, 1, |m| {
@@ -700,6 +822,28 @@ mod tests {
 				check_leaf_vec(m, 1, &vec8, 0.0, &[8]);
 			})
 			.await;
+		}
+		// vec8 knn
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec8, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![
+					(&vec8, 0.0),
+					(&vec6, 2.0),
+					(&vec4, 4.0),
+					(&vec3, 5.0),
+					(&vec2, 6.0),
+					(&vec1, 7.0),
+				],
+			);
+			check_docs(&docs, vec![1, 2, 3, 4, 6, 8]);
+		}
+		// vec4 knn(2)
+		{
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec4, 2).await.unwrap();
+			check_knn(&res, vec![(&vec4, 0.0), (&vec3, 1.0)]);
+			check_docs(&docs, vec![3, 4]);
 		}
 	}
 
@@ -779,5 +923,20 @@ mod tests {
 			}
 		})
 		.await
+	}
+
+	fn check_knn(res: &Vec<(Arc<Vector>, f64)>, expected: Vec<(&Vector, f64)>) {
+		assert_eq!(res.len(), expected.len());
+		for (i, (a, b)) in res.iter().zip(expected.iter()).enumerate() {
+			assert_eq!(a.0.as_ref(), b.0, "{}", i);
+			assert_eq!(a.1, b.1, "{}", i);
+		}
+	}
+
+	fn check_docs(docs: &RoaringTreemap, expected: Vec<DocId>) {
+		assert_eq!(docs.len() as usize, expected.len());
+		for id in expected {
+			assert!(docs.contains(id), "{}", id);
+		}
 	}
 }
