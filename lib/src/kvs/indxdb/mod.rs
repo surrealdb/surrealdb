@@ -23,7 +23,9 @@ impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok {
 			trace!("Aborting transaction as it was incomplete and dropped");
-			self.tx.abort();
+			if let Err(e) = self.tx.cancel() {
+				error!("Failed to abort transaction: {:?}", e);
+			}
 		}
 	}
 }
