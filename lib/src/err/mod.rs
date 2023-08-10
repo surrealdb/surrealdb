@@ -107,6 +107,13 @@ pub enum Error {
 		message: String,
 	},
 
+	/// Given test operation failed for JSON Patch
+	#[error("Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead.")]
+	PatchTest {
+		expected: String,
+		got: String,
+	},
+
 	/// Remote HTTP request functions are not enabled
 	#[error("Remote HTTP request functions are not enabled")]
 	HttpDisabled,
