@@ -19,6 +19,23 @@ pub struct Transaction {
 	tx: echodb::Tx<Key, Val>,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok {
+			loop {
+				trace!("Aborting transaction as it was incomplete and dropped");
+				let r = self.tx.cancel();
+				if let Ok(_) = r {
+					break;
+				}
+				if let Err(e) = r {
+					error!("Failed to abort transaction: {:?}", e);
+				}
+			}
+		}
+	}
+}
+
 impl Datastore {
 	/// Open a new database
 	pub async fn new() -> Result<Datastore, Error> {

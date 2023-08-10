@@ -29,6 +29,29 @@ pub struct Transaction {
 	_db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok {
+			trace!("Aborting transaction as it was incomplete and dropped");
+			loop {
+				if let Some(mut tx) = self.tx.try_lock() {
+					if let Some(tx) = tx.take() {
+						let res = tx.rollback();
+						match res {
+							Ok(_) => {
+								break;
+							}
+							Err(e) => {
+								error!("Failed to abort transaction: {:?}", e);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {

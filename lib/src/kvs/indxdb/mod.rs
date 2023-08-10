@@ -19,6 +19,14 @@ pub struct Transaction {
 	tx: indxdb::Tx,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok {
+			trace!("Aborting transaction as it was incomplete and dropped");
+			self.tx.abort();
+		}
+	}
+}
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {

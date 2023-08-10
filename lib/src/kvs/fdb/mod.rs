@@ -39,6 +39,20 @@ pub struct Transaction {
 	tx: Arc<Mutex<Option<foundationdb::Transaction>>>,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok {
+			trace!("Aborting transaction as it was incomplete and dropped");
+			let mut tx = self.tx.try_lock();
+			if let Some(mut mutex) = tx {
+				if let Some(tx) = mutex.take() {
+					tx.cancel();
+				}
+			}
+		}
+	}
+}
+
 impl Datastore {
 	/// Open a new database
 	///

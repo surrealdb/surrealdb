@@ -20,6 +20,7 @@ mod mem {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
+	include!("tx_impl.rs");
 	include!("multireader.rs");
 	include!("timestamp_to_versionstamp.rs");
 }
@@ -48,6 +49,7 @@ mod rocksdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
+	include!("tx_impl.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -78,6 +80,7 @@ mod speedb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
+	include!("tx_impl.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -112,6 +115,7 @@ mod tikv {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
+	include!("tx_impl.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
@@ -146,6 +150,7 @@ mod fdb {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
+	include!("tx_impl.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_allow.rs");

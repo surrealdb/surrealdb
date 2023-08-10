@@ -29,6 +29,24 @@ pub struct Transaction {
 	_db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok {
+			trace!("Aborting transaction as it was incomplete and dropped");
+			loop {
+				if let Some(mut lock) = self.tx.try_lock() {
+					let r = lock.take();
+					if let Some(r) = r {
+						r.abort();
+						break;
+					}
+					trace!("Acquired lock but there was no transaction");
+				}
+			}
+		}
+	}
+}
+
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
