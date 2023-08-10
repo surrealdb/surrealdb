@@ -37,10 +37,14 @@ impl Drop for Transaction {
 			loop {
 				if let Some(mut lock) = self.tx.try_lock() {
 					let r = lock.take();
-					if let Some(r) = r {
-						r.abort();
-						trace!("Aborted transaction after {} retries", counter);
-						break;
+					if let Some(tx) = r {
+						let r = tx.rollback();
+						if let Err(e) = r {
+							error!("Failed to abort transaction: {:?}", e);
+						} else {
+							trace!("Aborted transaction after {} retries", counter);
+							break;
+						}
 					}
 					trace!("Acquired lock but there was no transaction");
 				}
