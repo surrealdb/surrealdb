@@ -36,8 +36,8 @@ impl Drop for Transaction {
 			let mut counter = 0u16;
 			loop {
 				if let Some(mut lock) = self.tx.try_lock() {
-					let r = lock.take();
-					if let Some(tx) = r {
+					let tx_opt = lock.take();
+					if let Some(tx) = tx_opt {
 						let r = tx.rollback();
 						if let Err(e) = r {
 							error!("Failed to abort transaction: {:?}", e);

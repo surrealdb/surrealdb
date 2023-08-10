@@ -26,7 +26,7 @@ impl Drop for Transaction {
 			loop {
 				trace!("Aborting transaction as it was incomplete and dropped");
 				let r = self.tx.cancel();
-				if let Ok(_) = r {
+				if r.is_ok() {
 					trace!("Aborted transaction after {} retries", counter);
 					break;
 				}
