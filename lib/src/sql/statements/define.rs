@@ -1261,6 +1261,7 @@ pub struct DefineFieldStatement {
 	pub kind: Option<Kind>,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
+	pub default: Option<Value>,
 	pub permissions: Permissions,
 }
 
@@ -1350,6 +1351,10 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 				DefineFieldOption::Assert(ref v) => Some(v.to_owned()),
 				_ => None,
 			}),
+			default: opts.iter().find_map(|x| match x {
+				DefineFieldOption::Default(ref v) => Some(v.to_owned()),
+				_ => None,
+			}),
 			permissions: opts
 				.iter()
 				.find_map(|x| match x {
@@ -1367,11 +1372,12 @@ pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Value),
 	Assert(Value),
+	Default(Value),
 	Permissions(Permissions),
 }
 
 fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
-	alt((field_flex, field_kind, field_value, field_assert, field_permissions))(i)
+	alt((field_flex, field_kind, field_value, field_assert, field_default, field_permissions))(i)
 }
 
 fn field_flex(i: &str) -> IResult<&str, DefineFieldOption> {
@@ -1402,6 +1408,14 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value(i)?;
 	Ok((i, DefineFieldOption::Assert(v)))
+}
+
+fn field_default(i: &str) -> IResult<&str, DefineFieldOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("DEFAULT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = value(i)?;
+	Ok((i, DefineFieldOption::Default(v)))
 }
 
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
