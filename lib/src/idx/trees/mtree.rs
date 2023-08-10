@@ -253,7 +253,8 @@ impl MTree {
 					recompute_radius.push((node, idx));
 				}
 				MTreeNode::Leaf(objects) => {
-					if self.insert_node_leaf(objects, v, parent_center, id) {
+					self.insert_node_leaf(objects, v, parent_center, id);
+					if objects.len() > self.state.capacity as usize {
 						// The node need to be split
 						self.split_node(store, node_id, node.key, objects)?;
 					} else {
@@ -334,17 +335,15 @@ impl MTree {
 		v: Arc<Vector>,
 		parent_center: Option<Arc<Vector>>,
 		id: DocId,
-	) -> bool {
+	) {
 		match objects.entry(v) {
 			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(id);
-				false
 			}
 			Entry::Vacant(e) => {
 				let d =
 					parent_center.map_or(0f64, |v| self.calculate_distance(v.as_ref(), e.key()));
 				e.insert(MObjectProperties::new(d, id));
-				objects.len() > self.state.capacity as usize
 			}
 		}
 	}
@@ -477,22 +476,9 @@ impl MTree {
 	) -> Result<bool, Error> {
 		if let Some(root_id) = self.state.root {
 			let (del, nodes) = self.remove_vector(tx, store, root_id, Arc::new(v), doc_id).await?;
-			match del {
-				Deletion::KeyRemoved => {
-					// TODO if underflow
-					// Either Can borrow siblings or Merge with siblings
-
-					// TODO is Root Empty?
-
-					for node in nodes {
-						store.set_node(node, false)?;
-					}
-				}
-				Deletion::DocRemoved | Deletion::None => {
-					for node in nodes {
-						store.set_node(node, false)?;
-					}
-				}
+			if del == Deletion::KeyRemoved {
+				self.handle_routing_path(tx, store, nodes).await?;
+				// TODO is Root Empty?
 			}
 			return Ok(del != Deletion::None);
 		}
@@ -506,19 +492,17 @@ impl MTree {
 		root_id: NodeId,
 		v: Arc<Vector>,
 		doc_id: DocId,
-	) -> Result<(Deletion, Vec<StoredNode<MTreeNode>>), Error> {
+	) -> Result<(Deletion, Vec<DeletionRoutingPart>), Error> {
 		let mut nodes = vec![];
-		let mut current = Some(root_id);
-		while let Some(node_id) = current.take() {
-			let mut node = store.get_node(tx, node_id).await?;
+		let mut current = Some(DeletionRoutingPart::new(None, root_id));
+		while let Some(part) = current.take() {
+			let mut node = store.get_node(tx, part.node_id).await?;
 			match &mut node.n {
 				MTreeNode::Routing(entries) => {
-					current = self.find_next_entry(entries, v.as_ref());
-					if current.is_none() {
-						store.set_node(node, false)?;
-					} else {
-						nodes.push(node);
-					}
+					current = self
+						.find_next_child_entry(entries, v.as_ref())
+						.map(|n| DeletionRoutingPart::new(Some(part.node_id), n));
+					store.set_node(node, false)?;
 				}
 				MTreeNode::Leaf(indexmap) => {
 					match self.delete_entry(indexmap, v.clone(), doc_id)? {
@@ -536,8 +520,27 @@ impl MTree {
 					}
 				}
 			}
+			nodes.push(part);
 		}
-		Ok((Deletion::None, nodes))
+		Ok((Deletion::None, vec![]))
+	}
+
+	async fn handle_routing_path(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		mut nodes: Vec<DeletionRoutingPart>,
+	) -> Result<(), Error> {
+		while let Some(part) = nodes.pop() {
+			let node = store.get_node(tx, part.node_id).await?;
+			if let MTreeNode::Routing(r) = &node.n {
+				if r.len() < self.state.minimum {
+					todo!()
+				}
+			}
+			store.set_node(node, false)?;
+		}
+		Ok(())
 	}
 
 	fn delete_entry(
@@ -559,7 +562,11 @@ impl MTree {
 		Ok(Deletion::None)
 	}
 
-	fn find_next_entry(&self, entries: &Vec<MRoutingProperties>, v: &Vector) -> Option<NodeId> {
+	fn find_next_child_entry(
+		&self,
+		entries: &Vec<MRoutingProperties>,
+		v: &Vector,
+	) -> Option<NodeId> {
 		for entry in entries {
 			let d = self.calculate_distance(v.as_ref(), entry.center.as_ref());
 			if d <= entry.radius {
@@ -582,6 +589,20 @@ enum Deletion {
 	KeyRemoved,
 	DocRemoved,
 	None,
+}
+
+struct DeletionRoutingPart {
+	_parent_id: Option<NodeId>,
+	node_id: NodeId,
+}
+
+impl DeletionRoutingPart {
+	fn new(parent_id: Option<NodeId>, node_id: NodeId) -> Self {
+		Self {
+			_parent_id: parent_id,
+			node_id,
+		}
+	}
 }
 
 #[derive(PartialEq)]
@@ -619,6 +640,7 @@ impl Ord for PriorityResult {
 
 impl Eq for PriorityResult {}
 
+#[derive(Debug)]
 pub(in crate::idx) enum MTreeNode {
 	Routing(Vec<MRoutingProperties>),
 	Leaf(IndexMap<Arc<Vector>, MObjectProperties>),
@@ -681,6 +703,8 @@ impl From<MtStatistics> for Value {
 #[derive(Clone, Serialize, Deserialize)]
 struct MState {
 	capacity: u16,
+	#[serde(skip)]
+	minimum: usize,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 	#[serde(skip)]
@@ -692,6 +716,7 @@ impl MState {
 		assert!(capacity >= 2, "Capacity should be >= 2");
 		Self {
 			capacity,
+			minimum: capacity as usize / 2,
 			root: None,
 			next_node_id: 0,
 			updated: false,
@@ -699,7 +724,7 @@ impl MState {
 	}
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(in crate::idx) struct MRoutingProperties {
 	// Reference to the node
 	node: NodeId,
@@ -709,7 +734,7 @@ pub(in crate::idx) struct MRoutingProperties {
 	radius: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(in crate::idx) struct MObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,
@@ -968,28 +993,126 @@ mod tests {
 			check_knn(&res, vec![(&vec4, 0.0), (&vec3, 1.0)]);
 			check_docs(&docs, vec![3, 4]);
 		}
+	}
 
-		// Delete vec2 (not key removal, just doc_id: 3)
+	#[test(tokio::test)]
+	async fn test_mtree_deletions() {
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let mut s = s.lock().await;
+		let mut t = MTree::new(MState::new(4), Distance::Euclidean);
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
+
+		let vec1 = vec![1.into()];
+		let vec2 = vec![2.into()];
+		let vec3 = vec![3.into()];
+		let vec4 = vec![4.into()];
+		let vec5 = vec![5.into()];
+		let vec6 = vec![6.into()];
+		let vec7 = vec![7.into()];
+		let vec8 = vec![8.into()];
+		let vec9 = vec![9.into()];
+
+		t.insert(&mut tx, &mut s, vec1.clone(), 1).await.unwrap();
+		t.insert(&mut tx, &mut s, vec2.clone(), 2).await.unwrap();
+		t.insert(&mut tx, &mut s, vec2.clone(), 3).await.unwrap();
+		t.insert(&mut tx, &mut s, vec3.clone(), 3).await.unwrap();
+		t.insert(&mut tx, &mut s, vec4.clone(), 4).await.unwrap();
+		t.insert(&mut tx, &mut s, vec5.clone(), 5).await.unwrap();
+		t.insert(&mut tx, &mut s, vec6.clone(), 6).await.unwrap();
+		t.insert(&mut tx, &mut s, vec7.clone(), 7).await.unwrap();
+		t.insert(&mut tx, &mut s, vec8.clone(), 8).await.unwrap();
+		t.insert(&mut tx, &mut s, vec9.clone(), 9).await.unwrap();
+
 		{
-			assert!(t.remove(&mut tx, &mut s, vec2.clone(), 3).await.unwrap());
-			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec8, 10).await.unwrap();
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec9, 10).await.unwrap();
 			check_knn(
 				&res,
 				vec![
-					(&vec8, 0.0),
-					(&vec6, 2.0),
-					(&vec4, 4.0),
-					(&vec3, 5.0),
-					(&vec2, 6.0),
-					(&vec1, 7.0),
+					(&vec9, 0.0),
+					(&vec8, 1.0),
+					(&vec7, 2.0),
+					(&vec6, 3.0),
+					(&vec5, 4.0),
+					(&vec4, 5.0),
+					(&vec3, 6.0),
+					(&vec2, 7.0),
+					(&vec1, 8.0),
 				],
 			);
-			check_docs(&docs, vec![1, 2, 3, 4, 6, 8]);
+			check_docs(&docs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+			assert_eq!(t.state.root, Some(0));
+			check_routing(&mut tx, &mut s, 0, |m| {
+				assert_eq!(m.len(), 2);
+				check_routing_vec(m, 0, &vec1, 1, 2.0);
+				check_routing_vec(m, 1, &vec5, 2, 4.0);
+			})
+			.await;
 		}
 
-		// Remove again vec2 / docid: 3
+		// Remove vec2 (not key removal, just doc_id: 3) => Deletion::DocRemoved
+		{
+			assert!(t.remove(&mut tx, &mut s, vec2.clone(), 3).await.unwrap());
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec9, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![
+					(&vec9, 0.0),
+					(&vec8, 1.0),
+					(&vec7, 2.0),
+					(&vec6, 3.0),
+					(&vec5, 4.0),
+					(&vec4, 5.0),
+					(&vec3, 6.0),
+					(&vec2, 7.0),
+					(&vec1, 8.0),
+				],
+			);
+			check_docs(&docs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+		}
+
+		// Remove again vec2 / docid: 3 => Deletion::None
 		{
 			assert!(!t.remove(&mut tx, &mut s, vec2.clone(), 3).await.unwrap());
+		}
+
+		// Remove vec1 => Deletion::KeyRemoved
+		{
+			assert!(t.remove(&mut tx, &mut s, vec1.clone(), 1).await.unwrap());
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec9, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![
+					(&vec9, 0.0),
+					(&vec8, 1.0),
+					(&vec7, 2.0),
+					(&vec6, 3.0),
+					(&vec5, 4.0),
+					(&vec4, 5.0),
+					(&vec3, 6.0),
+					(&vec2, 7.0),
+				],
+			);
+			check_docs(&docs, vec![2, 3, 4, 5, 6, 7, 8, 9]);
+		}
+
+		// Remove vec2
+		{
+			assert!(t.remove(&mut tx, &mut s, vec2.clone(), 2).await.unwrap());
+			let (res, docs) = t.knn_search(&mut tx, &mut s, &vec9, 10).await.unwrap();
+			check_knn(
+				&res,
+				vec![
+					(&vec9, 0.0),
+					(&vec8, 1.0),
+					(&vec7, 2.0),
+					(&vec6, 3.0),
+					(&vec5, 4.0),
+					(&vec4, 5.0),
+					(&vec3, 6.0),
+				],
+			);
+			check_docs(&docs, vec![3, 4, 5, 6, 7, 8, 9]);
 		}
 
 		// Delete vec8
@@ -1042,6 +1165,7 @@ mod tests {
 		F: FnOnce(&MTreeNode),
 	{
 		let n = s.get_node(tx, node_id).await.unwrap();
+		println!("Node: {:?}", n.n);
 		check_func(&n.n);
 		s.set_node(n, false).unwrap();
 	}
