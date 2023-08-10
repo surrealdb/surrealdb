@@ -1,7 +1,7 @@
 //! Request class implementation
 
-use http::Method;
 use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
+use lib_http::Method;
 
 use crate::fnc::script::fetch::{body::Body, RequestError};
 

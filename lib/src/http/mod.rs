@@ -1,68 +1,95 @@
 #![allow(dead_code)]
 
+use std::{convert::Infallible, str::Utf8Error, sync::Arc};
+
+use lib_http::{
+	header::{InvalidHeaderName, InvalidHeaderValue},
+	method::InvalidMethod,
+	Method, StatusCode,
+};
+use thiserror::Error;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod hyper;
-use http::HeaderMap;
 #[cfg(not(target_arch = "wasm32"))]
-use hyper::Client as NativeClient;
+use hyper::{Client as NativeClient, Error as ClientError};
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[cfg(target_arch = "wasm32")]
-use wasm::Client as NativeClient;
+use wasm::{Client as NativeClient, Error as ClientError};
 
 mod url;
 pub use url::{IntoUrl, Url};
+mod builder;
+pub use builder::{ClientBuilder, RedirectAction, RedirectPolicy};
+mod request;
+pub use request::Request;
+mod response;
+pub use response::Response;
+mod body;
+pub use body::Body;
 
-use crate::opt::Tls;
+#[derive(Error, Debug)]
+pub enum Error {
+	#[error("{0}")]
+	Url(#[from] url::UrlParseError),
+	#[error("{0}")]
+	Client(#[from] ClientError),
+	#[error("Failed to parse bytes to string: {0}")]
+	Utf8(#[from] Utf8Error),
+	#[error(
+		"Invalid authorization token, authorization token could not be used as a header value"
+	)]
+	InvalidToken,
+	#[error("Request returned error statuscode: {0}")]
+	StatusCode(StatusCode),
+	#[error("{0}")]
+	InvalidHeaderName(#[from] InvalidHeaderName),
+	#[error("{0}")]
+	InvalidHeaderValue(#[from] InvalidHeaderValue),
+	#[error("{0}")]
+	InvalidMethod(#[from] InvalidMethod),
+}
 
-pub struct Request {}
+impl From<Infallible> for Error {
+	fn from(value: Infallible) -> Self {
+		panic!("Infallible error was created")
+	}
+}
 
+#[derive(Clone)]
 pub struct Client {
-	inner: NativeClient,
+	inner: Arc<NativeClient>,
 }
 
 impl Client {
 	pub fn new() -> Self {
 		Self {
-			inner: NativeClient::new(),
+			inner: Arc::new(NativeClient::new()),
 		}
 	}
 
-	pub fn build() -> ClientBuilder {
+	pub fn builder() -> ClientBuilder {
 		ClientBuilder::new()
 	}
 
-	pub fn get<U: IntoUrl>(&self, url: U) -> Request {
-		todo!()
-	}
-}
-
-pub struct ClientBuilder {
-	default_headers: Option<HeaderMap>,
-	tls_config: Option<Tls>,
-}
-
-impl Default for ClientBuilder {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl ClientBuilder {
-	pub fn new() -> Self {
-		ClientBuilder {
-			default_headers: None,
-			tls_config: None,
-		}
+	pub fn get<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.into_url()?;
+		Request::new(Method::GET, url, self.clone())
 	}
 
-	pub fn with_tls(mut self, tls: Tls) -> Self {
-		self.tls_config = Some(tls);
-		self
+	pub fn post<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.into_url()?;
+		Request::new(Method::POST, url, self.clone())
 	}
 
-	pub fn default_headers(mut self, tls: Tls) -> Self {
-		self.tls_config = Some(tls);
-		self
+	pub fn head<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.into_url()?;
+		Request::new(Method::HEAD, url, self.clone())
+	}
+
+	pub fn put<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.into_url()?;
+		Request::new(Method::PUT, url, self.clone())
 	}
 }

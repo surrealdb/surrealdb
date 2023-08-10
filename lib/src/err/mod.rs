@@ -788,15 +788,8 @@ impl<T> From<channel::SendError<T>> for Error {
 }
 
 #[cfg(feature = "http")]
-impl From<reqwest::Error> for Error {
-	fn from(e: reqwest::Error) -> Error {
-		Error::Http(e.to_string())
-	}
-}
-
-#[cfg(feature = "http")]
-impl From<hyper::Error> for Error {
-	fn from(e: hyper::Error) -> Error {
+impl From<crate::http::Error> for Error {
+	fn from(e: crate::http::Error) -> Error {
 		Error::Http(e.to_string())
 	}
 }

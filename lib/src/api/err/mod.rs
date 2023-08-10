@@ -167,15 +167,8 @@ pub enum Error {
 }
 
 #[cfg(feature = "protocol-http")]
-impl From<reqwest::Error> for crate::Error {
-	fn from(e: reqwest::Error) -> Self {
-		Self::Api(Error::Http(e.to_string()))
-	}
-}
-
-#[cfg(feature = "protocol-http")]
-impl From<hyper::Error> for crate::Error {
-	fn from(e: hyper::Error) -> Self {
+impl From<crate::http::Error> for crate::Error {
+	fn from(e: crate::http::Error) -> Self {
 		Self::Api(Error::Http(e.to_string()))
 	}
 }

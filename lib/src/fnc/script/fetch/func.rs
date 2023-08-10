@@ -49,27 +49,31 @@ pub async fn fetch<'js>(
 	let redirect = js_req.init.request_redirect;
 
 	// set the policy for redirecting requests.
-	let policy = redirect::Policy::custom(move |attempt| {
+	let policy = RedirectPolicy::custom(move |attempt| {
 		match redirect {
 			classes::RequestRedirect::Follow => {
 				// Fetch spec limits redirect to a max of 20
 				if attempt.previous().len() > 20 {
-					attempt.error("too many redirects")
+					RedirectAction::error("too many redirects")
 				} else {
-					attempt.follow()
+					RedirectAction::Follow
 				}
 			}
-			classes::RequestRedirect::Error => attempt.error("unexpected redirect"),
-			classes::RequestRedirect::Manual => attempt.stop(),
+			classes::RequestRedirect::Error => RedirectAction::error("unexpected redirect"),
+			classes::RequestRedirect::Manual => RedirectAction::Stop,
 		}
 	});
 
-	let client = reqwest::Client::builder().redirect(policy).build().map_err(|e| {
+	let client = crate::http::Client::builder().redirect(policy).build().map_err(|e| {
 		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
+	let req = crate::http::Request::new(js_req.init.method, url.clone(), client.clone());
+
+	todo!()
+	/*
 	// Set the body for the request.
-	let mut req_builder = reqwest::RequestBuilder::from_parts(client, req);
+	let mut req_builder = RequestBuilder::from_parts(client, req);
 	if let Some(body) = js_req.init.body {
 		match body.data.replace(BodyData::Used) {
 			BodyData::Stream(x) => {

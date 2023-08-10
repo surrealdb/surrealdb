@@ -22,6 +22,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
+use crate::http::Request;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
 use crate::sql::Array;
@@ -29,13 +30,12 @@ use crate::sql::Strand;
 use crate::sql::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
-use http::header::HeaderMap;
-use http::header::HeaderValue;
-use http::header::ACCEPT;
-#[cfg(not(target_arch = "wasm32"))]
-use http::header::CONTENT_TYPE;
 use indexmap::IndexMap;
-use reqwest::RequestBuilder;
+use lib_http::header::HeaderMap;
+use lib_http::header::HeaderValue;
+use lib_http::header::ACCEPT;
+#[cfg(not(target_arch = "wasm32"))]
+use lib_http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
@@ -46,6 +46,10 @@ use std::path::PathBuf;
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncReadExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
@@ -116,21 +120,21 @@ enum Auth {
 	},
 }
 
-trait Authenticate {
-	fn auth(self, auth: &Option<Auth>) -> Self;
+trait Authenticate: Sized {
+	fn auth(self, auth: &Option<Auth>) -> Result<Self>;
 }
 
-impl Authenticate for RequestBuilder {
-	fn auth(self, auth: &Option<Auth>) -> Self {
+impl Authenticate for Request {
+	fn auth(self, auth: &Option<Auth>) -> Result<Self> {
 		match auth {
 			Some(Auth::Basic {
 				user,
 				pass,
-			}) => self.basic_auth(user, Some(pass)),
+			}) => Ok(self.basic_auth(user, Some(pass))),
 			Some(Auth::Bearer {
 				token,
-			}) => self.bearer_auth(token),
-			None => self,
+			}) => Ok(self.bearer_auth(token)?),
+			None => Ok(self),
 		}
 	}
 }
@@ -151,7 +155,7 @@ struct AuthResponse {
 	token: Option<String>,
 }
 
-async fn submit_auth(request: RequestBuilder) -> Result<Value> {
+async fn submit_auth(request: Request) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let response: AuthResponse =
@@ -162,7 +166,7 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	Ok(response.token.into())
 }
 
-async fn query(request: RequestBuilder) -> Result<QueryResponse> {
+async fn query(request: Request) -> Result<QueryResponse> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
@@ -190,7 +194,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	Ok(QueryResponse(map))
 }
 
-async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
+async fn take(one: bool, request: Request) -> Result<Value> {
 	if let Some(result) = query(request).await?.0.remove(&0) {
 		let mut vec = result?;
 		match one {
@@ -277,7 +281,7 @@ async fn export(
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let file = match OpenOptions::new().read(true).open(&path).await {
+	let mut file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
 			return Err(Error::FileOpen {
@@ -309,13 +313,13 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 	Ok(Value::None)
 }
 
-async fn version(request: RequestBuilder) -> Result<Value> {
+async fn version(request: Request) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let version = response.text().await?;
 	Ok(version.into())
 }
 
-pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
+pub(crate) async fn health(request: Request) -> Result<Value> {
 	request.send().await?.error_for_status()?;
 	Ok(Value::None)
 }
@@ -323,7 +327,7 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	base_url: &Url,
-	client: &reqwest::Client,
+	client: &crate::http::Client,
 	headers: &mut HeaderMap,
 	vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
@@ -333,7 +337,7 @@ async fn router(
 	match method {
 		Method::Use => {
 			let path = base_url.join(SQL_PATH)?;
-			let mut request = client.post(path).headers(headers.clone());
+			let mut request = client.post(path)?.headers(headers.clone());
 			let (ns, db) = match &mut params[..] {
 				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
 					(Some(mem::take(ns)), Some(mem::take(db)))
@@ -366,7 +370,7 @@ async fn router(
 				},
 				None => None,
 			};
-			request = request.auth(auth).body("RETURN true");
+			request = request.auth(auth)?.body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
 				headers.insert("NS", ns);
@@ -497,6 +501,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
 			let path = base_url.join(Method::Export.as_str())?;
+			let file = param.file.expect("file to export into");
 			let request = client
 				.get(path)
 				.headers(headers.clone())

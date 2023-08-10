@@ -23,7 +23,7 @@ use crate::api::Surreal;
 use crate::error::Db as DbError;
 use flume::Receiver;
 #[cfg(feature = "protocol-http")]
-use reqwest::ClientBuilder;
+use crate::http::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;

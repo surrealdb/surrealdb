@@ -16,7 +16,7 @@ use func::js_fetch;
 /// Error returned by the request.
 #[derive(Debug, Clone)]
 pub enum RequestError {
-	Reqwest(Arc<reqwest::Error>),
+	Reqwest(Arc<crate::http::Error>),
 }
 
 impl fmt::Display for RequestError {
