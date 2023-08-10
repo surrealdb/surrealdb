@@ -22,15 +22,18 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok {
+			let mut counter = 0u16;
 			loop {
 				trace!("Aborting transaction as it was incomplete and dropped");
 				let r = self.tx.cancel();
 				if let Ok(_) = r {
+					trace!("Aborted transaction after {} retries", counter);
 					break;
 				}
 				if let Err(e) = r {
 					error!("Failed to abort transaction: {:?}", e);
 				}
+				counter += 1;
 			}
 		}
 	}

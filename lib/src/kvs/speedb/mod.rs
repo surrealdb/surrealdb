@@ -33,15 +33,18 @@ impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok {
 			trace!("Aborting transaction as it was incomplete and dropped");
+			let mut counter = 0u16;
 			loop {
 				if let Some(mut lock) = self.tx.try_lock() {
 					let r = lock.take();
 					if let Some(r) = r {
 						r.abort();
+						trace!("Aborted transaction after {} retries", counter);
 						break;
 					}
 					trace!("Acquired lock but there was no transaction");
 				}
+				counter += 1;
 			}
 		}
 	}
