@@ -5141,6 +5141,7 @@ dependencies = [
  "geo 0.25.1",
  "indexmap 1.9.3",
  "indxdb",
+ "ipnet",
  "jsonwebtoken",
  "lexicmp",
  "lru",

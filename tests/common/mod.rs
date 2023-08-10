@@ -140,6 +140,7 @@ pub struct StartServerArguments {
 	pub tls: bool,
 	pub wait_is_ready: bool,
 	pub tick_interval: time::Duration,
+	pub args: String,
 }
 
 impl Default for StartServerArguments {
@@ -149,6 +150,7 @@ impl Default for StartServerArguments {
 			tls: false,
 			wait_is_ready: true,
 			tick_interval: time::Duration::new(1, 0),
+			args: String::default(),
 		}
 	}
 }
@@ -171,6 +173,7 @@ pub async fn start_server(
 		tls,
 		wait_is_ready,
 		tick_interval,
+		args,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
@@ -178,7 +181,7 @@ pub async fn start_server(
 	let port: u16 = rng.gen_range(13000..14000);
 	let addr = format!("127.0.0.1:{port}");
 
-	let mut extra_args = String::default();
+	let mut extra_args = args.clone();
 	if tls {
 		// Test the crt/key args but the keys are self signed so don't actually connect.
 		let crt_path = tmp_file("crt.crt");

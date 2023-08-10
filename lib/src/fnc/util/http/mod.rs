@@ -6,6 +6,7 @@ use crate::sql::value::Value;
 use crate::sql::{json, Bytes};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, RequestBuilder, Response};
+use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
@@ -46,10 +47,13 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 }
 
 pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new HEAD request
-	let mut req = cli.head(uri.as_str());
+	let mut req = cli.head(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -72,10 +76,13 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 }
 
 pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.get(uri.as_str());
+	let mut req = cli.get(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -100,10 +107,13 @@ pub async fn put(
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.put(uri.as_str());
+	let mut req = cli.put(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -130,10 +140,13 @@ pub async fn post(
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.post(uri.as_str());
+	let mut req = cli.post(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -160,10 +173,13 @@ pub async fn patch(
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.patch(uri.as_str());
+	let mut req = cli.patch(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -189,10 +205,13 @@ pub async fn delete(
 	uri: Strand,
 	opts: impl Into<Object>,
 ) -> Result<Value, Error> {
+	// Check if the URI is valid and allowed
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.delete(uri.as_str());
+	let mut req = cli.delete(url);
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");

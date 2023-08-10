@@ -183,6 +183,10 @@ pub enum Error {
 		message: String,
 	},
 
+	/// The URL is invalid
+	#[error("The URL `{0}` is invalid")]
+	InvalidUrl(String),
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -587,6 +591,21 @@ pub enum Error {
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),
+
+	//
+	// Capabilities
+	//
+	/// Scripting is not allowed
+	#[error("Scripting functions are not allowed")]
+	ScriptingNotAllowed,
+
+	/// Function is not allowed
+	#[error("Function '{0}' is not allowed to be executed")]
+	FunctionNotAllowed(String),
+
+	/// Network target is not allowed
+	#[error("Acess to network target '{0}' is not allowed")]
+	NetTargetNotAllowed(String),
 }
 
 impl From<Error> for String {

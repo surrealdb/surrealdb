@@ -1,9 +1,16 @@
 //! Request class implementation
 
-use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
+use js::{
+	class::{OwnedBorrow, Trace},
+	prelude::Coerced,
+	Class, Ctx, Exception, FromJs, Object, Result, Value,
+};
 use reqwest::Method;
 
-use crate::fnc::script::fetch::{body::Body, RequestError};
+use crate::fnc::script::{
+	fetch::{body::Body, RequestError},
+	modules::surrealdb::query::{QueryContext, QUERY_DATA_PROP_NAME},
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestMode {
@@ -395,6 +402,16 @@ impl<'js> Request<'js> {
 			let url_str = url.to_string()?;
 			let url = Url::parse(&url_str)
 				.map_err(|e| Exception::throw_type(&ctx, &format!("failed to parse url: {e}")))?;
+
+			// Check if the url is allowed
+			let query_ctx = ctx
+				.globals()
+				.get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+			query_ctx
+				.context
+				.check_allowed_net(&url)
+				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+
 			if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
 				// url cannot contain non empty username and passwords
 				return Err(Exception::throw_type(&ctx, "Url contained credentials."));
