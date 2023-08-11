@@ -136,7 +136,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -178,7 +178,7 @@ where
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(|| Surreal::init());
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
