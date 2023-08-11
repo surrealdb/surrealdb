@@ -122,10 +122,43 @@ fn parse_server_stdio_from_var(var: &str) -> Result<Stdio, Box<dyn Error>> {
 	}
 }
 
+pub struct StartServerArguments {
+	pub auth: bool,
+	pub tls: bool,
+	pub wait_is_ready: bool,
+	pub tick_interval: time::Duration,
+}
+
+impl Default for StartServerArguments {
+	fn default() -> Self {
+		Self {
+			auth: true,
+			tls: false,
+			wait_is_ready: true,
+			tick_interval: time::Duration::new(1, 0),
+		}
+	}
+}
+
+pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		auth: false,
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments::default()).await
+}
+
 pub async fn start_server(
-	auth: bool,
-	tls: bool,
-	wait_is_ready: bool,
+	StartServerArguments {
+		auth,
+		tls,
+		wait_is_ready,
+		tick_interval,
+	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
 
@@ -147,6 +180,11 @@ pub async fn start_server(
 
 	if auth {
 		extra_args.push_str(" --auth");
+	}
+
+	if !tick_interval.is_zero() {
+		let sec = tick_interval.as_secs();
+		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
 	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");

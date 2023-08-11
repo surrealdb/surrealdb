@@ -5,10 +5,15 @@ mod common;
 use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 use serial_test::serial;
 use std::fs;
+use std::time;
 use test_log::test;
+use tokio::time::sleep;
 use tracing::info;
 
-use common::{PASS, USER};
+use common::{StartServerArguments, PASS, USER};
+
+const ONE_SEC: time::Duration = time::Duration::new(1, 0);
+const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 #[test]
 #[serial]
@@ -38,7 +43,14 @@ fn nonexistent_option() {
 #[serial]
 async fn all_commands() {
 	// Commands without credentials when auth is disabled, should succeed
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = ""; // Anonymous user
 
 	info!("* Create a record");
@@ -177,7 +189,14 @@ async fn start_tls() {
 			("SURREAL_TEST_SERVER_STDERR", Some("piped")),
 		],
 		async {
-			let (_, server) = common::start_server(false, true, false).await.unwrap();
+			let (_, server) = common::start_server(StartServerArguments {
+				auth: false,
+				tls: true,
+				wait_is_ready: false,
+				tick_interval: ONE_SEC,
+			})
+			.await
+			.unwrap();
 
 			std::thread::sleep(std::time::Duration::from_millis(2000));
 			let output = server.kill().output().err().unwrap();
@@ -193,7 +212,14 @@ async fn start_tls() {
 #[serial]
 async fn with_root_auth() {
 	// Commands with credentials when auth is enabled, should succeed
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = format!("--user {USER} --pass {PASS}");
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -243,7 +269,14 @@ async fn with_root_auth() {
 #[serial]
 async fn with_anon_auth() {
 	// Commands without credentials when auth is enabled, should fail
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = ""; // Anonymous user
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -297,6 +330,64 @@ async fn with_anon_auth() {
 		// 	output
 		// );
 		assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
+	}
+}
+
+#[test(tokio::test)]
+#[serial]
+async fn node() {
+	// Commands without credentials when auth is disabled, should succeed
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+	let creds = ""; // Anonymous user
+
+	info!("* Define a table");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Create a record");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
+			Ok("[{ id: thing:one }]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Show changes");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[{ changes: [{ update: { id: thing:one } }], versionstamp: 65536 }]\n\n"
+				.to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	sleep(TWO_SECS).await;
+
+	info!("* Show changes after GC");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
 	}
 }
 
