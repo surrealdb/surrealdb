@@ -11,8 +11,8 @@ impl Value {
 	}
 	fn _every(&self, steps: bool, arrays: bool, prev: Idiom) -> Vec<Idiom> {
 		match self {
-			// Current path part is an object
-			Value::Object(v) => match steps {
+			// Current path part is an object and is not empty
+			Value::Object(v) if !v.is_empty() => match steps {
 				// Let's log all intermediary nodes
 				true if !prev.is_empty() => Some(prev.clone())
 					.into_iter()
@@ -30,8 +30,8 @@ impl Value {
 					})
 					.collect::<Vec<_>>(),
 			},
-			// Current path part is an array
-			Value::Array(v) => match arrays {
+			// Current path part is an array and is not empty
+			Value::Array(v) if !v.is_empty() => match arrays {
 				// Let's log all individual array items
 				true => std::iter::once(prev.clone())
 					.chain(v.iter().enumerate().rev().flat_map(|(i, v)| {
@@ -54,6 +54,18 @@ mod tests {
 	use super::*;
 	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
+
+	#[test]
+	fn every_with_empty_objects_arrays() {
+		let val = Value::parse("{ test: {}, status: false, something: {age: 45}, tags: []}");
+		let res = vec![
+			Idiom::parse("something.age"),
+			Idiom::parse("status"),
+			Idiom::parse("tags"),
+			Idiom::parse("test"),
+		];
+		assert_eq!(res, val.every(None, false, false));
+	}
 
 	#[test]
 	fn every_without_array_indexes() {
