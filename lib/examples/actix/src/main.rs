@@ -8,7 +8,7 @@ use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
+static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

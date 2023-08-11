@@ -82,7 +82,7 @@ use tokio::io::AsyncWriteExt;
 /// use surrealdb::engine::local::Db;
 /// use surrealdb::engine::local::Mem;
 ///
-/// static DB: Lazy<Surreal<Db>> = Lazy::new(|| Surreal::init());
+/// static DB: Lazy<Surreal<Db>> = Lazy::new(Surreal::init);
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
