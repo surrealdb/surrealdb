@@ -40,6 +40,13 @@ impl Session {
 		self.db = Some(db.to_owned());
 		self
 	}
+
+	// Set the realtime functionality of the session
+	pub fn with_rt(mut self, rt: bool) -> Session {
+		self.rt = rt;
+		self
+	}
+
 	/// Retrieves the selected namespace
 	pub(crate) fn ns(&self) -> Option<Arc<str>> {
 		self.ns.as_deref().map(Into::into)
