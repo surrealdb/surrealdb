@@ -21,7 +21,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.ok {
+		if !self.ok && !self.rw {
 			trace!("Aborting transaction as it was incomplete and dropped");
 			let future = self.tx.cancel();
 			// We are executing a future in a synchronous call

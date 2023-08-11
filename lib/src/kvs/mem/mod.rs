@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -21,7 +22,12 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.ok {
+		if !self.ok && !self.rw {
+			let backtrace = Backtrace::capture();
+			if let BacktraceStatus::Captured = backtrace.status() {
+				// printing the backtrace is prettier than logging individual entries in trace
+				println!("{}", backtrace);
+			}
 			let mut counter = 0u16;
 			loop {
 				trace!("Aborting transaction as it was incomplete and dropped");
