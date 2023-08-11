@@ -41,7 +41,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.ok && !self.rw {
+		if !self.ok && self.rw {
 			warn!("A write transaction was dropped without being resolved");
 		}
 	}
