@@ -64,6 +64,7 @@ pub use use_ns::UseNs;
 pub use version::Version;
 
 use crate::api::conn::Method;
+use crate::api::method::export::IntoExportable;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -71,15 +72,16 @@ use crate::api::opt::auth::Jwt;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
-use crate::api::ExtractRouter;
+use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::sql::to_value;
 use crate::sql::Uuid;
 use crate::sql::Value;
-use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 impl Method {
 	#[allow(dead_code)] // used by `ws` and `http`
@@ -113,18 +115,19 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	/// Creates a new static instance of the client
+	/// Initialises a new unconnected instance of the client
 	///
-	/// The static singleton ensures that a single database instance is available across very large
-	/// or complicated applications. With the singleton, only one connection to the database is
-	/// instantiated, and the database connection does not have to be shared across components
-	/// or controllers.
+	/// This makes it easy to create a static singleton of the client. The static singleton
+	/// ensures that a single database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database is instantiated,
+	/// and the database connection does not have to be shared across components or controllers.
 	///
 	/// # Examples
 	///
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
@@ -133,7 +136,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Client> = Surreal::init();
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -167,6 +170,7 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
@@ -174,7 +178,7 @@ where
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Any> = Surreal::init();
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(|| Surreal::init());
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -204,9 +208,9 @@ where
 	///     Ok(())
 	/// }
 	/// ```
-	pub const fn init() -> Self {
+	pub fn init() -> Self {
 		Self {
-			router: OnceCell::new(),
+			router: Arc::new(OnceLock::new()),
 		}
 	}
 
@@ -229,9 +233,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<'static, C, Self> {
+	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<C, Self> {
 		Connect {
-			router: None,
+			router: Arc::new(OnceLock::new()),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -971,13 +975,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn export<P>(&self, file: P) -> Export<C>
+	pub fn export<E>(&self, target: E) -> Export<C>
 	where
-		P: AsRef<Path>,
+		E: IntoExportable,
 	{
 		Export {
 			router: self.router.extract(),
-			file: file.as_ref().to_owned(),
+			target: target.into_exportable(),
 		}
 	}
 

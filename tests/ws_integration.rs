@@ -12,7 +12,7 @@ use crate::common::{PASS, USER};
 #[test(tokio::test)]
 #[serial]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	// Send command
@@ -37,7 +37,7 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -104,7 +104,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -159,7 +159,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -383,7 +383,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -425,7 +425,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -477,7 +477,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -563,7 +563,7 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -646,7 +646,7 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -699,7 +699,7 @@ async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -762,7 +762,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -806,7 +806,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -852,7 +852,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -892,7 +892,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -942,7 +942,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1024,7 +1024,7 @@ async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1129,7 +1129,7 @@ async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1191,7 +1191,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1237,7 +1237,7 @@ async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1295,7 +1295,7 @@ async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1353,7 +1353,7 @@ async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
@@ -1397,7 +1397,7 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	// Send command

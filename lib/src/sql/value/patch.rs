@@ -1,20 +1,35 @@
 use crate::err::Error;
-use crate::sql::operation::Op;
+use crate::sql::operation::Operation;
 use crate::sql::value::Value;
 
 impl Value {
-	pub(crate) fn patch(&mut self, val: Value) -> Result<(), Error> {
-		for o in val.to_operations()?.into_iter() {
-			match o.op {
-				Op::Add => match self.pick(&o.path) {
-					Value::Array(_) => self.inc(&o.path, o.value),
-					_ => self.put(&o.path, o.value),
+	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
+		// This value is for test operation, value itself shouldn't change until all operations done.
+		// If test operations fails, nothing in value will be changed.
+		let mut tmp_val = self.clone();
+
+		for operation in ops.to_operations()?.into_iter() {
+			match operation {
+				Operation::Add {
+					path,
+					value,
+				} => match tmp_val.pick(&path) {
+					Value::Array(_) => tmp_val.inc(&path, value),
+					_ => tmp_val.put(&path, value),
 				},
-				Op::Remove => self.cut(&o.path),
-				Op::Replace => self.put(&o.path, o.value),
-				Op::Change => {
-					if let Value::Strand(p) = o.value {
-						if let Value::Strand(v) = self.pick(&o.path) {
+				Operation::Remove {
+					path,
+				} => tmp_val.cut(&path),
+				Operation::Replace {
+					path,
+					value,
+				} => tmp_val.put(&path, value),
+				Operation::Change {
+					path,
+					value,
+				} => {
+					if let Value::Strand(p) = value {
+						if let Value::Strand(v) = tmp_val.pick(&path) {
 							let dmp = dmp::new();
 							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
 								Error::InvalidPatch {
@@ -27,13 +42,42 @@ impl Value {
 								}
 							})?;
 							let txt = txt.into_iter().collect::<String>();
-							self.put(&o.path, Value::from(txt));
+							tmp_val.put(&path, Value::from(txt));
 						}
 					}
 				}
-				_ => (),
+				Operation::Copy {
+					path,
+					from,
+				} => {
+					let found_val = tmp_val.pick(&from);
+					tmp_val.put(&path, found_val);
+				}
+				Operation::Move {
+					path,
+					from,
+				} => {
+					let found_val = tmp_val.pick(&from);
+					tmp_val.put(&path, found_val);
+					tmp_val.cut(&from);
+				}
+				Operation::Test {
+					path,
+					value,
+				} => {
+					let found_val = tmp_val.pick(&path);
+
+					if value != found_val {
+						return Err(Error::PatchTest {
+							expected: value.to_string(),
+							got: found_val.to_string(),
+						});
+					}
+				}
 			}
 		}
+
+		*self = tmp_val;
 		Ok(())
 	}
 }
@@ -83,6 +127,33 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn patch_copy_simple() {
+		let mut val = Value::parse("{ test: 123, temp: true }");
+		let ops = Value::parse("[{ op: 'copy', path: '/temp', from: '/test' }]");
+		let res = Value::parse("{ test: 123, temp: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_move_simple() {
+		let mut val = Value::parse("{ temp: true, some: 123 }");
+		let ops = Value::parse("[{ op: 'move', path: '/other', from: '/temp' }]");
+		let res = Value::parse("{ other: true, some: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_test_simple() {
+		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = Value::parse("[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]");
+		let res = Value::parse("{ test: { other: 'test' }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
 	async fn patch_add_embedded() {
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let ops = Value::parse("[{ op: 'add', path: '/temp/test', value: true }]");
@@ -121,10 +192,47 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn patch_copy_embedded() {
+		let mut val = Value::parse("{ test: { other: null }, temp: 123 }");
+		let ops = Value::parse("[{ op: 'copy', path: '/test/other', from: '/temp' }]");
+		let res = Value::parse("{ test: { other: 123 }, temp: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_move_embedded() {
+		let mut val = Value::parse("{ test: { other: ':3', some: 123 }}");
+		let ops = Value::parse("[{ op: 'move', path: '/temp', from: '/test/other' }]");
+		let res = Value::parse("{ test: { some: 123 }, temp: ':3' }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_test_embedded() {
+		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = Value::parse("[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]");
+		let res = Value::parse("{ test: { something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
 	async fn patch_change_invalid() {
 		// See https://github.com/surrealdb/surrealdb/issues/2001
 		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
 		let ops = Value::parse("[{ op: 'change', path: '/test/other', value: 'text' }]");
 		assert!(val.patch(ops).is_err());
+	}
+
+	#[tokio::test]
+	async fn patch_test_invalid() {
+		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
+		let should = val.clone();
+		let ops = Value::parse("[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 'not same' }]");
+		assert!(val.patch(ops).is_err());
+		// It is important to test if patches applied even if test operation fails
+		assert_eq!(val, should);
 	}
 }

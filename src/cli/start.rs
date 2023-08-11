@@ -144,11 +144,11 @@ pub async fn init(
 	env::init().await?;
 	// Start the kvs server
 	dbs::init(dbs).await?;
-	// Start the web server
-	net::init().await?;
 	// Start the node agent
 	#[cfg(feature = "has-storage")]
 	node::init().await?;
+	// Start the web server
+	net::init().await?;
 	// All ok
 	Ok(())
 }

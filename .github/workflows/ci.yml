@@ -492,10 +492,9 @@ jobs:
         run: |
           sudo apt-get -y update
 
-      - name: Install TiKV
+      - name: Install TiUP
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          ~/.tiup/bin/tiup install tikv pd
           ~/.tiup/bin/tiup -v
 
       - name: Install cargo-make

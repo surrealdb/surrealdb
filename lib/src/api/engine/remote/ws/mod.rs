@@ -58,11 +58,12 @@ impl Surreal<Client> {
 	/// # Examples
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::remote::ws::Client;
 	/// use surrealdb::engine::remote::ws::Ws;
 	///
-	/// static DB: Surreal<Client> = Surreal::init();
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -75,7 +76,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
