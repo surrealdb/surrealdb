@@ -1,5 +1,5 @@
 use crate::sql::idiom::Idiom;
-use crate::sql::operation::{Op, Operation};
+use crate::sql::operation::Operation;
 use crate::sql::value::Value;
 use std::cmp::min;
 
@@ -11,18 +11,15 @@ impl Value {
 				// Loop over old keys
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
-						ops.push(Operation {
-							op: Op::Remove,
+						ops.push(Operation::Remove {
 							path: path.clone().push(key.clone().into()),
-							value: Value::Null,
 						})
 					}
 				}
 				// Loop over new keys
 				for (key, val) in b.iter() {
 					match a.get(key) {
-						None => ops.push(Operation {
-							op: Op::Add,
+						None => ops.push(Operation::Add {
 							path: path.clone().push(key.clone().into()),
 							value: val.clone(),
 						}),
@@ -42,8 +39,7 @@ impl Value {
 				}
 				while n < b.len() {
 					if n >= a.len() {
-						ops.push(Operation {
-							op: Op::Add,
+						ops.push(Operation::Add {
 							path: path.clone().push(n.into()),
 							value: b[n].clone(),
 						})
@@ -52,17 +48,14 @@ impl Value {
 				}
 				while n < a.len() {
 					if n >= b.len() {
-						ops.push(Operation {
-							op: Op::Remove,
+						ops.push(Operation::Remove {
 							path: path.clone().push(n.into()),
-							value: Value::Null,
 						})
 					}
 					n += 1;
 				}
 			}
-			(Value::Strand(a), Value::Strand(b)) if a != b => ops.push(Operation {
-				op: Op::Change,
+			(Value::Strand(a), Value::Strand(b)) if a != b => ops.push(Operation::Change {
 				path,
 				value: {
 					let dmp = dmp::new();
@@ -71,8 +64,7 @@ impl Value {
 					txt.into()
 				},
 			}),
-			(a, b) if a != b => ops.push(Operation {
-				op: Op::Replace,
+			(a, b) if a != b => ops.push(Operation::Replace {
 				path,
 				value: val.clone(),
 			}),

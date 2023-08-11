@@ -13,6 +13,7 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
@@ -25,7 +26,6 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
-use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
@@ -38,6 +38,7 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
@@ -129,7 +130,7 @@ impl Connection for Client {
 			router(url, maybe_connector, capacity, config, socket, route_rx);
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,

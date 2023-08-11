@@ -112,7 +112,6 @@ pub use self::limit::Limit;
 pub use self::model::Model;
 pub use self::number::Number;
 pub use self::object::Object;
-pub use self::operation::Op;
 pub use self::operation::Operation;
 pub use self::operator::Operator;
 pub use self::order::Order;
