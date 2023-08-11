@@ -24,6 +24,7 @@ name = "actix-example"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "once_cell",
  "serde",
  "surrealdb",
  "thiserror",

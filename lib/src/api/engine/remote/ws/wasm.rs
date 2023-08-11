@@ -11,6 +11,7 @@ use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
@@ -23,7 +24,6 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
-use once_cell::sync::OnceCell;
 use pharos::Channel;
 use pharos::Observable;
 use pharos::ObserveConfig;
@@ -37,6 +37,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -82,7 +83,7 @@ impl Connection for Client {
 			conn_rx.into_recv_async().await??;
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features: HashSet::new(),
 					conn: PhantomData,
 					sender: route_tx,

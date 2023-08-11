@@ -1,11 +1,11 @@
 #[cfg(feature = "has-storage")]
 use crate::net::client_ip::ClientIp;
 #[cfg(feature = "has-storage")]
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use std::{net::SocketAddr, path::PathBuf};
 
 #[cfg(feature = "has-storage")]
-pub static CF: OnceCell<Config> = OnceCell::new();
+pub static CF: OnceLock<Config> = OnceLock::new();
 
 use std::time::Duration;
 
