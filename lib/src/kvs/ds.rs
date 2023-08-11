@@ -304,19 +304,14 @@ impl Datastore {
 				);
 				let sess = Session::owner();
 				self.execute(&sql, &sess, None).await?;
-				txn.cancel().await?; // Read only transaction
 				Ok(())
 			}
 			Ok(_) => {
 				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
 				warn!("Consider removing the --user/--pass arguments from the server start.");
-				txn.cancel().await?; // Read only transaction
 				Ok(())
 			}
-			Err(e) => {
-				txn.cancel().await?;
-				Err(e)
-			}
+			Err(e) => Err(e),
 		}
 	}
 
