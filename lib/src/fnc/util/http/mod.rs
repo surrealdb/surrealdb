@@ -18,7 +18,8 @@ fn encode_body(req: Request, body: Value) -> Request {
 			.header(CONTENT_TYPE, "application/octet-stream")
 			.expect("header should be correct")
 			.body(bytes.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+		// TODO: Check if this is actually correct.
+		_ if body.is_some() => req.json(&body.into_json()).expect("serialization should succeed"),
 		_ => req,
 	}
 }
@@ -45,7 +46,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			},
 			_ => Ok(Value::None),
 		},
-		s => Err(Error::Reqwest(s.canonical_reason().unwrap_or_default().to_owned())),
+		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
 }
 
@@ -74,7 +75,7 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => Ok(Value::None),
-		s => Err(Error::Reqwest(s.canonical_reason().unwrap_or_default().to_owned())),
+		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
 }
 
@@ -152,11 +153,11 @@ pub async fn post(
 	let mut req = cli.post(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Submit the request body
 	req = encode_body(req, body);
@@ -185,11 +186,11 @@ pub async fn patch(
 	let mut req = cli.patch(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Submit the request body
 	req = encode_body(req, body);
@@ -217,11 +218,11 @@ pub async fn delete(
 	let mut req = cli.delete(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {

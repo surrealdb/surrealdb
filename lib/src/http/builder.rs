@@ -1,4 +1,4 @@
-use std::error::Error as StdError;
+use std::{error::Error as StdError, sync::Arc};
 
 use lib_http::{HeaderMap, StatusCode};
 use url::Url;
@@ -60,7 +60,7 @@ impl RedirectPolicy {
 	where
 		F: Fn(Attempt<'_>) -> RedirectAction + Send + Sync + 'static,
 	{
-		Self::custom(Box::new(f))
+		Self::Custom(Box::new(f))
 	}
 }
 
@@ -102,7 +102,7 @@ impl ClientBuilder {
 
 	pub fn build(self) -> Result<Client, Error> {
 		Ok(Client {
-			inner: NativeClient::build(self)?,
+			inner: Arc::new(NativeClient::build(self)),
 		})
 	}
 }

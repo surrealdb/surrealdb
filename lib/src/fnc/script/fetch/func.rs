@@ -1,17 +1,11 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::fetch::{
-	body::{Body, BodyData, BodyKind},
-	classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-	RequestError,
+use crate::{
+	fnc::script::fetch::classes::{self, Request, RequestInit, Response},
+	http::{RedirectAction, RedirectPolicy},
 };
 use futures::TryStreamExt;
-use http::header::{HeaderValue, CONTENT_TYPE};
-use js::{function::Opt, Class, Ctx, Exception, Result, Value};
-use reqwest::{redirect, Body as ReqBody};
-use std::sync::Arc;
-
-use super::classes::Headers;
+use js::{function::Opt, Ctx, Exception, Result, Value};
 
 #[js::function]
 #[allow(unused_variables)]
@@ -132,6 +126,7 @@ pub async fn fetch<'js>(
 		was_redirected: false,
 	};
 	Ok(response)
+	*/
 }
 
 #[cfg(test)]

@@ -9,3 +9,5 @@ impl Client {
 
 	pub fn build(builder: ClientBuilder) -> Result<Self, Error> {}
 }
+
+pub struct Body {}

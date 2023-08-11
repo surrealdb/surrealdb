@@ -2,9 +2,9 @@ use bytes::Bytes;
 use futures::Stream;
 use lib_http::HeaderMap;
 
-use super::Error;
-
-pub struct Response {}
+pub struct Response {
+	response
+}
 
 impl Response {
 	pub async fn text(self) -> Result<String, Error> {

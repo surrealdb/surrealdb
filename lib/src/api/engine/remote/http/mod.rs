@@ -349,7 +349,8 @@ async fn router(
 			let ns = match ns {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
-						request = request.header("NS", &ns);
+						// This is a correct header value so the unwrap should be fine.
+						request = request.header("NS", &ns).unwrap();
 						Some(ns)
 					}
 					Err(_) => {
@@ -361,7 +362,8 @@ async fn router(
 			let db = match db {
 				Some(db) => match HeaderValue::try_from(&db) {
 					Ok(db) => {
-						request = request.header("DB", &db);
+						// This is a correct header value so the unwrap should be fine.
+						request = request.header("DB", &db).unwrap();
 						Some(db)
 					}
 					Err(_) => {
@@ -386,7 +388,7 @@ async fn router(
 				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
+			let request = client.post(path)?.headers(headers.clone()).auth(auth)?.body(credentials);
 			let value = submit_auth(request).await?;
 			if let [credentials] = &mut params[..] {
 				if let Ok(Root {
@@ -412,7 +414,7 @@ async fn router(
 				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
+			let request = client.post(path)?.headers(headers.clone()).auth(auth)?.body(credentials);
 			let value = submit_auth(request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -422,8 +424,11 @@ async fn router(
 				[Value::Strand(Strand(token))] => mem::take(token),
 				_ => unreachable!(),
 			};
-			let request =
-				client.post(path).headers(headers.clone()).bearer_auth(&token).body("RETURN true");
+			let request = client
+				.post(path)?
+				.headers(headers.clone())
+				.bearer_auth(&token)?
+				.body("RETURN true");
 			take(true, request).await?;
 			*auth = Some(Auth::Bearer {
 				token,
@@ -438,7 +443,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = create_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -446,7 +451,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = update_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -454,7 +459,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = patch_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -462,7 +467,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = merge_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -470,7 +475,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = select_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -478,15 +483,19 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = delete_statement(&mut params);
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+				client.post(path)?.headers(headers.clone()).auth(auth)?.body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {
 			let path = base_url.join(SQL_PATH)?;
-			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			match param.query {
-				Some((query, bindings)) => {
+			let mut request =
+				client.post(path)?.headers(headers.clone()).query(&vars)?.auth(auth)?;
+			match &mut params[..] {
+				[Value::Strand(Strand(statements))] => {
+					request = request.body(mem::take(statements));
+				}
+				[Value::Strand(Strand(statements)), Value::Object(bindings)] => {
 					let bindings: Vec<_> =
 						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
 					request = request.query(&bindings).body(query.to_string());
@@ -503,10 +512,10 @@ async fn router(
 			let path = base_url.join(Method::Export.as_str())?;
 			let file = param.file.expect("file to export into");
 			let request = client
-				.get(path)
+				.get(path)?
 				.headers(headers.clone())
-				.auth(auth)
-				.header(ACCEPT, "application/octet-stream");
+				.auth(auth)?
+				.header(ACCEPT, "application/octet-stream")?;
 			let value = export(request, (param.file, param.sender)).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -515,22 +524,22 @@ async fn router(
 			let path = base_url.join(Method::Import.as_str())?;
 			let file = param.file.expect("file to import from");
 			let request = client
-				.post(path)
+				.post(path)?
 				.headers(headers.clone())
-				.auth(auth)
-				.header(CONTENT_TYPE, "application/octet-stream");
+				.auth(auth)?
+				.header(CONTENT_TYPE, "application/octet-stream")?;
 			let value = import(request, file).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Health => {
 			let path = base_url.join(Method::Health.as_str())?;
-			let request = client.get(path);
+			let request = client.get(path)?;
 			let value = health(request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Version => {
 			let path = base_url.join(method.as_str())?;
-			let request = client.get(path);
+			let request = client.get(path)?;
 			let value = version(request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -541,10 +550,10 @@ async fn router(
 				_ => unreachable!(),
 			};
 			let request = client
-				.post(path)
+				.post(path)?
 				.headers(headers.clone())
-				.auth(auth)
-				.query(&[(key.as_str(), value.as_str())])
+				.auth(auth)?
+				.query(&[(key.as_str(), value.as_str())])?
 				.body(format!("RETURN ${key}"));
 			take(true, request).await?;
 			vars.insert(key, value);
@@ -563,10 +572,10 @@ async fn router(
 				_ => unreachable!(),
 			};
 			let request = client
-				.post(path)
+				.post(path)?
 				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("table", table)])
+				.auth(auth)?
+				.query(&[("table", table)])?
 				.body("LIVE SELECT * FROM type::table($table)");
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
@@ -578,10 +587,10 @@ async fn router(
 				_ => unreachable!(),
 			};
 			let request = client
-				.post(path)
+				.post(path)?
 				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("id", id)])
+				.auth(auth)?
+				.query(&[("id", id)])?
 				.body("KILL type::string($id)");
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))

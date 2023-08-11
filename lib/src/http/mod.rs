@@ -10,13 +10,17 @@ use lib_http::{
 use thiserror::Error;
 
 #[cfg(not(target_arch = "wasm32"))]
-mod hyper;
+pub mod hyper;
 #[cfg(not(target_arch = "wasm32"))]
-use hyper::{Client as NativeClient, Error as ClientError};
+pub use hyper as req_impl;
 #[cfg(target_arch = "wasm32")]
-mod wasm;
+pub mod wasm;
 #[cfg(target_arch = "wasm32")]
-use wasm::{Client as NativeClient, Error as ClientError};
+pub use wasm as req_impl;
+
+pub use req_impl::Response;
+use req_impl::{Client as NativeClient, ClientError};
+use tokio::time::error::Elapsed;
 
 mod url;
 pub use url::{IntoUrl, Url};
@@ -24,10 +28,18 @@ mod builder;
 pub use builder::{ClientBuilder, RedirectAction, RedirectPolicy};
 mod request;
 pub use request::Request;
-mod response;
-pub use response::Response;
 mod body;
 pub use body::Body;
+
+#[derive(Error, Debug)]
+pub enum SerializeError {
+	#[error("{0}")]
+	Json(#[from] serde_json::Error),
+	#[error("{0}")]
+	UrlDe(#[from] serde_urlencoded::de::Error),
+	#[error("{0}")]
+	UrlSer(#[from] serde_urlencoded::ser::Error),
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -49,6 +61,12 @@ pub enum Error {
 	InvalidHeaderValue(#[from] InvalidHeaderValue),
 	#[error("{0}")]
 	InvalidMethod(#[from] InvalidMethod),
+	#[error("Decoding error {0}")]
+	Decode(SerializeError),
+	#[error("Encoding error {0}")]
+	Encode(SerializeError),
+	#[error("Request timed out: {0}")]
+	Timeout(#[from] Elapsed),
 }
 
 impl From<Infallible> for Error {
@@ -74,22 +92,32 @@ impl Client {
 	}
 
 	pub fn get<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
-		let url = url.into_url()?;
+		let url = url.to_url()?;
 		Request::new(Method::GET, url, self.clone())
 	}
 
 	pub fn post<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
-		let url = url.into_url()?;
+		let url = url.to_url()?;
 		Request::new(Method::POST, url, self.clone())
 	}
 
 	pub fn head<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
-		let url = url.into_url()?;
+		let url = url.to_url()?;
 		Request::new(Method::HEAD, url, self.clone())
 	}
 
 	pub fn put<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
-		let url = url.into_url()?;
+		let url = url.to_url()?;
 		Request::new(Method::PUT, url, self.clone())
+	}
+
+	pub fn patch<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.to_url()?;
+		Request::new(Method::PATCH, url, self.clone())
+	}
+
+	pub fn delete<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
+		let url = url.to_url()?;
+		Request::new(Method::DELETE, url, self.clone())
 	}
 }

@@ -1,34 +1,40 @@
 use base64_lib::write::EncoderWriter;
-use lib_http::{header::AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, Method};
+use lib_http::{
+	header::{AUTHORIZATION, CONTENT_TYPE},
+	HeaderMap, HeaderName, HeaderValue, Method,
+};
 use serde::Serialize;
 use std::time::Duration;
 use url::Url;
 
-use super::{Client, Error, IntoUrl, Response};
+use super::{Body, Client, Error, Response, SerializeError};
 
 pub struct Request {
-	method: Method,
-	url: Url,
-	headers: HeaderMap,
-	timeout: Option<Duration>,
-	client: Client,
+	pub(super) method: Method,
+	pub(super) url: Url,
+	pub(super) headers: HeaderMap,
+	pub(super) timeout: Option<Duration>,
+	pub(super) client: Client,
+	pub(super) body: Body,
 }
 
 impl Request {
 	pub fn new<U, M>(method: M, url: U, client: Client) -> Result<Self, Error>
 	where
-		U: IntoUrl,
+		Url: TryFrom<U>,
+		<Url as TryFrom<U>>::Error: Into<Error>,
 		Method: TryFrom<M>,
 		<Method as TryFrom<M>>::Error: Into<Error>,
 	{
-		let url = url.into_url();
-		let method = Method::try_fro(method).map_err(|e| e.into())?;
+		let url = Url::try_from(url).map_err(|e| e.into())?;
+		let method = Method::try_from(method).map_err(|e| e.into())?;
 		Ok(Self {
 			url,
 			method,
 			headers: HeaderMap::new(),
 			timeout: None,
 			client,
+			body: Body::empty(),
 		})
 	}
 
@@ -41,18 +47,23 @@ impl Request {
 		U: std::fmt::Display,
 		P: std::fmt::Display,
 	{
-		use std::fmt::Write;
+		use std::io::Write;
 
 		let mut buf = b"Basic ".to_vec();
 
-		let mut encoder = EncoderWriter::new(&mut buf, &base64_lib::prelude::BASE64_STANDARD);
-		let _ = write!(&mut encoder, "{}:", username);
-		if let Some(password) = password {
-			let _ = write!(&mut encoder, "{}:", password);
+		{
+			let mut encoder = EncoderWriter::new(&mut buf, &base64_lib::prelude::BASE64_STANDARD);
+			let _ = write!(&mut encoder, "{}:", username);
+			if let Some(password) = password {
+				let _ = write!(&mut encoder, "{}:", password);
+			}
+
+			// Writing into a vector shouldn't fail
+			encoder.finish().unwrap();
 		}
 
-		let mut header =
-			HeaderValue::from_bytes(&buf).expect("basic auth header should always be valid");
+		let mut header = HeaderValue::from_bytes(buf.as_slice())
+			.expect("basic auth header should always be valid");
 		header.set_sensitive(true);
 		self.headers.insert(AUTHORIZATION, header);
 		self
@@ -63,9 +74,18 @@ impl Request {
 		T: std::fmt::Display,
 	{
 		let token = format!("Bearer {token}");
-		let header = HeaderValue::from_str(&token).map_err(|_| Error::InvalidToken)?;
+		let mut header = HeaderValue::from_str(&token).map_err(|_| Error::InvalidToken)?;
 		header.set_sensitive(true);
 		self.headers.insert(AUTHORIZATION, header);
+		Ok(self)
+	}
+
+	pub fn query<T: Serialize + ?Sized>(mut self, query: &T) -> Result<Self, Error> {
+		{
+			let mut pairs = self.url.query_pairs_mut();
+			let serializer = serde_urlencoded::Serializer::new(&mut pairs);
+			query.serialize(serializer).map_err(SerializeError::from).map_err(Error::Encode)?;
+		}
 		Ok(self)
 	}
 
@@ -84,22 +104,43 @@ impl Request {
 	{
 		let name = HeaderName::try_from(name).map_err(|e| e.into())?;
 		let value = HeaderValue::try_from(value).map_err(|e| e.into())?;
-		self.header.append(name, value);
+		self.headers.append(name, value);
 		Ok(self)
 	}
 
 	pub fn timeout(mut self, duration: Duration) -> Self {
-		todo!()
+		self.timeout = Some(duration);
+		self
 	}
 
-	pub fn body<B>(mut self, body: B) -> Self {
-		todo!()
+	pub fn body<B>(mut self, body: B) -> Self
+	where
+		Body: From<B>,
+	{
+		self.body = body.into();
+		self
 	}
 
-	pub fn json<S>(mut self, value: S) -> Result<Self, Error>
+	pub fn json<S>(mut self, value: &S) -> Result<Self, Error>
 	where
 		S: Serialize,
 	{
-		todo!()
+		let value =
+			serde_json::to_vec(value).map_err(SerializeError::from).map_err(Error::Encode)?;
+		self.body = Body::from(value);
+		let header_value = HeaderValue::from_static("application/json");
+		self.headers.insert(CONTENT_TYPE, header_value);
+		Ok(self)
+	}
+
+	pub fn text<S>(mut self, value: S) -> Result<Self, Error>
+	where
+		String: From<S>,
+	{
+		let value = String::from(value);
+		self.body = Body::from(value);
+		let header_value = HeaderValue::from_static("plain/text");
+		self.headers.insert(CONTENT_TYPE, header_value);
+		Ok(self)
 	}
 }
