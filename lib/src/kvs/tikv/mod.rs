@@ -22,6 +22,14 @@ pub struct Transaction {
 	tx: tikv::Transaction,
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.ok && !self.rw {
+			warn!("A write transaction was dropped without being resolved");
+		}
+	}
+}
+
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {

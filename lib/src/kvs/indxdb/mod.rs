@@ -22,18 +22,7 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok && !self.rw {
-			trace!("Aborting transaction as it was incomplete and dropped");
-			let future = self.tx.cancel();
-			// We are executing a future in a synchronous call
-			// We should have access to the runtime to call a blocking function, but we don't
-			// We could write unsafe code here to resolve this future by moving ownership
-			// or copying pointers.
-			// https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_bridges_sync_and_async.html
-			// Below is a workaround that might cause a panic
-			let res = futures::executor::block_on(future);
-			if let Err(e) = res {
-				error!("Failed to abort transaction: {:?}", e);
-			}
+			warn!("A write transaction was dropped without being resolved");
 		}
 	}
 }

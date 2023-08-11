@@ -23,23 +23,11 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok && !self.rw {
+			warn!("A write transaction was dropped without being resolved");
 			let backtrace = Backtrace::capture();
 			if let BacktraceStatus::Captured = backtrace.status() {
 				// printing the backtrace is prettier than logging individual entries in trace
 				println!("{}", backtrace);
-			}
-			let mut counter = 0u16;
-			loop {
-				trace!("Aborting transaction as it was incomplete and dropped");
-				let r = self.tx.cancel();
-				if r.is_ok() {
-					trace!("Aborted transaction after {} retries", counter);
-					break;
-				}
-				if let Err(e) = r {
-					error!("Failed to abort transaction: {:?}", e);
-				}
-				counter += 1;
 			}
 		}
 	}

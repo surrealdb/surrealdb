@@ -32,24 +32,7 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok && !self.rw {
-			trace!("Aborting transaction as it was incomplete and dropped");
-			let mut counter = 0u16;
-			loop {
-				if let Some(mut lock) = self.tx.try_lock() {
-					let tx_opt = lock.take();
-					if let Some(tx) = tx_opt {
-						let r = tx.rollback();
-						if let Err(e) = r {
-							error!("Failed to abort transaction: {:?}", e);
-						} else {
-							trace!("Aborted transaction after {} retries", counter);
-							break;
-						}
-					}
-					trace!("Acquired lock but there was no transaction");
-				}
-				counter += 1;
-			}
+			warn!("A write transaction was dropped without being resolved");
 		}
 	}
 }
