@@ -6,6 +6,7 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use futures::lock::Mutex;
 use rocksdb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -33,6 +34,13 @@ impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok && self.rw {
 			warn!("A write transaction was dropped without being resolved");
+			let backtrace = Backtrace::force_capture();
+			if let BacktraceStatus::Captured = backtrace.status() {
+				// printing the backtrace is prettier than logging individual entries in trace
+				println!("{}", backtrace);
+			}
+			#[cfg(debug_assertions)]
+			panic!("Panicking because of a transaction that was not handled correctly");
 		}
 	}
 }

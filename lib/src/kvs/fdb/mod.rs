@@ -1,6 +1,7 @@
 #![cfg(feature = "kv-fdb")]
 
 use futures::TryStreamExt;
+use std::backtrace::{Backtrace, BacktraceStatus};
 
 use crate::err::Error;
 use crate::kvs::Key;
@@ -43,6 +44,13 @@ impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.ok && self.rw {
 			warn!("A write transaction was dropped without being resolved");
+			let backtrace = Backtrace::force_capture();
+			if let BacktraceStatus::Captured = backtrace.status() {
+				// printing the backtrace is prettier than logging individual entries in trace
+				println!("{}", backtrace);
+			}
+			#[cfg(debug_assertions)]
+			panic!("Panicking because of a transaction that was not handled correctly");
 		}
 	}
 }
