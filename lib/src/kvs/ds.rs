@@ -10,8 +10,8 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::iam::{Action, Auth, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
@@ -290,28 +290,40 @@ impl Datastore {
 
 	/// Setup the initial credentials
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
-		let mut txn = self.transaction(false, false).await?;
-		match txn.all_root_users().await {
+		let txn = Arc::new(Mutex::new(self.transaction(true, false).await?));
+		let root_users = txn.lock().await.all_root_users().await;
+		match root_users {
 			Ok(val) if val.is_empty() => {
 				info!(
 					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
 				);
 
-				let sql = format!(
-					"DEFINE USER {user} ON ROOT PASSWORD '{pass}' ROLES OWNER",
-					user = creds.username,
-					pass = creds.password
+				// We inject user and pass via format because the language doesnt yet support params for them
+				// Once it does, we can set user and pass via the context.add_value() method
+				// Also note: user is unquoted but password is
+				let raw_sql = format!(
+					r#"DEFINE USER {} ON ROOT PASSWORD "{}" ROLES OWNER"#,
+					creds.username, creds.password
 				);
-				let sess = Session::owner();
-				self.execute(&sql, &sess, None).await?;
+				let query = sql::parse(&raw_sql)?;
+				// We know there is only 1 statement so we access it directly
+				let stm = &query.0 .0[0];
+				let ctx = Context::default();
+				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
 			Ok(_) => {
 				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
 				warn!("Consider removing the --user/--pass arguments from the server start.");
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
-			Err(e) => Err(e),
+			Err(e) => {
+				txn.lock().await.cancel().await?;
+				Err(e)
+			}
 		}
 	}
 
