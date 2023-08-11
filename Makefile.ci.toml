@@ -117,12 +117,12 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 [tasks.ci-api-integration-fdb]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-tikv-tests]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-tikv]
 category = "CI - INTEGRATION TESTS"
@@ -165,6 +165,8 @@ script = """
    ${HOME}/.tiup/bin/tiup install pd tikv playground
 
    ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &>/tmp/tiup.log &
+
+   ${HOME}/.tiup/bin/tiup clean --all
 
    echo $! > /tmp/tiup.pid
 
