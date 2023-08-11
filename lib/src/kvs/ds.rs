@@ -15,6 +15,8 @@ use crate::iam::{Action, Auth, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
+use crate::sql::statements::DefineUserStatement;
+use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
 use crate::vs;
@@ -297,17 +299,7 @@ impl Datastore {
 				info!(
 					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
 				);
-
-				// We inject user and pass via format because the language doesnt yet support params for them
-				// Once it does, we can set user and pass via the context.add_value() method
-				// Also note: user is unquoted but password is
-				let raw_sql = format!(
-					r#"DEFINE USER {} ON ROOT PASSWORD "{}" ROLES OWNER"#,
-					creds.username, creds.password
-				);
-				let query = sql::parse(&raw_sql)?;
-				// We know there is only 1 statement so we access it directly
-				let stm = &query.0 .0[0];
+				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
 				let ctx = Context::default();
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
