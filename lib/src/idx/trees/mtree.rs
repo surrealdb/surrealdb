@@ -563,22 +563,18 @@ impl MTree {
 		Ok(result)
 	}
 
-	async fn deletion_adjustments(
+	fn find_next_child_entry(
 		&self,
-		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
-		routing_nodes: &mut Vec<(StoredNode<MTreeNode>, usize)>,
-	) -> Result<(), Error> {
-		while let Some((node, idx)) = routing_nodes.pop() {
-			if let MTreeNode::Routing(children) = &node.n {
-				let child = store.get_node(tx, children[idx].node).await?;
-				if child.n.len() < self.minimum {
-					todo!()
-				}
-				self.compute_radius(tx, store, node, idx).await?;
+		entries: &Vec<MRoutingProperties>,
+		v: &Vector,
+	) -> Option<(usize, NodeId)> {
+		for (idx, entry) in entries.iter().enumerate() {
+			let d = self.calculate_distance(v.as_ref(), entry.center.as_ref());
+			if d <= entry.radius {
+				return Some((idx, entry.node));
 			}
 		}
-		Ok(())
+		None
 	}
 
 	fn delete_entry(
@@ -600,18 +596,112 @@ impl MTree {
 		Ok(Deletion::None)
 	}
 
-	fn find_next_child_entry(
+	async fn deletion_adjustments(
 		&self,
-		entries: &Vec<MRoutingProperties>,
-		v: &Vector,
-	) -> Option<(usize, NodeId)> {
-		for (idx, entry) in entries.iter().enumerate() {
-			let d = self.calculate_distance(v.as_ref(), entry.center.as_ref());
-			if d <= entry.radius {
-				return Some((idx, entry.node));
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		routing_nodes: &mut Vec<(StoredNode<MTreeNode>, usize)>,
+	) -> Result<(), Error> {
+		while let Some((node, idx)) = routing_nodes.pop() {
+			if let MTreeNode::Routing(children) = &node.n {
+				let child = store.get_node(tx, children[idx].node).await?;
+				if child.n.len() < self.minimum {
+					let mut predecessor = if idx > 0 {
+						self.deletion_sibling_option(tx, store, children, idx - 1).await?
+					} else {
+						Sibling::None
+					};
+					let mut successor = if idx < children.len() - 1 {
+						self.deletion_sibling_option(tx, store, children, idx + 1).await?
+					} else {
+						Sibling::None
+					};
+					if let Sibling::Borrow(sibling) = predecessor {
+						predecessor = Sibling::None;
+						self.borrow_from_precedessor(store, node, sibling, child)?;
+					} else if let Sibling::Borrow(sibling) = successor {
+						successor = Sibling::None;
+						self.borrow_from_successor(store, node, sibling, child)?;
+					} else if let Sibling::Merge(sibling) = successor {
+						successor = Sibling::None;
+						self.merge_with_successor(store, node, sibling, child)?;
+					} else if let Sibling::Merge(sibling) = predecessor {
+						predecessor = Sibling::None;
+						self.merge_with_precedessor(store, node, sibling, child)?;
+					} else {
+						store.set_node(child, false)?;
+						self.compute_radius(tx, store, node, idx).await?;
+					}
+					Self::sibling_cleanup(store, predecessor)?;
+					Self::sibling_cleanup(store, successor)?;
+				}
+				continue;
 			}
+			self.compute_radius(tx, store, node, idx).await?;
 		}
-		None
+		Ok(())
+	}
+
+	async fn deletion_sibling_option(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		children: &Vec<MRoutingProperties>,
+		idx: usize,
+	) -> Result<Sibling, Error> {
+		let sibling = store.get_node(tx, children[idx].node).await?;
+		Ok(if sibling.n.len() > self.minimum {
+			Sibling::Borrow(sibling)
+		} else {
+			Sibling::Merge(sibling)
+		})
+	}
+
+	fn borrow_from_precedessor(
+		&self,
+		_store: &mut MTreeNodeStore,
+		_parent: StoredNode<MTreeNode>,
+		_predecessor: StoredNode<MTreeNode>,
+		_child: StoredNode<MTreeNode>,
+	) -> Result<(), Error> {
+		todo!()
+	}
+
+	fn borrow_from_successor(
+		&self,
+		_store: &mut MTreeNodeStore,
+		_parent: StoredNode<MTreeNode>,
+		_predecessor: StoredNode<MTreeNode>,
+		_child: StoredNode<MTreeNode>,
+	) -> Result<(), Error> {
+		todo!()
+	}
+
+	fn merge_with_precedessor(
+		&self,
+		_store: &mut MTreeNodeStore,
+		_parent: StoredNode<MTreeNode>,
+		_predecessor: StoredNode<MTreeNode>,
+		_child: StoredNode<MTreeNode>,
+	) -> Result<(), Error> {
+		todo!()
+	}
+
+	fn merge_with_successor(
+		&self,
+		_store: &mut MTreeNodeStore,
+		_parent: StoredNode<MTreeNode>,
+		_successor: StoredNode<MTreeNode>,
+		_child: StoredNode<MTreeNode>,
+	) -> Result<(), Error> {
+		todo!()
+	}
+
+	fn sibling_cleanup(store: &mut MTreeNodeStore, sibling: Sibling) -> Result<(), Error> {
+		match sibling {
+			Sibling::None => Ok(()),
+			Sibling::Borrow(n) | Sibling::Merge(n) => store.set_node(n, false),
+		}
 	}
 
 	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
@@ -627,6 +717,12 @@ enum Deletion {
 	KeyRemoved,
 	DocRemoved,
 	None,
+}
+
+enum Sibling {
+	None,
+	Borrow(StoredNode<MTreeNode>),
+	Merge(StoredNode<MTreeNode>),
 }
 
 #[derive(PartialEq)]
