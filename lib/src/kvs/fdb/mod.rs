@@ -97,6 +97,7 @@ impl Datastore {
 		match self.db.create_trx() {
 			Ok(inner) => Ok(Transaction {
 				done: false,
+				check: Check::Warn,
 				write,
 				lock,
 				inner: Arc::new(Mutex::new(Some(inner))),
