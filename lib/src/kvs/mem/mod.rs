@@ -25,9 +25,11 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.done {
-			// Cancel the transaction
-			let _ = self.cancel();
+		if !self.done && self.write {
+			// Check if already panicking
+			if std::thread::panicking() {
+				return;
+			}
 			// Handle the behaviour
 			match self.check {
 				Check::None => {
