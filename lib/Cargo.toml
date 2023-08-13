@@ -62,7 +62,7 @@ bytes = "1.4.0"
 cedar-policy = "2.3.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.26", features = ["serde"] }
-derive = { version = "0.9.0", package = "surrealdb-derive", git = "https://github.com/surrealdb/surrealdb-derive", branch = "versioning" }
+derive = { version = "0.11.0", package = "surrealdb-derive" }
 deunicode = "1.3.3"
 dmp = "0.2.0"
 echodb = { version = "0.4.0", optional = true }
@@ -122,20 +122,20 @@ serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = "0.2.12"
 time = { version = "0.3.25", features = ["serde"] }
-tokio = { version = "1.30.0", features = ["macros", "sync", "rt-multi-thread"] }
+tokio = { version = "1.31.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 wiremock = "0.5.19"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
-tokio = { version = "1.30.0", default-features = false, features = ["rt", "sync"] }
+tokio = { version = "1.31.0", default-features = false, features = ["rt", "sync"] }
 uuid = { version = "1.4.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.37"
 wasmtimer = { version = "0.2.0", default-features = false, features = ["tokio"] }
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.30.0", default-features = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1.31.0", default-features = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
 tokio-tungstenite = { version = "0.18.0", optional = true }
 uuid = { version = "1.4.1", features = ["serde", "v4", "v7"] }
 

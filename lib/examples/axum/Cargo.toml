@@ -9,4 +9,4 @@ axum = "0.6.20"
 serde = { version = "1.0.183", features = ["derive"] }
 surrealdb = { path = "../.." }
 thiserror = "1.0.44"
-tokio = { version = "1.30.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.31.0", features = ["macros", "rt-multi-thread"] }

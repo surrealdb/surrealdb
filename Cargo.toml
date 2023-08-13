@@ -62,7 +62,7 @@ serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 tempfile = "3.7.1"
 thiserror = "1.0.44"
-tokio = { version = "1.30.0", features = ["macros", "signal"] }
+tokio = { version = "1.31.0", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.3", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension"] }
