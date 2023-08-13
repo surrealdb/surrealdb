@@ -2,20 +2,14 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-#[proc_macro_derive(Store, attributes(format))]
+#[proc_macro_derive(Store)]
 pub fn store(input: TokenStream) -> TokenStream {
 	// Parse the token stream
 	let input = parse_macro_input!(input as DeriveInput);
 	// Fetch the struct name
 	let name = &input.ident;
-	//
+	// Add derived implementations
 	let output = quote! {
-
-		impl #name {
-			pub fn to_vec(&self) -> Vec<u8> {
-				self.into()
-			}
-		}
 
 		impl From<Vec<u8>> for #name {
 			fn from(v: Vec<u8>) -> Self {
@@ -29,31 +23,45 @@ pub fn store(input: TokenStream) -> TokenStream {
 			}
 		}
 
-		impl From<&Vec<u8>> for #name {
-			fn from(v: &Vec<u8>) -> Self {
-				use bincode::Options;
-				bincode::options()
-					.with_no_limit()
-					.with_little_endian()
-					.with_varint_encoding()
-					.reject_trailing_bytes()
-					.deserialize::<Self>(v)
-					.unwrap()
+		impl #name {
+			pub fn to_vec(&self) -> Vec<u8> {
+				let mut out:Vec<u8> = vec![];
+				revision::Revisioned::serialize_revisioned(self, &mut out).unwrap();
+				out
 			}
 		}
 
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
-				use bincode::Options;
-				bincode::options()
-					.with_no_limit()
-					.with_little_endian()
-					.with_varint_encoding()
-					.reject_trailing_bytes()
-					.serialize(v)
-					.unwrap_or_default()
+				let mut out:Vec<u8> = vec![];
+				revision::Revisioned::serialize_revisioned(v, &mut out).unwrap();
+				out
 			}
 		}
+
+		impl From<&Vec<u8>> for #name {
+			fn from(v: &Vec<u8>) -> Self {
+				revision::Revisioned::deserialize_revisioned(&mut v.as_slice()).unwrap()
+			}
+		}
+
+		// TODO: for a future pull request
+
+		// impl TryFrom<&#name> for Vec<u8> {
+		// 	type Error = crate::err::Error;
+		// 	fn try_from(v: &#name) -> Result<Self, Self::Error> {
+		// 		let mut out:Vec<u8> = vec![];
+		// 		revision::Revisioned::serialize_revisioned(v, &mut out)?;
+		// 		Ok(out)
+		// 	}
+		// }
+
+		// impl TryFrom<&Vec<u8>> for #name {
+		// 	type Error = crate::err::Error;
+		// 	fn try_from(v: &Vec<u8>) -> Result<Self, Self::Error> {
+		// 		revision::Revisioned::deserialize_revisioned(&mut v.as_slice())
+		// 	}
+		// }
 
 	};
 	//
