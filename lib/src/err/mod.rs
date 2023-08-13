@@ -33,6 +33,10 @@ pub enum Error {
 	#[error("{0}")]
 	Deprecated(String),
 
+	/// A custom error has been thrown
+	#[error("{0}")]
+	Thrown(String),
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),

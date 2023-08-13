@@ -22,14 +22,17 @@ use crate::sql::statements::kill::{kill, KillStatement};
 use crate::sql::statements::live::{live, LiveStatement};
 use crate::sql::statements::option::{option, OptionStatement};
 use crate::sql::statements::output::{output, OutputStatement};
+use crate::sql::statements::r#break::{r#break, BreakStatement};
+use crate::sql::statements::r#continue::{r#continue, ContinueStatement};
+use crate::sql::statements::r#use::{r#use, UseStatement};
 use crate::sql::statements::relate::{relate, RelateStatement};
 use crate::sql::statements::remove::{remove, RemoveStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::show::{show, ShowStatement};
 use crate::sql::statements::sleep::{sleep, SleepStatement};
+use crate::sql::statements::throw::{throw, ThrowStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::statements::yuse::{yuse, UseStatement};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -82,6 +85,8 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 pub enum Statement {
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
+	Break(BreakStatement),
+	Continue(ContinueStatement),
 	Cancel(CancelStatement),
 	Commit(CommitStatement),
 	Create(CreateStatement),
@@ -102,6 +107,7 @@ pub enum Statement {
 	Show(ShowStatement),
 	Sleep(SleepStatement),
 	Update(UpdateStatement),
+	Throw(ThrowStatement),
 	Use(UseStatement),
 }
 
@@ -122,6 +128,8 @@ impl Statement {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Analyze(_) => false,
+			Self::Break(_) => false,
+			Self::Continue(_) => false,
 			Self::Create(v) => v.writeable(),
 			Self::Define(_) => true,
 			Self::Delete(v) => v.writeable(),
@@ -139,6 +147,7 @@ impl Statement {
 			Self::Set(v) => v.writeable(),
 			Self::Show(_) => false,
 			Self::Sleep(_) => false,
+			Self::Throw(_) => false,
 			Self::Update(v) => v.writeable(),
 			Self::Use(_) => false,
 			_ => unreachable!(),
@@ -154,6 +163,8 @@ impl Statement {
 	) -> Result<Value, Error> {
 		match self {
 			Self::Analyze(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Break(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Continue(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Create(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Delete(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
@@ -169,7 +180,8 @@ impl Statement {
 			Self::Select(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Set(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Show(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Sleep(v) => v.compute(ctx, opt, doc).await,
+			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Throw(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => unreachable!(),
 		}
@@ -181,8 +193,10 @@ impl Display for Statement {
 		match self {
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
+			Self::Break(v) => write!(Pretty::from(f), "{v}"),
 			Self::Cancel(v) => write!(Pretty::from(f), "{v}"),
 			Self::Commit(v) => write!(Pretty::from(f), "{v}"),
+			Self::Continue(v) => write!(Pretty::from(f), "{v}"),
 			Self::Create(v) => write!(Pretty::from(f), "{v}"),
 			Self::Define(v) => write!(Pretty::from(f), "{v}"),
 			Self::Delete(v) => write!(Pretty::from(f), "{v}"),
@@ -200,6 +214,7 @@ impl Display for Statement {
 			Self::Set(v) => write!(Pretty::from(f), "{v}"),
 			Self::Show(v) => write!(Pretty::from(f), "{v}"),
 			Self::Sleep(v) => write!(Pretty::from(f), "{v}"),
+			Self::Throw(v) => write!(Pretty::from(f), "{v}"),
 			Self::Update(v) => write!(Pretty::from(f), "{v}"),
 			Self::Use(v) => write!(Pretty::from(f), "{v}"),
 		}
@@ -213,8 +228,10 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			alt((
 				map(analyze, Statement::Analyze),
 				map(begin, Statement::Begin),
+				map(r#break, Statement::Break),
 				map(cancel, Statement::Cancel),
 				map(commit, Statement::Commit),
+				map(r#continue, Statement::Continue),
 				map(create, Statement::Create),
 				map(define, Statement::Define),
 				map(delete, Statement::Delete),
@@ -222,9 +239,9 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 				map(ifelse, Statement::Ifelse),
 				map(info, Statement::Info),
 				map(insert, Statement::Insert),
-				map(kill, Statement::Kill),
 			)),
 			alt((
+				map(kill, Statement::Kill),
 				map(live, Statement::Live),
 				map(option, Statement::Option),
 				map(output, Statement::Output),
@@ -234,8 +251,9 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 				map(set, Statement::Set),
 				map(show, Statement::Show),
 				map(sleep, Statement::Sleep),
+				map(throw, Statement::Throw),
 				map(update, Statement::Update),
-				map(yuse, Statement::Use),
+				map(r#use, Statement::Use),
 			)),
 		)),
 		mightbespace,

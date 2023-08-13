@@ -28,7 +28,7 @@ impl fmt::Display for UseStatement {
 	}
 }
 
-pub fn yuse(i: &str) -> IResult<&str, UseStatement> {
+pub fn r#use(i: &str) -> IResult<&str, UseStatement> {
 	alt((both, ns, db))(i)
 }
 
@@ -89,7 +89,7 @@ mod tests {
 	#[test]
 	fn use_query_ns() {
 		let sql = "USE NS test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
@@ -105,7 +105,7 @@ mod tests {
 	#[test]
 	fn use_query_db() {
 		let sql = "USE DB test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
@@ -121,7 +121,7 @@ mod tests {
 	#[test]
 	fn use_query_both() {
 		let sql = "USE NS test DB test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(

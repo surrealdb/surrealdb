@@ -1,7 +1,9 @@
 pub(crate) mod analyze;
 pub(crate) mod begin;
+pub(crate) mod r#break;
 pub(crate) mod cancel;
 pub(crate) mod commit;
+pub(crate) mod r#continue;
 pub(crate) mod create;
 pub(crate) mod define;
 pub(crate) mod delete;
@@ -19,8 +21,9 @@ pub(crate) mod select;
 pub(crate) mod set;
 pub(crate) mod show;
 pub(crate) mod sleep;
+pub(crate) mod throw;
 pub(crate) mod update;
-pub(crate) mod yuse;
+pub(crate) mod r#use;
 
 pub use self::begin::BeginStatement;
 pub use self::cancel::CancelStatement;
@@ -35,11 +38,14 @@ pub use self::kill::KillStatement;
 pub use self::live::LiveStatement;
 pub use self::option::OptionStatement;
 pub use self::output::OutputStatement;
+pub use self::r#break::BreakStatement;
+pub use self::r#continue::ContinueStatement;
+pub use self::r#use::UseStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;
+pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
-pub use self::yuse::UseStatement;
 
 pub use self::define::DefineAnalyzerStatement;
 pub use self::define::DefineDatabaseStatement;
