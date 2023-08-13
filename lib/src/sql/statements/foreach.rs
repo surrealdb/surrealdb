@@ -35,7 +35,7 @@ impl ForeachStatement {
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "for statements",
+			feature: "FOR statements",
 		})
 	}
 }
