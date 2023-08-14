@@ -21,14 +21,14 @@ async fn expired_nodes_are_garbage_collected() {
 	// Set up the first node at an early timestamp
 	let old_node = crate::sql::uuid::Uuid::new_v4();
 	let old_time = Timestamp {
-		value: 123,
+		value: 1234,
 	};
 	test.bootstrap_at_time(old_node, old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_node = crate::sql::uuid::Uuid::new_v4();
 	let new_time = Timestamp {
-		value: 456,
+		value: 5678,
 	};
 	test.bootstrap_at_time(new_node.clone(), new_time.clone()).await.unwrap();
 

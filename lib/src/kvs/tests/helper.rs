@@ -17,10 +17,10 @@ impl TestContext {
 		node_id: crate::sql::uuid::Uuid,
 		time: Timestamp,
 	) -> Result<(), Error> {
-		let mut tx = self.db.transaction(true, true).await?;
+		let mut tx = self.db.transaction(true, false).await?;
 		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
-		let mut tx = self.db.transaction(true, true).await?;
+		let mut tx = self.db.transaction(true, false).await?;
 		self.db.remove_archived(&mut tx, archived).await?;
 		Ok(tx.commit().await?)
 	}
