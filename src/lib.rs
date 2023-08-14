@@ -23,14 +23,6 @@ pub fn store(input: TokenStream) -> TokenStream {
 			}
 		}
 
-		impl #name {
-			pub fn to_vec(&self) -> Vec<u8> {
-				let mut out:Vec<u8> = vec![];
-				revision::Revisioned::serialize_revisioned(self, &mut out).unwrap();
-				out
-			}
-		}
-
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
 				let mut out:Vec<u8> = vec![];
