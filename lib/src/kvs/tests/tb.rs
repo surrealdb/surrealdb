@@ -6,14 +6,8 @@ use crate::sql::statements::DefineTableStatement;
 #[serial]
 async fn table_definitions_can_be_scanned() {
 	// Setup
-	let test = match init().await {
-		Ok(ctx) => ctx,
-		Err(e) => panic!("{:?}", e),
-	};
-	let mut tx = match test.db.transaction(true, false).await {
-		Ok(tx) => tx,
-		Err(e) => panic!("{:?}", e),
-	};
+	let test = init().await.unwrap();
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";
@@ -28,10 +22,7 @@ async fn table_definitions_can_be_scanned() {
 		permissions: Default::default(),
 		changefeed: None,
 	};
-	match tx.set(&key, &value).await {
-		Ok(_) => {}
-		Err(e) => panic!("{:?}", e),
-	};
+	tx.set(&key, &value).await.unwrap();
 
 	// Validate with scan
 	match tx.scan(tb::prefix(namespace, database)..tb::suffix(namespace, database), 1000).await {
@@ -48,14 +39,8 @@ async fn table_definitions_can_be_scanned() {
 #[serial]
 async fn table_definitions_can_be_deleted() {
 	// Setup
-	let test = match init().await {
-		Ok(ctx) => ctx,
-		Err(e) => panic!("{:?}", e),
-	};
-	let mut tx = match test.db.transaction(true, false).await {
-		Ok(tx) => tx,
-		Err(e) => panic!("{:?}", e),
-	};
+	let test = init().await.unwrap();
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";
@@ -70,16 +55,10 @@ async fn table_definitions_can_be_deleted() {
 		permissions: Default::default(),
 		changefeed: None,
 	};
-	match tx.set(&key, &value).await {
-		Ok(_) => {}
-		Err(e) => panic!("{:?}", e),
-	};
+	tx.set(&key, &value).await.unwrap();
 
 	// Validate delete
-	match tx.del(&key).await {
-		Ok(_) => {}
-		Err(e) => panic!("{:?}", e),
-	};
+	tx.del(&key).await.unwrap();
 
 	// Should not exist
 	match tx.get(&key).await {

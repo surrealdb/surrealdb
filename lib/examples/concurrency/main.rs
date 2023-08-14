@@ -4,7 +4,7 @@ use surrealdb::engine::remote::ws::Ws;
 use surrealdb::Surreal;
 use tokio::sync::mpsc;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
+static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 
 const NUM: usize = 100_000;
 

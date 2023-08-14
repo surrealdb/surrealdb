@@ -10,7 +10,7 @@ pub async fn mock<'a>() -> (Context<'a>, Options, Transaction) {
 	let ctx = Context::default();
 	let opt = Options::default().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 	let kvs = Datastore::new("memory").await.unwrap();
-	let txn = kvs.transaction(true, false).await.unwrap();
+	let txn = kvs.transaction(true, false).await.unwrap().rollback_and_ignore();
 	let txn = Arc::new(Mutex::new(txn));
 	(ctx, opt, txn)
 }
