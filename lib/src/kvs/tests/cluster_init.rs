@@ -14,22 +14,21 @@ use uuid;
 #[tokio::test]
 #[serial]
 async fn expired_nodes_are_garbage_collected() {
-	let test = match init().await {
-		Ok(test) => test,
-		Err(e) => panic!("{}", e),
-	};
+	let test = init().await.unwrap();
 
 	// Set up the first node at an early timestamp
-	let old_node = crate::sql::uuid::Uuid::new_v4();
+	let old_node =
+		crate::sql::uuid::Uuid::try_from("BA01030F-0D86-493D-A6E8-EF27287FC5DC").unwrap();
 	let old_time = Timestamp {
 		value: 123,
 	};
 	test.bootstrap_at_time(old_node, old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
-	let new_node = crate::sql::uuid::Uuid::new_v4();
+	let new_node =
+		crate::sql::uuid::Uuid::try_from("EF34C843-FB06-4E94-B779-434B900878C0").unwrap();
 	let new_time = Timestamp {
-		value: 456,
+		value: 567,
 	};
 	test.bootstrap_at_time(new_node.clone(), new_time.clone()).await.unwrap();
 
@@ -54,14 +53,12 @@ async fn expired_nodes_are_garbage_collected() {
 #[tokio::test]
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
-	let test = match init().await {
-		Ok(test) => test,
-		Err(e) => panic!("{}", e),
-	};
+	let test = init().await.unwrap();
 
 	// Set up the first node at an early timestamp
-	let old_node =
-		crate::sql::uuid::Uuid::from(uuid::Uuid::from_fields(0, 1, 2, &[3, 4, 5, 6, 7, 8, 9, 10]));
+	let old_node = crate::sql::uuid::Uuid::from(
+		uuid::Uuid::parse_str("19AC759A-16D8-4DC3-BFC2-E9B24294C8EB").unwrap(),
+	);
 	let old_time = Timestamp {
 		value: 123,
 	};
@@ -73,8 +70,10 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_db(test.test_str("testdb").as_str());
 	let table = "my_table";
 	let lq = LiveStatement {
-		id: sql::Uuid(uuid::Uuid::new_v4()),
-		node: crate::sql::uuid::Uuid::from(Uuid::new_v4()),
+		id: sql::Uuid(uuid::Uuid::parse_str("748DD7B1-99CA-4C66-A6E2-C9558596AD48").unwrap()),
+		node: crate::sql::uuid::Uuid::from(
+			Uuid::parse_str("4C21BA69-8468-4E8C-8405-9EBB1C62D7AC").unwrap(),
+		),
 		expr: Fields(vec![sql::Field::All], false),
 		what: Table(sql::Table::from(table)),
 		cond: None,
@@ -102,12 +101,9 @@ async fn expired_nodes_get_live_queries_archived() {
 	tx.lock().await.commit().await.unwrap();
 
 	// Set up second node at a later timestamp
-	let new_node = crate::sql::uuid::Uuid::from(uuid::Uuid::from_fields(
-		16,
-		17,
-		18,
-		&[19, 20, 21, 22, 23, 24, 25, 26],
-	));
+	let new_node = crate::sql::uuid::Uuid::from(
+		uuid::Uuid::parse_str("2F95505B-4F0F-47BE-BC50-417D6E3F249A").unwrap(),
+	);
 	let new_time = Timestamp {
 		value: 456,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors

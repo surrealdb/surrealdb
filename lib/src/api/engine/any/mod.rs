@@ -589,7 +589,7 @@ impl Surreal<Any> {
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	///
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(|| Surreal::init());
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
