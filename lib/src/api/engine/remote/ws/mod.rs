@@ -63,7 +63,7 @@ impl Surreal<Client> {
 	/// use surrealdb::engine::remote::ws::Client;
 	/// use surrealdb::engine::remote::ws::Ws;
 	///
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {

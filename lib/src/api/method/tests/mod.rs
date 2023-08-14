@@ -24,7 +24,7 @@ use std::ops::Bound;
 use types::User;
 use types::USER;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(|| Surreal::init());
+static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 
 #[tokio::test]
 async fn api() {

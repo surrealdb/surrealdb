@@ -1,10 +1,10 @@
 mod parse;
 use parse::Parse;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Id, Thing, Value};
 
 #[tokio::test]
 async fn delete() -> Result<(), Error> {
@@ -369,4 +369,57 @@ async fn check_permissions_auth_disabled() {
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
 	}
+}
+
+#[tokio::test]
+async fn delete_filtered_live_notification() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET value = 50;
+		LIVE SELECT * FROM person WHERE value<100;
+		DELETE person:test;
+	";
+	let dbs = Datastore::new("memory").await?.with_notifications();
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let expected_record = Value::parse(
+		"[
+			{
+				id: person:test,
+				value: 50
+			}
+		]",
+	);
+	assert_eq!(tmp, expected_record);
+	//
+	let live_id = res.remove(0).result?;
+	let live_id = match live_id {
+		Value::Uuid(id) => id,
+		_ => panic!("expected uuid"),
+	};
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let notifications = dbs.notifications();
+	let notifications = match notifications {
+		Some(notifications) => notifications,
+		None => panic!("expected notifications"),
+	};
+	let not = notifications.recv_blocking().unwrap();
+	assert_eq!(
+		not,
+		Notification {
+			id: live_id,
+			action: Action::Delete,
+			result: Value::Thing(Thing {
+				tb: "person".to_string(),
+				id: Id::String("test".to_string()),
+			}),
+		}
+	);
+	Ok(())
 }
