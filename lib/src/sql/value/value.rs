@@ -1156,7 +1156,7 @@ impl Value {
 				}
 				Err(Error::CoerceTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1168,7 +1168,7 @@ impl Value {
 				..
 			}) => Err(Error::CoerceTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -1550,7 +1550,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -1568,13 +1568,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1594,7 +1594,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -1613,13 +1613,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1682,7 +1682,7 @@ impl Value {
 				}
 				Err(Error::ConvertTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1694,7 +1694,7 @@ impl Value {
 				..
 			}) => Err(Error::ConvertTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -2111,7 +2111,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -2129,13 +2129,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -2155,7 +2155,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -2174,13 +2174,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
