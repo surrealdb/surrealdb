@@ -1051,7 +1051,8 @@ async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 			"json"
 		]
 	});
-	let res = common::ws_send_msg_and_wait_response(socket, serde_json::to_string(&msg).unwrap()).await;
+	let res =
+		common::ws_send_msg_and_wait_response(socket, serde_json::to_string(&msg).unwrap()).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Query data

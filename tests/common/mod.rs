@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
 pub const PASS: &str = "root";
@@ -223,10 +223,7 @@ pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 	Ok(ws_stream)
 }
 
-pub async fn ws_send_msg(
-	socket: &mut WsStream,
-	msg_req: String,
-) -> Result<(), Box<dyn Error>> {
+pub async fn ws_send_msg(socket: &mut WsStream, msg_req: String) -> Result<(), Box<dyn Error>> {
 	let now = time::Instant::now();
 	debug!("Sending message: {msg_req}");
 	tokio::select! {
@@ -252,7 +249,6 @@ pub async fn ws_send_msg_and_wait_response(
 	socket: &mut WsStream,
 	msg_req: String,
 ) -> Result<serde_json::Value, Box<dyn Error>> {
-	// Use JSON format by default
 	ws_send_msg(socket, msg_req).await?;
 	ws_recv_msg_with_fmt(socket, Format::Json).await
 }
