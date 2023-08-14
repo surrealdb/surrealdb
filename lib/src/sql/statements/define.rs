@@ -1532,7 +1532,8 @@ mod tests {
 		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
 			name: Ident::from("test"),
 		});
-		assert_eq!(6, stm.to_vec().len());
+		let enc: Vec<u8> = stm.try_into().unwrap();
+		assert_eq!(6, enc.len());
 	}
 
 	#[test]
@@ -1624,9 +1625,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 
-		let serialized = out.to_vec();
-		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let serialized: Vec<u8> = (&out).try_into().unwrap();
 		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
 		assert_eq!(out, deserialized);
 	}
@@ -1639,9 +1638,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 
-		let serialized = out.to_vec();
-		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let serialized: Vec<u8> = (&out).try_into().unwrap();
 		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
 		assert_eq!(out, deserialized);
 	}

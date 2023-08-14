@@ -5197,9 +5197,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-derive"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e29b306b3da8c734ed439f383ca745577d4df9f182c4d9a9c89b4ef15b51a6b"
+checksum = "aacdb4c58b9ebef0291310afcd63af0012d85610d361f3785952c61b6f1dddf4"
 dependencies = [
  "quote",
  "syn 1.0.109",

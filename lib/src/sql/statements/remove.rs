@@ -902,6 +902,7 @@ mod tests {
 		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident::from("test"),
 		});
-		assert_eq!(6, stm.to_vec().len());
+		let enc: Vec<u8> = stm.try_into().unwrap();
+		assert_eq!(6, enc.len());
 	}
 }

@@ -2967,13 +2967,20 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(1, Value::None.to_vec().len());
-		assert_eq!(1, Value::Null.to_vec().len());
-		assert_eq!(2, Value::Bool(true).to_vec().len());
-		assert_eq!(2, Value::Bool(false).to_vec().len());
-		assert_eq!(6, Value::from("test").to_vec().len());
-		assert_eq!(15, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(22, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		let enc: Vec<u8> = Value::None.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Null.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Bool(true).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::Bool(false).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::from("test").try_into().unwrap();
+		assert_eq!(8, enc.len());
+		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").try_into().unwrap();
+		assert_eq!(19, enc.len());
+		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").try_into().unwrap();
+		assert_eq!(27, enc.len());
 	}
 
 	#[test]
@@ -2984,8 +2991,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.into();
-		let dec: Value = enc.into();
+		let enc: Vec<u8> = val.try_into().unwrap();
+		let dec: Value = enc.try_into().unwrap();
 		assert_eq!(res, dec);
 	}
 }
