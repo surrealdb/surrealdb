@@ -19,14 +19,14 @@ async fn expired_nodes_are_garbage_collected() {
 	// Set up the first node at an early timestamp
 	let old_node = crate::sql::uuid::Uuid::try_from("BA01030F-0D86-493D-A6E8-EF27287FC5DC")?;
 	let old_time = Timestamp {
-		value: 1234,
+		value: 123,
 	};
 	test.bootstrap_at_time(old_node, old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_node = crate::sql::uuid::Uuid::try_from("EF34C843-FB06-4E94-B779-434B900878C0")?;
 	let new_time = Timestamp {
-		value: 5678,
+		value: 567,
 	};
 	test.bootstrap_at_time(new_node.clone(), new_time.clone()).await.unwrap();
 
@@ -51,10 +51,7 @@ async fn expired_nodes_are_garbage_collected() {
 #[tokio::test]
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
-	let test = match init().await {
-		Ok(test) => test,
-		Err(e) => panic!("{}", e),
-	};
+	let test = init().await.unwrap();
 
 	// Set up the first node at an early timestamp
 	let old_node = crate::sql::uuid::Uuid::from(uuid::Uuid::parse_str(
