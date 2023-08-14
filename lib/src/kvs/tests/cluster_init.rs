@@ -1,4 +1,3 @@
-use fst::Automaton;
 use futures::lock::Mutex;
 use std::sync::Arc;
 
