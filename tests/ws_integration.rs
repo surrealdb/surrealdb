@@ -233,7 +233,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 #[serial]
 async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	//
