@@ -3,7 +3,6 @@
 mod common;
 
 use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-use serial_test::serial;
 use std::fs;
 use std::time;
 use test_log::test;
