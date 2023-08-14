@@ -18,7 +18,6 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [x] Compiles to WebAssembly
 - [x] Supports typed SQL statements
 - [x] Invalid SQL queries are never sent to the server, the client uses the same parser the server uses
-- [x] Static clients, no need for `once_cell` or `lazy_static`
 - [x] Clonable connections with auto-reconnect capabilities, no need for a connection pool
 - [x] Range queries
 - [x] Consistent API across all supported protocols and storage engines

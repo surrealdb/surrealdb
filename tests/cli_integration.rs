@@ -3,42 +3,48 @@
 mod common;
 
 use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-use serial_test::serial;
 use std::fs;
+use std::time;
 use test_log::test;
+use tokio::time::sleep;
 use tracing::info;
 
-use common::{PASS, USER};
+use common::{StartServerArguments, PASS, USER};
+
+const ONE_SEC: time::Duration = time::Duration::new(1, 0);
+const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 #[test]
-#[serial]
 fn version() {
 	assert!(common::run("version").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn help() {
 	assert!(common::run("help").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn nonexistent_subcommand() {
 	assert!(common::run("nonexistent").output().is_err());
 }
 
 #[test]
-#[serial]
 fn nonexistent_option() {
 	assert!(common::run("version --turbo").output().is_err());
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn all_commands() {
 	// Commands without credentials when auth is disabled, should succeed
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = ""; // Anonymous user
 
 	info!("* Create a record");
@@ -168,7 +174,6 @@ async fn all_commands() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn start_tls() {
 	// Capute the server's stdout/stderr
 	temp_env::async_with_vars(
@@ -177,7 +182,14 @@ async fn start_tls() {
 			("SURREAL_TEST_SERVER_STDERR", Some("piped")),
 		],
 		async {
-			let (_, server) = common::start_server(false, true, false).await.unwrap();
+			let (_, server) = common::start_server(StartServerArguments {
+				auth: false,
+				tls: true,
+				wait_is_ready: false,
+				tick_interval: ONE_SEC,
+			})
+			.await
+			.unwrap();
 
 			std::thread::sleep(std::time::Duration::from_millis(2000));
 			let output = server.kill().output().err().unwrap();
@@ -190,10 +202,16 @@ async fn start_tls() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn with_root_auth() {
 	// Commands with credentials when auth is enabled, should succeed
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = format!("--user {USER} --pass {PASS}");
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -240,10 +258,16 @@ async fn with_root_auth() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn with_anon_auth() {
 	// Commands without credentials when auth is enabled, should fail
-	let (addr, _server) = common::start_server(true, false, true).await.unwrap();
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = ""; // Anonymous user
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -300,8 +324,64 @@ async fn with_anon_auth() {
 	}
 }
 
+#[test(tokio::test)]
+async fn node() {
+	// Commands without credentials when auth is disabled, should succeed
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+	let creds = ""; // Anonymous user
+
+	info!("* Define a table");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Create a record");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
+			Ok("[{ id: thing:one }]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Show changes");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[{ changes: [{ update: { id: thing:one } }], versionstamp: 65536 }]\n\n"
+				.to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	sleep(TWO_SECS).await;
+
+	info!("* Show changes after GC");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+}
+
 #[test]
-#[serial]
 fn validate_found_no_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -311,7 +391,6 @@ fn validate_found_no_files() {
 }
 
 #[test]
-#[serial]
 fn validate_succeed_for_valid_surql_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -324,7 +403,6 @@ fn validate_succeed_for_valid_surql_files() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_glob_pattern() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -336,7 +414,6 @@ fn validate_failed_due_to_invalid_glob_pattern() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_surql_files_syntax() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 

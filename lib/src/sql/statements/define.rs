@@ -502,6 +502,25 @@ pub struct DefineUserStatement {
 	pub roles: Vec<Ident>,
 }
 
+impl From<(Base, &str, &str)> for DefineUserStatement {
+	fn from((base, user, pass): (Base, &str, &str)) -> Self {
+		DefineUserStatement {
+			base,
+			name: user.into(),
+			hash: Argon2::default()
+				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
+				.unwrap()
+				.to_string(),
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
+			roles: vec!["owner".into()],
+		}
+	}
+}
+
 impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
