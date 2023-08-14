@@ -1627,6 +1627,8 @@ mod tests {
 		let serialized = out.to_vec();
 		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
 		assert_eq!(out, deserializled);
+		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 
 	#[test]
@@ -1640,5 +1642,7 @@ mod tests {
 		let serialized = out.to_vec();
 		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
 		assert_eq!(out, deserializled);
+		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 }
