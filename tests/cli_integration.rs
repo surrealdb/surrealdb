@@ -3,7 +3,6 @@
 mod common;
 
 use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-use serial_test::serial;
 use std::fs;
 use std::time;
 use test_log::test;
@@ -16,31 +15,26 @@ const ONE_SEC: time::Duration = time::Duration::new(1, 0);
 const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 #[test]
-#[serial]
 fn version() {
 	assert!(common::run("version").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn help() {
 	assert!(common::run("help").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn nonexistent_subcommand() {
 	assert!(common::run("nonexistent").output().is_err());
 }
 
 #[test]
-#[serial]
 fn nonexistent_option() {
 	assert!(common::run("version --turbo").output().is_err());
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn all_commands() {
 	// Commands without credentials when auth is disabled, should succeed
 	let (addr, _server) = common::start_server(StartServerArguments {
@@ -180,7 +174,6 @@ async fn all_commands() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn start_tls() {
 	// Capute the server's stdout/stderr
 	temp_env::async_with_vars(
@@ -209,7 +202,6 @@ async fn start_tls() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn with_root_auth() {
 	// Commands with credentials when auth is enabled, should succeed
 	let (addr, _server) = common::start_server(StartServerArguments {
@@ -266,7 +258,6 @@ async fn with_root_auth() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn with_anon_auth() {
 	// Commands without credentials when auth is enabled, should fail
 	let (addr, _server) = common::start_server(StartServerArguments {
@@ -334,7 +325,6 @@ async fn with_anon_auth() {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn node() {
 	// Commands without credentials when auth is disabled, should succeed
 	let (addr, _server) = common::start_server(StartServerArguments {
@@ -392,7 +382,6 @@ async fn node() {
 }
 
 #[test]
-#[serial]
 fn validate_found_no_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -402,7 +391,6 @@ fn validate_found_no_files() {
 }
 
 #[test]
-#[serial]
 fn validate_succeed_for_valid_surql_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -415,7 +403,6 @@ fn validate_succeed_for_valid_surql_files() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_glob_pattern() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -427,7 +414,6 @@ fn validate_failed_due_to_invalid_glob_pattern() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_surql_files_syntax() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
