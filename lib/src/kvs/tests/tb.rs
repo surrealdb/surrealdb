@@ -33,6 +33,7 @@ async fn table_definitions_can_be_scanned() {
 		}
 		Err(e) => panic!("{:?}", e),
 	}
+	tx.commit().await.unwrap();
 }
 
 #[tokio::test]
