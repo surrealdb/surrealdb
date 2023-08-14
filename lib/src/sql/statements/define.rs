@@ -1533,7 +1533,7 @@ mod tests {
 			name: Ident::from("test"),
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
-		assert_eq!(6, enc.len());
+		assert_eq!(9, enc.len());
 	}
 
 	#[test]
