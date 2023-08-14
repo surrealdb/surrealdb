@@ -2479,6 +2479,7 @@ impl Transaction {
 	// Private methods
 	// --------------------------------------------------
 
+	#[allow(unused_variables)]
 	fn check_level(&mut self, check: Check) {
 		match self {
 			#[cfg(feature = "kv-mem")]
