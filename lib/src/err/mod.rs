@@ -9,7 +9,6 @@ use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use std::borrow::Cow;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
@@ -441,20 +440,20 @@ pub enum Error {
 	#[error("Expected a {into} but found {from}")]
 	CoerceTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to convert a value to another value
 	#[error("Expected a {into} but cannot convert {from} into a {into}")]
 	ConvertTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
 	LengthInvalid {
-		kind: Cow<'static, str>,
+		kind: String,
 		size: usize,
 	},
 
