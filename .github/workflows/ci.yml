@@ -29,6 +29,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -55,6 +57,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -87,6 +91,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -115,6 +121,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -145,6 +153,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -175,6 +185,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -205,6 +217,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -235,6 +249,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -286,6 +302,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -321,6 +339,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -356,6 +376,8 @@ jobs:
 
         - name: Setup cache
           uses: Swatinem/rust-cache@v2
+          with:
+            save-if: ${{ github.ref == 'refs/heads/main' }}
 
         - name: Install dependencies
           run: |
@@ -391,6 +413,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -417,6 +441,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -443,6 +469,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -469,6 +497,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
@@ -495,6 +525,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -530,6 +562,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
