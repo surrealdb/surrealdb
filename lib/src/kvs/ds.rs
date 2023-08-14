@@ -10,11 +10,13 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::iam::{Action, Auth, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
+use crate::sql::statements::DefineUserStatement;
+use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
 use crate::vs;
@@ -290,28 +292,30 @@ impl Datastore {
 
 	/// Setup the initial credentials
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
-		let mut txn = self.transaction(false, false).await?;
-		match txn.all_root_users().await {
+		let txn = Arc::new(Mutex::new(self.transaction(true, false).await?));
+		let root_users = txn.lock().await.all_root_users().await;
+		match root_users {
 			Ok(val) if val.is_empty() => {
 				info!(
 					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
 				);
-
-				let sql = format!(
-					"DEFINE USER {user} ON ROOT PASSWORD '{pass}' ROLES OWNER",
-					user = creds.username,
-					pass = creds.password
-				);
-				let sess = Session::owner();
-				self.execute(&sql, &sess, None).await?;
+				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+				let ctx = Context::default();
+				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
 			Ok(_) => {
 				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
 				warn!("Consider removing the --user/--pass arguments from the server start.");
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
-			Err(e) => Err(e),
+			Err(e) => {
+				txn.lock().await.cancel().await?;
+				Err(e)
+			}
 		}
 	}
 

@@ -8,10 +8,7 @@ async fn table_definitions_can_be_scanned() {
 	// Setup
 	let node_id = Uuid::parse_str("f7b2ba17-90ed-45f9-9aa2-906c6ba0c289").unwrap();
 	let test = init(node_id).await.unwrap();
-	let mut tx = match test.db.transaction(true, false).await {
-		Ok(tx) => tx,
-		Err(e) => panic!("{:?}", e),
-	};
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";
@@ -26,10 +23,7 @@ async fn table_definitions_can_be_scanned() {
 		permissions: Default::default(),
 		changefeed: None,
 	};
-	match tx.set(&key, &value).await {
-		Ok(_) => {}
-		Err(e) => panic!("{:?}", e),
-	};
+	tx.set(&key, &value).await.unwrap();
 
 	// Validate with scan
 	match tx.scan(tb::prefix(namespace, database)..tb::suffix(namespace, database), 1000).await {
@@ -40,6 +34,7 @@ async fn table_definitions_can_be_scanned() {
 		}
 		Err(e) => panic!("{:?}", e),
 	}
+	tx.commit().await.unwrap();
 }
 
 #[tokio::test]
@@ -48,10 +43,7 @@ async fn table_definitions_can_be_deleted() {
 	// Setup
 	let node_id = Uuid::parse_str("13c0e650-1710-489e-bb80-f882bce50b56").unwrap();
 	let test = init(node_id).await.unwrap();
-	let mut tx = match test.db.transaction(true, false).await {
-		Ok(tx) => tx,
-		Err(e) => panic!("{:?}", e),
-	};
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";
@@ -77,4 +69,5 @@ async fn table_definitions_can_be_deleted() {
 		Ok(Some(o)) => panic!("Should not exist but was {:?}", o),
 		Err(e) => panic!("Unexpected error on get {:?}", e),
 	};
+	tx.commit().await.unwrap();
 }

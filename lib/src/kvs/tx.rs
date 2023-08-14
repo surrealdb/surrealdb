@@ -8,6 +8,7 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
@@ -92,10 +93,29 @@ impl fmt::Display for Transaction {
 
 impl Transaction {
 	// --------------------------------------------------
+	// Configuration methods
+	// --------------------------------------------------
+
+	pub fn rollback_with_warning(mut self) -> Self {
+		self.check_level(Check::Warn);
+		self
+	}
+
+	pub fn rollback_with_panic(mut self) -> Self {
+		self.check_level(Check::Panic);
+		self
+	}
+
+	pub fn rollback_and_ignore(mut self) -> Self {
+		self.check_level(Check::None);
+		self
+	}
+
+	// --------------------------------------------------
 	// Integral methods
 	// --------------------------------------------------
 
-	/// Check if transactions is finished.
+	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
@@ -2498,6 +2518,47 @@ impl Transaction {
 			}
 		}
 		Ok(None)
+	}
+
+	// --------------------------------------------------
+	// Private methods
+	// --------------------------------------------------
+
+	fn check_level(&mut self, check: Check) {
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
 	}
 }
 

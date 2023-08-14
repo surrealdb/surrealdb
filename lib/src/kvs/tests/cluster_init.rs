@@ -27,7 +27,7 @@ async fn expired_nodes_are_garbage_collected() {
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
-		value: 456,
+		value: 567,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
