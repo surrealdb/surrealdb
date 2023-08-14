@@ -209,10 +209,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem --workspace --test ws_integration
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Run WS integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-ws-integration
 
   test:
     name: Test workspace
