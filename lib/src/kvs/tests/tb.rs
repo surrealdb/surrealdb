@@ -66,4 +66,5 @@ async fn table_definitions_can_be_deleted() {
 		Ok(Some(o)) => panic!("Should not exist but was {:?}", o),
 		Err(e) => panic!("Unexpected error on get {:?}", e),
 	};
+	tx.commit().await.unwrap();
 }
