@@ -65,7 +65,7 @@ impl Datastore {
 		match self.db.begin(write).await {
 			Ok(inner) => Ok(Transaction {
 				done: false,
-				check: Check::Warn,
+				check: Check::Panic,
 				write,
 				inner,
 			}),
