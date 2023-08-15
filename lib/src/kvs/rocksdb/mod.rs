@@ -97,7 +97,7 @@ impl Datastore {
 		Ok(Transaction {
 			done: false,
 			write,
-			check: Check::Panic,
+			check: Check::Warn,
 			inner: Arc::new(Mutex::new(Some(inner))),
 			ro,
 			_db: self.db.clone(),
