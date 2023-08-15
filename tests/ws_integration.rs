@@ -226,7 +226,6 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -248,7 +247,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Signup
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -267,7 +266,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Sign in
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -298,7 +297,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Start Live Query
 	let table_name = "test_tableBB4B0A788C7E46E798720AEF938CBCF6";
-	let _live_query_response = common::ws_send_msg(
+	let _live_query_response = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 				"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
@@ -321,7 +320,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let socket2 = &mut common::connect_ws(&addr).await?;
 
 	// Signin
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket2,
 		serde_json::to_string(&json!({
 			"id": "95128766-5218-4CEE-92D4-0FD4906709B9",
