@@ -141,6 +141,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
+	pub id: Option<u64>,
 }
 
 impl DefineNamespaceStatement {
@@ -158,7 +159,14 @@ impl DefineNamespaceStatement {
 		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
 		let mut run = txn.lock().await;
-		run.set(key, self).await?;
+		// Set the id
+		if self.id.is_none() {
+			let mut ns = self.clone();
+			ns.id = Some(run.get_next_ns_id().await?);
+			run.set(key, ns).await?;
+		} else {
+			run.set(key, self).await?;
+		}
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -180,6 +188,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 		i,
 		DefineNamespaceStatement {
 			name,
+			id: None,
 		},
 	))
 }
@@ -192,6 +201,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 	pub changefeed: Option<ChangeFeed>,
+	pub id: Option<u64>,
 }
 
 impl DefineDatabaseStatement {
@@ -209,8 +219,17 @@ impl DefineDatabaseStatement {
 		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.set(key, self).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		// Set the id
+		if self.id.is_none() && ns.id.is_some() {
+			let mut db = self.clone();
+			db.id = Some(run.get_next_db_id(ns.id.unwrap()).await?);
+			// Store the db
+			run.set(key, db).await?;
+		} else {
+			// Store the db
+			run.set(key, self).await?;
+		}
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -243,6 +262,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 					DefineDatabaseOption::ChangeFeed(ref v) => v.to_owned(),
 				})
 				.next(),
+			id: None,
 		},
 	))
 }
@@ -963,6 +983,7 @@ pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
 	pub full: bool,
+	pub id: Option<u64>,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
@@ -982,9 +1003,15 @@ impl DefineTableStatement {
 		let mut run = txn.lock().await;
 		// Process the statement
 		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
+			let mut dt = self.clone();
+			dt.id = Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?);
+			run.set(key, dt).await?;
+		} else {
+			run.set(key, self).await?;
+		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -1080,6 +1107,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					_ => None,
 				})
 				.unwrap_or_default(),
+			id: None,
 			view: opts.iter().find_map(|x| match x {
 				DefineTableOption::View(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -1502,8 +1530,9 @@ mod tests {
 	fn check_define_serialize() {
 		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
 			name: Ident::from("test"),
+			id: None,
 		});
-		assert_eq!(6, stm.to_vec().len());
+		assert_eq!(7, stm.to_vec().len());
 	}
 
 	#[test]
