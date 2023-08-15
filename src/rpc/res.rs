@@ -64,7 +64,7 @@ impl From<Notification> for Data {
 pub struct Response {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	id: Option<Value>,
-	pub result: Result<Data, Failure>,
+	result: Result<Data, Failure>,
 }
 
 impl Response {
