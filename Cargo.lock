@@ -14,7 +14,7 @@ dependencies = [
  "futures-sink",
  "memchr",
  "pin-project-lite",
- "tokio 1.32.0",
+ "tokio 1.29.1",
  "tokio-util",
  "tracing",
 ]
@@ -24,7 +24,6 @@ name = "actix-example"
 version = "0.1.0"
 dependencies = [
  "actix-web",
- "once_cell",
  "serde",
  "surrealdb",
  "thiserror",
@@ -63,7 +62,7 @@ dependencies = [
  "rand 0.8.5",
  "sha1",
  "smallvec 1.11.0",
- "tokio 1.32.0",
+ "tokio 1.29.1",
  "tokio-util",
  "tracing",
  "zstd",
@@ -76,7 +75,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e01ed3140b2f8d422c68afa1ed2e85d996ea619c988ac834d255db32138655cb"
 dependencies = [
  "quote",
- "syn 2.0.29",
+ "syn 2.0.27",
 ]
 
 [[package]]
@@ -99,7 +98,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15265b6b8e2347670eb363c47fc8c75208b4a4994b27192f345fcbe707804f3e"
 dependencies = [
  "futures-core",
- "tokio 1.32.0",
+ "tokio 1.29.1",
 ]
 
 [[package]]
@@ -115,8 +114,8 @@ dependencies = [
  "futures-util",
  "mio 0.8.8",
  "num_cpus",
- "socket2 0.4.9",
- "tokio 1.32.0",
+ "socket2",
+ "tokio 1.29.1",
  "tracing",
 ]
 
@@ -3109,6 +3108,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e1631a786e3e6f3117b115aaabd848692ed1a5a44ba5ab8e9a36d2d48c5ddba"
+dependencies = [
+ "anyhow",
+ "clap 4.3.19",
+ "tokio 1.29.1",
+]
+
+[[package]]
 name = "nanoid"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5066,12 +5076,16 @@ dependencies = [
  "futures-concurrency",
  "fuzzy-matcher",
  "geo",
+ "http",
+ "hyper",
  "indexmap 1.9.3",
  "indxdb",
  "jsonwebtoken",
  "lexicmp",
  "lru",
  "md-5",
+ "mime",
+ "multi",
  "nanoid",
  "native-tls",
  "nom",

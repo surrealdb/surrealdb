@@ -1,21 +1,29 @@
-use super::{Body, ClientBuilder, Error, Request};
+use crate::sql::Bytes;
+
+use super::{ClientBuilder, Error, Request};
+use futures::Stream;
 use hyper::client::HttpConnector;
 use lib_http::{HeaderMap, Uri};
+use std::error::Error as StdError;
 
 mod connect;
 use connect::Connector;
+mod body;
 mod response;
 pub use response::Response;
 
-pub type ClientError = hyper::Error;
-pub type ClientBody = hyper::Body;
+pub type BoxError = Box<dyn StdError + Send + Sync>;
+pub type BoxStream = Box<dyn Stream<Item = Result<Bytes, BoxError>>>;
 
-pub struct Client {
-	client: hyper::Client<Connector, ClientBody>,
+pub type BackendError = hyper::Error;
+pub type BackendBody = body::Body;
+
+pub struct Backend {
+	client: hyper::Client<Connector, BackendBody>,
 	default_headers: Option<HeaderMap>,
 }
 
-impl Client {
+impl Backend {
 	pub fn new() -> Self {
 		let client = hyper::Client::builder().build(Connector::Http(HttpConnector::new()));
 

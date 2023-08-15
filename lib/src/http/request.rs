@@ -39,7 +39,7 @@ impl Request {
 	}
 
 	pub async fn send(self) -> Result<Response, Error> {
-		todo!()
+		self.client.clone().inner.execute(self).await
 	}
 
 	pub fn basic_auth<U, P>(mut self, username: U, password: Option<P>) -> Self

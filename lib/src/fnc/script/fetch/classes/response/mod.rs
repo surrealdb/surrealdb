@@ -148,7 +148,7 @@ impl<'js> Response<'js> {
 	#[qjs(rename = "clone")]
 	pub fn clone_js(&self, ctx: Ctx<'js>) -> Self {
 		Response {
-			body: self.body.clone_js(ctx),
+			body: self.body.clone_js(&ctx),
 			init: self.init.clone(),
 			url: self.url.clone(),
 			r#type: self.r#type,

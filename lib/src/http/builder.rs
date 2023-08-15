@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::opt::Tls;
 
-use super::{Client, Error, NativeClient};
+use super::{Backend, Client, Error};
 
 pub struct Attempt<'a> {
 	pub(super) previous: &'a [Url],
@@ -102,7 +102,7 @@ impl ClientBuilder {
 
 	pub fn build(self) -> Result<Client, Error> {
 		Ok(Client {
-			inner: Arc::new(NativeClient::build(self)),
+			inner: Arc::new(Backend::build(self)),
 		})
 	}
 }

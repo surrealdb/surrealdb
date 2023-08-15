@@ -1,9 +1,16 @@
 //! Request class implementation
 
-use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
+use js::{
+	class::Trace,
+	prelude::{Coerced, This},
+	Class, Ctx, Exception, FromJs, Object, Result, Value,
+};
 use lib_http::Method;
 
-use crate::fnc::script::fetch::{body::Body, RequestError};
+use crate::fnc::script::fetch::{
+	body::{Body, BodyAndKind},
+	RequestError,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestMode {
@@ -207,7 +214,7 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 pub struct RequestInit<'js> {
 	pub method: Method,
 	pub headers: Class<'js, Headers>,
-	pub body: Option<Body>,
+	pub body: Option<BodyAndKind>,
 	pub referrer: String,
 	pub referrer_policy: ReferrerPolicy,
 	pub request_mode: RequestMode,
@@ -346,7 +353,7 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 			Class::instance(ctx.clone(), Headers::new_empty())?
 		};
 
-		let body = object.get::<_, Option<Body>>("body")?;
+		let body = object.get::<_, Option<BodyAndKind>>("body")?;
 
 		Ok(Self {
 			method,
@@ -438,7 +445,7 @@ impl<'js> Request<'js> {
 	// ------------------------------
 	#[qjs(get, rename = "body_used")]
 	pub fn body_used(&self) -> bool {
-		self.init.body.as_ref().map(Body::used).unwrap_or(true)
+		self.init.body.body.is_used()
 	}
 
 	#[qjs(get)]
@@ -474,24 +481,22 @@ impl<'js> Request<'js> {
 
 	/// Takes the buffer from the body leaving it used.
 	#[qjs(skip)]
-	async fn take_buffer(&self, ctx: &Ctx<'js>) -> Result<Bytes> {
-		let Some(body) = self.init.body.as_ref() else {
-			return Ok(Bytes::new());
+	async fn take_buffer(this: This<Class<'js, Self>>, ctx: &Ctx<'js>) -> Result<Bytes> {
+		// To ensure a borrow is not kept across awaits we manually borrow the inner class value.
+		let body = {
+			let this = this.0.try_borrow_mut()?;
+			std::mem::replace(&mut this.body.body, Body::used())
 		};
 		match body.to_buffer().await {
 			Ok(Some(x)) => Ok(x),
 			Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
-			Err(e) => match e {
-				RequestError::Reqwest(e) => {
-					Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
-				}
-			},
+			Err(e) => Err(Exception::throw_type(ctx, &e)),
 		}
 	}
 
 	// Returns a promise with the request body as a Blob
-	pub async fn blob(&self, ctx: Ctx<'js>) -> Result<Blob> {
-		let headers = self.init.headers.clone();
+	pub async fn blob(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<Blob> {
+		let headers = this.try_borrow()?.init.headers.clone();
 		let mime = {
 			let headers = headers.borrow();
 			let headers = &headers.inner;
@@ -506,7 +511,7 @@ impl<'js> Request<'js> {
 				.to_owned()
 		};
 
-		let data = self.take_buffer(&ctx).await?;
+		let data = Self::take_buffer(this, &ctx).await?;
 		Ok(Blob {
 			mime,
 			data,
@@ -520,14 +525,14 @@ impl<'js> Request<'js> {
 	}
 
 	// Returns a promise with the request body as JSON
-	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		let text = self.text(ctx.clone()).await?;
+	pub async fn json(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<Value<'js>> {
+		let text = Self::text(this, ctx.clone()).await?;
 		ctx.json_parse(text)
 	}
 
 	// Returns a promise with the request body as text
-	pub async fn text(&self, ctx: Ctx<'js>) -> Result<String> {
-		let data = self.take_buffer(&ctx).await?;
+	pub async fn text(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<String> {
+		let data = Self::take_buffer(this, &ctx).await?;
 
 		// Skip UTF-BOM
 		if data.starts_with(&[0xEF, 0xBB, 0xBF]) {

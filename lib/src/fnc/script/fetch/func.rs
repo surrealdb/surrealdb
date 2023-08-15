@@ -2,10 +2,14 @@
 
 use crate::{
 	fnc::script::fetch::classes::{self, Request, RequestInit, Response},
-	http::{RedirectAction, RedirectPolicy},
+	http::{Body as HttpBody, RedirectAction, RedirectPolicy},
 };
-use futures::TryStreamExt;
-use js::{function::Opt, Ctx, Exception, Result, Value};
+use js::{function::Opt, Class, Ctx, Exception, Result, Value};
+
+use super::{
+	body::Body,
+	classes::{Headers, ResponseInit, ResponseType},
+};
 
 #[js::function]
 #[allow(unused_variables)]
@@ -38,7 +42,7 @@ pub async fn fetch<'js>(
 	// unwrap should never panic.
 	let headers = js_req.init.headers;
 	let headers = headers.borrow();
-	let mut headers = headers.inner.clone();
+	let headers = headers.inner.clone();
 
 	let redirect = js_req.init.request_redirect;
 
@@ -62,43 +66,17 @@ pub async fn fetch<'js>(
 		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
-	let req = crate::http::Request::new(js_req.init.method, url.clone(), client.clone());
+	// method and url already parsed object so this should never panic.
+	let mut req =
+		crate::http::Request::new(js_req.init.method, url.clone(), client.clone()).unwrap();
 
-	todo!()
-	/*
 	// Set the body for the request.
-	let mut req_builder = RequestBuilder::from_parts(client, req);
-	if let Some(body) = js_req.init.body {
-		match body.data.replace(BodyData::Used) {
-			BodyData::Stream(x) => {
-				let body = ReqBody::wrap_stream(x.into_inner());
-				req_builder = req_builder.body(body);
-			}
-			BodyData::Buffer(x) => {
-				let body = ReqBody::from(x);
-				req_builder = req_builder.body(body);
-			}
-			BodyData::Used => return Err(Exception::throw_type(&ctx, "Body unusable")),
-		};
-		match body.kind {
-			BodyKind::Buffer => {}
-			BodyKind::String => {
-				headers
-					.entry(CONTENT_TYPE)
-					.or_insert_with(|| HeaderValue::from_static("text/plain;charset=UTF-8"));
-			}
-			BodyKind::Blob(mime) => {
-				if let Ok(x) = HeaderValue::from_bytes(mime.as_bytes()) {
-					// TODO: Not according to spec, figure out the specific Mime -> Content-Type
-					// -> Mime conversion process.
-					headers.entry(CONTENT_TYPE).or_insert_with(|| x);
-				}
-			}
-		}
+	if let Some(body) = js_req.init.body.map(|x| x.body.into_backend_body()) {
+		req = req.body(body);
 	}
 
 	// make the request
-	let response = req_builder
+	let response = req
 		.headers(headers)
 		.send()
 		.await
@@ -114,10 +92,7 @@ pub async fn fetch<'js>(
 	};
 
 	// Extract the body
-	let body = Body::stream(
-		BodyKind::Buffer,
-		response.bytes_stream().map_err(Arc::new).map_err(RequestError::Reqwest),
-	);
+	let body = Body::stream(response.bytes_stream());
 	let response = Response {
 		body,
 		init,
@@ -126,7 +101,6 @@ pub async fn fetch<'js>(
 		was_redirected: false,
 	};
 	Ok(response)
-	*/
 }
 
 #[cfg(test)]

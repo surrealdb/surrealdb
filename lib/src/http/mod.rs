@@ -12,14 +12,14 @@ use thiserror::Error;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hyper;
 #[cfg(not(target_arch = "wasm32"))]
-pub use hyper as req_impl;
+pub use hyper as backend;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 #[cfg(target_arch = "wasm32")]
-pub use wasm as req_impl;
+pub use wasm as backend;
 
-pub use req_impl::Response;
-use req_impl::{Client as NativeClient, ClientError};
+use backend::{Backend, BackendError};
+pub use backend::{BackendBody as Body, Response};
 use tokio::time::error::Elapsed;
 
 mod url;
@@ -28,8 +28,6 @@ mod builder;
 pub use builder::{ClientBuilder, RedirectAction, RedirectPolicy};
 mod request;
 pub use request::Request;
-mod body;
-pub use body::Body;
 
 #[derive(Error, Debug)]
 pub enum SerializeError {
@@ -46,7 +44,7 @@ pub enum Error {
 	#[error("{0}")]
 	Url(#[from] url::UrlParseError),
 	#[error("{0}")]
-	Client(#[from] ClientError),
+	Client(#[from] BackendError),
 	#[error("Failed to parse bytes to string: {0}")]
 	Utf8(#[from] Utf8Error),
 	#[error(
@@ -70,20 +68,20 @@ pub enum Error {
 }
 
 impl From<Infallible> for Error {
-	fn from(value: Infallible) -> Self {
+	fn from(_: Infallible) -> Self {
 		panic!("Infallible error was created")
 	}
 }
 
 #[derive(Clone)]
 pub struct Client {
-	inner: Arc<NativeClient>,
+	inner: Arc<Backend>,
 }
 
 impl Client {
 	pub fn new() -> Self {
 		Self {
-			inner: Arc::new(NativeClient::new()),
+			inner: Arc::new(Backend::new()),
 		}
 	}
 
