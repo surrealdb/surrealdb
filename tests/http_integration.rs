@@ -297,7 +297,6 @@ async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let url = &format!("http://{addr}/rpc");
@@ -331,7 +330,6 @@ async fn rpc_live_authorised() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let url = &format!("http://{addr}/rpc");
@@ -363,7 +361,6 @@ async fn rpc_live_unauthorised() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-#[serial]
 async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let url = &format!("http://{addr}/signin");
