@@ -1,12 +1,7 @@
-use std::time::Duration;
-
 use axum_server::Handle;
 use tokio::task::JoinHandle;
 
-use crate::{
-	err::Error,
-	net::rpc::{WebSocketRef, WEBSOCKETS},
-};
+use crate::{err::Error, rpc, telemetry};
 
 /// Start a graceful shutdown:
 /// * Signal the Axum Handle when a shutdown signal is received.
@@ -24,15 +19,12 @@ pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
 				// First stop accepting new HTTP requests
 				http_handle.graceful_shutdown(None);
 
-				// Close all WebSocket connections. Queued messages will still be processed.
-				for (_, WebSocketRef(_, cancel_token)) in WEBSOCKETS.read().await.iter() {
-					cancel_token.cancel();
-				};
+				rpc::graceful_shutdown().await;
 
-				// Wait for all existing WebSocket connections to gracefully close
-				while WEBSOCKETS.read().await.len() > 0 {
-					tokio::time::sleep(Duration::from_millis(100)).await;
-				};
+				// Flush all telemetry data
+				if let Err(err) = telemetry::shutdown() {
+					error!("Failed to flush telemetry data: {}", err);
+				}
 			} => (),
 			// Force an immediate shutdown if a second signal is received
 			_ = async {
@@ -46,9 +38,7 @@ pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
 				http_handle.shutdown();
 
 				// Close all WebSocket connections immediately
-				if let Ok(mut writer) = WEBSOCKETS.try_write() {
-					writer.drain();
-				}
+				rpc::shutdown();
 			} => (),
 		}
 	})
