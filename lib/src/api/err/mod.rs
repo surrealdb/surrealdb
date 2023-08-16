@@ -18,11 +18,11 @@ pub enum Error {
 	Query(String),
 
 	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request")]
+	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
 	/// There was an error processing a remote WS request
-	#[error("There was an error processing a remote WS request")]
+	#[error("There was an error processing a remote WS request: {0}")]
 	Ws(String),
 
 	/// The specified scheme does not match any supported protocol or storage engine
@@ -109,8 +109,8 @@ pub enum Error {
 		error: String,
 	},
 
-	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{string}` to JSON string: {error}")]
+	/// Failed to deserialize from JSON string to `sql::Value`
+	#[error("Failed to deserialize `{string}` to sql::Value: {error}")]
 	FromJsonString {
 		string: String,
 		error: String,
@@ -146,6 +146,20 @@ pub enum Error {
 	/// it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]
 	BackupsNotSupported,
+
+	/// The version of the server is not compatible with the versions supported by this SDK
+	#[error("server version `{server_version}` does not match the range supported by the client `{supported_versions}`")]
+	VersionMismatch {
+		server_version: semver::Version,
+		supported_versions: String,
+	},
+
+	/// The build metadata of the server is older than the minimum supported by this SDK
+	#[error("server build `{server_metadata}` is older than the minimum supported build `{supported_metadata}`")]
+	BuildMetadataMismatch {
+		server_metadata: semver::BuildMetadata,
+		supported_metadata: semver::BuildMetadata,
+	},
 }
 
 #[cfg(feature = "protocol-http")]

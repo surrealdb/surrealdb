@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::{Level, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
@@ -35,6 +36,7 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
+	User(RemoveUserStatement),
 }
 
 impl RemoveStatement {
@@ -59,6 +61,7 @@ impl RemoveStatement {
 			Self::Field(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn).await,
+			Self::User(ref v) => v.compute(ctx, opt, txn).await,
 		}
 	}
 }
@@ -78,6 +81,7 @@ impl Display for RemoveStatement {
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
+			Self::User(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -96,6 +100,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(field, RemoveStatement::Field),
 		map(index, RemoveStatement::Index),
 		map(analyzer, RemoveStatement::Analyzer),
+		map(user, RemoveStatement::User),
 	))(i)
 }
 
@@ -116,10 +121,8 @@ impl RemoveNamespaceStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// No need for NS/DB
-		opt.needs(Level::Kv)?;
 		// Allowed to run?
-		opt.check(Level::Kv)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -170,10 +173,8 @@ impl RemoveDatabaseStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected NS?
-		opt.needs(Level::Ns)?;
 		// Allowed to run?
-		opt.check(Level::Ns)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -224,10 +225,8 @@ impl RemoveFunctionStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -282,10 +281,8 @@ impl RemoveAnalyzerStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -335,12 +332,11 @@ impl RemoveLoginStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+
 		match self.base {
 			Base::Ns => {
-				// Selected NS?
-				opt.needs(Level::Ns)?;
-				// Allowed to run?
-				opt.check(Level::Kv)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -350,10 +346,6 @@ impl RemoveLoginStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Ns)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -362,7 +354,7 @@ impl RemoveLoginStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => unreachable!(),
+			_ => Err(Error::InvalidLevel(self.base.to_string())),
 		}
 	}
 }
@@ -410,12 +402,11 @@ impl RemoveTokenStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+
 		match &self.base {
 			Base::Ns => {
-				// Selected NS?
-				opt.needs(Level::Ns)?;
-				// Allowed to run?
-				opt.check(Level::Kv)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -425,10 +416,6 @@ impl RemoveTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Ns)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -438,10 +425,6 @@ impl RemoveTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Sc(sc) => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Db)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Delete the definition
@@ -450,7 +433,7 @@ impl RemoveTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => unreachable!(),
+			_ => Err(Error::InvalidLevel(self.base.to_string())),
 		}
 	}
 }
@@ -497,10 +480,8 @@ impl RemoveScopeStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -551,10 +532,8 @@ impl RemoveParamStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -603,10 +582,8 @@ impl RemoveTableStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -658,10 +635,8 @@ impl RemoveEventStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -719,10 +694,8 @@ impl RemoveFieldStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -781,10 +754,8 @@ impl RemoveIndexStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Delete the definition
@@ -823,6 +794,86 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
+pub struct RemoveUserStatement {
+	pub name: Ident,
+	pub base: Base,
+}
+
+impl RemoveUserStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+
+		match self.base {
+			Base::Root => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::root::us::new(&self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Ns => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Delete the definition
+				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Delete the definition
+				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			_ => Err(Error::InvalidLevel(self.base.to_string())),
+		}
+	}
+}
+
+impl Display for RemoveUserStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE USER {} ON {}", self.name, self.base)
+	}
+}
+
+fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("USER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, base) = base(i)?;
+	Ok((
+		i,
+		RemoveUserStatement {
+			name,
+			base,
 		},
 	))
 }

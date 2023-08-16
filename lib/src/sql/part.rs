@@ -22,6 +22,7 @@ use std::str;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Part {
 	All,
+	Flatten,
 	Last,
 	First,
 	Field(Ident),
@@ -112,6 +113,7 @@ impl fmt::Display for Part {
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{v}"),
+			Part::Flatten => f.write_str("…"),
 			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -139,7 +141,7 @@ impl<'a> Next<'a> for &'a [Part] {
 // ------------------------------
 
 pub fn part(i: &str) -> IResult<&str, Part> {
-	alt((all, last, index, field, value, graph, filter))(i)
+	alt((all, flatten, last, index, field, value, graph, filter))(i)
 }
 
 pub fn first(i: &str) -> IResult<&str, Part> {
@@ -178,6 +180,12 @@ pub fn index(i: &str) -> IResult<&str, Part> {
 	let (i, v) = number(i)?;
 	let (i, _) = closebracket(i)?;
 	Ok((i, Part::Index(v)))
+}
+
+pub fn flatten(i: &str) -> IResult<&str, Part> {
+	let (i, _) = alt((tag("…"), tag("...")))(i)?;
+	let (i, _) = ending(i)?;
+	Ok((i, Part::Flatten))
 }
 
 pub fn field(i: &str) -> IResult<&str, Part> {
@@ -242,6 +250,26 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[$]", format!("{}", out));
 		assert_eq!(out, Part::Last);
+	}
+
+	#[test]
+	fn part_flatten() {
+		let sql = "...";
+		let res = part(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("…", format!("{}", out));
+		assert_eq!(out, Part::Flatten);
+	}
+
+	#[test]
+	fn part_flatten_ellipsis() {
+		let sql = "…";
+		let res = part(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("…", format!("{}", out));
+		assert_eq!(out, Part::Flatten);
 	}
 
 	#[test]

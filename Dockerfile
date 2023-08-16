@@ -1,5 +1,5 @@
-# Use the distroless/cc:latest image as the base image
-FROM gcr.io/distroless/cc:latest
+# Use ChainGuard's glibc-dynamic image as the base image. More information about this image can be found at https://www.chainguard.dev/chainguard-images
+FROM cgr.dev/chainguard/glibc-dynamic
 
 # Declare a build-time argument for the target architecture
 ARG TARGETARCH

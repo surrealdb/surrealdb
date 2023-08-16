@@ -1,7 +1,10 @@
 name: Continuous integration
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - main
   pull_request:
   merge_group:
 
@@ -26,12 +29,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Check format of code
-        run: cargo fmt --all --check
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-      - name: Check format of unlinked tests
-        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-format
 
   check:
     name: Check workspace
@@ -46,14 +57,24 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo check
-        run: cargo check --locked --workspace
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Check workspace
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check
 
   check-wasm:
     name: Check Wasm
@@ -70,9 +91,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run cargo check
-        run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http --target wasm32-unknown-unknown
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Check wasm
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check-wasm
 
   clippy:
     name: Check clippy
@@ -89,17 +121,27 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Run clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-clippy
 
   cli:
-    name: Test command line
+    name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
 
@@ -111,17 +153,27 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem --workspace --test cli_integration
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Run CLI integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-cli-integration
 
   http-server:
-    name: Test HTTP server
+    name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
 
@@ -133,14 +185,56 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem --workspace --test http_integration
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Run HTTP integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-http-integration
+
+  ws-server:
+    name: WebSocket integration tests
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Run WS integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-ws-integration
 
   test:
     name: Test workspace
@@ -155,24 +249,45 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Free up some disk space
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run cargo test (+coverage)
-        run: cargo llvm-cov --html --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --skip cli
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test workspace + coverage
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-workspace-coverage
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
         with:
-            name: code-coverage-report
-            path: target/llvm-cov/html/
-            retention-days: 5
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 5
 
   ws-engine:
     name: WebSocket engine
@@ -187,22 +302,29 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
         with:
           version: "7.1.30"
 
-      - name: Run cargo test
-        run: |
-          cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
-          cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test ws engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-ws
 
   http-engine:
     name: HTTP engine
@@ -217,22 +339,66 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
         with:
           version: "7.1.30"
 
-      - name: Run cargo test
-        run: |
-          cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
-          cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test http engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-http
+
+  any-engine:
+      name: Any engine
+      runs-on: ubuntu-latest
+      steps:
+
+        - name: Install stable toolchain
+          uses: dtolnay/rust-toolchain@stable
+
+        - name: Checkout sources
+          uses: actions/checkout@v3
+
+        - name: Setup cache
+          uses: Swatinem/rust-cache@v2
+          with:
+            save-if: ${{ github.ref == 'refs/heads/main' }}
+
+        - name: Install dependencies
+          run: |
+            sudo apt-get -y update
+
+        - name: Setup FoundationDB
+          uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+          with:
+            version: "7.1.30"
+
+        - name: Install cargo-make
+          uses: actions-rs/cargo@v1
+          with:
+            command: install
+            args: --debug cargo-make
+
+        - name: Test any engine
+          uses: actions-rs/cargo@v1
+          with:
+            command: make
+            args: ci-api-integration-any
 
   mem-engine:
     name: Memory engine
@@ -247,11 +413,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run cargo test
-        run: |
-          cargo test --locked --package surrealdb --no-default-features --features kv-mem --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test mem engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-mem
 
   file-engine:
     name: File engine
@@ -266,11 +441,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run cargo test
-        run: |
-          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test file engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-file
 
   rocksdb-engine:
     name: RocksDB engine
@@ -285,11 +469,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run cargo test
-        run: |
-          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::rocksdb
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test rocksdb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-rocksdb
 
   speedb-engine:
     name: SpeeDB engine
@@ -304,11 +497,20 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run cargo test
-        run: |
-          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-speedb --test api api_integration::speedb
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test speedb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-speedb
 
   tikv-engine:
      name: TiKV engine
@@ -323,23 +525,29 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Install TiKV
+      - name: Install TiUP
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          ~/.tiup/bin/tiup install tikv pd
           ~/.tiup/bin/tiup -v
 
-      - name: Run cargo test
-        run: |
-          (&>/dev/null ~/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &)
-          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-tikv --test api api_integration::tikv
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test tikv engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-tikv
 
   fdb-engine:
     name: FoundationDB engine
@@ -354,43 +562,22 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
         with:
           version: "7.1.30"
 
-      - name: Run cargo test
-        run: |
-          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --lib kvs
-          cargo test --locked --package surrealdb --no-default-features --features kv-fdb-7_1 --test api api_integration::fdb
-
-  any-engine:
-    name: Any engine
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
         with:
-          version: "7.1.30"
+          command: install
+          args: --debug cargo-make
 
-      - name: Run cargo test
-        run: |
-          cargo build --locked --no-default-features --features storage-fdb
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root fdb:/etc/foundationdb/fdb.cluster &)
-          cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any
+      - name: Test fdb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-fdb

@@ -400,7 +400,7 @@ mod tests {
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
 				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
-				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
+				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == Value::from("object") {

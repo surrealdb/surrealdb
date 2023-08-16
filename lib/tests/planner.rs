@@ -119,7 +119,7 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 
 async fn execute_test(sql: &str, expected_result: usize) -> Result<Vec<Response>, Error> {
 	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	// Check that the setup is ok

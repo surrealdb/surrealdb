@@ -18,7 +18,7 @@ mod tikv;
 
 use crate::api::Connection;
 use crate::api::Result;
-use crate::dbs::Level;
+use crate::iam::Level;
 use url::Url;
 
 use super::Config;

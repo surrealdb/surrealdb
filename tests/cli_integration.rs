@@ -1,43 +1,53 @@
-// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
+// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli_integration -- --nocapture
 
 mod common;
 
 use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-use serial_test::serial;
 use std::fs;
+use std::time;
+use test_log::test;
+use tokio::time::sleep;
+use tracing::info;
 
-use common::{PASS, USER};
+use common::{StartServerArguments, PASS, USER};
+
+const ONE_SEC: time::Duration = time::Duration::new(1, 0);
+const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 #[test]
-#[serial]
 fn version() {
 	assert!(common::run("version").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn help() {
 	assert!(common::run("help").output().is_ok());
 }
 
 #[test]
-#[serial]
 fn nonexistent_subcommand() {
 	assert!(common::run("nonexistent").output().is_err());
 }
 
 #[test]
-#[serial]
 fn nonexistent_option() {
 	assert!(common::run("version --turbo").output().is_err());
 }
 
-#[tokio::test]
-#[serial]
+#[test(tokio::test)]
 async fn all_commands() {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
-	let creds = format!("--user {USER} --pass {PASS}");
-	// Create a record
+	// Commands without credentials when auth is disabled, should succeed
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+	let creds = ""; // Anonymous user
+
+	info!("* Create a record");
 	{
 		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
 		assert_eq!(
@@ -47,7 +57,7 @@ async fn all_commands() {
 		);
 	}
 
-	// Export to stdout
+	info!("* Export to stdout");
 	{
 		let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
 		let output = common::run(&args).output().expect("failed to run stdout export: {args}");
@@ -55,7 +65,7 @@ async fn all_commands() {
 		assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
 	}
 
-	// Export to file
+	info!("* Export to file");
 	let exported = {
 		let exported = common::tmp_file("exported.surql");
 		let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
@@ -63,13 +73,13 @@ async fn all_commands() {
 		exported
 	};
 
-	// Import the exported file
+	info!("* Import the exported file");
 	{
 		let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {exported}");
 		common::run(&args).output().expect("failed to run import: {args}");
 	}
 
-	// Query from the import (pretty-printed this time)
+	info!("* Query from the import (pretty-printed this time)");
 	{
 		let args = format!("sql --conn http://{addr} {creds} --ns N --db D2 --pretty");
 		assert_eq!(
@@ -79,7 +89,7 @@ async fn all_commands() {
 		);
 	}
 
-	// Unfinished backup CLI
+	info!("* Unfinished backup CLI");
 	{
 		let file = common::tmp_file("backup.db");
 		let args = format!("backup {creds}  http://{addr} {file}");
@@ -89,7 +99,7 @@ async fn all_commands() {
 		assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 	}
 
-	// Multi-statement (and multi-line) query including error(s) over WS
+	info!("* Multi-statement (and multi-line) query including error(s) over WS");
 	{
 		let args = format!("sql --conn ws://{addr} {creds} --ns N3 --db D3 --multi --pretty");
 		let output = common::run(&args)
@@ -112,7 +122,7 @@ async fn all_commands() {
 		assert!(output.contains("thing:also_success"), "missing also_success in {output}")
 	}
 
-	// Multi-statement (and multi-line) transaction including error(s) over WS
+	info!("* Multi-statement (and multi-line) transaction including error(s) over WS");
 	{
 		let args = format!("sql --conn ws://{addr} {creds} --ns N4 --db D4 --multi --pretty");
 		let output = common::run(&args)
@@ -136,7 +146,7 @@ async fn all_commands() {
 		assert!(output.contains("rgument"), "missing argument error in {output}");
 	}
 
-	// Pass neither ns nor db
+	info!("* Pass neither ns nor db");
 	{
 		let args = format!("sql --conn http://{addr} {creds}");
 		let output = common::run(&args)
@@ -146,7 +156,7 @@ async fn all_commands() {
 		assert!(output.contains("thing:one"), "missing thing:one in {output}");
 	}
 
-	// Pass only ns
+	info!("* Pass only ns");
 	{
 		let args = format!("sql --conn http://{addr} {creds} --ns N5");
 		let output = common::run(&args)
@@ -156,33 +166,56 @@ async fn all_commands() {
 		assert!(output.contains("thing:one"), "missing thing:one in {output}");
 	}
 
-	// Pass only db and expect an error
+	info!("* Pass only db and expect an error");
 	{
 		let args = format!("sql --conn http://{addr} {creds} --db D5");
 		common::run(&args).output().expect_err("only db");
 	}
 }
 
-#[tokio::test]
-#[serial]
+#[test(tokio::test)]
 async fn start_tls() {
-	let (_, server) = common::start_server(true, false).await.unwrap();
+	// Capute the server's stdout/stderr
+	temp_env::async_with_vars(
+		[
+			("SURREAL_TEST_SERVER_STDOUT", Some("piped")),
+			("SURREAL_TEST_SERVER_STDERR", Some("piped")),
+		],
+		async {
+			let (_, server) = common::start_server(StartServerArguments {
+				auth: false,
+				tls: true,
+				wait_is_ready: false,
+				tick_interval: ONE_SEC,
+			})
+			.await
+			.unwrap();
 
-	std::thread::sleep(std::time::Duration::from_millis(2000));
-	let output = server.kill().output().err().unwrap();
+			std::thread::sleep(std::time::Duration::from_millis(2000));
+			let output = server.kill().output().err().unwrap();
 
-	// Test the crt/key args but the keys are self signed so don't actually connect.
-	assert!(output.contains("Started web server"), "couldn't start web server: {output}");
+			// Test the crt/key args but the keys are self signed so don't actually connect.
+			assert!(output.contains("Started web server"), "couldn't start web server: {output}");
+		},
+	)
+	.await;
 }
 
-#[tokio::test]
-#[serial]
+#[test(tokio::test)]
 async fn with_root_auth() {
-	let (addr, _server) = common::start_server(false, true).await.unwrap();
+	// Commands with credentials when auth is enabled, should succeed
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 	let creds = format!("--user {USER} --pass {PASS}");
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
-	// Can query /sql over HTTP
+	info!("* Query over HTTP");
 	{
 		let args = format!("{sql_args} {creds}");
 		let input = "INFO FOR ROOT;";
@@ -190,7 +223,7 @@ async fn with_root_auth() {
 		assert!(output.is_ok(), "failed to query over HTTP: {}", output.err().unwrap());
 	}
 
-	// Can query /sql over WS
+	info!("* Query over WS");
 	{
 		let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 		let input = "INFO FOR ROOT;";
@@ -198,7 +231,7 @@ async fn with_root_auth() {
 		assert!(output.is_ok(), "failed to query over WS: {}", output.err().unwrap());
 	}
 
-	// KV user can do exports
+	info!("* Root user can do exports");
 	let exported = {
 		let exported = common::tmp_file("exported.surql");
 		let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
@@ -207,13 +240,13 @@ async fn with_root_auth() {
 		exported
 	};
 
-	// KV user can do imports
+	info!("* Root user can do imports");
 	{
 		let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {exported}");
 		common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 	}
 
-	// KV user can do backups
+	info!("* Root user can do backups");
 	{
 		let file = common::tmp_file("backup.db");
 		let args = format!("backup {creds} http://{addr} {file}");
@@ -224,8 +257,131 @@ async fn with_root_auth() {
 	}
 }
 
+#[test(tokio::test)]
+async fn with_anon_auth() {
+	// Commands without credentials when auth is enabled, should fail
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: true,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+	let creds = ""; // Anonymous user
+	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+
+	info!("* Query over HTTP");
+	{
+		let args = format!("{sql_args} {creds}");
+		let input = "";
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+	}
+
+	info!("* Query over WS");
+	{
+		let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+		let input = "";
+		let output = common::run(&args).input(input).output();
+		assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+	}
+
+	info!("* Can't do exports");
+	{
+		let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
+		let output = common::run(&args).output();
+		assert!(
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to export: {:?}",
+			output
+		);
+	}
+
+	info!("* Can't do imports");
+	{
+		let tmp_file = common::tmp_file("exported.surql");
+		let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
+		let output = common::run(&args).output();
+		assert!(
+			output.clone().unwrap_err().contains("Forbidden"),
+			"anonymous user shouldn't be able to import: {:?}",
+			output
+		);
+	}
+
+	info!("* Can't do backups");
+	{
+		let args = format!("backup {creds} http://{addr}");
+		let output = common::run(&args).output();
+		// TODO(sgirones): Once backups are functional, update this test.
+		// assert!(
+		// 	output.unwrap_err().contains("Forbidden"),
+		// 	"anonymous user shouldn't be able to backup",
+		// 	output
+		// );
+		assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
+	}
+}
+
+#[test(tokio::test)]
+async fn node() {
+	// Commands without credentials when auth is disabled, should succeed
+	let (addr, _server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+	let creds = ""; // Anonymous user
+
+	info!("* Define a table");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Create a record");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
+			Ok("[{ id: thing:one }]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	info!("* Show changes");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[{ changes: [{ update: { id: thing:one } }], versionstamp: 65536 }]\n\n"
+				.to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+
+	sleep(TWO_SECS).await;
+
+	info!("* Show changes after GC");
+	{
+		let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+		assert_eq!(
+			common::run(&args).input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n").output(),
+			Ok("[]\n\n".to_owned()),
+			"failed to send sql: {args}"
+		);
+	}
+}
+
 #[test]
-#[serial]
 fn validate_found_no_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -235,7 +391,6 @@ fn validate_found_no_files() {
 }
 
 #[test]
-#[serial]
 fn validate_succeed_for_valid_surql_files() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -248,7 +403,6 @@ fn validate_succeed_for_valid_surql_files() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_glob_pattern() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 
@@ -260,7 +414,6 @@ fn validate_failed_due_to_invalid_glob_pattern() {
 }
 
 #[test]
-#[serial]
 fn validate_failed_due_to_invalid_surql_files_syntax() {
 	let temp_dir = assert_fs::TempDir::new().unwrap();
 

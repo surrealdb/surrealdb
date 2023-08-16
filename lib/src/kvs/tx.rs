@@ -8,16 +8,20 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
+use crate::sql::statements::DefineUserStatement;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
 use channel::Sender;
+use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -46,6 +50,7 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
+	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -88,10 +93,29 @@ impl fmt::Display for Transaction {
 
 impl Transaction {
 	// --------------------------------------------------
+	// Configuration methods
+	// --------------------------------------------------
+
+	pub fn rollback_with_warning(mut self) -> Self {
+		self.check_level(Check::Warn);
+		self
+	}
+
+	pub fn rollback_with_panic(mut self) -> Self {
+		self.check_level(Check::Panic);
+		self
+	}
+
+	pub fn rollback_and_ignore(mut self) -> Self {
+		self.check_level(Check::None);
+		self
+	}
+
+	// --------------------------------------------------
 	// Integral methods
 	// --------------------------------------------------
 
-	/// Check if transactions is finished.
+	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
@@ -445,6 +469,29 @@ impl Transaction {
 		}
 	}
 
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamp(&mut self) -> Result<Versionstamp, Error> {
+		Ok(self.vso.lock().await.now())
+	}
+
+	#[allow(unused)]
+	async fn get_non_monotonic_versionstamped_key<K>(
+		&mut self,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		let prefix: Key = prefix.into();
+		let suffix: Key = suffix.into();
+		let ts = self.get_non_monotonic_versionstamp().await?;
+		let mut k: Vec<u8> = prefix.clone();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.clone());
+		Ok(k)
+	}
+
 	/// Insert or update a key in the datastore.
 	#[allow(unused_variables)]
 	pub async fn set_versionstamped_key<K, V>(
@@ -455,7 +502,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -1174,6 +1221,15 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all namespace user definitions for a specific namespace.
+	pub async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::namespace::us::prefix(ns);
+		let end = crate::key::namespace::us::suffix(ns);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
+	}
+
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::namespace::tk::prefix(ns);
@@ -1233,6 +1289,19 @@ impl Transaction {
 			self.cache.set(key, Entry::Dls(Arc::clone(&val)));
 			val
 		})
+	}
+
+	/// Retrieve all database user definitions for a specific database.
+	pub async fn all_db_users(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::database::us::prefix(ns, db);
+		let end = crate::key::database::us::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
 	}
 
 	/// Retrieve all database token definitions for a specific database.
@@ -1328,7 +1397,7 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all scope definitions for a specific database.
+	/// Retrieve all param definitions for a specific database.
 	pub async fn all_pa(
 		&mut self,
 		ns: &str,
@@ -1540,6 +1609,16 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all ROOT users.
+	pub async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::root::us::prefix();
+		let end = crate::key::root::us::suffix();
+
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
+	}
+
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::root::ns::new(ns);
@@ -1732,6 +1811,46 @@ impl Transaction {
 		})?;
 		Ok(val.into())
 	}
+
+	/// Retrieve a specific user definition from ROOT.
+	pub async fn get_root_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::root::us::new(user);
+		let val = self.get(key).await?.ok_or(Error::UserRootNotFound {
+			value: user.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific user definition from a namespace.
+	pub async fn get_ns_user(
+		&mut self,
+		ns: &str,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::namespace::us::new(ns, user);
+		let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
+			value: user.to_owned(),
+			ns: ns.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific user definition from a database.
+	pub async fn get_db_user(
+		&mut self,
+		ns: &str,
+		db: &str,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::database::us::new(ns, db, user);
+		let val = self.get(key).await?.ok_or(Error::UserDbNotFound {
+			value: user.to_owned(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
 	pub async fn add_ns(
 		&mut self,
@@ -2297,5 +2416,261 @@ impl Transaction {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
 		}
 		Ok(())
+	}
+
+	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
+	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
+	pub(crate) async fn set_timestamp_for_versionstamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		lock: bool,
+	) -> Result<(), Error> {
+		// This also works as an advisory lock on the ts keys so that there is
+		// on other concurrent transactions that can write to the ts_key or the keys after it.
+		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
+
+		// Ensure there are no keys after the ts_key
+		// Otherwise we can go back in time!
+		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let begin = ts_key.encode()?;
+		let end = crate::key::database::ts::suffix(ns, db);
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((k, _)) = latest_ts_pair {
+			let k = crate::key::database::ts::Ts::decode(k)?;
+			let latest_ts = k.ts;
+			if latest_ts >= ts {
+				return Err(Error::Internal(
+					"ts is less than or equal to the latest ts".to_string(),
+				));
+			}
+		}
+		self.set(ts_key, vs).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn get_versionstamp_from_timestamp(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+		_lock: bool,
+	) -> Result<Option<Versionstamp>, Error> {
+		let start = crate::key::database::ts::prefix(ns, db);
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
+		let end = ts_key.encode()?;
+		let ts_pairs = self.getr(start..end, u32::MAX).await?;
+		let latest_ts_pair = ts_pairs.last();
+		if let Some((_, v)) = latest_ts_pair {
+			if v.len() == 10 {
+				let mut sl = [0u8; 10];
+				sl.copy_from_slice(v);
+				return Ok(Some(sl));
+			} else {
+				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+			}
+		}
+		Ok(None)
+	}
+
+	// --------------------------------------------------
+	// Private methods
+	// --------------------------------------------------
+
+	fn check_level(&mut self, check: Check) {
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(ref mut v),
+				..
+			} => v.check_level(check),
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(ref mut v),
+				..
+			} => v.check_level(check),
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
+	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests {
+	use crate::{
+		kvs::Datastore,
+		sql::{statements::DefineUserStatement, Base},
+	};
+
+	#[tokio::test]
+	async fn test_get_root_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent KV user
+		let res = txn.get_root_user("nonexistent").await;
+		assert_eq!(res.err().unwrap().to_string(), "The root user 'nonexistent' does not exist");
+
+		// Create KV user and retrieve it
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Root,
+			..Default::default()
+		};
+		let key = crate::key::root::us::new("user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_root_user("user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_get_ns_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent NS user
+		let res = txn.get_ns_user("ns", "nonexistent").await;
+		assert_eq!(
+			res.err().unwrap().to_string(),
+			"The user 'nonexistent' does not exist in the namespace 'ns'"
+		);
+
+		// Create NS user and retrieve it
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Ns,
+			..Default::default()
+		};
+
+		let key = crate::key::namespace::us::new("ns", "user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_ns_user("ns", "user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_get_db_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent DB user
+		let res = txn.get_db_user("ns", "db", "nonexistent").await;
+		assert_eq!(
+			res.err().unwrap().to_string(),
+			"The user 'nonexistent' does not exist in the database 'db'"
+		);
+
+		// Create DB user and retrieve it
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Db,
+			..Default::default()
+		};
+
+		let key = crate::key::database::us::new("ns", "db", "user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_all_root_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_root_users().await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Root,
+			..Default::default()
+		};
+
+		let key1 = crate::key::root::us::new("user1");
+		let key2 = crate::key::root::us::new("user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_root_users().await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
+	}
+
+	#[tokio::test]
+	async fn test_all_ns_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_ns_users("ns").await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Ns,
+			..Default::default()
+		};
+
+		let key1 = crate::key::namespace::us::new("ns", "user1");
+		let key2 = crate::key::namespace::us::new("ns", "user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_ns_users("ns").await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
+	}
+
+	#[tokio::test]
+	async fn test_db_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_db_users("ns", "db").await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Db,
+			..Default::default()
+		};
+
+		let key1 = crate::key::database::us::new("ns", "db", "user1");
+		let key2 = crate::key::database::us::new("ns", "db", "user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_db_users("ns", "db").await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
 	}
 }

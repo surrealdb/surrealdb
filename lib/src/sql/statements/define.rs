@@ -1,8 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::{Level, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Action;
+use crate::iam::ResourceKind;
+use crate::iam::Role;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::block::{block, Block};
@@ -10,11 +13,13 @@ use crate::sql::changefeed::{changefeed, ChangeFeed};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::duration::{duration, Duration};
+use crate::sql::error::Error as SqlError;
 use crate::sql::error::IResult;
 use crate::sql::escape::quote_str;
 use crate::sql::filter::{filters, Filter};
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
+use crate::sql::fmt::Fmt;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -38,6 +43,7 @@ use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::multi::separated_list0;
 use nom::sequence::tuple;
+use nom::Err::Failure;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use rand::Rng;
@@ -58,6 +64,7 @@ pub enum DefineStatement {
 	Event(DefineEventStatement),
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
+	User(DefineUserStatement),
 }
 
 impl DefineStatement {
@@ -73,7 +80,9 @@ impl DefineStatement {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(_) => Err(Error::Deprecated(
+				"DEFINE LOGIN is no longer supported. Use DEFINE USER instead".to_string(),
+			)),
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -82,6 +91,7 @@ impl DefineStatement {
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -93,6 +103,7 @@ impl Display for DefineStatement {
 			Self::Database(v) => Display::fmt(v, f),
 			Self::Function(v) => Display::fmt(v, f),
 			Self::Login(v) => Display::fmt(v, f),
+			Self::User(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
 			Self::Param(v) => Display::fmt(v, f),
@@ -111,6 +122,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(database, DefineStatement::Database),
 		map(function, DefineStatement::Function),
 		map(login, DefineStatement::Login),
+		map(user, DefineStatement::User),
 		map(token, DefineStatement::Token),
 		map(scope, DefineStatement::Scope),
 		map(param, DefineStatement::Param),
@@ -140,10 +152,8 @@ impl DefineNamespaceStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// No need for NS/DB
-		opt.needs(Level::Kv)?;
 		// Allowed to run?
-		opt.check(Level::Kv)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
@@ -193,10 +203,8 @@ impl DefineDatabaseStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected NS?
-		opt.needs(Level::Ns)?;
 		// Allowed to run?
-		opt.check(Level::Ns)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -274,10 +282,8 @@ impl DefineFunctionStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -356,10 +362,8 @@ impl DefineAnalyzerStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -419,50 +423,6 @@ pub struct DefineLoginStatement {
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
-}
-
-impl DefineLoginStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
-	) -> Result<Value, Error> {
-		match self.base {
-			Base::Ns => {
-				// Selected DB?
-				opt.needs(Level::Ns)?;
-				// Allowed to run?
-				opt.check(Level::Kv)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Process the statement
-				let key = crate::key::namespace::lg::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Ns)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Process the statement
-				let key = crate::key::database::lg::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			_ => unreachable!(),
-		}
-	}
 }
 
 impl Display for DefineLoginStatement {
@@ -534,6 +494,188 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct DefineUserStatement {
+	pub name: Ident,
+	pub base: Base,
+	pub hash: String,
+	pub code: String,
+	pub roles: Vec<Ident>,
+}
+
+impl From<(Base, &str, &str)> for DefineUserStatement {
+	fn from((base, user, pass): (Base, &str, &str)) -> Self {
+		DefineUserStatement {
+			base,
+			name: user.into(),
+			hash: Argon2::default()
+				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
+				.unwrap()
+				.to_string(),
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
+			roles: vec!["owner".into()],
+		}
+	}
+}
+
+impl DefineUserStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+
+		match self.base {
+			Base::Root => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::root::us::new(&self.name);
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Ns => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the statement
+				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			// Other levels are not supported
+			_ => Err(Error::InvalidLevel(self.base.to_string())),
+		}
+	}
+}
+
+impl Display for DefineUserStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"DEFINE USER {} ON {} PASSHASH {} ROLES {}",
+			self.name,
+			self.base,
+			quote_str(&self.hash),
+			Fmt::comma_separated(
+				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+			)
+		)
+	}
+}
+
+fn user(i: &str) -> IResult<&str, DefineUserStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("USER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, base) = base(i)?;
+	let (i, opts) = user_opts(i)?;
+
+	let mut res = DefineUserStatement {
+		name,
+		base,
+		roles: vec!["Viewer".into()], // New users get the viewer role by default
+		code: rand::thread_rng()
+			.sample_iter(&Alphanumeric)
+			.take(128)
+			.map(char::from)
+			.collect::<String>(),
+		..Default::default()
+	};
+
+	for opt in opts {
+		match opt {
+			DefineUserOption::Password(v) => {
+				res.hash = Argon2::default()
+					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
+					.unwrap()
+					.to_string()
+			}
+			DefineUserOption::Passhash(v) => {
+				res.hash = v;
+			}
+			DefineUserOption::Roles(v) => {
+				res.roles = v;
+			}
+		}
+	}
+
+	Ok((i, res))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DefineUserOption {
+	Password(String),
+	Passhash(String),
+	Roles(Vec<Ident>),
+}
+
+fn user_opts(i: &str) -> IResult<&str, Vec<DefineUserOption>> {
+	many0(alt((alt((user_pass, user_hash)), user_roles)))(i)
+}
+
+fn user_pass(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PASSWORD")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = strand_raw(i)?;
+	Ok((i, DefineUserOption::Password(v)))
+}
+
+fn user_hash(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PASSHASH")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = strand_raw(i)?;
+	Ok((i, DefineUserOption::Passhash(v)))
+}
+
+fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ROLES")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, roles) = separated_list0(commas, |i| {
+		let (i, v) = ident(i)?;
+		// Verify the role is valid
+		Role::try_from(v.as_str()).map_err(|_| Failure(SqlError::Role(i, v.to_string())))?;
+
+		Ok((i, v))
+	})(i)?;
+
+	Ok((i, DefineUserOption::Roles(roles)))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -550,12 +692,10 @@ impl DefineTokenStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+
 		match &self.base {
 			Base::Ns => {
-				// Selected DB?
-				opt.needs(Level::Ns)?;
-				// Allowed to run?
-				opt.check(Level::Kv)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -566,10 +706,6 @@ impl DefineTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Ns)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -581,10 +717,6 @@ impl DefineTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Sc(sc) => {
-				// Selected DB?
-				opt.needs(Level::Db)?;
-				// Allowed to run?
-				opt.check(Level::Db)?;
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the statement
@@ -596,7 +728,8 @@ impl DefineTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => unreachable!(),
+			// Other levels are not supported
+			_ => Err(Error::InvalidLevel(self.base.to_string())),
 		}
 	}
 }
@@ -665,10 +798,8 @@ impl DefineScopeStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -783,10 +914,8 @@ impl DefineParamStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -847,10 +976,8 @@ impl DefineTableStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1050,10 +1177,8 @@ impl DefineEventStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1134,10 +1259,8 @@ impl DefineFieldStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement
@@ -1294,10 +1417,8 @@ impl DefineIndexStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
 		// Allowed to run?
-		opt.check(Level::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the statement

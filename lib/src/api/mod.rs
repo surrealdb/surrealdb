@@ -13,7 +13,6 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
 use std::fmt::Debug;
@@ -22,10 +21,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local as spawn;
+use std::sync::OnceLock;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -38,15 +34,15 @@ pub trait Connection: conn::Connection {}
 /// The future returned when creating a new SurrealDB instance
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Connect<'r, C: Connection, Response> {
-	router: Option<&'r OnceCell<Arc<Router<C>>>>,
+pub struct Connect<C: Connection, Response> {
+	router: Arc<OnceLock<Router<C>>>,
 	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,
 }
 
-impl<C, R> Connect<'_, C, R>
+impl<C, R> Connect<C, R>
 where
 	C: Connection,
 {
@@ -82,43 +78,39 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Connect<'r, Client, Surreal<Client>>
+impl<Client> IntoFuture for Connect<Client, Surreal<Client>>
 where
 	Client: Connection,
 {
 	type Output = Result<Surreal<Client>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let client = Client::connect(self.address?, self.capacity).await?;
-			client.check_server_version();
+			client.check_server_version().await?;
 			Ok(client)
 		})
 	}
 }
 
-impl<'r, Client> IntoFuture for Connect<'r, Client, ()>
+impl<Client> IntoFuture for Connect<Client, ()>
 where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			match self.router {
-				Some(router) => {
-					let option =
-						Client::connect(self.address?, self.capacity).await?.router.into_inner();
-					match option {
-						Some(client) => {
-							let _res = router.set(client);
-						}
-						None => unreachable!(),
-					}
-				}
-				None => unreachable!(),
+			let arc = Client::connect(self.address?, self.capacity).await?.router;
+			let cell = Arc::into_inner(arc).expect("new connection to have no references");
+			let router = cell.into_inner().expect("router to be set");
+			if self.router.set(router).is_ok() {
+				let client = Surreal {
+					router: self.router,
+				};
+				client.check_server_version().await?;
 			}
 			Ok(())
 		})
@@ -133,35 +125,34 @@ pub(crate) enum ExtraFeatures {
 /// A database client instance for embedded or remote databases
 #[derive(Debug)]
 pub struct Surreal<C: Connection> {
-	router: OnceCell<Arc<Router<C>>>,
+	router: Arc<OnceLock<Router<C>>>,
 }
 
 impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	fn check_server_version(&self) {
-		let conn = self.clone();
-		spawn(async move {
-			let (versions, build_meta) = SUPPORTED_VERSIONS;
-			// invalid version requirements should be caught during development
-			let req = VersionReq::parse(versions).expect("valid supported versions");
-			let build_meta =
-				BuildMetadata::new(build_meta).expect("valid supported build metadata");
-			match conn.version().await {
-				Ok(version) => {
-					let server_build = &version.build;
-					if !req.matches(&version) {
-						warn!("server version `{version}` does not match the range supported by the client `{versions}`");
-					} else if !server_build.is_empty() && server_build < &build_meta {
-						warn!("server build `{server_build}` is older than the minimum supported build `{build_meta}`");
-					}
-				}
-				Err(error) => {
-					trace!("failed to lookup the server version; {error:?}");
-				}
+	async fn check_server_version(&self) -> Result<()> {
+		let (versions, build_meta) = SUPPORTED_VERSIONS;
+		// invalid version requirements should be caught during development
+		let req = VersionReq::parse(versions).expect("valid supported versions");
+		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
+		let version = self.version().await?;
+		let server_build = &version.build;
+		if !req.matches(&version) {
+			return Err(Error::VersionMismatch {
+				server_version: version,
+				supported_versions: versions.to_owned(),
 			}
-		});
+			.into());
+		} else if !server_build.is_empty() && server_build < &build_meta {
+			return Err(Error::BuildMetadataMismatch {
+				server_metadata: server_build.clone(),
+				supported_metadata: build_meta,
+			}
+			.into());
+		}
+		Ok(())
 	}
 }
 
@@ -176,14 +167,22 @@ where
 	}
 }
 
-trait ExtractRouter<C>
+trait OnceLockExt<C>
 where
 	C: Connection,
 {
+	fn with_value(value: Router<C>) -> OnceLock<Router<C>> {
+		let cell = OnceLock::new();
+		match cell.set(value) {
+			Ok(()) => cell,
+			Err(_) => unreachable!("don't have exclusive access to `cell`"),
+		}
+	}
+
 	fn extract(&self) -> Result<&Router<C>>;
 }
 
-impl<C> ExtractRouter<C> for OnceCell<Arc<Router<C>>>
+impl<C> OnceLockExt<C> for OnceLock<Router<C>>
 where
 	C: Connection,
 {

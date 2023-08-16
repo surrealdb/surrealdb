@@ -8,16 +8,16 @@ use crate::api::engine::local::Db;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
 use crate::dbs::Session;
+use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
-use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -25,6 +25,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 impl crate::api::Connection for Db {}
 
@@ -55,7 +56,7 @@ impl Connection for Db {
 			features.insert(ExtraFeatures::Backup);
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features,
 					conn: PhantomData,
 					sender: route_tx,
@@ -89,6 +90,13 @@ pub(crate) fn router(
 ) {
 	tokio::spawn(async move {
 		let url = address.endpoint;
+		let configured_root = match address.auth {
+			Level::Root => Some(Root {
+				username: &address.username,
+				password: &address.password,
+			}),
+			_ => None,
+		};
 
 		let kvs = {
 			let path = match url.scheme() {
@@ -106,8 +114,15 @@ pub(crate) fn router(
 
 			match Datastore::new(&path).await {
 				Ok(kvs) => {
+					// If a root user is specified, setup the initial datastore credentials
+					if let Some(root) = configured_root {
+						if let Err(error) = kvs.setup_initial_creds(root).await {
+							let _ = conn_tx.into_send_async(Err(error.into())).await;
+							return;
+						}
+					}
 					let _ = conn_tx.into_send_async(Ok(())).await;
-					kvs
+					kvs.with_auth_enabled(configured_root.is_some())
 				}
 				Err(error) => {
 					let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -128,25 +143,10 @@ pub(crate) fn router(
 
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
-		let configured_root = match address.auth {
-			Level::Kv => Some(Root {
-				username: &address.username,
-				password: &address.password,
-			}),
-			_ => None,
-		};
-		let mut session = if configured_root.is_some() {
-			// If a root user is specified, lock down the database
-			Session::default()
-		} else {
-			// If no root user is specified, the database should be open
-			Session::for_kv()
-		};
+		let mut session = Session::default();
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &configured_root, &mut session, &mut vars)
-				.await
-			{
+			match super::router(route.request, &kvs, &mut session, &mut vars).await {
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;
 				}

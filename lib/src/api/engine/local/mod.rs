@@ -46,7 +46,6 @@ use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use crate::opt::auth::Root;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Query;
@@ -78,11 +77,12 @@ use tokio::io::AsyncWriteExt;
 /// Instantiating a global instance
 ///
 /// ```
+/// use once_cell::sync::Lazy;
 /// use surrealdb::{Result, Surreal};
 /// use surrealdb::engine::local::Db;
 /// use surrealdb::engine::local::Mem;
 ///
-/// static DB: Surreal<Db> = Surreal::init();
+/// static DB: Lazy<Surreal<Db>> = Lazy::new(Surreal::init);
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
@@ -335,9 +335,6 @@ pub struct TiKv;
 pub struct FDb;
 
 /// An embedded database
-///
-/// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe
-/// on `Db`
 #[derive(Debug, Clone)]
 pub struct Db {
 	pub(crate) method: crate::api::conn::Method,
@@ -347,7 +344,7 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -400,7 +397,6 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Datastore,
-	configured_root: &Option<Root<'_>>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
 ) -> Result<DbResponse> {
@@ -436,8 +432,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response =
-				crate::iam::signin::signin(kvs, configured_root, session, credentials).await?;
+			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Authenticate => {
@@ -445,7 +440,7 @@ async fn router(
 				[Value::Strand(Strand(token))] => mem::take(token),
 				_ => unreachable!(),
 			};
-			crate::iam::verify::token(kvs, session, token).await?;
+			crate::iam::verify::token(kvs, session, &token).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Invalidate => {
@@ -518,75 +513,89 @@ async fn router(
 			// Write to channel.
 			async fn export_with_err(
 				kvs: &Datastore,
+				sess: &Session,
 				ns: String,
 				db: String,
 				chn: channel::Sender<Vec<u8>>,
 			) -> std::result::Result<(), crate::Error> {
-				kvs.export(ns, db, chn).await.map_err(|error| {
-					error!("{error}");
+				let export = kvs.prepare_export(sess, ns, db, chn).await.map_err(|error| {
+					error!("Error preparing export: {error}");
+					crate::Error::Db(error)
+				})?;
+
+				export.await.map_err(|error| {
+					error!("Error processing export: {error}");
 					crate::Error::Db(error)
 				})
 			}
+			match (param.file, param.send) {
+				(None, None) => panic!("Expected file or channel, neither found"),
+				(Some(_), Some(_)) => panic!("Expected file or channel, found both"),
+				(Some(path), None) => {
+					let export = export_with_err(kvs, session, ns, db, tx);
 
-			let export = export_with_err(kvs, ns, db, tx);
+					// Read from channel and write to pipe.
+					let bridge = async move {
+						while let Ok(value) = rx.recv().await {
+							if writer.write_all(&value).await.is_err() {
+								// Broken pipe. Let either side's error be propagated.
+								break;
+							}
+						}
+						Ok(())
+					};
 
-			// Read from channel and write to pipe.
-			let bridge = async move {
-				while let Ok(value) = rx.recv().await {
-					if writer.write_all(&value).await.is_err() {
-						// Broken pipe. Let either side's error be propagated.
-						break;
-					}
-				}
-				Ok(())
-			};
+					// Output to stdout or file.
+					let mut output: Box<dyn AsyncWrite + Unpin + Send> =
+						match path.to_str().unwrap() {
+							"-" => Box::new(io::stdout()),
+							_ => {
+								let file = match OpenOptions::new()
+									.write(true)
+									.create(true)
+									.truncate(true)
+									.open(&path)
+									.await
+								{
+									Ok(path) => path,
+									Err(error) => {
+										return Err(Error::FileOpen {
+											path,
+											error,
+										}
+										.into());
+									}
+								};
+								Box::new(file)
+							}
+						};
 
-			// Output to stdout or file.
-			let path = param.file.expect("file to export into");
-			let mut output: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
-				"-" => Box::new(io::stdout()),
-				_ => {
-					let file = match OpenOptions::new()
-						.write(true)
-						.create(true)
-						.truncate(true)
-						.open(&path)
-						.await
+					// Copy from pipe to output.
+					async fn copy_with_err<'a, R, W>(
+						path: PathBuf,
+						reader: &'a mut R,
+						writer: &'a mut W,
+					) -> std::result::Result<(), crate::Error>
+					where
+						R: tokio::io::AsyncRead + Unpin + ?Sized,
+						W: tokio::io::AsyncWrite + Unpin + ?Sized,
 					{
-						Ok(path) => path,
-						Err(error) => {
-							return Err(Error::FileOpen {
+						io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
+							crate::Error::Api(crate::error::Api::FileRead {
 								path,
 								error,
-							}
-							.into());
-						}
-					};
-					Box::new(file)
+							})
+						})
+					}
+
+					let copy = copy_with_err(path, &mut reader, &mut output);
+
+					tokio::try_join!(export, bridge, copy).map(|_| DbResponse::Other(Value::None))
 				}
-			};
-
-			// Copy from pipe to output.
-			async fn copy_with_err<'a, R, W>(
-				path: PathBuf,
-				reader: &'a mut R,
-				writer: &'a mut W,
-			) -> std::result::Result<(), crate::Error>
-			where
-				R: tokio::io::AsyncRead + Unpin + ?Sized,
-				W: tokio::io::AsyncWrite + Unpin + ?Sized,
-			{
-				io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
-					crate::Error::Api(crate::error::Api::FileRead {
-						path,
-						error,
-					})
-				})
+				(None, Some(chn)) => export_with_err(kvs, session, ns, db, chn)
+					.await
+					.map(|_| DbResponse::Other(Value::None)),
 			}
-
-			let copy = copy_with_err(path, &mut reader, &mut output);
-
-			tokio::try_join!(export, bridge, copy).map(|_| DbResponse::Other(Value::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {

@@ -76,11 +76,12 @@ impl Surreal<Client> {
 	/// # Examples
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::remote::http::Client;
 	/// use surrealdb::engine::remote::http::Http;
 	///
-	/// static DB: Surreal<Client> = Surreal::init();
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -93,7 +94,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -166,7 +167,6 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 }
 
 async fn query(request: RequestBuilder) -> Result<QueryResponse> {
-	info!("{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
@@ -283,15 +283,22 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		}
 		.into());
 	}
-	request
+	let res = request
 		.header(ACCEPT, "application/octet-stream")
 		// ideally we should pass `file` directly into the body
 		// but currently that results in
 		// "HTTP status client error (405 Method Not Allowed) for url"
 		.body(contents)
 		.send()
-		.await?
-		.error_for_status()?;
+		.await?;
+
+	if res.error_for_status_ref().is_err() {
+		let body: serde_json::Value = res.json().await?;
+		let error_msg =
+			format!("\n{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into()));
+
+		return Err(Error::Http(error_msg).into());
+	}
 	Ok(Value::None)
 }
 

@@ -94,6 +94,7 @@ use crate::api::err::Error;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
@@ -122,8 +123,10 @@ use crate::api::opt::Tls;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Level;
+use crate::iam::Level;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use url::Url;
 
 /// A trait for converting inputs to a server address object
@@ -256,6 +259,7 @@ where
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
@@ -265,6 +269,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	)))
@@ -276,7 +281,7 @@ where
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, root) = self;
 		let mut endpoint = IntoEndpoint::into_endpoint(address.into())?;
-		endpoint.auth = Level::Kv;
+		endpoint.auth = Level::Root;
 		endpoint.username = root.username.to_owned();
 		endpoint.password = root.password.to_owned();
 		Ok(endpoint)
@@ -287,6 +292,7 @@ where
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
+	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
@@ -296,6 +302,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	)))
@@ -347,6 +354,7 @@ where
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
+		feature = "kv-speedb",
 		feature = "kv-indxdb",
 	),
 	feature = "native-tls",
@@ -358,6 +366,7 @@ where
 			feature = "kv-mem",
 			feature = "kv-tikv",
 			feature = "kv-rocksdb",
+			feature = "kv-speedb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
 		),
@@ -418,6 +427,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	),
@@ -430,6 +440,7 @@ where
 			feature = "kv-mem",
 			feature = "kv-tikv",
 			feature = "kv-rocksdb",
+			feature = "kv-speedb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
 		),
@@ -529,6 +540,7 @@ where
 		feature = "kv-mem",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
+		feature = "kv-speedb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
 	),
@@ -541,6 +553,7 @@ where
 			feature = "kv-mem",
 			feature = "kv-tikv",
 			feature = "kv-rocksdb",
+			feature = "kv-speedb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
 		),
@@ -572,10 +585,11 @@ impl Surreal<Any> {
 	/// # Examples
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	///
-	/// static DB: Surreal<Any> = Surreal::init();
+	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -585,7 +599,7 @@ impl Surreal<Any> {
 	/// ```
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -632,12 +646,86 @@ impl Surreal<Any> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>> {
+pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 	Connect {
-		router: None,
+		router: Arc::new(OnceLock::new()),
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
 		response_type: PhantomData,
+	}
+}
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use super::*;
+	use crate::opt::auth::Root;
+	use crate::sql::{test::Parse, value::Value};
+
+	#[tokio::test]
+	async fn local_engine_without_auth() {
+		// Instantiate an in-memory instance without root credentials
+		let db = connect("memory").await.unwrap();
+		db.use_ns("N").use_db("D").await.unwrap();
+		// The client has access to everything
+		assert!(
+			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
+			"client should have access to ROOT"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
+			"client should have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
+			"client should have access to DB"
+		);
+
+		// There are no users in the datastore
+		let mut res = db.query("INFO FOR ROOT").await.unwrap();
+		let users: Value = res.take("users").unwrap();
+
+		assert_eq!(users, Value::parse("[{}]"), "there should be no users in the system");
+	}
+
+	#[tokio::test]
+	async fn local_engine_with_auth() {
+		// Instantiate an in-memory instance with root credentials
+		let creds = Root {
+			username: "root",
+			password: "root",
+		};
+		let db = connect(("memory", creds)).await.unwrap();
+		db.use_ns("N").use_db("D").await.unwrap();
+
+		// The client needs to sign in before it can access anything
+		assert!(
+			db.query("INFO FOR ROOT").await.unwrap().check().is_err(),
+			"client should not have access to KV"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_err(),
+			"client should not have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_err(),
+			"client should not have access to DB"
+		);
+
+		// It can sign in
+		assert!(db.signin(creds).await.is_ok(), "client should be able to sign in");
+
+		// After the sign in, the client has access to everything
+		assert!(
+			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
+			"client should have access to KV"
+		);
+		assert!(
+			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
+			"client should have access to NS"
+		);
+		assert!(
+			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
+			"client should have access to DB"
+		);
 	}
 }

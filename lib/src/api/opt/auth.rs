@@ -27,7 +27,7 @@ pub struct Root<'a> {
 	pub password: &'a str,
 }
 
-impl Credentials<Signin, ()> for Root<'_> {}
+impl Credentials<Signin, Jwt> for Root<'_> {}
 
 /// Credentials for the namespace user
 #[derive(Debug, Clone, Copy, Serialize)]
