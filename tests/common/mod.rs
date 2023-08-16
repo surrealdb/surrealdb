@@ -2,6 +2,7 @@
 
 pub mod error;
 
+use crate::common::error::TestError;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -363,9 +364,17 @@ pub async fn ws_query(
 		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
 			Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
 		}
-		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => {
-			Ok(obj.get("result").unwrap().as_array().unwrap().to_owned())
-		}
+		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
+			.get("result")
+			.ok_or(TestError::AssertionError {
+				message: "expected a result from the received object".to_string(),
+			})?
+			.as_array()
+			.ok_or(TestError::AssertionError {
+				message: "expected the result object to be an array for the received ws message"
+					.to_string(),
+			})?
+			.to_owned()),
 		_ => {
 			error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
 			Err(format!("unexpected response: {:?}", msg).into())

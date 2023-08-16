@@ -96,7 +96,7 @@ impl Datastore {
 		// Return the transaction
 		Ok(Transaction {
 			done: false,
-			check: Check::Warn,
+			check: Check::Panic,
 			write,
 			inner: Arc::new(Mutex::new(Some(inner))),
 			ro,

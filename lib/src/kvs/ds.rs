@@ -594,6 +594,14 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#[cfg(debug_assertions)]
+		if lock {
+			warn!("There are issues with pessimistic locking in TiKV");
+		}
+		self.transaction_inner(write, lock).await
+	}
+
+	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
