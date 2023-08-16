@@ -1,6 +1,5 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::error;
 use crate::iam::token::Claims;
 use crate::iam::Auth;
 use crate::iam::{Actor, Level, Role};
@@ -454,21 +453,6 @@ async fn verify_ns_creds(
 
 	let user_res = match tx.get_ns_user(ns, user).await {
 		Ok(u) => Ok(u),
-		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
-		// If the USER resource is not found in the namespace, try to find the LOGIN resource
-		Err(error::Db::UserNsNotFound {
-			ns: _,
-			value: _,
-		}) => match tx.get_nl(ns, user).await {
-			Ok(u) => Ok(DefineUserStatement {
-				base: u.base,
-				name: u.name,
-				hash: u.hash,
-				code: u.code,
-				roles: vec![Role::Editor.into()],
-			}),
-			Err(e) => Err(e),
-		},
 		Err(e) => Err(e),
 	}?;
 
@@ -488,22 +472,6 @@ async fn verify_db_creds(
 
 	let user_res = match tx.get_db_user(ns, db, user).await {
 		Ok(u) => Ok(u),
-		// TODO(sgirones): Remove this fallback once we remove LOGIN from the system completely. We are backwards compatible with LOGIN for now.
-		// If the USER resource is not found in the database, try to find the LOGIN resource
-		Err(error::Db::UserDbNotFound {
-			ns: _,
-			db: _,
-			value: _,
-		}) => match tx.get_dl(ns, db, user).await {
-			Ok(u) => Ok(DefineUserStatement {
-				base: u.base,
-				name: u.name,
-				hash: u.hash,
-				code: u.code,
-				roles: vec![Role::Editor.into()],
-			}),
-			Err(e) => Err(e),
-		},
 		Err(e) => Err(e),
 	}?;
 

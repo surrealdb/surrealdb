@@ -242,7 +242,6 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			databases: { test: 'DEFINE DATABASE test' },
-			logins: {},
 			tokens: {},
 			users: {},
 		}",
@@ -253,7 +252,6 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			analyzers: {},
-			logins: {},
 			tokens: {},
 			functions: {},
 			params: {},
