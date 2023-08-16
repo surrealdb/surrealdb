@@ -147,7 +147,16 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 }
 
 pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments::default()).await
+	let res = start_server(StartServerArguments::default()).await;
+	let debug_override = true;
+	if debug_override {
+		if let Ok(inner) = res {
+			return Ok(("localhost:8000".to_string(), inner.1));
+		}
+		res
+	} else {
+		res
+	}
 }
 
 pub async fn start_server(

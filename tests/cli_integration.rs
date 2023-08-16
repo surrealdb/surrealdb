@@ -45,6 +45,7 @@ async fn all_commands() {
 	})
 	.await
 	.unwrap();
+	println!("addr: {}", addr);
 	let creds = ""; // Anonymous user
 
 	info!("* Create a record");
@@ -212,6 +213,7 @@ async fn with_root_auth() {
 	})
 	.await
 	.unwrap();
+	println!("addr: {}", addr);
 	let creds = format!("--user {USER} --pass {PASS}");
 	let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
