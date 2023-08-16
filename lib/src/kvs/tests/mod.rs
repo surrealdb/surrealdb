@@ -95,7 +95,7 @@ mod tikv {
 		let ds = Datastore::new("tikv:127.0.0.1:2379").await.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		assert!(tx.delp(vec![], u32::MAX).await.is_ok());
+		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		ds
@@ -129,7 +129,7 @@ mod fdb {
 		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster").await.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		assert!(tx.delp(vec![], u32::MAX).await.is_ok());
+		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		ds
