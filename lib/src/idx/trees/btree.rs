@@ -909,8 +909,12 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
+		let statistics = t
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
+			.await
+			.unwrap();
 		tx.commit().await.unwrap();
-		t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug)).await.unwrap()
+		statistics
 	}
 
 	#[test(tokio::test)]
