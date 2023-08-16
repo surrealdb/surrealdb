@@ -44,7 +44,7 @@ pub enum Error {
 	#[error("{0}")]
 	Url(#[from] url::UrlParseError),
 	#[error("{0}")]
-	Client(#[from] BackendError),
+	Backend(#[from] BackendError),
 	#[error("Failed to parse bytes to string: {0}")]
 	Utf8(#[from] Utf8Error),
 	#[error(

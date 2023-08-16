@@ -1,14 +1,16 @@
 //! Request class implementation
 
+use bytes::Bytes;
 use js::{
 	class::Trace,
-	prelude::{Coerced, This},
+	prelude::{Coerced, Opt, This},
 	Class, Ctx, Exception, FromJs, Object, Result, Value,
 };
-use lib_http::Method;
+use lib_http::{header, HeaderName, Method};
+use url::Url;
 
 use crate::fnc::script::fetch::{
-	body::{Body, BodyAndKind},
+	body::{Body, BodyAndKind, BodyKind},
 	RequestError,
 };
 
@@ -386,7 +388,24 @@ use reqwest::{header::HeaderName, Url};
 pub struct Request<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) url: Url,
-	pub(crate) init: RequestInit<'js>,
+	#[qjs(skip_trace)]
+	pub method: Method,
+	pub headers: Class<'js, Headers>,
+	#[qjs(skip_trace)]
+	pub body: Body,
+	pub referrer: String,
+	#[qjs(skip_trace)]
+	pub referrer_policy: ReferrerPolicy,
+	#[qjs(skip_trace)]
+	pub request_mode: RequestMode,
+	#[qjs(skip_trace)]
+	pub request_credentials: RequestCredentials,
+	#[qjs(skip_trace)]
+	pub request_cache: RequestCache,
+	#[qjs(skip_trace)]
+	pub request_redirect: RequestRedirect,
+	pub integrity: String,
+	pub keep_alive: bool,
 }
 
 #[js::methods]
@@ -397,46 +416,73 @@ impl<'js> Request<'js> {
 
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'js>, input: Value<'js>, init: Opt<RequestInit<'js>>) -> Result<Self> {
-		if let Some(url) = input.as_string() {
-			// url string
-			let url_str = url.to_string()?;
-			let url = Url::parse(&url_str)
-				.map_err(|e| Exception::throw_type(&ctx, &format!("failed to parse url: {e}")))?;
+		if let Some(request) = input.as_object().and_then(Object::as_class::<Self>) {
+			// existing request object, just return it
+			return request.try_borrow_mut()?.clone_js(ctx.clone());
+		}
 
-			if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
-				// url cannot contain non empty username and passwords
-				return Err(Exception::throw_type(&ctx, "Url contained credentials."));
-			}
-			let init = init.into_inner().map_or_else(|| RequestInit::default(ctx.clone()), Ok)?;
+		let Some(url) = input.as_string() else {
+			return Err(Exception::throw_type(
+				&ctx,
+				"request `init` paramater must either be a request object or a string",
+			));
+		};
+		// url string
+		let url_str = url.to_string()?;
+		let url = Url::parse(&url_str)
+			.map_err(|e| Exception::throw_type(&ctx, &format!("failed to parse url: {e}")))?;
+		if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
+			// url cannot contain non empty username and passwords
+			return Err(Exception::throw_type(&ctx, "Url contained credentials."));
+		}
+		let init = init.into_inner().map_or_else(|| RequestInit::default(ctx.clone()), Ok)?;
+		let body = if let Some(body) = init.body {
 			// HEAD and GET methods can't have a body
-			if init.body.is_some() && init.method == Method::GET || init.method == Method::HEAD {
+			if init.method == Method::GET || init.method == Method::HEAD {
 				return Err(Exception::throw_type(
 					&ctx,
 					&format!("Request with method `{}` cannot have a body", init.method),
 				));
 			}
 
-			Ok(Self {
-				url,
-				init,
-			})
-		} else if let Some(request) = input.into_object().and_then(Class::<Self>::from_object) {
-			// existing request object, just return it
-			request.try_borrow()?.clone_js(ctx.clone())
+			let mut headers = init.headers.borrow_mut();
+			body.apply_to_headers(&mut headers.inner)
 		} else {
-			Err(Exception::throw_type(
-				&ctx,
-				"request `init` paramater must either be a request object or a string",
-			))
-		}
+			Body::default()
+		};
+
+		Ok(Self {
+			url,
+			method: init.method,
+			headers: init.headers,
+			body,
+			referrer: init.referrer,
+			referrer_policy: init.referrer_policy,
+			request_mode: init.request_mode,
+			request_credentials: init.request_credentials,
+			request_cache: init.request_cache,
+			request_redirect: init.request_redirect,
+			integrity: init.integrity,
+			keep_alive: init.keep_alive,
+		})
 	}
 
 	/// Clone the response, teeing any possible underlying streams.
 	#[qjs(rename = "clone")]
-	pub fn clone_js(&self, ctx: Ctx<'js>) -> Result<Self> {
+	pub fn clone_js(&mut self, ctx: Ctx<'js>) -> Result<Self> {
 		Ok(Self {
 			url: self.url.clone(),
-			init: self.init.clone_js(ctx)?,
+			headers: self.headers.clone(),
+			method: self.method.clone(),
+			body: self.body.clone_js(&ctx),
+			referrer: self.referrer.clone(),
+			referrer_policy: self.referrer_policy,
+			request_mode: self.request_mode,
+			request_credentials: self.request_credentials,
+			request_cache: self.request_cache,
+			request_redirect: self.request_redirect,
+			integrity: self.integrity.clone(),
+			keep_alive: self.keep_alive,
 		})
 	}
 
@@ -445,12 +491,12 @@ impl<'js> Request<'js> {
 	// ------------------------------
 	#[qjs(get, rename = "body_used")]
 	pub fn body_used(&self) -> bool {
-		self.init.body.body.is_used()
+		self.body.is_used()
 	}
 
 	#[qjs(get)]
 	pub fn method(&self) -> String {
-		self.init.method.to_string()
+		self.method.to_string()
 	}
 
 	#[qjs(get)]
@@ -460,12 +506,12 @@ impl<'js> Request<'js> {
 
 	#[qjs(get)]
 	pub fn headers(&self) -> Class<'js, Headers> {
-		self.init.headers.clone()
+		self.headers.clone()
 	}
 
 	#[qjs(get)]
 	pub fn referrer(&self) -> String {
-		self.init.referrer.clone()
+		self.referrer.clone()
 	}
 	// TODO
 
@@ -484,8 +530,8 @@ impl<'js> Request<'js> {
 	async fn take_buffer(this: This<Class<'js, Self>>, ctx: &Ctx<'js>) -> Result<Bytes> {
 		// To ensure a borrow is not kept across awaits we manually borrow the inner class value.
 		let body = {
-			let this = this.0.try_borrow_mut()?;
-			std::mem::replace(&mut this.body.body, Body::used())
+			let mut this = this.0.try_borrow_mut()?;
+			std::mem::replace(&mut this.body, Body::used())
 		};
 		match body.to_buffer().await {
 			Ok(Some(x)) => Ok(x),
@@ -496,12 +542,11 @@ impl<'js> Request<'js> {
 
 	// Returns a promise with the request body as a Blob
 	pub async fn blob(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<Blob> {
-		let headers = this.try_borrow()?.init.headers.clone();
+		let headers = this.try_borrow()?.headers.clone();
 		let mime = {
 			let headers = headers.borrow();
 			let headers = &headers.inner;
-			let key = HeaderName::from_static("content-type");
-			let types = headers.get_all(key);
+			let types = headers.get_all(header::CONTENT_TYPE);
 			// TODO: This is not according to spec.
 			types
 				.iter()

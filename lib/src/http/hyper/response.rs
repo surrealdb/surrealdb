@@ -3,7 +3,7 @@ use crate::http::SerializeError;
 use super::super::Error;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use hyper::body;
+use hyper::body::{self, HttpBody};
 use lib_http::{HeaderMap, HeaderValue, StatusCode, Version};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::str;
@@ -49,12 +49,12 @@ impl Response {
 	}
 
 	pub async fn bytes(self) -> Result<Bytes, Error> {
-		body::to_bytes(self.inner.into_body()).await.map_err(Error::Client)
+		body::to_bytes(self.inner.into_body()).await.map_err(Error::Backend)
 	}
 
 	pub fn bytes_stream(self) -> impl Stream<Item = Result<Bytes, Error>> {
 		let body = self.inner.into_body();
-		body.map_err(Error::Client)
+		TryStreamExt::map_err(body, Error::Backend)
 	}
 
 	pub async fn body(self) -> Result<Vec<u8>, Error> {

@@ -40,11 +40,11 @@ pub async fn fetch<'js>(
 
 	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
 	// unwrap should never panic.
-	let headers = js_req.init.headers;
+	let headers = js_req.headers;
 	let headers = headers.borrow();
 	let headers = headers.inner.clone();
 
-	let redirect = js_req.init.request_redirect;
+	let redirect = js_req.request_redirect;
 
 	// set the policy for redirecting requests.
 	let policy = RedirectPolicy::custom(move |attempt| {
@@ -67,35 +67,30 @@ pub async fn fetch<'js>(
 	})?;
 
 	// method and url already parsed object so this should never panic.
-	let mut req =
-		crate::http::Request::new(js_req.init.method, url.clone(), client.clone()).unwrap();
-
-	// Set the body for the request.
-	if let Some(body) = js_req.init.body.map(|x| x.body.into_backend_body()) {
-		req = req.body(body);
-	}
+	let req = crate::http::Request::new(js_req.method, url.clone(), client.clone()).unwrap();
 
 	// make the request
 	let response = req
 		.headers(headers)
+		.body(js_req.body.into_backend_body())
 		.send()
 		.await
 		.map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
 
+	let status = response.status().as_u16();
+	let status_text = response.status().canonical_reason().unwrap_or_default().to_owned();
+
 	// Extract the headers
 	let headers = Headers::from_map(response.headers().clone());
 	let headers = Class::instance(ctx, headers)?;
-	let init = ResponseInit {
-		headers,
-		status: response.status().as_u16(),
-		status_text: response.status().canonical_reason().unwrap_or("").to_owned(),
-	};
 
 	// Extract the body
 	let body = Body::stream(response.bytes_stream());
 	let response = Response {
 		body,
-		init,
+		headers,
+		status,
+		status_text,
 		url: Some(url),
 		r#type: ResponseType::Default,
 		was_redirected: false,

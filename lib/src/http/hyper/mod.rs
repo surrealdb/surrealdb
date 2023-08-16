@@ -1,10 +1,9 @@
-use crate::sql::Bytes;
-
 use super::{ClientBuilder, Error, Request};
+use bytes::Bytes;
 use futures::Stream;
 use hyper::client::HttpConnector;
 use lib_http::{HeaderMap, Uri};
-use std::error::Error as StdError;
+use std::{error::Error as StdError, pin::Pin, sync::Arc};
 
 mod connect;
 use connect::Connector;
@@ -12,8 +11,8 @@ mod body;
 mod response;
 pub use response::Response;
 
-pub type BoxError = Box<dyn StdError + Send + Sync>;
-pub type BoxStream = Box<dyn Stream<Item = Result<Bytes, BoxError>>>;
+pub type BoxError = Arc<dyn StdError + Send + Sync>;
+pub type BoxStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + Sync>>;
 
 pub type BackendError = hyper::Error;
 pub type BackendBody = body::Body;
@@ -49,7 +48,7 @@ impl Backend {
 		// These unwraps should not ever panic since request already ensures that everything should
 		// be valid for the request.
 		*request_builder.headers_mut().unwrap() = request.headers;
-		let req = request_builder.body(request.body.into_client()).unwrap();
+		let req = request_builder.body(request.body).unwrap();
 
 		let response = if let Some(timeout) = request.timeout {
 			tokio::time::timeout(timeout, self.client.request(req)).await??

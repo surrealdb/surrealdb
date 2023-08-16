@@ -3,9 +3,11 @@ use crate::http::Body as BackendBody;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use js::{Class, Ctx, Error, FromJs, Result, Type, Value};
+use lib_http::{header, HeaderMap};
 use mime::Mime;
 use std::error::Error as StdError;
 use std::result::Result as StdResult;
+use std::sync::Arc;
 
 use super::{classes::Blob, util};
 
@@ -27,6 +29,39 @@ pub struct BodyAndKind {
 	pub kind: BodyKind,
 }
 
+impl BodyAndKind {
+	/// Applies the content type to the headers and returns the body.
+	pub fn apply_to_headers(self, headers: &mut HeaderMap) -> Body {
+		match self.kind {
+			BodyKind::String => {
+				headers.entry(header::CONTENT_TYPE).or_insert_with(|| {
+					let mime = mime::TEXT_PLAIN_UTF_8.to_string();
+					// TEXT_PLAIN should be a valid header value.
+					mime.parse().unwrap()
+				});
+			}
+			BodyKind::Bytes => {}
+			BodyKind::Blob(mime) => {
+				// Mime's should always a valid header value.
+				headers
+					.entry(header::CONTENT_TYPE)
+					.or_insert_with(|| mime.to_string().parse().unwrap());
+			}
+			BodyKind::FormData => todo!(),
+		}
+		self.body
+	}
+}
+
+impl Default for BodyAndKind {
+	fn default() -> Self {
+		Self {
+			body: Body::empty(),
+			kind: BodyKind::Bytes,
+		}
+	}
+}
+
 impl Default for Body {
 	fn default() -> Self {
 		Body::empty()
@@ -36,12 +71,12 @@ impl Default for Body {
 impl Body {
 	/// Create a new used body.
 	pub fn used() -> Self {
-		Body(Body::used())
+		Body(BackendBody::used())
 	}
 
 	/// Create a new used body.
 	pub fn empty() -> Self {
-		Body(Body::empty())
+		Body(BackendBody::empty())
 	}
 
 	/// Returns wther the body is alread used.
@@ -54,7 +89,7 @@ impl Body {
 	where
 		S: Stream<Item = StdResult<O, E>> + Send + Sync + 'static,
 		Bytes: From<O>,
-		Box<dyn StdError + Send + Sync>: From<E>,
+		E: StdError + Send + Sync + 'static,
 	{
 		Body(BackendBody::wrap_stream(stream))
 	}
@@ -94,7 +129,7 @@ impl<'js> FromJs<'js> for BodyAndKind {
 		let object = match value.type_of() {
 			Type::String => {
 				let string = value.as_string().unwrap().to_string()?;
-				let body = Body::buffer(string);
+				let body = Body::from(string);
 				return Ok(BodyAndKind {
 					body,
 					kind: BodyKind::String,
@@ -115,13 +150,17 @@ impl<'js> FromJs<'js> for BodyAndKind {
 			return Ok(BodyAndKind {
 				body,
 				// for now
-				kind: BodyKind::Blob(mime::STAR),
+				kind: BodyKind::Blob(mime::STAR_STAR),
 			});
 		}
 
 		if let Some(bytes) = util::buffer_source_to_bytes(&object)? {
 			let bytes = Bytes::copy_from_slice(bytes);
-			return Ok(Body::from(bytes));
+			let body = Body::from(bytes);
+			return Ok(BodyAndKind {
+				body,
+				kind: BodyKind::Bytes,
+			});
 		}
 
 		Err(Error::FromJs {
