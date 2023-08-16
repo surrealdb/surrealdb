@@ -757,6 +757,7 @@ mod tests {
 				total_size: 1691,
 			}
 		);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -782,6 +783,7 @@ mod tests {
 				total_size: 1656,
 			}
 		);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -805,6 +807,7 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 100);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -828,6 +831,7 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(s.keys_count, 100);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -853,6 +857,7 @@ mod tests {
 				total_size: 57486,
 			}
 		);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -878,6 +883,7 @@ mod tests {
 				total_size: 75206,
 			}
 		);
+		tx.commit().await.unwrap();
 	}
 
 	const REAL_WORLD_TERMS: [&str; 30] = [
@@ -903,7 +909,12 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug)).await.unwrap()
+		let statistics = t
+			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+		statistics
 	}
 
 	#[test(tokio::test)]
@@ -1076,6 +1087,7 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(nodes_count, 10);
+		tx.commit().await.unwrap();
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
@@ -1169,6 +1181,7 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(nodes_count, 7);
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -1207,6 +1220,7 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			print_tree(&mut tx, &mut t).await;
+			tx.commit().await.unwrap();
 		}
 
 		for (key, _) in CLRS_EXAMPLE {
@@ -1235,6 +1249,7 @@ mod tests {
 						Some(*payload)
 					)
 				}
+				tx.commit().await.unwrap();
 			}
 		}
 
@@ -1248,6 +1263,7 @@ mod tests {
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
 		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]
