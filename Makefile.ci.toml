@@ -163,7 +163,11 @@ script = """
 
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
-script = "kill $(cat /tmp/surreal.pid) || true"
+script = """
+        kill $(cat /tmp/surreal.pid) || true
+        sleep 5
+        kill -9 $(cat /tmp/surreal.pid) || true
+"""
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
