@@ -130,8 +130,9 @@ impl Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
-		if self.inner.commit().await.is_err() {
+		if let Err(err) = self.inner.commit().await {
 			self.inner.rollback().await?;
+			return Err(err.into());
 		}
 		// Continue
 		Ok(())
