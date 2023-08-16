@@ -4,7 +4,7 @@ use uuid::Uuid;
 #[serial]
 async fn scan_node_lq() {
 	let test = init().await.unwrap();
-	let mut tx = test.db.transaction(true, true).await.unwrap();
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let node_id = Uuid::from_bytes([
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
 		0x0F,
@@ -27,7 +27,7 @@ async fn scan_node_lq() {
 	);
 	let _ = tx.putc(key, "value", None).await.unwrap();
 	tx.commit().await.unwrap();
-	let mut tx = test.db.transaction(true, true).await.unwrap();
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	let res = tx.scan_lq(&node_id, 100).await.unwrap();
 	assert_eq!(res.len(), 1);

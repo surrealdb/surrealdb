@@ -75,7 +75,7 @@ impl Datastore {
 			TransactionOptions::new_optimistic()
 		};
 		// Set the behaviour when dropping an unfinished transaction
-		opt = opt.drop_check(CheckLevel::Warn);
+		opt = opt.drop_check(CheckLevel::Panic);
 		// Set this transaction as read only if possible
 		if !write {
 			opt = opt.read_only();
@@ -131,7 +131,9 @@ impl Transaction {
 		self.done = true;
 		// Commit this transaction
 		if let Err(err) = self.inner.commit().await {
-			self.inner.rollback().await?;
+			if let Err(inner_err) = self.inner.rollback().await {
+				error!("Transaction commit failed {} and rollback failed: {}", err, inner_err);
+			}
 			return Err(err.into());
 		}
 		// Continue
