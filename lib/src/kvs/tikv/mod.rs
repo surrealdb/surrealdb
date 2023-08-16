@@ -84,7 +84,7 @@ impl Datastore {
 		match self.db.begin_with_options(opt).await {
 			Ok(inner) => Ok(Transaction {
 				done: false,
-				check: Check::Warn,
+				check: Check::Panic,
 				write,
 				inner,
 			}),
