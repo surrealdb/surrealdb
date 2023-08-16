@@ -629,6 +629,7 @@ mod test {
 					});
 
 					let req = new Request("http://a",{ method: "PUT", body: "some text" });
+					assert.seq(req.headers.get("content-type"),"text/plain; charset=utf-8");
 					assert.seq(await req.text(),"some text");
 
 					req = new Request("http://a",{ method: "PUT", body: JSON.stringify({ a: 1, b: [2], c: { d: 3} })});
