@@ -274,6 +274,12 @@ impl<'js> Response<'js> {
 			ResponseInit::default(ctx)?
 		};
 
+		headers.try_borrow_mut()?.inner.entry(header::CONTENT_TYPE).or_insert_with(|| {
+			let mime = mime::APPLICATION_JSON;
+			// Should always be a correct header value;
+			HeaderValue::try_from(mime.to_string()).unwrap()
+		});
+
 		Ok(Response {
 			url: None,
 			body: Body::from(json),
@@ -362,6 +368,7 @@ mod test {
 					assert.seq(resp.ok,true);
 					assert.seq(resp.statusText,'');
 					assert.seq(resp.headers.get("SomeHeader"),"Some-Value");
+					assert.seq(resp.headers.get("content-type"),"application/json");
 					let obj = await resp.json();
 					assert.seq(typeof obj, "object");
 					assert.seq(obj.a, 1);
@@ -396,6 +403,7 @@ mod test {
 
 					resp = new Response("some text");
 					let resp_2 = resp.clone();
+					assert.seq(resp.headers.get("content-type"),"text/plain; charset=utf-8");
 					assert.seq(await resp.text(),"some text");
 					assert.seq(await resp_2.text(),"some text");
 
