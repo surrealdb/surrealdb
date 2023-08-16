@@ -1,4 +1,4 @@
-use crate::idg::seq::Seq;
+use crate::idg::u64::U64;
 use crate::kvs::kv::Key;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -38,7 +38,7 @@ pub enum Entry {
 	Nts(Arc<[DefineTokenStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
-	Seq(Seq),
+	Seq(U64),
 	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
 }

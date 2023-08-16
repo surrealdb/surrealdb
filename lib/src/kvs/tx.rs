@@ -6,7 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
-use crate::idg::seq::Seq;
+use crate::idg::u64::U64;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -2401,7 +2401,7 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) async fn get_seq(&mut self, key: Key) -> Result<Seq, Error> {
+	pub(crate) async fn get_seq(&mut self, key: Key) -> Result<U64, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
 				v
@@ -2411,9 +2411,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				Seq::new(key.clone(), Some(val)).await?
+				U64::new(key.clone(), Some(val)).await?
 			} else {
-				Seq::new(key.clone(), None).await?
+				U64::new(key.clone(), None).await?
 			}
 		};
 
@@ -2432,9 +2432,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				Seq::new(key.clone(), Some(val)).await?
+				U64::new(key.clone(), Some(val)).await?
 			} else {
-				Seq::new(key.clone(), None).await?
+				U64::new(key.clone(), None).await?
 			}
 		};
 
@@ -2503,9 +2503,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				Seq::new(key.clone(), Some(val)).await?
+				U64::new(key.clone(), Some(val)).await?
 			} else {
-				Seq::new(key.clone(), None).await?
+				U64::new(key.clone(), None).await?
 			}
 		};
 
