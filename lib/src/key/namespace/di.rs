@@ -39,7 +39,7 @@ mod tests {
 			123,
 		);
 		let enc = Di::encode(&val).unwrap();
-		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);
+		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);
 
 		let dec = Di::decode(&enc).unwrap();
 		assert_eq!(val, dec);
