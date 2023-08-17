@@ -422,7 +422,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 			action: Action::Delete,
 			result: Value::Thing(Thing {
 				tb: "person".to_string(),
-				id: Id::String("test".to_string()),
+				id: Id::String("test_true".to_string()),
 			}),
 		}
 	);

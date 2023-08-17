@@ -16,7 +16,7 @@ impl<'a> Document<'a> {
 		// Check if record exists
 		self.empty(ctx, opt, txn, stm).await?;
 		// Check where clause
-		self.check(ctx, opt, txn, stm).await?;
+		self.check(ctx, opt, txn, stm, false).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
 		// Yield document

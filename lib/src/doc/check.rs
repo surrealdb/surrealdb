@@ -11,11 +11,16 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		previous_doc: bool,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+			let doc = match previous_doc {
+				true => &self.initial,
+				false => &self.current,
+			};
+			if !cond.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}
