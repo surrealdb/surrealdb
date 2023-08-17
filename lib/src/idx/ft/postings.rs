@@ -142,5 +142,6 @@ mod tests {
 
 		// The underlying b-tree should be empty now
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
+		tx.commit().await.unwrap();
 	}
 }

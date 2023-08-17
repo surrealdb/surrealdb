@@ -134,5 +134,6 @@ mod tests {
 				.unwrap();
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), None);
+		tx.commit().await.unwrap()
 	}
 }
