@@ -8,6 +8,7 @@ use crate::sql::common::{closechevron, openchevron};
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -15,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Future")]
+#[revisioned(revision = 1)]
 pub struct Future(pub Block);
 
 impl From<Value> for Future {

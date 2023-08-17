@@ -64,6 +64,7 @@ where
 		// Search for it
 		black_box(t.search(&mut tx, &mut s, &key).await.unwrap());
 	}
+	tx.commit().await.unwrap();
 }
 
 criterion_group!(benches, bench_index_btree);

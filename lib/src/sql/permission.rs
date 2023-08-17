@@ -10,12 +10,14 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::{multi::separated_list0, sequence::tuple};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -181,6 +183,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Permission {
 	None,
 	Full,

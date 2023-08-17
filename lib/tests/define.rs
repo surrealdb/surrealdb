@@ -1127,7 +1127,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
 
 	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
@@ -1183,7 +1183,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 	let sql = "
 		USE NS ns;
 		DEFINE USER test ON NS PASSWORD 'test';
-		
+
 		INFO FOR USER test;
 		INFO FOR USER test ON NS;
 		INFO FOR USER test ON NAMESPACE;
@@ -1240,7 +1240,7 @@ async fn define_statement_user_db() -> Result<(), Error> {
 		USE NS ns;
 		USE DB db;
 		DEFINE USER test ON DB PASSWORD 'test';
-		
+
 		INFO FOR USER test;
 		INFO FOR USER test ON DB;
 		INFO FOR USER test ON DATABASE;

@@ -11,6 +11,7 @@ use crate::net::{self, client_ip::ClientIp};
 use crate::node;
 use clap::Args;
 use ipnet::IpNet;
+use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -123,6 +124,9 @@ pub async fn init(
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_filter(log).init();
+	// Start metrics subsystem
+	crate::telemetry::metrics::init(&TelemetryContext::current())
+		.expect("failed to initialize metrics");
 
 	// Check if a banner should be outputted
 	if !no_banner {
@@ -144,11 +148,11 @@ pub async fn init(
 	env::init().await?;
 	// Start the kvs server
 	dbs::init(dbs).await?;
-	// Start the web server
-	net::init().await?;
 	// Start the node agent
 	#[cfg(feature = "has-storage")]
 	node::init().await?;
+	// Start the web server
+	net::init().await?;
 	// All ok
 	Ok(())
 }

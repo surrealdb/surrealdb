@@ -1,9 +1,11 @@
 #![cfg(feature = "kv-indxdb")]
 
 use crate::err::Error;
+use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -11,17 +13,49 @@ pub struct Datastore {
 }
 
 pub struct Transaction {
-	// Is the transaction complete?
-	ok: bool,
-	// Is the transaction read+write?
-	rw: bool,
-	// The distributed datastore transaction
-	tx: indxdb::Tx,
+	/// Is the transaction complete?
+	done: bool,
+	/// Is the transaction writeable?
+	write: bool,
+	/// Should we check unhandled transactions?
+	check: Check,
+	/// The underlying datastore transaction
+	inner: indxdb::Tx,
+}
+
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if !self.done && self.write {
+			// Check if already panicking
+			if std::thread::panicking() {
+				return;
+			}
+			// Handle the behaviour
+			match self.check {
+				Check::None => {
+					trace!("A transaction was dropped without being committed or cancelled");
+				}
+				Check::Warn => {
+					warn!("A transaction was dropped without being committed or cancelled");
+				}
+				Check::Panic => {
+					#[cfg(debug_assertions)]
+					{
+						let backtrace = Backtrace::force_capture();
+						if let BacktraceStatus::Captured = backtrace.status() {
+							println!("{}", backtrace);
+						}
+					}
+					panic!("A transaction was dropped without being committed or cancelled");
+				}
+			}
+		}
+	}
 }
 
 impl Datastore {
 	/// Open a new database
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
+	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		match indxdb::db::new(path).await {
 			Ok(db) => Ok(Datastore {
 				db,
@@ -30,12 +64,13 @@ impl Datastore {
 		}
 	}
 	/// Start a new transaction
-	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		match self.db.begin(write).await {
-			Ok(tx) => Ok(Transaction {
-				ok: false,
-				rw: write,
-				tx,
+			Ok(inner) => Ok(Transaction {
+				done: false,
+				check: Check::Panic,
+				write,
+				inner,
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -43,65 +78,69 @@ impl Datastore {
 }
 
 impl Transaction {
+	/// Behaviour if unclosed
+	pub(crate) fn check_level(&mut self, check: Check) {
+		self.check = check;
+	}
 	/// Check if closed
-	pub fn closed(&self) -> bool {
-		self.ok
+	pub(crate) fn closed(&self) -> bool {
+		self.done
 	}
 	/// Cancel a transaction
-	pub async fn cancel(&mut self) -> Result<(), Error> {
+	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Mark this transaction as done
-		self.ok = true;
+		self.done = true;
 		// Cancel this transaction
-		self.tx.cancel().await?;
+		self.inner.cancel().await?;
 		// Continue
 		Ok(())
 	}
 	/// Commit a transaction
-	pub async fn commit(&mut self) -> Result<(), Error> {
+	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Mark this transaction as done
-		self.ok = true;
+		self.done = true;
 		// Cancel this transaction
-		self.tx.commit().await?;
+		self.inner.commit().await?;
 		// Continue
 		Ok(())
 	}
 	/// Check if a key exists
-	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.tx.exi(key.into()).await?;
+		let res = self.inner.exi(key.into()).await?;
 		// Return result
 		Ok(res)
 	}
 	/// Fetch a key from the database
-	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.tx.get(key.into()).await?;
+		let res = self.inner.get(key.into()).await?;
 		// Return result
 		Ok(res)
 	}
@@ -111,18 +150,18 @@ impl Transaction {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[allow(unused)]
-	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	pub(crate) async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Write the timestamp to the "last-write-timestamp" key
 		// to ensure that no other transactions can commit with older timestamps.
 		let k: Key = key.into();
-		let prev = self.tx.get(k.clone()).await?;
+		let prev = self.inner.get(k.clone()).await?;
 		let ver = match prev {
 			Some(prev) => {
 				let slice = prev.as_slice();
@@ -139,12 +178,12 @@ impl Transaction {
 
 		let verbytes = u64_to_versionstamp(ver);
 
-		self.tx.put(k, verbytes.to_vec()).await?;
+		self.inner.put(k, verbytes.to_vec()).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}
 	/// Obtain a new key that is suffixed with the change timestamp
-	pub async fn get_versionstamped_key<K>(
+	pub(crate) async fn get_versionstamped_key<K>(
 		&mut self,
 		ts_key: K,
 		prefix: K,
@@ -154,11 +193,11 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		let ts = self.get_timestamp(ts_key).await?;
@@ -168,106 +207,110 @@ impl Transaction {
 		Ok(k)
 	}
 	/// Insert or update a key in the database
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.set(key.into(), val.into()).await?;
+		self.inner.set(key.into(), val.into()).await?;
 		// Return result
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.put(key.into(), val.into()).await?;
+		self.inner.put(key.into(), val.into()).await?;
 		// Return result
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.putc(key.into(), val.into(), chk.map(Into::into)).await?;
+		self.inner.putc(key.into(), val.into(), chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}
 	/// Delete a key
-	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.del(key.into()).await?;
+		let res = self.inner.del(key.into()).await?;
 		// Return result
 		Ok(res)
 	}
 	/// Delete a key
-	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
-		if !self.rw {
+		if !self.write {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.delc(key.into(), chk.map(Into::into)).await?;
+		let res = self.inner.delc(key.into(), chk.map(Into::into)).await?;
 		// Return result
 		Ok(res)
 	}
 	/// Retrieve a range of keys from the databases
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub(crate) async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
@@ -276,7 +319,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.tx.scan(rng, limit).await?;
+		let res = self.inner.scan(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}

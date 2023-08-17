@@ -17,14 +17,15 @@ use crate::sql::value::Value;
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use ulid::Ulid;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Id {
 	Number(i64),
-	/// Invariant: Doesn't contain NUL bytes.
 	String(String),
 	Array(Array),
 	Object(Object),

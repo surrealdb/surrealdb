@@ -8,6 +8,7 @@ use nom::character::complete::char;
 use nom::combinator::recognize;
 use nom::sequence::delimited;
 use nom::sequence::tuple;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -18,6 +19,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
+#[revisioned(revision = 1)]
 pub struct Uuid(#[serde(with = "uuid::serde::compact")] pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {

@@ -94,7 +94,7 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = sql::sub_query(&text).map_err(|e| {
+		let query = sql::subquery(&text).map_err(|e| {
 			let error_text = format!("{}", e);
 			Exception::throw_type(&ctx, &error_text)
 		})?;

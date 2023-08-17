@@ -183,6 +183,19 @@ mod api_integration {
             };
 		}
 
+		#[tokio::test]
+		async fn surreal_clone() {
+			use surrealdb::engine::any::Any;
+
+			let db: Surreal<Db> = Surreal::init();
+			db.clone().connect::<Mem>(()).await.unwrap();
+			db.use_ns("test").use_db("test").await.unwrap();
+
+			let db: Surreal<Any> = Surreal::init();
+			db.clone().connect("memory").await.unwrap();
+			db.use_ns("test").use_db("test").await.unwrap();
+		}
+
 		include!("api/mod.rs");
 		include!("api/local.rs");
 		include!("api/backup.rs");
