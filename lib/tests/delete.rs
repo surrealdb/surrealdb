@@ -1,4 +1,6 @@
 mod parse;
+
+use channel::{Receiver, TryRecvError};
 use parse::Parse;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
@@ -373,15 +375,10 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
-	let sql = "
-		CREATE person:test_true SET condition = true;
-		LIVE SELECT * FROM person WHERE condition = true;
-		DELETE person:test_true;
-	";
 	let dbs = Datastore::new("memory").await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
 	// validate create response
 	let tmp = res.remove(0).result?;
 	let expected_record = Value::parse(
@@ -395,6 +392,9 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, expected_record);
 
 	// Validate live query response
+	let res =
+		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
 	let live_id = res.remove(0).result?;
 	let live_id = match live_id {
 		Value::Uuid(id) => id,
@@ -402,6 +402,8 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	};
 
 	// Validate delete response
+	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
@@ -412,7 +414,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		Some(notifications) => notifications,
 		None => panic!("expected notifications"),
 	};
-	let not = notifications.recv_blocking().unwrap();
+	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
 	assert_eq!(
 		not,
 		Notification {
@@ -425,4 +427,19 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		}
 	);
 	Ok(())
+}
+
+fn recv_notification(
+	notifications: &Receiver<Notification>,
+	tries: u8,
+	poll_rate: std::time::Duration,
+) -> Result<Notification, TryRecvError> {
+	for _ in 0..tries {
+		match notifications.try_recv() {
+			Ok(not) => return Ok(not),
+			Err(_) => {}
+		}
+		std::thread::sleep(poll_rate);
+	}
+	notifications.try_recv()
 }
