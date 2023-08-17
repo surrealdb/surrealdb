@@ -140,7 +140,7 @@ mod tests {
 			let (tx, mut d) = get_ids(&ds).await;
 			let id = d.get_next_id();
 			finish(tx, d).await.unwrap();
-			assert_eq!(id, 0u64);
+			assert_eq!(id, 0);
 		}
 
 		// Get the second and the third ids
@@ -149,8 +149,8 @@ mod tests {
 			let id1 = d.get_next_id();
 			let id2 = d.get_next_id();
 			finish(tx, d).await.unwrap();
-			assert_eq!(id1, 1u64);
-			assert_eq!(id2, 2u64);
+			assert_eq!(id1, 1);
+			assert_eq!(id2, 2);
 		}
 
 		// It reuses the removed id within a transaction
@@ -160,8 +160,8 @@ mod tests {
 			let id1 = d.get_next_id();
 			let id2 = d.get_next_id();
 			finish(tx, d).await.unwrap();
-			assert_eq!(id1, 1u64);
-			assert_eq!(id2, 3u64);
+			assert_eq!(id1, 1);
+			assert_eq!(id2, 3);
 		}
 
 		// It reuses the removed id across transactions
@@ -174,8 +174,8 @@ mod tests {
 			let id1 = d2.get_next_id();
 			let id2 = d2.get_next_id();
 			finish(tx, d2).await.unwrap();
-			assert_eq!(id1, 2u64);
-			assert_eq!(id2, 4u64);
+			assert_eq!(id1, 2);
+			assert_eq!(id2, 4);
 		}
 	}
 }

@@ -2835,25 +2835,25 @@ mod tests {
 		let nsid = txn.get_next_ns_id().await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
-		assert_eq!(nsid, 0u64);
+		assert_eq!(nsid, 0);
 
 		let mut txn = ds.transaction(true, false).await.unwrap();
 		let dbid = txn.get_next_db_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
-		assert_eq!(dbid, 0u64);
+		assert_eq!(dbid, 0);
 
 		let mut txn = ds.transaction(true, false).await.unwrap();
 		let tbid1 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
-		assert_eq!(tbid1, 0u64);
+		assert_eq!(tbid1, 0);
 
 		let mut txn = ds.transaction(true, false).await.unwrap();
 		let tbid2 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
-		assert_eq!(tbid2, 1u64);
+		assert_eq!(tbid2, 1);
 
 		let mut txn = ds.transaction(true, false).await.unwrap();
 		txn.remove_tb_id(nsid, dbid, tbid1).await.unwrap();
