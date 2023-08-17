@@ -2,13 +2,13 @@
 
 use crate::{
 	fnc::script::fetch::classes::{self, Request, RequestInit, Response},
-	http::{Body as HttpBody, RedirectAction, RedirectPolicy},
+	http::{RedirectAction, RedirectPolicy},
 };
 use js::{function::Opt, Class, Ctx, Exception, Result, Value};
 
 use super::{
 	body::Body,
-	classes::{Headers, ResponseInit, ResponseType},
+	classes::{Headers, ResponseType},
 };
 
 #[js::function]

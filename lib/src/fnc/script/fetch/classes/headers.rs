@@ -2,12 +2,12 @@
 
 use std::str::FromStr;
 
+use crate::http::header::{HeaderMap, HeaderName, HeaderValue};
 use js::{
 	class::Trace,
 	prelude::{Coerced, List},
 	Array, Ctx, Exception, Result, Value,
 };
-use lib_http::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Clone, Trace)]
 #[js::class]

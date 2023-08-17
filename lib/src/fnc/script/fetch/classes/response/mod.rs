@@ -1,16 +1,22 @@
 //! Response class implementation
 
-mod init;
-use std::mem;
-
+use super::{Blob, Headers};
+use crate::fnc::script::fetch::{
+	body::{Body, BodyAndKind},
+	util,
+};
+use crate::http::header::{self, HeaderValue};
 use bytes::Bytes;
-pub use init::ResponseInit;
-
 use js::{
 	class::Trace,
 	prelude::{Opt, This},
 	ArrayBuffer, Class, Ctx, Exception, Result, Value,
 };
+use std::mem;
+use url::Url;
+
+mod init;
+pub use init::ResponseInit;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -22,16 +28,6 @@ pub enum ResponseType {
 	Opaque,
 	OpaqueRedirect,
 }
-
-use lib_http::{header, HeaderValue};
-use url::Url;
-
-use crate::fnc::script::fetch::{
-	body::{Body, BodyAndKind, BodyKind},
-	util, RequestError,
-};
-
-use super::{Blob, Headers};
 
 #[allow(dead_code)]
 #[derive(Trace)]
@@ -180,7 +176,7 @@ impl<'js> Response<'js> {
 			return Err(Exception::throw_type(ctx, "Body unusable"));
 		}
 
-		match body.to_buffer().await {
+		match body.into_buffer().await {
 			Ok(Some(x)) => Ok(x),
 			Ok(None) => Ok(Bytes::new()),
 			Err(e) => Err(Exception::throw_type(ctx, &format!("stream failed: {e}"))),
@@ -195,7 +191,7 @@ impl<'js> Response<'js> {
 			let headers = borrow.headers.clone();
 			let headers = headers.try_borrow()?;
 			let headers = &headers.inner;
-			let types = headers.get_all(lib_http::header::CONTENT_TYPE);
+			let types = headers.get_all(crate::http::header::CONTENT_TYPE);
 			// TODO: This is not according to spec.
 			types
 				.iter()

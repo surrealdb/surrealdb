@@ -1,5 +1,5 @@
+use crate::http::Uri;
 use hyper::{client::HttpConnector, service::Service};
-use lib_http::Uri;
 
 use std::{
 	error::Error as StdError,

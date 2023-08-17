@@ -114,9 +114,6 @@ mod exe;
 mod fnc;
 mod vs;
 
-#[cfg(feature = "http")]
-mod http;
-
 pub mod sql;
 
 #[doc(hidden)]
@@ -137,6 +134,9 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
+
+#[cfg(feature = "http")]
+pub mod http;
 
 #[doc(inline)]
 pub use api::engine;

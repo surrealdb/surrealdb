@@ -1,18 +1,14 @@
 //! Request class implementation
 
+use crate::fnc::script::fetch::body::{Body, BodyAndKind};
+use crate::http::{header, method::Method};
 use bytes::Bytes;
 use js::{
 	class::Trace,
 	prelude::{Coerced, Opt, This},
 	Class, Ctx, Exception, FromJs, Object, Result, Value,
 };
-use lib_http::{header, HeaderName, Method};
 use url::Url;
-
-use crate::fnc::script::fetch::{
-	body::{Body, BodyAndKind, BodyKind},
-	RequestError,
-};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RequestMode {
@@ -533,7 +529,7 @@ impl<'js> Request<'js> {
 			let mut this = this.0.try_borrow_mut()?;
 			std::mem::replace(&mut this.body, Body::used())
 		};
-		match body.to_buffer().await {
+		match body.into_buffer().await {
 			Ok(Some(x)) => Ok(x),
 			Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
 			Err(e) => Err(Exception::throw_type(ctx, &e)),

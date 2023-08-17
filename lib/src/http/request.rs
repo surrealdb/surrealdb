@@ -1,8 +1,8 @@
-use base64_lib::write::EncoderWriter;
-use lib_http::{
-	header::{AUTHORIZATION, CONTENT_TYPE},
-	HeaderMap, HeaderName, HeaderValue, Method,
+use crate::http::{
+	header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
+	method::Method,
 };
+use base64_lib::write::EncoderWriter;
 use serde::Serialize;
 use std::time::Duration;
 use url::Url;
@@ -91,7 +91,7 @@ impl Request {
 
 	/// Merges the existing headers with the new given ones.
 	pub fn headers(mut self, headers: HeaderMap) -> Self {
-		self.headers.extend(headers.into_iter());
+		self.headers.extend(headers);
 		self
 	}
 

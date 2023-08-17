@@ -6,7 +6,6 @@ use js::{
 	prelude::Coerced,
 	Ctx, Exception, FromJs, Result, String, Value,
 };
-use reqwest::multipart::{Form, Part};
 use std::{collections::HashMap, string::String as StdString};
 
 use crate::fnc::script::fetch::classes::Blob;
@@ -118,31 +117,5 @@ impl<'js> FormData<'js> {
 
 	pub fn delete(&mut self, name: Coerced<StdString>) {
 		self.values.remove(&name.0);
-	}
-
-	#[qjs(skip)]
-	pub fn to_form(&self) -> Result<Form> {
-		let mut res = Form::new();
-		for (k, v) in self.values.iter() {
-			for v in v {
-				match v {
-					FormDataValue::String(x) => {
-						res = res.text(k.clone(), x.to_string()?);
-					}
-					FormDataValue::Blob {
-						data,
-						filename,
-					} => {
-						let mut part = Part::bytes(data.borrow().data.to_vec());
-						if let Some(filename) = filename {
-							let filename = filename.to_string()?;
-							part = part.file_name(filename);
-						}
-						res = res.part(k.clone(), part);
-					}
-				}
-			}
-		}
-		Ok(res)
 	}
 }

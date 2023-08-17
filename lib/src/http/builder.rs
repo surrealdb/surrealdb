@@ -1,6 +1,6 @@
 use std::{error::Error as StdError, sync::Arc};
 
-use lib_http::{HeaderMap, StatusCode};
+use crate::http::{header::HeaderMap, status::StatusCode};
 use url::Url;
 
 use crate::opt::Tls;

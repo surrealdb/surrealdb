@@ -9,6 +9,7 @@ use crate::api::opt::Endpoint;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::http::header::HeaderMap;
 use crate::http::ClientBuilder;
 use flume::Receiver;
 use flume::Sender;

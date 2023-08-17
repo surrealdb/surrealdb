@@ -11,3 +11,5 @@ impl Client {
 }
 
 pub struct Body {}
+
+compile_error!("todo");

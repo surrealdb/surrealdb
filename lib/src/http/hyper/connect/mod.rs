@@ -1,12 +1,6 @@
-use hyper::{
-	client::{connect::Connection, HttpConnector},
-	service::Service,
-};
+use hyper::{client::HttpConnector, service::Service};
 use lib_http::Uri;
-use std::{
-	error::Error as StdError,
-	task::{ready, Poll},
-};
+use std::error::Error as StdError;
 use tokio::net::TcpStream;
 
 mod future;

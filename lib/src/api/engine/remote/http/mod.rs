@@ -22,6 +22,11 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
+use crate::http::header::HeaderMap;
+use crate::http::header::HeaderValue;
+use crate::http::header::ACCEPT;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::http::header::CONTENT_TYPE;
 use crate::http::Request;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
@@ -31,11 +36,6 @@ use crate::sql::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;
-use lib_http::header::HeaderMap;
-use lib_http::header::HeaderValue;
-use lib_http::header::ACCEPT;
-#[cfg(not(target_arch = "wasm32"))]
-use lib_http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;

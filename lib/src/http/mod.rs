@@ -1,13 +1,28 @@
+//! Http client implementation
+
 #![allow(dead_code)]
 
 use std::{convert::Infallible, str::Utf8Error, sync::Arc};
 
+pub use lib_http::{
+	header, method, status,
+	uri::{self, Uri},
+	version,
+};
 use lib_http::{
 	header::{InvalidHeaderName, InvalidHeaderValue},
 	method::InvalidMethod,
 	Method, StatusCode,
 };
 use thiserror::Error;
+use tokio::time::error::Elapsed;
+
+mod url;
+pub use url::{IntoUrl, Url};
+mod builder;
+pub use builder::{ClientBuilder, RedirectAction, RedirectPolicy};
+mod request;
+pub use request::Request;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hyper;
@@ -20,14 +35,6 @@ pub use wasm as backend;
 
 use backend::{Backend, BackendError};
 pub use backend::{BackendBody as Body, Response};
-use tokio::time::error::Elapsed;
-
-mod url;
-pub use url::{IntoUrl, Url};
-mod builder;
-pub use builder::{ClientBuilder, RedirectAction, RedirectPolicy};
-mod request;
-pub use request::Request;
 
 #[derive(Error, Debug)]
 pub enum SerializeError {

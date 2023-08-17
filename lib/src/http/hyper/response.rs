@@ -3,9 +3,9 @@ use crate::http::SerializeError;
 use super::super::Error;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use hyper::body::{self, HttpBody};
+use hyper::body;
 use lib_http::{HeaderMap, HeaderValue, StatusCode, Version};
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::de::DeserializeOwned;
 use std::str;
 
 pub struct Response {

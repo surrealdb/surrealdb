@@ -1,13 +1,11 @@
-use crate::fnc::script::fetch::{stream::ReadableStream, RequestError};
+use crate::http::header::{self, HeaderMap};
 use crate::http::Body as BackendBody;
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
+use futures::Stream;
 use js::{Class, Ctx, Error, FromJs, Result, Type, Value};
-use lib_http::{header, HeaderMap};
 use mime::Mime;
 use std::error::Error as StdError;
 use std::result::Result as StdResult;
-use std::sync::Arc;
 
 use super::{classes::Blob, util};
 
@@ -97,8 +95,8 @@ impl Body {
 	/// Returns the data from the body as a buffer.
 	///
 	/// if the body is a stream this future only returns when the full body is consumed.
-	pub async fn to_buffer(self) -> StdResult<Option<Bytes>, String> {
-		self.0.to_buffer().await.transpose().map_err(|e| e.to_string())
+	pub async fn into_buffer(self) -> StdResult<Option<Bytes>, String> {
+		self.0.into_buffer().await.transpose().map_err(|e| e.to_string())
 	}
 
 	/// Clones the body teeing any possible underlying streems
@@ -125,7 +123,7 @@ where
 }
 
 impl<'js> FromJs<'js> for BodyAndKind {
-	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
+	fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
 			Type::String => {
 				let string = value.as_string().unwrap().to_string()?;
@@ -154,7 +152,7 @@ impl<'js> FromJs<'js> for BodyAndKind {
 			});
 		}
 
-		if let Some(bytes) = util::buffer_source_to_bytes(&object)? {
+		if let Some(bytes) = util::buffer_source_to_bytes(object)? {
 			let bytes = Bytes::copy_from_slice(bytes);
 			let body = Body::from(bytes);
 			return Ok(BodyAndKind {

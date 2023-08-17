@@ -124,7 +124,7 @@ impl Body {
 
 	/// Returns a second body which has the same value as the current but can be consumed and
 	/// while maintaining the data inside if it goes unused.
-	pub fn to_reuse(&mut self) -> Self {
+	pub fn reuse(&mut self) -> Self {
 		match std::mem::replace(&mut self.kind, Kind::Used) {
 			Kind::Used => Self::used(),
 			// Already reusable
@@ -153,18 +153,12 @@ impl Body {
 	/// Turns the body into a buffer collecting all data from the body.
 	///
 	/// Returns None if the body was already used.
-	pub async fn to_buffer(self) -> Option<Result<Bytes, BoxError>> {
+	pub async fn into_buffer(self) -> Option<Result<Bytes, BoxError>> {
 		let future = match self.kind {
 			Kind::Used => return None,
 			Kind::Buffer(x) => return Some(Ok(x)),
 			Kind::Stream(x) => x,
-			Kind::Reusable(x) => {
-				if let Some(x) = x.take() {
-					x
-				} else {
-					return None;
-				}
-			}
+			Kind::Reusable(x) => x.take()?,
 		};
 
 		let res = future.try_collect().await.map(BytesMut::freeze);
@@ -174,7 +168,7 @@ impl Body {
 	/// Turn the body into a stream of data.
 	///
 	/// Returns None if the body was already used.
-	pub fn to_stream(self) -> Option<BoxStream> {
+	pub fn into_stream(self) -> Option<BoxStream> {
 		match self.kind {
 			Kind::Used => None,
 			Kind::Buffer(x) => {
@@ -284,7 +278,7 @@ impl HttpBody for Body {
 
 	fn poll_trailers(
 		self: std::pin::Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
+		_cx: &mut std::task::Context<'_>,
 	) -> Poll<Result<Option<lib_http::HeaderMap>, Self::Error>> {
 		Poll::Ready(Ok(None))
 	}

@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::Stream;
-use lib_http::HeaderMap;
+use crate::http::header::HeaderMap;
 
 pub struct Response {
 	response
