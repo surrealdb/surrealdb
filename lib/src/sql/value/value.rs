@@ -51,6 +51,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
+use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -65,6 +66,7 @@ use std::str::FromStr;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -105,6 +107,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to
@@ -1153,7 +1156,7 @@ impl Value {
 				}
 				Err(Error::CoerceTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1165,7 +1168,7 @@ impl Value {
 				..
 			}) => Err(Error::CoerceTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -1547,7 +1550,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -1565,13 +1568,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1591,7 +1594,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -1610,13 +1613,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1679,7 +1682,7 @@ impl Value {
 				}
 				Err(Error::ConvertTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1691,7 +1694,7 @@ impl Value {
 				..
 			}) => Err(Error::ConvertTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -2108,7 +2111,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -2126,13 +2129,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -2152,7 +2155,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -2171,13 +2174,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -2964,13 +2967,20 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(1, Value::None.to_vec().len());
-		assert_eq!(1, Value::Null.to_vec().len());
-		assert_eq!(2, Value::Bool(true).to_vec().len());
-		assert_eq!(2, Value::Bool(false).to_vec().len());
-		assert_eq!(6, Value::from("test").to_vec().len());
-		assert_eq!(15, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(22, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		let enc: Vec<u8> = Value::None.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Null.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Bool(true).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::Bool(false).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::from("test").try_into().unwrap();
+		assert_eq!(8, enc.len());
+		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").try_into().unwrap();
+		assert_eq!(19, enc.len());
+		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").try_into().unwrap();
+		assert_eq!(27, enc.len());
 	}
 
 	#[test]
@@ -2981,8 +2991,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.into();
-		let dec: Value = enc.into();
+		let enc: Vec<u8> = val.try_into().unwrap();
+		let dec: Value = enc.try_into().unwrap();
 		assert_eq!(res, dec);
 	}
 }

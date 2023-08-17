@@ -6,6 +6,7 @@ use crate::sql::ident::ident_raw;
 use crate::sql::thing::Thing;
 use nom::branch::alt;
 use nom::character::complete::char;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -51,6 +52,7 @@ impl Iterator for IntoIter {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Model")]
+#[revisioned(revision = 1)]
 pub enum Model {
 	Count(String, u64),
 	Range(String, u64, u64),

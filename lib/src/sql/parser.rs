@@ -3,7 +3,7 @@ use crate::iam::Error as IamError;
 use crate::sql::error::Error::{Field, Group, Order, Parser, Role, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
-use crate::sql::subquery::{subquery, Subquery};
+use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use nom::Err;
@@ -16,12 +16,6 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
-/// Parses a SurrealQL Subquery [`Subquery`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
-pub fn sub_query(input: &str) -> Result<Subquery, Error> {
-	parse_impl(input, subquery)
-}
-
 /// Parses a SurrealQL [`Thing`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
@@ -32,6 +26,12 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::value)
+}
+
+/// Parses a SurrealQL Subquery [`Subquery`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn subquery(input: &str) -> Result<Subquery, Error> {
+	parse_impl(input, super::subquery::subquery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]

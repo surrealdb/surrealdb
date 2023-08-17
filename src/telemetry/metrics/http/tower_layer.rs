@@ -1,5 +1,5 @@
 use axum::extract::MatchedPath;
-use opentelemetry::{metrics::MetricsError, Context as TelemetryContext, KeyValue};
+use opentelemetry::{metrics::MetricsError, KeyValue};
 use pin_project_lite::pin_project;
 use std::{
 	cell::Cell,
@@ -12,11 +12,6 @@ use std::{
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use tower::{Layer, Service};
-
-use super::{
-	HTTP_DURATION_METER, HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_DURATION,
-	HTTP_SERVER_REQUEST_SIZE, HTTP_SERVER_RESPONSE_SIZE,
-};
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -168,7 +163,7 @@ impl HttpCallMetricTracker {
 	}
 
 	// Follows the OpenTelemetry semantic conventions for HTTP metrics define here: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/metrics/semantic_conventions/http-metrics.md
-	fn olel_common_attrs(&self) -> Vec<KeyValue> {
+	fn otel_common_attrs(&self) -> Vec<KeyValue> {
 		let mut res = vec![
 			KeyValue::new("http.request.method", self.method.as_str().to_owned()),
 			KeyValue::new("network.protocol.name", "http".to_owned()),
@@ -186,11 +181,11 @@ impl HttpCallMetricTracker {
 	}
 
 	pub(super) fn active_req_attrs(&self) -> Vec<KeyValue> {
-		self.olel_common_attrs()
+		self.otel_common_attrs()
 	}
 
 	pub(super) fn request_duration_attrs(&self) -> Vec<KeyValue> {
-		let mut res = self.olel_common_attrs();
+		let mut res = self.otel_common_attrs();
 
 		res.push(KeyValue::new(
 			"http.response.status_code",
@@ -247,64 +242,25 @@ impl Drop for HttpCallMetricTracker {
 
 pub fn on_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	// Setup the active_requests observer
-	observe_active_request_start(tracker)
+	super::observe_request_start(tracker)
 }
 
 pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	// Setup the active_requests observer
-	observe_active_request_finish(tracker)?;
+	super::observe_request_finish(tracker)?;
 
 	// Record the duration of the request.
-	record_request_duration(tracker);
+	super::record_request_duration(tracker);
 
 	// Record the request size if known
 	if let Some(size) = tracker.request_size {
-		record_request_size(tracker, size)
+		super::record_request_size(tracker, size)
 	}
 
 	// Record the response size if known
 	if let Some(size) = tracker.response_size {
-		record_response_size(tracker, size)
+		super::record_response_size(tracker, size)
 	}
 
 	Ok(())
-}
-
-fn observe_active_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	let attrs = tracker.active_req_attrs();
-	// Setup the callback to observe the active requests.
-	HTTP_DURATION_METER
-		.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, 1, &attrs))
-}
-
-fn observe_active_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	let attrs = tracker.active_req_attrs();
-	// Setup the callback to observe the active requests.
-	HTTP_DURATION_METER
-		.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, -1, &attrs))
-}
-
-fn record_request_duration(tracker: &HttpCallMetricTracker) {
-	// Record the duration of the request.
-	HTTP_SERVER_DURATION.record(
-		&TelemetryContext::current(),
-		tracker.duration().as_millis() as u64,
-		&tracker.request_duration_attrs(),
-	);
-}
-
-pub fn record_request_size(tracker: &HttpCallMetricTracker, size: u64) {
-	HTTP_SERVER_REQUEST_SIZE.record(
-		&TelemetryContext::current(),
-		size,
-		&tracker.request_size_attrs(),
-	);
-}
-
-pub fn record_response_size(tracker: &HttpCallMetricTracker, size: u64) {
-	HTTP_SERVER_RESPONSE_SIZE.record(
-		&TelemetryContext::current(),
-		size,
-		&tracker.response_size_attrs(),
-	);
 }

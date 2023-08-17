@@ -10,6 +10,7 @@ use crate::sql::value::{single, Value};
 use async_recursion::async_recursion;
 use nom::character::complete::char;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -18,6 +19,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Cast")]
+#[revisioned(revision = 1)]
 pub struct Cast(pub Kind, pub Value);
 
 impl PartialOrd for Cast {

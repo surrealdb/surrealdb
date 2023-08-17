@@ -8,11 +8,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Groups(pub Vec<Group>);
 
 impl Deref for Groups {
@@ -41,6 +43,7 @@ impl Display for Groups {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Group(pub Idiom);
 
 impl Deref for Group {

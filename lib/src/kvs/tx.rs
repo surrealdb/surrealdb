@@ -2632,6 +2632,7 @@ impl Transaction {
 	// Private methods
 	// --------------------------------------------------
 
+	#[allow(unused_variables)]
 	fn check_level(&mut self, check: Check) {
 		match self {
 			#[cfg(feature = "kv-mem")]
@@ -2697,6 +2698,7 @@ mod tests {
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
+		txn.commit().await.unwrap()
 	}
 
 	#[tokio::test]
@@ -2722,6 +2724,7 @@ mod tests {
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_ns_user("ns", "user").await.unwrap();
 		assert_eq!(res, data);
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
@@ -2747,6 +2750,7 @@ mod tests {
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
 		assert_eq!(res, data);
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
@@ -2773,6 +2777,7 @@ mod tests {
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
@@ -2799,6 +2804,7 @@ mod tests {
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
@@ -2825,6 +2831,7 @@ mod tests {
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
