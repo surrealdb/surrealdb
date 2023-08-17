@@ -290,6 +290,17 @@ pub(super) struct StoredNode<N> {
 	pub(super) size: u32,
 }
 
+impl<N> StoredNode<N> {
+	pub(super) fn new(n: N, id: NodeId, key: Key, size: u32) -> Self {
+		Self {
+			n,
+			id,
+			key,
+			size,
+		}
+	}
+}
+
 pub trait TreeNode
 where
 	Self: Sized,
