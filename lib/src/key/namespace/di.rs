@@ -6,18 +6,18 @@ use serde::{Deserialize, Serialize};
 pub struct Di {
 	__: u8,
 	_a: u8,
-	pub ns: u64,
+	pub ns: u32,
 	_b: u8,
 	_c: u8,
 	_d: u8,
 }
 
-pub fn new(ns: u64) -> Di {
+pub fn new(ns: u32) -> Di {
 	Di::new(ns)
 }
 
 impl Di {
-	pub fn new(ns: u64) -> Self {
+	pub fn new(ns: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'+',

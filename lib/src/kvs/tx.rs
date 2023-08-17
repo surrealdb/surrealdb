@@ -6,7 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
-use crate::idg::u64::U64;
+use crate::idg::u32::U32;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -2401,7 +2401,7 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) async fn get_seq(&mut self, key: Key) -> Result<U64, Error> {
+	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
 				v
@@ -2411,9 +2411,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				U64::new(key.clone(), Some(val)).await?
+				U32::new(key.clone(), Some(val)).await?
 			} else {
-				U64::new(key.clone(), None).await?
+				U32::new(key.clone(), None).await?
 			}
 		};
 
@@ -2421,7 +2421,7 @@ impl Transaction {
 	}
 
 	// get_next_db_id will get the next db id for the given namespace.
-	pub(crate) async fn get_next_db_id(&mut self, ns: u64) -> Result<u64, Error> {
+	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
 		let key = crate::key::namespace::di::new(ns).encode().unwrap();
 		let mut seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -2432,9 +2432,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				U64::new(key.clone(), Some(val)).await?
+				U32::new(key.clone(), Some(val)).await?
 			} else {
-				U64::new(key.clone(), None).await?
+				U32::new(key.clone(), None).await?
 			}
 		};
 
@@ -2449,9 +2449,9 @@ impl Transaction {
 
 	// remove_db_id removes the given db id from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_db_id(&mut self, ns: u64, db: u64) -> Result<(), Error> {
+	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
 		let key = crate::key::namespace::di::new(ns).encode().unwrap();
-		let mut seq = self.get_seq(key.clone()).await?;
+		let mut seq = self.get_idg(key.clone()).await?;
 
 		seq.remove_id(db);
 
@@ -2463,9 +2463,9 @@ impl Transaction {
 	}
 
 	// get_next_db_id will get the next tb id for the given namespace and database.
-	pub(crate) async fn get_next_tb_id(&mut self, ns: u64, db: u64) -> Result<u64, Error> {
+	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
 		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
-		let mut seq = self.get_seq(key.clone()).await?;
+		let mut seq = self.get_idg(key.clone()).await?;
 
 		let id = seq.get_next_id();
 
@@ -2478,9 +2478,9 @@ impl Transaction {
 
 	// remove_tb_id removes the given tb id from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_tb_id(&mut self, ns: u64, db: u64, tb: u64) -> Result<(), Error> {
+	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
 		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
-		let mut seq = self.get_seq(key.clone()).await?;
+		let mut seq = self.get_idg(key.clone()).await?;
 
 		seq.remove_id(tb);
 
@@ -2492,7 +2492,7 @@ impl Transaction {
 	}
 
 	// get_next_ns_id will get the next ns id.
-	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u64, Error> {
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
 		let key = crate::key::root::ni::Ni::default().encode().unwrap();
 		let mut seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -2503,9 +2503,9 @@ impl Transaction {
 		} else {
 			let val = self.get(key.clone()).await?;
 			if let Some(val) = val {
-				U64::new(key.clone(), Some(val)).await?
+				U32::new(key.clone(), Some(val)).await?
 			} else {
-				U64::new(key.clone(), None).await?
+				U32::new(key.clone(), None).await?
 			}
 		};
 
@@ -2520,9 +2520,9 @@ impl Transaction {
 
 	// remove_ns_id removes the given ns id from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_ns_id(&mut self, ns: u64) -> Result<(), Error> {
+	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
 		let key = crate::key::root::ni::Ni::default().encode().unwrap();
-		let mut seq = self.get_seq(key.clone()).await?;
+		let mut seq = self.get_idg(key.clone()).await?;
 
 		seq.remove_id(ns);
 

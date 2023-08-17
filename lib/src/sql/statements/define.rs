@@ -141,7 +141,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
-	pub id: Option<u64>,
+	pub id: Option<u32>,
 }
 
 impl DefineNamespaceStatement {
@@ -201,7 +201,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 	pub changefeed: Option<ChangeFeed>,
-	pub id: Option<u64>,
+	pub id: Option<u32>,
 }
 
 impl DefineDatabaseStatement {
@@ -983,7 +983,7 @@ pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
 	pub full: bool,
-	pub id: Option<u64>,
+	pub id: Option<u32>,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
