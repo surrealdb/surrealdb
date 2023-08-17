@@ -16,7 +16,6 @@ use tokio::net::TcpStream;
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tracing::log::warn;
 use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
@@ -92,7 +91,7 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
 	let stdout_path = tmp_file(format!("server-stdout-{}.log", rand::random::<u32>()).as_str());
 	let stderr_path = tmp_file(format!("server-stderr-{}.log", rand::random::<u32>()).as_str());
-	info!("Logging server output to: ({}, {})", stdout_path, stderr_path);
+	debug!("Logging server output to: ({}, {})", stdout_path, stderr_path);
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
 

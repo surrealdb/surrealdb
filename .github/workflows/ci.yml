@@ -14,131 +14,131 @@ defaults:
 
 jobs:
 
-  # format:
-  #   name: Check format
-  #   runs-on: ubuntu-latest
-  #   steps:
+  format:
+    name: Check format
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: rustfmt
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Check format
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-format
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-format
 
-  # check:
-  #   name: Check workspace
-  #   runs-on: ubuntu-latest
-  #   steps:
+  check:
+    name: Check workspace
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Check workspace
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-check
+      - name: Check workspace
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check
 
-  # check-wasm:
-  #   name: Check Wasm
-  #   runs-on: ubuntu-latest
-  #   steps:
+  check-wasm:
+    name: Check Wasm
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         targets: wasm32-unknown-unknown
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Check wasm
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-check-wasm
+      - name: Check wasm
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check-wasm
 
-  # clippy:
-  #   name: Check clippy
-  #   runs-on: ubuntu-latest
-  #   steps:
+  clippy:
+    name: Check clippy
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: clippy
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Run clippy
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-clippy
+      - name: Run clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-clippy
 
   cli:
     name: CLI integration tests
@@ -179,125 +179,125 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log
+          cat /tmp/surrealdb.log || true
           
 
-  # http-server:
-  #   name: HTTP integration tests
-  #   runs-on: ubuntu-latest
-  #   steps:
+  http-server:
+    name: HTTP integration tests
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Run HTTP integration tests
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-http-integration
+      - name: Run HTTP integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-http-integration
 
-  # ws-server:
-  #   name: WebSocket integration tests
-  #   runs-on: ubuntu-latest
-  #   steps:
+  ws-server:
+    name: WebSocket integration tests
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Run WS integration tests
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-ws-integration
+      - name: Run WS integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-ws-integration
 
-  # test:
-  #   name: Test workspace
-  #   runs-on: ubuntu-latest
-  #   steps:
+  test:
+    name: Test workspace
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Free up some disk space
-  #       run: |
-  #         (set -x; df -h)
-  #         # Free up some disk space by removing unused files
-  #         (set -x; sudo rm -rf /imagegeneration || true)
-  #         (set -x; sudo rm -rf /opt/az || true)
-  #         (set -x; sudo rm -rf /opt/hostedtoolcache || true)
-  #         (set -x; sudo rm -rf /opt/google || true)
-  #         (set -x; sudo rm -rf /opt/pipx || true)
-  #         (set -x; df -h)
+      - name: Free up some disk space
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
 
-  #     - name: Install cargo-llvm-cov
-  #       uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #     - name: Test workspace + coverage
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-workspace-coverage
+      - name: Test workspace + coverage
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-workspace-coverage
 
-  #     - name: Upload coverage report
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: code-coverage-report
-  #         path: target/llvm-cov/html/
-  #         retention-days: 5
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 5
 
   ws-engine:
     name: WebSocket engine
@@ -331,11 +331,11 @@ jobs:
           args: --debug cargo-make
 
       - name: Test ws engine
-        run: |
-          while true; do
-            cargo make ci-api-integration-ws
-          done
-      
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-ws
+
       - name: Debug info
         if: always()
         run: |
@@ -343,7 +343,7 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log
+          cat /tmp/surrealdb.log || true
 
   http-engine:
     name: HTTP engine
@@ -377,11 +377,11 @@ jobs:
           args: --debug cargo-make
 
       - name: Test http engine
-        run: |
-          while true; do
-            cargo make ci-api-integration-http
-          done
-      
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-http
+
       - name: Debug info
         if: always()
         run: |
@@ -389,223 +389,250 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log
+          cat /tmp/surrealdb.log || true
 
-  # any-engine:
-  #     name: Any engine
-  #     runs-on: ubuntu-latest
-  #     steps:
+  any-engine:
+    name: Any engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #       - name: Install stable toolchain
-  #         uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #       - name: Checkout sources
-  #         uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #       - name: Setup cache
-  #         uses: Swatinem/rust-cache@v2
-  #         with:
-  #           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #       - name: Install dependencies
-  #         run: |
-  #           sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #       - name: Setup FoundationDB
-  #         uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
-  #         with:
-  #           version: "7.1.30"
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
 
-  #       - name: Install cargo-make
-  #         uses: actions-rs/cargo@v1
-  #         with:
-  #           command: install
-  #           args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  #       - name: Test any engine
-  #         uses: actions-rs/cargo@v1
-  #         with:
-  #           command: make
-  #           args: ci-api-integration-any
+      - name: Test any engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-any
 
-  # mem-engine:
-  #   name: Memory engine
-  #   runs-on: ubuntu-latest
-  #   steps:
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+  mem-engine:
+    name: Memory engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Test mem engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-mem
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  # file-engine:
-  #   name: File engine
-  #   runs-on: ubuntu-latest
-  #   steps:
+      - name: Test mem engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-mem
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+  file-engine:
+    name: File engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Test file engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-file
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  # rocksdb-engine:
-  #   name: RocksDB engine
-  #   runs-on: ubuntu-latest
-  #   steps:
+      - name: Test file engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-file
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+  rocksdb-engine:
+    name: RocksDB engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Test rocksdb engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-rocksdb
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  # speedb-engine:
-  #   name: SpeeDB engine
-  #   runs-on: ubuntu-latest
-  #   steps:
+      - name: Test rocksdb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-rocksdb
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+  speedb-engine:
+    name: SpeeDB engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Test speedb engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-speedb
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  # tikv-engine:
-  #    name: TiKV engine
-  #    runs-on: ubuntu-latest
-  #    steps:
+      - name: Test speedb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-speedb
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+  tikv-engine:
+     name: TiKV engine
+     runs-on: ubuntu-latest
+     steps:
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt-get -y update
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Install TiUP
-  #       run: |
-  #         curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-  #         ~/.tiup/bin/tiup -v
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Install TiUP
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          ~/.tiup/bin/tiup -v
 
-  #     - name: Test tikv engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-tikv
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-  # fdb-engine:
-  #   name: FoundationDB engine
-  #   runs-on: ubuntu-latest
-  #   steps:
+      - name: Test tikv engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-tikv
 
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v3
+  fdb-engine:
+    name: FoundationDB engine
+    runs-on: ubuntu-latest
+    steps:
 
-  #     - name: Setup cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Setup FoundationDB
-  #       uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
-  #       with:
-  #         version: "7.1.30"
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-  #     - name: Install cargo-make
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: --debug cargo-make
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  #     - name: Test fdb engine
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: make
-  #         args: ci-api-integration-fdb
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
+
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test fdb engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-fdb
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
