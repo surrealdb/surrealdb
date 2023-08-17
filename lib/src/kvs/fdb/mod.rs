@@ -175,8 +175,20 @@ impl Transaction {
 		// so that we can atomically `take` the inner out of the container and
 		// replace it with the new `reset`ed inner.
 		let r = match self.inner.lock().await.take() {
-			Some(inner) => inner.commit().await,
-			_ => return Err(Error::Ds("Unexpected error".to_string())),
+			Some(inner) => match inner.commit().await {
+				Ok(result) => Ok(result),
+				Err(err) => {
+					let cancel_res = inner.cancel().await;
+					match cancel_res {
+						Ok(_) => Err(err),
+						Err(cancel_err) => Err(Error::Tx(format!(
+							"Transaction commit failed {} and rollback failed: {}",
+							err, cancel_err
+						))),
+					}
+				}
+			},
+			None => return { Err(Error::Ds("Unable to acquire lock during commit".to_string())) },
 		};
 		match r {
 			Ok(_r) => {}
