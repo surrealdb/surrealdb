@@ -7,11 +7,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Splits(pub Vec<Split>);
 
 impl Deref for Splits {
@@ -36,6 +38,7 @@ impl fmt::Display for Splits {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Split(pub Idiom);
 
 impl Deref for Split {

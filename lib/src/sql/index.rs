@@ -7,10 +7,12 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::u32;
 use nom::combinator::{map, opt};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
 	Idx,

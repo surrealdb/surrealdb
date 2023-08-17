@@ -18,12 +18,14 @@ use nom::character::complete::u32;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // ShowStatement is used to show changes in a table or database via
 // the SHOW CHANGES statement.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct ShowStatement {
 	pub table: Option<Table>,
 	pub since: Option<u64>,

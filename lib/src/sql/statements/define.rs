@@ -47,10 +47,12 @@ use nom::Err::Failure;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use rand::Rng;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -139,6 +141,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
@@ -189,6 +192,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 	pub changefeed: Option<ChangeFeed>,
@@ -267,6 +271,7 @@ fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
@@ -348,6 +353,7 @@ fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
 	pub tokenizers: Option<Vec<Tokenizer>>,
@@ -418,6 +424,7 @@ pub(crate) fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -494,6 +501,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineUserStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -676,6 +684,7 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -781,6 +790,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -900,6 +910,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
@@ -959,6 +970,7 @@ fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
@@ -1161,6 +1173,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -1240,6 +1253,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -1247,6 +1261,7 @@ pub struct DefineFieldStatement {
 	pub kind: Option<Kind>,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
+	pub default: Option<Value>,
 	pub permissions: Permissions,
 }
 
@@ -1336,6 +1351,10 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 				DefineFieldOption::Assert(ref v) => Some(v.to_owned()),
 				_ => None,
 			}),
+			default: opts.iter().find_map(|x| match x {
+				DefineFieldOption::Default(ref v) => Some(v.to_owned()),
+				_ => None,
+			}),
 			permissions: opts
 				.iter()
 				.find_map(|x| match x {
@@ -1353,11 +1372,12 @@ pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Value),
 	Assert(Value),
+	Default(Value),
 	Permissions(Permissions),
 }
 
 fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
-	alt((field_flex, field_kind, field_value, field_assert, field_permissions))(i)
+	alt((field_flex, field_kind, field_value, field_assert, field_default, field_permissions))(i)
 }
 
 fn field_flex(i: &str) -> IResult<&str, DefineFieldOption> {
@@ -1390,6 +1410,14 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	Ok((i, DefineFieldOption::Assert(v)))
 }
 
+fn field_default(i: &str) -> IResult<&str, DefineFieldOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("DEFAULT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = value(i)?;
+	Ok((i, DefineFieldOption::Default(v)))
+}
+
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i)?;
@@ -1401,6 +1429,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -1503,7 +1532,8 @@ mod tests {
 		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
 			name: Ident::from("test"),
 		});
-		assert_eq!(6, stm.to_vec().len());
+		let enc: Vec<u8> = stm.try_into().unwrap();
+		assert_eq!(9, enc.len());
 	}
 
 	#[test]
@@ -1595,9 +1625,9 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 
-		let serialized = out.to_vec();
-		let deserializled = DefineDatabaseStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let serialized: Vec<u8> = (&out).try_into().unwrap();
+		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 
 	#[test]
@@ -1608,8 +1638,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 
-		let serialized = out.to_vec();
-		let deserializled = DefineTableStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserializled);
+		let serialized: Vec<u8> = (&out).try_into().unwrap();
+		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		assert_eq!(out, deserialized);
 	}
 }

@@ -1,4 +1,5 @@
 use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
 	Deserialize, Serialize,
@@ -7,6 +8,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[revisioned(revision = 1)]
 pub struct Bytes(pub(crate) Vec<u8>);
 
 impl Bytes {

@@ -6,6 +6,7 @@ use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::multi::many1;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::iter::Sum;
@@ -26,6 +27,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
+#[revisioned(revision = 1)]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {

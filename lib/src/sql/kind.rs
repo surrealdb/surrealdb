@@ -11,10 +11,12 @@ use nom::character::complete::u64;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Kind {
 	Any,
 	Bool,
