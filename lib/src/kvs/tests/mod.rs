@@ -109,8 +109,7 @@ mod tikv {
 			Datastore::new_full("tikv:127.0.0.1:2379", sql::Uuid::from(node_id)).await.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let result = tx.delp(vec![], u32::MAX).await;
-		assert!(result.is_ok(), "{:?}", result);
+		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		ds
@@ -149,8 +148,7 @@ mod fdb {
 			.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let result = tx.delp(vec![], u32::MAX).await;
-		assert!(result.is_ok(), "{:?}", result);
+		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		ds

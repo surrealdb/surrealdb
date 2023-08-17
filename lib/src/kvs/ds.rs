@@ -469,7 +469,10 @@ impl Datastore {
 	// Garbage collection task to run when a client disconnects from a surrealdb node
 	// i.e. we know the node, we are not performing a full wipe on the node
 	// and the wipe must be fully performed by this node
-	pub async fn garbage_collect_dead_session(&self, live_queries: &[Uuid]) -> Result<(), Error> {
+	pub async fn garbage_collect_dead_session(
+		&self,
+		live_queries: &[uuid::Uuid],
+	) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
@@ -628,6 +631,14 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#[cfg(debug_assertions)]
+		if lock {
+			warn!("There are issues with pessimistic locking in TiKV");
+		}
+		self.transaction_inner(write, lock).await
+	}
+
+	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]

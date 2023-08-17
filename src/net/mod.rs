@@ -129,7 +129,7 @@ pub async fn init() -> Result<(), Error> {
 		.merge(key::router())
 		.layer(service);
 
-	// Setup the graceful shutdown with no timeout
+	// Setup the graceful shutdown
 	let handle = Handle::new();
 	let shutdown_handler = graceful_shutdown(handle.clone());
 
@@ -158,9 +158,6 @@ pub async fn init() -> Result<(), Error> {
 
 	// Wait for the shutdown to finish
 	let _ = shutdown_handler.await;
-
-	// Flush all telemetry data
-	opentelemetry::global::shutdown_tracer_provider();
 
 	info!(target: LOG, "Web server stopped. Bye!");
 

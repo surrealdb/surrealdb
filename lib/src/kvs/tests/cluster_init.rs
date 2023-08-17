@@ -172,7 +172,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// Subject: Perform the action we are testing
 	trace!("Garbage collecting dead sessions");
-	test.db.garbage_collect_dead_session(&[sql::Uuid::from(live_query_to_delete)]).await.unwrap();
+	test.db.garbage_collect_dead_session(&[live_query_to_delete]).await.unwrap();
 
 	// Validate
 	trace!("Validating live queries");
