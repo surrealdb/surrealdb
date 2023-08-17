@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::{convert::Infallible, str::Utf8Error, sync::Arc};
+use std::{convert::Infallible, string::FromUtf8Error, sync::Arc};
 
 pub use lib_http::{
 	header, method, status,
@@ -53,7 +53,7 @@ pub enum Error {
 	#[error("{0}")]
 	Backend(#[from] BackendError),
 	#[error("Failed to parse bytes to string: {0}")]
-	Utf8(#[from] Utf8Error),
+	FromUtf8(#[from] FromUtf8Error),
 	#[error(
 		"Invalid authorization token, authorization token could not be used as a header value"
 	)]

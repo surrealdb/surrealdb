@@ -17,7 +17,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
+default = ["protocol-ws", "rustls","nowasm"]
 protocol-http = ["dep:hyper", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
@@ -39,6 +39,8 @@ native-tls = ["dep:native-tls", "dep:hyper-tls", "tokio-tungstenite?/native-tls"
 rustls = ["dep:rustls","dep:hyper-rustls", "dep:tokio-rustls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
+# feature to disable compiling examples on wasm.
+nowasm = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -121,7 +123,6 @@ hyper-tls = { version = "0.5.0", optional = true }
 lib_http = {version = "0.2.9", package = "http" }
 multi = "0.1.1"
 mime = "0.3.17"
-tokio-rustls = { version = "0.24.1", optional = true }
 serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
@@ -134,7 +135,16 @@ test-log = { version="0.2.12", features = ["trace"] }
 time = { version = "0.3.25", features = ["serde"] }
 tokio = { version = "1.31.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1.29.1", features = ["macros", "sync", "rt-multi-thread"] }
 wiremock = "0.5.19"
+pprof = { version = "0.11.1", features = [ "flamegraph", "criterion" ] }
+criterion = { version="0.4", features= [  "async_futures" ] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+tokio = { version = "1.29.1", features = ["macros", "sync", "rt"] }
+wasm-bindgen-test = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3.45"
@@ -175,3 +185,30 @@ harness = false
 [[bench]]
 name = "index_btree"
 harness = false
+
+[[example]]
+name = "select"
+path = "examples/select/main.rs"
+required-features = ["nowasm"]
+
+[[example]]
+name = "query"
+path = "examples/query/main.rs"
+required-features = ["nowasm"]
+
+[[example]]
+name = "transaction"
+path = "examples/transaction/main.rs"
+required-features = ["nowasm"]
+
+[[example]]
+name = "concurrency"
+path = "examples/concurrency/main.rs"
+required-features = ["nowasm"]
+
+[[example]]
+name = "version"
+path = "examples/version/main.rs"
+required-features = ["nowasm"]
+
+

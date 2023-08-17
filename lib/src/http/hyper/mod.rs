@@ -11,8 +11,8 @@ mod body;
 mod response;
 pub use response::Response;
 
-pub type BoxError = Arc<dyn StdError + Send + Sync>;
 pub type BoxStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + Sync>>;
+pub type BoxError = Arc<dyn StdError + Send + Sync>;
 
 pub type BackendError = hyper::Error;
 pub type BackendBody = body::Body;
