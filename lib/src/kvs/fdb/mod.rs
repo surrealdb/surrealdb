@@ -174,31 +174,34 @@ impl Transaction {
 		// whole inner object to the method, we wrap it inside a Arc<Mutex<Option<_>>>
 		// so that we can atomically `take` the inner out of the container and
 		// replace it with the new `reset`ed inner.
-		let r = match self.inner.lock().await.take() {
-			Some(inner) => match inner.commit().await {
-				Ok(result) => Ok(result),
-				Err(err) => {
-					let cancel_res = inner.cancel().await;
-					match cancel_res {
-						Ok(_) => Err(err),
-						Err(cancel_err) => Err(Error::Tx(format!(
-							"Transaction commit failed {} and rollback failed: {}",
-							err, cancel_err
-						))),
-					}
-				}
-			},
-			None => return { Err(Error::Ds("Unable to acquire lock during commit".to_string())) },
-		};
-		match r {
-			Ok(_r) => {}
-			Err(e) => {
-				return Err(Error::Tx(format!("Transaction commit error: {}", e)));
+		let lock = self.inner.lock().await.take();
+		let tx = match lock {
+			Some(result) => Ok(result),
+			None => {
+				Err(Error::Ds("Unable to resolve acquire client lock during commit".to_string()))
 			}
+		}?;
+		let result = match tx.commit().await {
+			Ok(_committed) => return Ok(()),
+			Err(commmit_err) => {
+				Err(Error::Tx(format!("Failed to commit transaction {}", commmit_err)))
+			}
+		};
+		if result.is_ok() {
+			return result;
 		}
-		// Continue
-		Ok(())
+
+		let cancel_result = self.cancel().await;
+		match cancel_result {
+			Ok(_) => result,
+			Err(rollback_err) => Err(Error::Tx(format!(
+				"Failed to commit transaction {}, cancel result: {:?}",
+				result.unwrap_err(),
+				rollback_err
+			))),
+		}
 	}
+
 	/// Check if a key exists
 	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
