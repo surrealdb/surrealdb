@@ -374,36 +374,39 @@ async fn check_permissions_auth_disabled() {
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
 	let sql = "
-		CREATE person:test SET value = 50;
-		LIVE SELECT * FROM person WHERE value<100;
-		DELETE person:test;
+		CREATE person:test_true SET condition = true;
+		LIVE SELECT * FROM person WHERE condition = true;
+		DELETE person:test_true;
 	";
 	let dbs = Datastore::new("memory").await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
-	//
+	// validate create response
 	let tmp = res.remove(0).result?;
 	let expected_record = Value::parse(
 		"[
 			{
-				id: person:test,
-				value: 50
+				id: person:test_true,
+				condition: true,
 			}
 		]",
 	);
 	assert_eq!(tmp, expected_record);
-	//
+
+	// Validate live query response
 	let live_id = res.remove(0).result?;
 	let live_id = match live_id {
 		Value::Uuid(id) => id,
 		_ => panic!("expected uuid"),
 	};
-	//
+
+	// Validate delete response
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
-	//
+
+	// Validate notification
 	let notifications = dbs.notifications();
 	let notifications = match notifications {
 		Some(notifications) => notifications,
