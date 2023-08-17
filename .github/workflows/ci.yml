@@ -167,10 +167,10 @@ jobs:
           args: --debug cargo-make
 
       - name: Run CLI integration tests
-        run: |
-          while true; do
-            cargo make ci-cli-integration
-          done
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-cli-integration
       
       - name: Debug info
         if: always()
