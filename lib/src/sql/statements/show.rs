@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
