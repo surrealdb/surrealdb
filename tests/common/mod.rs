@@ -358,11 +358,11 @@ pub async fn ws_query(
 		Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
 			.get("result")
 			.ok_or(TestError::AssertionError {
-				message: "expected a result from the received object".to_string(),
+				message: format!("expected a result from the received object, response: {:?}", &obj).to_string(),
 			})?
 			.as_array()
 			.ok_or(TestError::AssertionError {
-				message: "expected the result object to be an array for the received ws message"
+				message: format!("expected the result object to be an array for the received ws message, response: {:?}", &obj)
 					.to_string(),
 			})?
 			.to_owned()),
