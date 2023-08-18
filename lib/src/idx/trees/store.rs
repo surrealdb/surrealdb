@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 pub type NodeId = u64;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum TreeStoreType {
 	Write,
 	Read,
