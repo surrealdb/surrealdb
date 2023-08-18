@@ -6,11 +6,12 @@ use std::time::Duration;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
+use opentelemetry::{Context as TelemetryContext, KeyValue};
 use tracing::{Level, Subscriber};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -86,8 +87,16 @@ impl Builder {
 
 	/// Install the tracing dispatcher globally
 	pub fn init(self) {
-		self.build().init()
+		self.build().init();
 	}
+}
+
+pub fn shutdown() -> Result<(), MetricsError> {
+	// Flush all telemetry data
+	opentelemetry::global::shutdown_tracer_provider();
+	metrics::shutdown(&TelemetryContext::current())?;
+
+	Ok(())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.

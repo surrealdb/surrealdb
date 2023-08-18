@@ -18,9 +18,11 @@ async fn table_definitions_can_be_scanned() {
 		name: Default::default(),
 		drop: false,
 		full: false,
+		id: None,
 		view: None,
 		permissions: Default::default(),
 		changefeed: None,
+		comment: None,
 	};
 	tx.set(&key, &value).await.unwrap();
 
@@ -52,9 +54,11 @@ async fn table_definitions_can_be_deleted() {
 		name: Default::default(),
 		drop: false,
 		full: false,
+		id: None,
 		view: None,
 		permissions: Default::default(),
 		changefeed: None,
+		comment: None,
 	};
 	tx.set(&key, &value).await.unwrap();
 

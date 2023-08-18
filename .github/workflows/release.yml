@@ -24,6 +24,8 @@ jobs:
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
@@ -54,6 +56,15 @@ jobs:
         with:
           command: make
           args: ci-workspace-coverage-complete
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3

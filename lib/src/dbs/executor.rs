@@ -1,4 +1,3 @@
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Notification;
@@ -260,7 +259,7 @@ impl<'a> Executor<'a> {
 					Ok(Value::None)
 				}
 				// Process param definition statements
-				Statement::Set(mut stm) => {
+				Statement::Set(stm) => {
 					// Create a transaction
 					let loc = self.begin(stm.writeable()).await;
 					// Check the transaction
@@ -269,18 +268,8 @@ impl<'a> Executor<'a> {
 						true => Err(Error::TxFailure),
 						// The transaction began successfully
 						false => {
-							// Check if the variable is a protected variable
-							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
-								// The variable isn't protected and can be stored
-								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
-								// The user tried to set a protected variable
-								true => Err(Error::InvalidParam {
-									// Move the parameter name, as we no longer need it
-									name: std::mem::take(&mut stm.name),
-								}),
-							};
 							// Check the statement
-							match res {
+							match stm.compute(&ctx, &opt, &self.txn(), None).await {
 								Ok(val) => {
 									// Check if writeable
 									let writeable = stm.writeable();

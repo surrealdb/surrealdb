@@ -24,6 +24,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -594,6 +595,14 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#[cfg(debug_assertions)]
+		if lock {
+			warn!("There are issues with pessimistic locking in TiKV");
+		}
+		self.transaction_inner(write, lock).await
+	}
+
+	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
@@ -635,6 +644,7 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
+			write_buffer: HashMap::new(),
 			vso: self.vso.clone(),
 		})
 	}

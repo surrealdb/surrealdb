@@ -48,6 +48,7 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
+use crate::sql::Number;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
@@ -632,6 +633,17 @@ async fn router(
 				_ => unreachable!(),
 			};
 			vars.insert(key, value);
+			Ok(DbResponse::Other(Value::None))
+		}
+		Method::Tick => {
+			let ts = match &mut params[..1] {
+				[Value::Number(Number::Int(ts))] => {
+					let ts = ts.to_owned();
+					ts as u64
+				}
+				_ => unreachable!(),
+			};
+			kvs.tick_at(ts).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {

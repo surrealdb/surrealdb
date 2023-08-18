@@ -3,6 +3,7 @@ use crate::sql::fmt::Pretty;
 use crate::sql::statement::{statements, Statement, Statements};
 use derive::Store;
 use nom::combinator::all_consuming;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
@@ -10,6 +11,7 @@ use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct Query(pub Statements);
 
 impl Deref for Query {

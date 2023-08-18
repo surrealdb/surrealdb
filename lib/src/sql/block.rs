@@ -1,4 +1,3 @@
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -22,6 +21,7 @@ use nom::combinator::map;
 use nom::multi::many0;
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
@@ -31,6 +31,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Block")]
+#[revisioned(revision = 1)]
 pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
@@ -65,18 +66,7 @@ impl Block {
 		for v in self.iter() {
 			match v {
 				Entry::Set(v) => {
-					// Check if the variable is a protected variable
-					let val = match PROTECTED_PARAM_NAMES.contains(&v.name.as_str()) {
-						// The variable isn't protected and can be stored
-						false => v.compute(&ctx, opt, txn, doc).await,
-						// The user tried to set a protected variable
-						true => {
-							return Err(Error::InvalidParam {
-								name: v.name.to_owned(),
-							})
-						}
-					}?;
-					// Set the parameter
+					let val = v.compute(&ctx, opt, txn, doc).await?;
 					ctx.add_value(v.name.to_owned(), val);
 				}
 				Entry::Ifelse(v) => {
@@ -167,6 +157,7 @@ pub fn block(i: &str) -> IResult<&str, Block> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Entry {
 	Value(Value),
 	Set(SetStatement),

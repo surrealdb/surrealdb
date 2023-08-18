@@ -2,21 +2,20 @@
 
 mod common;
 
+use std::time::Duration;
+
 use serde_json::json;
-use serial_test::serial;
 use test_log::test;
 
-use crate::common::error::TestError;
 use crate::common::{PASS, USER};
 
 #[test(tokio::test)]
-#[serial]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	// Send command
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -35,7 +34,6 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -81,7 +79,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Send the info command
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -102,7 +100,6 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -124,7 +121,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Signup
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -157,7 +154,6 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -179,7 +175,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Signup
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -198,7 +194,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Sign in
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -231,7 +227,6 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -247,7 +242,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Invalidate session
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -273,7 +268,6 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -294,7 +288,7 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	//
 
 	// Send command
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -399,7 +393,6 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
 	let table_name = "table_8B5E5635869E4FF2A35C94E8FC2CAE9A".to_string();
@@ -483,7 +476,6 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
@@ -496,7 +488,7 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
 
 	// LIVE query via live endpoint
-	let live_id = common::ws_send_msg(
+	let live_res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 				"id": "1",
@@ -508,68 +500,60 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		.unwrap(),
 	)
 	.await?;
+	let live_id = live_res["result"].as_str().unwrap();
 
 	// Create some data for notification
+	// Manually send the query and wait for multiple messages. Ordering of the messages is not guaranteed, so we could receive the notification before the query result.
 	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	let created = common::ws_query(socket, query.as_str()).await.unwrap();
-	assert_eq!(created.len(), 1);
+	let json = json!({
+		"id": "1",
+		"method": "query",
+		"params": [query],
+	});
 
-	// Receive notification
-	let res = common::ws_recv_msg(socket).await.unwrap();
+	common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
-	// Verify response contains no error
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+	assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
+	let msgs = msgs.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+
+	let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
 	assert!(
-		res.as_object()
-			.ok_or(TestError::AssertionError {
-				message: format!("Unable to retrieve object from result: {}", res)
-			})
-			.unwrap()
-			.keys()
-			.eq(["result"]),
-		"result: {}",
-		res
+		lq_notif.is_some(),
+		"Expected to find a notification for LQ id {}: {:#?}",
+		live_id,
+		msgs
 	);
-
-	// Unwrap
-	let notification = &res
-		.as_object()
-		.ok_or(TestError::NetworkError {
-			message: format!("missing json object, res: {:?}", res).to_string(),
-		})
-		.unwrap()["result"];
-	assert_eq!(
-		&notification["id"],
-		live_id["result"].as_str().unwrap(),
-		"expected a notification id to match the live query id: {} but was {}",
-		&notification,
-		live_id
-	);
-	let action = notification["action"].as_str().unwrap();
-	let result = notification["result"].as_object().unwrap();
+	// Extract the notification object
+	let lq_notif = lq_notif.unwrap();
+	let lq_notif = lq_notif["result"].as_object().unwrap();
 
 	// Verify message on individual keys since the notification ID is random
-	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
+	let action = lq_notif["action"].as_str().unwrap();
+	let result = lq_notif["result"].as_object().unwrap();
+	assert_eq!(action, "CREATE", "expected notification to be `CREATE`: {:?}", lq_notif);
+	let expected_id = format!("{}:⟨{}⟩", table_name, id);
 	assert_eq!(
-		result["id"].as_str().ok_or(TestError::AssertionError {
-			message: format!("missing id, res: {:?}", res).to_string(),
-		})?,
-		format!("{}:⟨{}⟩", table_name, id),
-		"result: {:?}",
-		res
+		result["id"].as_str(),
+		Some(expected_id.as_str()),
+		"expected notification to have id {:?}: {:?}",
+		expected_id,
+		lq_notif
 	);
 	assert_eq!(
-		result["name"].as_str().unwrap(),
-		serde_json::to_value("ok").unwrap(),
-		"result: {:?}",
-		res
+		result["name"].as_str(),
+		Some("ok"),
+		"expected notification to have name `ok`: {:?}",
+		lq_notif
 	);
 
 	Ok(())
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_without_auth().await.unwrap();
 	let table_name = "table_FD40A9A361884C56B5908A934164884A".to_string();
@@ -584,75 +568,62 @@ async fn live_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	// LIVE query via query endpoint
 	let lq_res =
 		common::ws_query(socket, format!("LIVE SELECT * FROM {};", table_name).as_str()).await?;
-	assert_eq!(lq_res.len(), 1);
-	let live_id = lq_res
-		.get(0)
-		.ok_or(TestError::AssertionError {
-			message: "Expected 1 result after len check".to_string(),
-		})
-		.unwrap();
+	assert_eq!(lq_res.len(), 1, "Expected 1 result got: {:?}", lq_res);
+	let live_id = lq_res[0]["result"].as_str().unwrap();
 
 	// Create some data for notification
+	// Manually send the query and wait for multiple messages. Ordering of the messages is not guaranteed, so we could receive the notification before the query result.
 	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	let created = common::ws_query(socket, query.as_str()).await.unwrap();
-	assert_eq!(created.len(), 1);
+	let json = json!({
+		"id": "1",
+		"method": "query",
+		"params": [query],
+	});
 
-	// Receive notification
-	let res = common::ws_recv_msg(socket).await.unwrap();
+	common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
-	// Verify response contains no error
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+	assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
+	let msgs = msgs.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+
+	let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
 	assert!(
-		res.as_object()
-			.ok_or(TestError::AssertionError {
-				message: format!("Unable to retrieve object from result: {}", res)
-			})
-			.unwrap()
-			.keys()
-			.eq(["result"]),
-		"result: {}",
-		res
+		lq_notif.is_some(),
+		"Expected to find a notification for LQ id {}: {:#?}",
+		live_id,
+		msgs
 	);
 
-	// Unwrap
-	let notification = &res
-		.as_object()
-		.ok_or(TestError::NetworkError {
-			message: format!("missing json object, res: {:?}", res).to_string(),
-		})
-		.unwrap()["result"];
-	assert_eq!(
-		&notification["id"],
-		live_id["result"].as_str().unwrap(),
-		"expected a notification id to match the live query id: {} but was {}",
-		&notification,
-		live_id
-	);
-	let action = notification["action"].as_str().unwrap();
-	let result = notification["result"].as_object().unwrap();
+	// Extract the notification object
+	let lq_notif = lq_notif.unwrap();
+	let lq_notif = lq_notif["result"].as_object().unwrap();
 
 	// Verify message on individual keys since the notification ID is random
-	assert_eq!(action, &serde_json::to_value("CREATE").unwrap(), "result: {:?}", res);
+	let action = lq_notif["action"].as_str().unwrap();
+	let result = lq_notif["result"].as_object().unwrap();
+	assert_eq!(action, "CREATE", "expected notification to be `CREATE`: {:?}", lq_notif);
+	let expected_id = format!("{}:⟨{}⟩", table_name, id);
 	assert_eq!(
-		result["id"].as_str().ok_or(TestError::AssertionError {
-			message: format!("missing id, res: {:?}", res).to_string(),
-		})?,
-		format!("{}:⟨{}⟩", table_name, id),
-		"result: {:?}",
-		res
+		result["id"].as_str(),
+		Some(expected_id.as_str()),
+		"expected notification to have id {:?}: {:?}",
+		expected_id,
+		lq_notif
 	);
 	assert_eq!(
-		result["name"].as_str().unwrap(),
-		serde_json::to_value("ok").unwrap(),
-		"result: {:?}",
-		res
+		result["name"].as_str(),
+		Some("ok"),
+		"expected notification to have name `ok`: {:?}",
+		lq_notif
 	);
 
 	Ok(())
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -664,7 +635,7 @@ async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Define variable using let
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -679,7 +650,7 @@ async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Define variable using set
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -705,7 +676,6 @@ async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -717,7 +687,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Define variable
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -741,7 +711,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0], "let_value", "result: {:?}", res);
 
 	// Unset variable
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -768,7 +738,6 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -788,7 +757,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Select data
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -812,7 +781,6 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -826,7 +794,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Insert data
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -858,7 +826,6 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -872,7 +839,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Insert data
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -898,7 +865,6 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -918,7 +884,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Insert data
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -948,7 +914,6 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -977,7 +942,7 @@ async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 	// Change / Marge data
 	//
 
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 		"id": "1",
@@ -994,7 +959,7 @@ async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 	.await;
 	assert!(res.is_ok(), "result: {:?}", res);
 
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -1030,7 +995,6 @@ async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1070,7 +1034,7 @@ async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 			"path": "original_name",
 		}
 	]);
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -1099,7 +1063,7 @@ async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 			"value": "patch_value"
 		}
 	]);
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -1135,7 +1099,6 @@ async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1168,7 +1131,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	//
 	// Delete data
 	//
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -1197,7 +1160,6 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1228,7 +1190,8 @@ async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 			"json"
 		]
 	});
-	let res = common::ws_send_msg(socket, serde_json::to_string(&msg).unwrap()).await;
+	let res =
+		common::ws_send_msg_and_wait_response(socket, serde_json::to_string(&msg).unwrap()).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Query data
@@ -1243,7 +1206,6 @@ async fn format_json() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1275,7 +1237,7 @@ async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 		]
 	}))
 	.unwrap();
-	let res = common::ws_send_msg(socket, msg).await;
+	let res = common::ws_send_msg_and_wait_response(socket, msg).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Query data
@@ -1288,7 +1250,10 @@ async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 	}))
 	.unwrap();
 
-	let res = common::ws_send_msg_with_fmt(socket, msg, common::Format::Cbor).await;
+	let res = common::ws_send_msg(socket, msg).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+
+	let res = common::ws_recv_msg_with_fmt(socket, common::Format::Cbor).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert!(res["result"].is_array(), "result: {:?}", res);
@@ -1301,7 +1266,6 @@ async fn format_cbor() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1333,7 +1297,7 @@ async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 		]
 	}))
 	.unwrap();
-	let res = common::ws_send_msg(socket, msg).await;
+	let res = common::ws_send_msg_and_wait_response(socket, msg).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 
 	// Query data
@@ -1346,7 +1310,9 @@ async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 	}))
 	.unwrap();
 
-	let res = common::ws_send_msg_with_fmt(socket, msg, common::Format::Pack).await;
+	let res = common::ws_send_msg(socket, msg).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = common::ws_recv_msg_with_fmt(socket, common::Format::Pack).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert!(res["result"].is_array(), "result: {:?}", res);
@@ -1359,7 +1325,6 @@ async fn format_pack() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -1375,7 +1340,7 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	//
 	// Run a CREATE query
 	//
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
@@ -1403,13 +1368,12 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let socket = &mut common::connect_ws(&addr).await?;
 
 	// Send command
-	let res = common::ws_send_msg(
+	let res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
 			"id": "1",
