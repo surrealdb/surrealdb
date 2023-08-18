@@ -16,6 +16,17 @@ pub struct Response {
 }
 
 impl Response {
+	pub(super) fn from_js(response: web_sys::Response) -> Result<Self, Error> {
+		let inner = lib_http::Response::builder()
+			.status(response.status())
+			.body(response)
+			.map_err(|e| BoxError::from(e))?;
+
+		Ok(Response {
+			inner,
+		})
+	}
+
 	pub fn headers(&self) -> &HeaderMap<HeaderValue> {
 		self.inner.headers()
 	}

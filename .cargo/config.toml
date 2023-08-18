@@ -1,6 +1,9 @@
 [build]
 rustflags = ["--cfg", "uuid_unstable"]
 
+[target.wasm32-unknown-unknown]
+runner = 'wasm-bindgen-test-runner'
+
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
 

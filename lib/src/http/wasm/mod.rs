@@ -3,6 +3,7 @@ use js_sys::Promise;
 use std::error::Error as StdError;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 
 mod body;
 mod response;
@@ -44,6 +45,30 @@ fn js_fetch(req: &web_sys::Request) -> Promise {
 	}
 }
 
+pub struct AbortDropper(Option<web_sys::AbortController>);
+
+impl AbortDropper {
+	pub fn new() -> Result<Self, Error> {
+		Ok(AbortDropper(Some(web_sys::AbortController::new()?)))
+	}
+
+	pub fn signal(&self) -> web_sys::AbortSignal {
+		self.0.as_ref().unwrap().signal()
+	}
+
+	pub fn done(mut self) {
+		self.0.take();
+	}
+}
+
+impl Drop for AbortDropper {
+	fn drop(&mut self) {
+		if let Some(x) = self.0.take() {
+			x.abort();
+		}
+	}
+}
+
 pub struct Backend {
 	config: Arc<ClientBuilder>,
 }
@@ -62,6 +87,27 @@ impl Backend {
 	}
 
 	pub async fn execute(&self, request: Request) -> Result<Response, Error> {
-		todo!()
+		let headers = web_sys::Headers::new()?;
+		let abort = AbortDropper::new()?;
+		if let Some(default_headers) = self.config.default_headers.as_ref() {
+			for (k, v) in default_headers.iter() {
+				headers.append(k.as_str(), v.to_str().map_err(BoxError::from)?)?;
+			}
+		}
+		for (k, v) in request.headers.iter() {
+			headers.append(k.as_str(), v.to_str().map_err(BoxError::from)?)?;
+		}
+
+		let mut init = web_sys::RequestInit::new();
+		init.headers(headers.as_ref());
+		init.body(Some(&request.body.into_js_value()));
+		init.signal(Some(&abort.signal()));
+
+		let request = web_sys::Request::new_with_str_and_init(request.url.as_str(), &init)?;
+		let response = JsFuture::from(js_fetch(&request)).await?;
+		let response = response.unchecked_into::<web_sys::Response>();
+		let response = Response::from_js(response)?;
+		abort.done();
+		Ok(response)
 	}
 }
