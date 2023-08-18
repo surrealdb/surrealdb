@@ -341,10 +341,7 @@ async fn live_live_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		}))
 		.unwrap(),
 	)
-	.await;
-
-	assert!(live_res.is_ok(), "Unexpected error from the LIVE method: {:?}", live_res);
-	let live_res = live_res.unwrap();
+	.await?;
 	let live_id = live_res["result"].as_str().unwrap();
 
 	// Create some data for notification
