@@ -11,6 +11,7 @@ use_small_heuristics = "Off"
 # -----------------------------------
 
 #blank_lines_lower_bound = 1
+#group_imports = "One"
 #indent_style = "Block"
 #match_arm_blocks = true
 #reorder_impl_items = true

@@ -148,6 +148,7 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
+	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),

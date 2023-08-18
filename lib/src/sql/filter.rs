@@ -1,4 +1,3 @@
-use crate::sql::comment::shouldbespace;
 use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::language::{language, Language};
@@ -83,7 +82,5 @@ fn filter(i: &str) -> IResult<&str, Filter> {
 }
 
 pub(super) fn filters(i: &str) -> IResult<&str, Vec<Filter>> {
-	let (i, _) = tag_no_case("FILTERS")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	separated_list1(commas, filter)(i)
 }
