@@ -11,10 +11,11 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
+	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
@@ -25,12 +26,6 @@ pub enum Index {
 		sc: Scoring,
 		order: u32,
 	},
-}
-
-impl Default for Index {
-	fn default() -> Self {
-		Self::Idx
-	}
 }
 
 impl fmt::Display for Index {
@@ -55,12 +50,7 @@ impl fmt::Display for Index {
 }
 
 pub fn index(i: &str) -> IResult<&str, Index> {
-	alt((unique, search, non_unique))(i)
-}
-
-pub fn non_unique(i: &str) -> IResult<&str, Index> {
-	let (i, _) = tag("")(i)?;
-	Ok((i, Index::Idx))
+	alt((unique, search))(i)
 }
 
 pub fn unique(i: &str) -> IResult<&str, Index> {

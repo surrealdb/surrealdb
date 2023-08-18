@@ -77,12 +77,6 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("databases".to_owned(), tmp.into());
-				// Process the logins
-				let mut tmp = Object::default();
-				for v in run.all_nl(opt.ns()).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("logins".to_owned(), tmp.into());
 				// Process the users
 				let mut tmp = Object::default();
 				for v in run.all_ns_users(opt.ns()).await?.iter() {
@@ -105,12 +99,6 @@ impl InfoStatement {
 				let mut run = txn.lock().await;
 				// Create the result set
 				let mut res = Object::default();
-				// Process the logins
-				let mut tmp = Object::default();
-				for v in run.all_dl(opt.ns(), opt.db()).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("logins".to_owned(), tmp.into());
 				// Process the users
 				let mut tmp = Object::default();
 				for v in run.all_db_users(opt.ns(), opt.db()).await?.iter() {
