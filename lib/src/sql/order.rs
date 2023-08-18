@@ -8,11 +8,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Orders(pub Vec<Order>);
 
 impl Deref for Orders {
@@ -37,6 +39,7 @@ impl fmt::Display for Orders {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Order {
 	pub order: Idiom,
 	pub random: bool,

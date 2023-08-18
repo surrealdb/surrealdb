@@ -5,11 +5,13 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{plain as idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
@@ -34,6 +36,7 @@ impl fmt::Display for Fetchs {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Fetch(pub Idiom);
 
 impl Deref for Fetch {

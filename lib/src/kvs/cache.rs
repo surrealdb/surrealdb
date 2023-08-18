@@ -1,3 +1,4 @@
+use crate::idg::u32::U32;
 use crate::kvs::kv::Key;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -37,6 +38,7 @@ pub enum Entry {
 	Nts(Arc<[DefineTokenStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
+	Seq(U32),
 	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
 }

@@ -105,23 +105,54 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
-	use crate::sql::statements::DefineTableStatement;
+	use crate::sql::statements::show::ShowSince;
+	use crate::sql::statements::{
+		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
+	};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
 	use crate::vs;
 
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
+		let ts = crate::sql::Datetime::default();
 		let ns = "myns";
 		let db = "mydb";
 		let tb = super::Ident("mytb".to_string());
+		let mut dns = DefineNamespaceStatement::default();
+		dns.name = super::Ident(ns.to_string());
+		let mut ddb = DefineDatabaseStatement::default();
+		ddb.name = super::Ident(db.to_string());
+		ddb.changefeed = Some(ChangeFeed {
+			expiry: Duration::from_secs(10),
+		});
 		let mut dtb = DefineTableStatement::default();
 		dtb.name = tb.clone();
 		dtb.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(0),
+			expiry: Duration::from_secs(10),
 		});
 
 		let ds = Datastore::new("memory").await.unwrap();
+
+		//
+		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
+		// work.
+		//
+
+		let mut tx0 = ds.transaction(true, false).await.unwrap();
+		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
+		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
+		let tb = tb.clone();
+		tx0.put(&crate::key::database::tb::new(ns, db, tb.as_ref()), dtb.clone()).await.unwrap();
+		tx0.commit().await.unwrap();
+
+		// Let the db remember the timestamp for the current versionstamp
+		// so that we can replay change feeds from the timestamp later.
+		ds.tick_at(ts.0.timestamp().try_into().unwrap()).await.unwrap();
+
+		//
+		// Write things to the table.
+		//
 
 		let mut tx1 = ds.transaction(true, false).await.unwrap();
 		let thing_a = Thing {
@@ -168,13 +199,21 @@ mod tests {
 
 		let mut tx4 = ds.transaction(true, false).await.unwrap();
 		let tb = tb.clone();
-		let tb = Some(tb.0.as_ref());
-		let r = crate::cf::read(&mut tx4, ns, db, tb, Some(start), Some(10)).await.unwrap();
+		let r = crate::cf::read(
+			&mut tx4,
+			ns,
+			db,
+			Some(tb.0.as_ref()),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx4.commit().await.unwrap();
 
 		let mut want: Vec<ChangeSet> = Vec::new();
 		want.push(ChangeSet(
-			vs::u64_to_versionstamp(1),
+			vs::u64_to_versionstamp(2),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![TableMutation::Set(
@@ -184,7 +223,7 @@ mod tests {
 			)]),
 		));
 		want.push(ChangeSet(
-			vs::u64_to_versionstamp(2),
+			vs::u64_to_versionstamp(3),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![TableMutation::Set(
@@ -194,7 +233,7 @@ mod tests {
 			)]),
 		));
 		want.push(ChangeSet(
-			vs::u64_to_versionstamp(3),
+			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -214,18 +253,28 @@ mod tests {
 
 		let mut tx5 = ds.transaction(true, false).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(3), Some(10)).await.unwrap();
+		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
 		let mut tx6 = ds.transaction(true, false).await.unwrap();
-		let r = crate::cf::read(&mut tx6, ns, db, tb, Some(start), Some(10)).await.unwrap();
+		let tb = tb.clone();
+		let r = crate::cf::read(
+			&mut tx6,
+			ns,
+			db,
+			Some(tb.0.as_ref()),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx6.commit().await.unwrap();
 
 		let mut want: Vec<ChangeSet> = Vec::new();
 		want.push(ChangeSet(
-			vs::u64_to_versionstamp(3),
+			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -240,6 +289,23 @@ mod tests {
 				],
 			)]),
 		));
+		assert_eq!(r, want);
+
+		// Now we should see the gc_all results
+		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
+
+		let mut tx7 = ds.transaction(true, false).await.unwrap();
+		let r = crate::cf::read(
+			&mut tx7,
+			ns,
+			db,
+			Some(tb.0.as_ref()),
+			ShowSince::Timestamp(ts),
+			Some(10),
+		)
+		.await
+		.unwrap();
+		tx7.commit().await.unwrap();
 		assert_eq!(r, want);
 	}
 }

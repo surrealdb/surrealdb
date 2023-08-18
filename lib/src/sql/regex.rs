@@ -3,6 +3,7 @@ use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::character::complete::anychar;
 use nom::character::complete::char;
+use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
 	Deserialize, Deserializer, Serialize, Serializer,
@@ -17,7 +18,8 @@ use std::str::FromStr;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
 #[derive(Clone)]
-pub struct Regex(pub(super) regex::Regex);
+#[revisioned(revision = 1)]
+pub struct Regex(pub regex::Regex);
 
 impl Regex {
 	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.

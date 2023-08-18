@@ -15,11 +15,13 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::{map, not, peek};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Part {
 	All,
 	Flatten,

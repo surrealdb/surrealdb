@@ -1,8 +1,8 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::key::change;
-use crate::key::database;
 use crate::kvs::Transaction;
+use crate::sql::statements::show::ShowSince;
 use crate::vs;
 
 // Reads the change feed for a specific database or a table,
@@ -18,18 +18,23 @@ pub async fn read(
 	ns: &str,
 	db: &str,
 	tb: Option<&str>,
-	start: Option<u64>,
+	start: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>, Error> {
-	// Get the current timestamp
-	let seq = database::vs::new(ns, db);
-
 	let beg = match start {
-		Some(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
-		None => {
-			let ts = tx.get_timestamp(seq, false).await?;
-			change::prefix_ts(ns, db, ts)
-		} // None => dc::prefix(ns, db),
+		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
+		ShowSince::Timestamp(x) => {
+			let ts = x.0.timestamp() as u64;
+			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
+			match vs {
+				Some(vs) => change::prefix_ts(ns, db, vs),
+				None => {
+					return Err(Error::Internal(
+						"no versionstamp associated to this timestamp exists yet".to_string(),
+					))
+				}
+			}
+		}
 	};
 	let end = change::suffix(ns, db);
 

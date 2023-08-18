@@ -13,6 +13,7 @@ use nom::combinator::map;
 use nom::error::ErrorKind;
 use nom::sequence::delimited;
 use nom::{error_position, Err};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops;
@@ -24,6 +25,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
+#[revisioned(revision = 1)]
 pub struct Datetime(#[serde(with = "ts_binary")] pub DateTime<Utc>);
 
 impl Default for Datetime {

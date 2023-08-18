@@ -12,10 +12,12 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
