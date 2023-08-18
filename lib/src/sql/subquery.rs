@@ -16,6 +16,7 @@ use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::combinator::map;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
@@ -24,6 +25,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
+#[revisioned(revision = 1)]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),

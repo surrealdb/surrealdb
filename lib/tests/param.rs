@@ -26,7 +26,6 @@ async fn define_global_param() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			analyzers: {},
-			logins: {},
 			tokens: {},
 			functions: {},
 			params: { test: 'DEFINE PARAM $test VALUE 12345' },

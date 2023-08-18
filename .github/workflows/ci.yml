@@ -171,6 +171,16 @@ jobs:
         with:
           command: make
           args: ci-cli-integration
+      
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+          
 
   http-server:
     name: HTTP integration tests
@@ -326,6 +336,15 @@ jobs:
           command: make
           args: ci-api-integration-ws
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   http-engine:
     name: HTTP engine
     runs-on: ubuntu-latest
@@ -363,42 +382,60 @@ jobs:
           command: make
           args: ci-api-integration-http
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   any-engine:
-      name: Any engine
-      runs-on: ubuntu-latest
-      steps:
+    name: Any engine
+    runs-on: ubuntu-latest
+    steps:
 
-        - name: Install stable toolchain
-          uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-        - name: Checkout sources
-          uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-        - name: Setup cache
-          uses: Swatinem/rust-cache@v2
-          with:
-            save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-        - name: Install dependencies
-          run: |
-            sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-        - name: Setup FoundationDB
-          uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
-          with:
-            version: "7.1.30"
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
 
-        - name: Install cargo-make
-          uses: actions-rs/cargo@v1
-          with:
-            command: install
-            args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-        - name: Test any engine
-          uses: actions-rs/cargo@v1
-          with:
-            command: make
-            args: ci-api-integration-any
+      - name: Test any engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-any
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
   mem-engine:
     name: Memory engine
@@ -549,6 +586,15 @@ jobs:
           command: make
           args: ci-api-integration-tikv
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   fdb-engine:
     name: FoundationDB engine
     runs-on: ubuntu-latest
@@ -581,3 +627,12 @@ jobs:
         with:
           command: make
           args: ci-api-integration-fdb
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true

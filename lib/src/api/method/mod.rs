@@ -21,6 +21,7 @@ mod select;
 mod set;
 mod signin;
 mod signup;
+mod tick;
 mod unset;
 mod update;
 mod use_db;
@@ -57,6 +58,7 @@ pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
+pub use tick::Tick;
 pub use unset::Unset;
 pub use update::Update;
 pub use use_db::UseDb;
@@ -103,6 +105,7 @@ impl Method {
 			Method::Set => "set",
 			Method::Signin => "signin",
 			Method::Signup => "signup",
+			Method::Tick => "tick",
 			Method::Unset => "unset",
 			Method::Update => "update",
 			Method::Use => "use",
@@ -901,6 +904,27 @@ where
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
+		}
+	}
+
+	/// Runs the embedded datastore's "tick" operation at the specified timestamp.
+	/// This is used by the client to periodically run node maintenance tasks
+	/// which are usually run by the server itself in a client-server setup.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.tick(123).await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn tick(&self, ts: u64) -> Tick<C> {
+		Tick {
+			router: self.router.extract(),
+			ts,
 		}
 	}
 

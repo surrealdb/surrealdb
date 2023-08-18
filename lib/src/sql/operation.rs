@@ -1,10 +1,12 @@
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
+#[revisioned(revision = 1)]
 pub enum Operation {
 	Add {
 		path: Idiom,

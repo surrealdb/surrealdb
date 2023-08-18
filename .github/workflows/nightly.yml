@@ -57,6 +57,15 @@ jobs:
           command: make
           args: ci-workspace-coverage
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
         with:

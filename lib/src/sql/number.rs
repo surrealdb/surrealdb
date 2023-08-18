@@ -9,6 +9,7 @@ use nom::character::complete::i64;
 use nom::combinator::{map, opt};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
+use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -23,6 +24,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
+#[revisioned(revision = 1)]
 pub enum Number {
 	Int(i64),
 	Float(f64),
