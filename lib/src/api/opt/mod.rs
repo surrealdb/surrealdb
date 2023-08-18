@@ -402,6 +402,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		},
 		Value::Cast(cast) => json!(cast),
 		Value::Function(function) => json!(function),
+		Value::Query(query) => json!(query),
 		Value::Subquery(subquery) => json!(subquery),
 		Value::Expression(expression) => json!(expression),
 	}

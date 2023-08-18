@@ -40,6 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
+use crate::sql::Query;
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -65,7 +66,7 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Values(pub Vec<Value>);
 
@@ -152,6 +153,7 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	Query(Query),
 	// Add new variants here
 }
 
@@ -858,6 +860,11 @@ impl Value {
 	/// Check if this Value is a Strand
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
+	}
+
+	/// Check if this Value is a Query
+	pub fn is_query(&self) -> bool {
+		matches!(self, Value::Query(_))
 	}
 
 	/// Check if this Value is a float Number
@@ -2472,6 +2479,7 @@ impl fmt::Display for Value {
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
+			Value::Query(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),

@@ -215,7 +215,7 @@ pub(crate) fn router(
 							let (id, method, param) = request;
 							let params = match param.query {
 								Some((query, bindings)) => {
-									vec![query.to_string().into(), bindings.into()]
+									vec![query.into(), bindings.into()]
 								}
 								None => param.other,
 							};
