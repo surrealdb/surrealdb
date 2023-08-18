@@ -61,7 +61,6 @@ impl Child {
 		if status.success() {
 			Ok(buf)
 		} else {
-			error!("Status is {:?}", output.status);
 			Err(buf)
 		}
 	}

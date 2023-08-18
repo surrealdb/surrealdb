@@ -312,9 +312,8 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-#[serial]
 async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let table_name = "table_D250F804BC244558982DB7D8712F6BE3".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -325,10 +324,10 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
 
 	// LIVE query via live endpoint
-	let live_response = common::ws_send_msg(
+	let live_res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
-				"id": "BE282C96-A64C-414C-BADF-15DCCE534D6D",
+				"id": "1",
 				"method": "live",
 				"params": [
 					table_name
@@ -336,25 +335,14 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		}))
 		.unwrap(),
 	)
-	.await
-	.unwrap();
-	let live_id = live_response
-		.as_object()
-		.ok_or(TestError::AssertionError {
-			message: "Expected live query response to be object".to_string(),
-		})
-		.unwrap()
-		.get("result")
-		.ok_or(TestError::AssertionError {
-			message: "Expected live query response to contain a result entry".to_string(),
-		})
-		.unwrap();
+	.await?;
+	let live_id = live_res["result"].as_str().unwrap();
 
 	// KILL query via kill endpoint
-	let kill_res = common::ws_send_msg(
+	common::ws_send_msg(
 		socket,
 		serde_json::to_string(&json!({
-				"id": "F35647F1-E87F-4A05-A629-2C8A7377F7B7",
+				"id": "1",
 				"method": "kill",
 				"params": [
 					live_id
@@ -362,39 +350,38 @@ async fn kill_kill_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		}))
 		.unwrap(),
 	)
-	.await
-	.unwrap();
-	assert_eq!(kill_res["status"], serde_json::Value::Null, "result: {:?}", kill_res);
+	.await?;
+
+	// Verify we killed the query
+	let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(1000)).await?;
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+	let msg = msgs.get(0).unwrap();
+	assert!(msg["status"].is_null(), "unexpected status: {:?}", msg);
 
 	// Create some data for notification
-	let id = "839CF28F518F4BBAB57C6AC1CFE18051";
+	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	println!("query: {}", query);
-	let created = common::ws_query(socket, query.as_str()).await.unwrap();
-	assert_eq!(created.len(), 1);
+	let _ = common::ws_query(socket, query.as_str()).await.unwrap();
+	let json = json!({
+		"id": "1",
+		"method": "query",
+		"params": [query],
+	});
 
-	// Receive notification
-	let res = common::ws_recv_msg(socket).await;
-	match &res {
-		Err(e) => {
-			if let Some(TestError::NetworkError {
-				..
-			}) = e.downcast_ref::<TestError>()
-			{
-			} else {
-				panic!("Expected a network error, but got: {:?}", e)
-			}
-		}
-		Ok(v) => {
-			panic!("Expected a network error, but got: {:?}", v)
-		}
-	}
+	common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+
+	// Wait some time for all messages to arrive, and then verify we didn't get any notification
+	let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(500)).await?;
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+	let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
+	assert!(lq_notif.is_none(), "Expected to find no notifications, found 1: {:#?}", msgs);
+
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-	let (addr, _server) = common::start_server(false, false, true).await.unwrap();
+	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	let table_name = "table_8B5E5635869E4FF2A35C94E8FC2CAE9A".to_string();
 
 	let socket = &mut common::connect_ws(&addr).await?;
@@ -405,10 +392,10 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 	let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
 
 	// LIVE query via live endpoint
-	let live_response = common::ws_send_msg(
+	let live_res = common::ws_send_msg_and_wait_response(
 		socket,
 		serde_json::to_string(&json!({
-				"id": "29EE2E72-D472-4AEF-BB50-6576DF69577F",
+				"id": "1",
 				"method": "live",
 				"params": [
 					table_name
@@ -416,26 +403,15 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		}))
 		.unwrap(),
 	)
-	.await
-	.unwrap();
-	let live_id = live_response
-		.as_object()
-		.ok_or(TestError::AssertionError {
-			message: "Expected live query response to be object".to_string(),
-		})
-		.unwrap()
-		.get("result")
-		.ok_or(TestError::AssertionError {
-			message: "Expected live query response to contain a result entry".to_string(),
-		})
-		.unwrap();
+	.await?;
+	let live_id = live_res["result"].as_str().unwrap();
 
 	// KILL query via kill endpoint
-	let kill_query = format!("KILL {live_id}");
-	let kill_res = common::ws_send_msg(
+	let kill_query = format!("KILL '{live_id}'");
+	common::ws_send_msg(
 		socket,
 		serde_json::to_string(&json!({
-				"id": "9215D428-1D42-419E-9554-FA23568795DF",
+				"id": "1",
 				"method": "query",
 				"params": [
 					kill_query
@@ -443,35 +419,32 @@ async fn kill_query_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		}))
 		.unwrap(),
 	)
-	.await
-	.unwrap();
-	let response_error = kill_res["result"].as_object().and_then(|map| map.get("error"));
-	assert!(response_error.is_none(), "resp error: {:?}, response: {:?}", response_error, kill_res);
-	assert_eq!(kill_res["status"], serde_json::Value::Null, "result: {:?}", kill_res);
+	.await?;
+
+	// Verify we killed the query
+	let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(1000)).await?;
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+	let msg = msgs.get(0).unwrap();
+	assert!(msg["status"].is_null(), "unexpected status: {:?}", msg);
 
 	// Create some data for notification
-	let id = "FFE4CB54709840D3ACBE6C86E1148035";
+	let id = "an-id-goes-here";
 	let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
-	println!("query: {}", query);
-	let created = common::ws_query(socket, query.as_str()).await.unwrap();
-	assert_eq!(created.len(), 1);
+	let _ = common::ws_query(socket, query.as_str()).await.unwrap();
+	let json = json!({
+		"id": "1",
+		"method": "query",
+		"params": [query],
+	});
 
-	// Receive notification
-	let res = common::ws_recv_msg(socket).await;
-	match &res {
-		Err(e) => {
-			if let Some(TestError::NetworkError {
-				..
-			}) = e.downcast_ref::<TestError>()
-			{
-			} else {
-				panic!("Expected a network error, but got: {:?}", e)
-			}
-		}
-		Ok(v) => {
-			panic!("Expected a network error, but got: {:?}", v)
-		}
-	}
+	common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+
+	// Wait some time for all messages to arrive, and then verify we didn't get any notification
+	let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(500)).await?;
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", msgs);
+	let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
+	assert!(lq_notif.is_none(), "Expected to find no notifications, found 1: {:#?}", msgs);
+
 	Ok(())
 }
 
