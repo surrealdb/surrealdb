@@ -7,6 +7,7 @@ use nom::character::complete::char;
 use nom::combinator::value;
 use nom::sequence::preceded;
 use nom::Err::Failure;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -27,6 +28,7 @@ const TRAILING_SURROGATES: RangeInclusive<u16> = 0xDC00..=0xDFFF;
 /// A string that doesn't contain NUL bytes.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
+#[revisioned(revision = 1)]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {

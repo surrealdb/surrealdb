@@ -143,7 +143,7 @@ run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"]
 category = "CI - SERVICES"
 dependencies = ["build-surrealdb"]
 script = """
-   #!/bin/bash
+   #!/bin/bash -ex
 
    target/debug/surreal start ${_START_SURREALDB_PATH} &>/tmp/surrealdb.log &
 
@@ -163,18 +163,20 @@ script = """
 
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
-script = "kill $(cat /tmp/surreal.pid) || true"
+script = """
+        kill $(cat /tmp/surreal.pid) || true
+        sleep 5
+        kill -9 $(cat /tmp/surreal.pid) || true
+"""
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
 script = """
-   #!/bin/bash
+   #!/bin/bash -ex
 
    ${HOME}/.tiup/bin/tiup install pd tikv playground
 
    ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &>/tmp/tiup.log &
-
-   ${HOME}/.tiup/bin/tiup clean --all
 
    echo $! > /tmp/tiup.pid
 

@@ -17,7 +17,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
-use crate::sql::serde::deserialize;
+use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -172,7 +172,8 @@ pub(crate) fn router(
 			let mut request = BTreeMap::new();
 			request.insert("method".to_owned(), PING_METHOD.into());
 			let value = Value::from(request);
-			Message::Binary(value.into())
+			let value = serialize(&value).unwrap();
+			Message::Binary(value)
 		};
 
 		let mut vars = IndexMap::new();
@@ -229,6 +230,10 @@ pub(crate) fn router(
 										vars.remove(key);
 									}
 								}
+								Method::Tick => {
+									// Remote backend doesn't support tick
+									return;
+								}
 								_ => {}
 							}
 							let method_str = match method {
@@ -244,7 +249,8 @@ pub(crate) fn router(
 								}
 								let payload = Value::from(request);
 								trace!("Request {payload}");
-								Message::Binary(payload.into())
+								let payload = serialize(&payload).unwrap();
+								Message::Binary(payload)
 							};
 							if let Method::Authenticate
 							| Method::Invalidate

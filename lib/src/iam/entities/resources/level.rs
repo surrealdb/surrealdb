@@ -1,3 +1,4 @@
+use revision::revisioned;
 use std::{
 	collections::{HashMap, HashSet},
 	str::FromStr,
@@ -7,6 +8,7 @@ use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Level {
 	#[default]
 	No,

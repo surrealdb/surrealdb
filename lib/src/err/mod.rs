@@ -5,11 +5,10 @@ use crate::sql::value::Value;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-use bung::encode::Error as SerdeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use revision::Error as RevisionError;
 use serde::Serialize;
-use std::borrow::Cow;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
@@ -32,6 +31,10 @@ pub enum Error {
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Deprecated(String),
+
+	/// A custom error has been thrown
+	#[error("{0}")]
+	Thrown(String),
 
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
@@ -441,20 +444,20 @@ pub enum Error {
 	#[error("Expected a {into} but found {from}")]
 	CoerceTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to convert a value to another value
 	#[error("Expected a {into} but cannot convert {from} into a {into}")]
 	ConvertTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
 	LengthInvalid {
-		kind: Cow<'static, str>,
+		kind: String,
 		size: usize,
 	},
 
@@ -494,10 +497,6 @@ pub enum Error {
 	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
-	/// Represents an underlying error with Serde encoding / decoding
-	#[error("Serde error: {0}")]
-	Serde(#[from] SerdeError),
-
 	/// Represents an underlying error with IO encoding / decoding
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
@@ -509,6 +508,10 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// Represents an underlying error with versioned data encoding / decoding
+	#[error("Versioned error: {0}")]
+	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]

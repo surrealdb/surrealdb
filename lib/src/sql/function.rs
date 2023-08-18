@@ -21,6 +21,7 @@ use nom::combinator::recognize;
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -29,6 +30,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
+#[revisioned(revision = 1)]
 pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),

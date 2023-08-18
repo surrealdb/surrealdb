@@ -14,6 +14,7 @@ use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -22,6 +23,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
+#[revisioned(revision = 1)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,

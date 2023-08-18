@@ -6,6 +6,7 @@ use crate::sql::thing::{thing, Thing};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -13,6 +14,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Edges")]
+#[revisioned(revision = 1)]
 pub struct Edges {
 	pub dir: Dir,
 	pub from: Thing,

@@ -7,6 +7,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
 use crate::sql::operator::{self, Operator};
 use crate::sql::value::{single, value, Value};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -16,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 /// Binary expressions.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
+#[revisioned(revision = 1)]
 pub enum Expression {
 	Unary {
 		o: Operator,
