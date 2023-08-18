@@ -151,11 +151,11 @@ impl Processor {
 			},
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
-					self.query(s).await.map(Into::into).map_err(Into::into)
+				Ok((v, o)) if (v.is_strand() || v.is_query()) && o.is_none_or_null() => {
+					self.query(v).await.map(Into::into).map_err(Into::into)
 				}
-				Ok((Value::Strand(s), Value::Object(o))) => {
-					self.query_with(s, o).await.map(Into::into).map_err(Into::into)
+				Ok((v, Value::Object(o))) if v.is_strand() || v.is_query() => {
+					self.query_with(v, o).await.map(Into::into).map_err(Into::into)
 				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
@@ -262,7 +262,7 @@ impl Processor {
 			=> &self.vars
 		};
 		// Execute the query on the database
-		let mut res = self.query_with(Strand::from(sql), Object::from(var)).await?;
+		let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
 		// Extract the first query result
 		let response = res.remove(0);
 		match response.result {
@@ -283,7 +283,7 @@ impl Processor {
 			=> &self.vars
 		};
 		// Execute the query on the database
-		let mut res = self.query_with(Strand::from(sql), Object::from(var)).await?;
+		let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
 		// Extract the first query result
 		let response = res.remove(0);
 		match response.result {
@@ -490,13 +490,18 @@ impl Processor {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, sql: Strand) -> Result<Vec<Response>, Error> {
+	async fn query(&self, sql: Value) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var).await?;
+		let res = match sql {
+			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
+			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			_ => unreachable!(),
+		};
+
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;
@@ -505,13 +510,17 @@ impl Processor {
 		Ok(res)
 	}
 
-	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Vec<Response>, Error> {
+	async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var).await?;
+		let res = match sql {
+			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
+			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			_ => unreachable!(),
+		};
 		// Post-process hooks for web layer
 		for response in &res {
 			self.handle_live_query_results(response).await;

@@ -20,7 +20,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub enum InfoStatement {
 	Root,
