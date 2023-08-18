@@ -127,6 +127,8 @@ pub mod err;
 #[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]
+pub mod idg;
+#[doc(hidden)]
 pub mod idx;
 #[doc(hidden)]
 pub mod key;

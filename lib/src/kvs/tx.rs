@@ -6,6 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
+use crate::idg::u32::U32;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -37,6 +38,7 @@ use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -50,6 +52,7 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
+	pub(super) write_buffer: HashMap<Key, ()>,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
@@ -1865,6 +1868,7 @@ impl Transaction {
 					let key = crate::key::root::ns::new(ns);
 					let val = DefineNamespaceStatement {
 						name: ns.to_owned().into(),
+						id: None,
 					};
 					self.put(key, &val).await?;
 					Ok(val)
@@ -1894,6 +1898,7 @@ impl Transaction {
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
 						changefeed: None,
+						id: None,
 					};
 					self.put(key, &val).await?;
 					Ok(val)
@@ -2052,6 +2057,7 @@ impl Transaction {
 					let key = crate::key::root::ns::new(ns);
 					let val = DefineNamespaceStatement {
 						name: ns.to_owned().into(),
+						id: None,
 					};
 					self.put(key, &val).await?;
 					Ok(Arc::new(val))
@@ -2081,6 +2087,7 @@ impl Transaction {
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
 						changefeed: None,
+						id: None,
 					};
 					self.put(key, &val).await?;
 					Ok(Arc::new(val))
@@ -2394,6 +2401,138 @@ impl Transaction {
 		}
 	}
 
+	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
+		let seq = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Seq(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?;
+			if let Some(val) = val {
+				U32::new(key.clone(), Some(val)).await?
+			} else {
+				U32::new(key.clone(), None).await?
+			}
+		};
+
+		Ok(seq)
+	}
+
+	// get_next_db_id will get the next db id for the given namespace.
+	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
+		let key = crate::key::namespace::di::new(ns).encode().unwrap();
+		let mut seq = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Seq(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?;
+			if let Some(val) = val {
+				U32::new(key.clone(), Some(val)).await?
+			} else {
+				U32::new(key.clone(), None).await?
+			}
+		};
+
+		let id = seq.get_next_id();
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(id)
+	}
+
+	// remove_db_id removes the given db id from the sequence.
+	#[allow(unused)]
+	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
+		let key = crate::key::namespace::di::new(ns).encode().unwrap();
+		let mut seq = self.get_idg(key.clone()).await?;
+
+		seq.remove_id(db);
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(())
+	}
+
+	// get_next_db_id will get the next tb id for the given namespace and database.
+	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
+		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
+		let mut seq = self.get_idg(key.clone()).await?;
+
+		let id = seq.get_next_id();
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(id)
+	}
+
+	// remove_tb_id removes the given tb id from the sequence.
+	#[allow(unused)]
+	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
+		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
+		let mut seq = self.get_idg(key.clone()).await?;
+
+		seq.remove_id(tb);
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(())
+	}
+
+	// get_next_ns_id will get the next ns id.
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
+		let key = crate::key::root::ni::Ni::default().encode().unwrap();
+		let mut seq = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Seq(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?;
+			if let Some(val) = val {
+				U32::new(key.clone(), Some(val)).await?
+			} else {
+				U32::new(key.clone(), None).await?
+			}
+		};
+
+		let id = seq.get_next_id();
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(id)
+	}
+
+	// remove_ns_id removes the given ns id from the sequence.
+	#[allow(unused)]
+	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
+		let key = crate::key::root::ni::Ni::default().encode().unwrap();
+		let mut seq = self.get_idg(key.clone()).await?;
+
+		seq.remove_id(ns);
+
+		self.cache.set(key.clone(), Entry::Seq(seq));
+
+		self.write_buffer.insert(key.clone(), ());
+
+		Ok(())
+	}
+
 	// complete_changes will complete the changefeed recording for the given namespace and database.
 	//
 	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
@@ -2411,6 +2550,20 @@ impl Transaction {
 	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
 	// non-FDB backends.
 	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
+		let mut buf = self.write_buffer.clone();
+		let writes = buf.drain();
+		for (k, _) in writes {
+			let v = self.cache.get(&k).unwrap();
+			let mut seq = if let Entry::Seq(v) = v {
+				v
+			} else {
+				unreachable!();
+			};
+			if let Some((k, v)) = seq.finish() {
+				self.set(k, v).await?
+			}
+		}
+
 		let changes = self.cf.get();
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
@@ -2678,6 +2831,50 @@ mod tests {
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0], data);
+		txn.commit().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_seqs() {
+		let ds = Datastore::new("memory").await.unwrap();
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		let nsid = txn.get_next_ns_id().await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+		assert_eq!(nsid, 0);
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		let dbid = txn.get_next_db_id(nsid).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+		assert_eq!(dbid, 0);
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		let tbid1 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+		assert_eq!(tbid1, 0);
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		let tbid2 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+		assert_eq!(tbid2, 1);
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		txn.remove_tb_id(nsid, dbid, tbid1).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		txn.remove_db_id(nsid, dbid).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
+		txn.commit().await.unwrap();
+
+		let mut txn = ds.transaction(true, false).await.unwrap();
+		txn.remove_ns_id(nsid).await.unwrap();
+		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 	}
 }
