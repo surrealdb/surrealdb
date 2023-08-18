@@ -4,7 +4,6 @@ use axum::Extension;
 use axum::Router;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
-use surrealdb::{channel, sql};
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 

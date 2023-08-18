@@ -89,7 +89,7 @@ impl Connection {
 		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &ws_id {
 				trace!("Removing live query: {}", key);
-				live_queries_to_gc.push(key.clone());
+				live_queries_to_gc.push(*key);
 				return false;
 			}
 			true

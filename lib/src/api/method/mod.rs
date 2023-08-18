@@ -916,8 +916,8 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engine::any::connect("mem://").unwrap();
-	/// db.tick_at(123).await.unwrap();
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.tick(123);
 	/// # Ok(())
 	/// # }
 	/// ```
