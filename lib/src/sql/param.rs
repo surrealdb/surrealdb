@@ -6,6 +6,7 @@ use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::value::Value;
 use nom::character::complete::char;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
@@ -15,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Param")]
+#[revisioned(revision = 1)]
 pub struct Param(pub Ident);
 
 impl From<Ident> for Param {

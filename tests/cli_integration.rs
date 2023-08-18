@@ -175,30 +175,20 @@ async fn all_commands() {
 
 #[test(tokio::test)]
 async fn start_tls() {
-	// Capute the server's stdout/stderr
-	temp_env::async_with_vars(
-		[
-			("SURREAL_TEST_SERVER_STDOUT", Some("piped")),
-			("SURREAL_TEST_SERVER_STDERR", Some("piped")),
-		],
-		async {
-			let (_, server) = common::start_server(StartServerArguments {
-				auth: false,
-				tls: true,
-				wait_is_ready: false,
-				tick_interval: ONE_SEC,
-			})
-			.await
-			.unwrap();
+	let (_, server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: true,
+		wait_is_ready: false,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
 
-			std::thread::sleep(std::time::Duration::from_millis(2000));
-			let output = server.kill().output().err().unwrap();
+	std::thread::sleep(std::time::Duration::from_millis(2000));
+	let output = server.kill().output().err().unwrap();
 
-			// Test the crt/key args but the keys are self signed so don't actually connect.
-			assert!(output.contains("Started web server"), "couldn't start web server: {output}");
-		},
-	)
-	.await;
+	// Test the crt/key args but the keys are self signed so don't actually connect.
+	assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 }
 
 #[test(tokio::test)]

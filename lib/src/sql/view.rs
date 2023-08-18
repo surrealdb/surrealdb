@@ -7,10 +7,12 @@ use crate::sql::table::{tables, Tables};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct View {
 	pub expr: Fields,
 	pub what: Tables,

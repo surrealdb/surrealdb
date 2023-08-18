@@ -15,11 +15,13 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
