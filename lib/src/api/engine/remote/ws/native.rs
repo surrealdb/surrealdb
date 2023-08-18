@@ -230,6 +230,10 @@ pub(crate) fn router(
 										vars.remove(key);
 									}
 								}
+								Method::Tick => {
+									// Remote backend doesn't support tick
+									return;
+								}
 								_ => {}
 							}
 							let method_str = match method {
