@@ -2636,6 +2636,7 @@ impl Transaction {
 
 	#[allow(unused_variables)]
 	fn check_level(&mut self, check: Check) {
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
