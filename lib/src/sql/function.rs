@@ -178,7 +178,7 @@ impl Function {
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
-					run.get_fc(opt.ns(), opt.db(), s).await?
+					run.get_db_function(opt.ns(), opt.db(), s).await?
 				};
 				// Check permissions
 				if opt.check_perms(Action::View) {

@@ -38,9 +38,10 @@ pub enum Entry {
 	Nus(Arc<[DefineUserStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
-	Seq(U32),
 	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
+	// Sequences
+	Seq(U32),
 }
 
 #[derive(Default)]

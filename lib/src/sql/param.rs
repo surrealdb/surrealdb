@@ -75,7 +75,7 @@ impl Param {
 						// Claim transaction
 						let mut run = txn.lock().await;
 						// Get the param definition
-						run.get_pa(opt.ns(), opt.db(), v).await
+						run.get_db_param(opt.ns(), opt.db(), v).await
 					};
 					// Check if the param has been set globally
 					match val {
