@@ -33,11 +33,11 @@ impl TestContext {
 
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
-pub(crate) async fn init() -> Result<TestContext, Error> {
-	let db = new_ds().await;
+pub(crate) async fn init(node_id: Uuid) -> Result<TestContext, Error> {
+	let db = new_ds(node_id).await;
 	return Ok(TestContext {
 		db,
-		context_id: Uuid::new_v4().to_string(), // The context does not always have to be a uuid
+		context_id: node_id.to_string(), // The context does not always have to be a uuid
 	});
 }
 

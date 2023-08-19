@@ -84,15 +84,23 @@ impl Connection {
 			ws_id,
 			WebSocketRef(internal_sender.clone(), rpc.read().await.graceful_shutdown.clone()),
 		);
-
+		let mut live_queries_to_gc = Vec::new();
 		// Remove all live queries
 		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &ws_id {
 				trace!("Removing live query: {}", key);
+				live_queries_to_gc.push(*key);
 				return false;
 			}
 			true
 		});
+
+		// Garbage collect Live Query
+		if let Err(e) =
+			DB.get().unwrap().garbage_collect_dead_session(live_queries_to_gc.as_slice()).await
+		{
+			error!("Failed to garbage collect dead sessions: {:?}", e);
+		}
 
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));

@@ -1,4 +1,3 @@
-use crate::sql::comment::shouldbespace;
 use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::language::{language, Language};
@@ -11,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Filter {
 	Ascii,
@@ -83,7 +82,5 @@ fn filter(i: &str) -> IResult<&str, Filter> {
 }
 
 pub(super) fn filters(i: &str) -> IResult<&str, Vec<Filter>> {
-	let (i, _) = tag_no_case("FILTERS")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	separated_list1(commas, filter)(i)
 }

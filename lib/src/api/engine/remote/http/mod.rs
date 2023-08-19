@@ -321,12 +321,7 @@ async fn router(
 	vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	let mut params = match param.query {
-		Some((query, bindings)) => {
-			vec![query.to_string().into(), bindings.into()]
-		}
-		None => param.other,
-	};
+	let mut params = param.other;
 
 	match method {
 		Method::Use => {
@@ -479,16 +474,13 @@ async fn router(
 		Method::Query => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			match &mut params[..] {
-				[Value::Strand(Strand(statements))] => {
-					request = request.body(mem::take(statements));
-				}
-				[Value::Strand(Strand(statements)), Value::Object(bindings)] => {
+			match param.query {
+				Some((query, bindings)) => {
 					let bindings: Vec<_> =
 						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
-					request = request.query(&bindings).body(mem::take(statements));
+					request = request.query(&bindings).body(query.to_string());
 				}
-				_ => unreachable!(),
+				None => unreachable!(),
 			}
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
