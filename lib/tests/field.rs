@@ -303,3 +303,207 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn field_definition_value_reference() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE product;
+		DEFINE FIELD subproducts ON product VALUE ->contains->product;
+		CREATE product:one, product:two;
+		RELATE product:one->contains:test->product:two;
+		SELECT * FROM product;
+		UPDATE product;
+		SELECT * FROM product;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: contains:test,
+				in: product:one,
+				out: product:two,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_definition_value_reference_with_future() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE product;
+		DEFINE FIELD subproducts ON product VALUE <future> { ->contains->product };
+		CREATE product:one, product:two;
+		RELATE product:one->contains:test->product:two;
+		SELECT * FROM product;
+		UPDATE product;
+		SELECT * FROM product;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: contains:test,
+				in: product:one,
+				out: product:two,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
