@@ -35,9 +35,16 @@ impl Session {
 		self.ns = Some(ns.to_owned());
 		self
 	}
+
 	/// Set the selected database for the session
 	pub fn with_db(mut self, db: &str) -> Session {
 		self.db = Some(db.to_owned());
+		self
+	}
+
+	/// Set the selected database for the session
+	pub fn with_sc(mut self, sc: &str) -> Session {
+		self.sc = Some(sc.to_owned());
 		self
 	}
 
@@ -51,14 +58,17 @@ impl Session {
 	pub(crate) fn ns(&self) -> Option<Arc<str>> {
 		self.ns.as_deref().map(Into::into)
 	}
+
 	/// Retrieves the selected database
 	pub(crate) fn db(&self) -> Option<Arc<str>> {
 		self.db.as_deref().map(Into::into)
 	}
+
 	/// Checks if live queries are allowed
 	pub(crate) fn live(&self) -> bool {
 		self.rt
 	}
+
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add scope auth data
@@ -88,8 +98,9 @@ impl Session {
 
 	/// Create a system session for a given level and role
 	pub fn for_level(level: Level, role: Role) -> Session {
+		// Create a new session
 		let mut sess = Session::default();
-
+		// Set the session details
 		match level {
 			Level::Root => {
 				sess.au = Arc::new(Auth::for_root(role));
@@ -106,6 +117,22 @@ impl Session {
 			_ => {}
 		}
 		sess
+	}
+
+	/// Create a scoped session for a given NS and DB
+	pub fn for_scope(ns: &str, db: &str, sc: &str, rid: Value) -> Session {
+		Session {
+			au: Arc::new(Auth::for_sc(rid.to_string(), ns, db, sc)),
+			rt: false,
+			ip: None,
+			or: None,
+			id: None,
+			ns: Some(ns.to_owned()),
+			db: Some(db.to_owned()),
+			sc: Some(sc.to_owned()),
+			tk: None,
+			sd: Some(rid),
+		}
 	}
 
 	/// Create a system session for the root level with Owner role
