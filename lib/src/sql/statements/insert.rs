@@ -110,7 +110,7 @@ impl InsertStatement {
 				_ => unreachable!(),
 			},
 			v => {
-				return Err(Error::RelateStatement {
+				return Err(Error::InsertStatement {
 					value: v.to_string(),
 				})
 			}
