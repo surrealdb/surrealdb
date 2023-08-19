@@ -16,7 +16,7 @@ use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Permissions {
 	pub select: Permission,
@@ -182,7 +182,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Permission {
 	None,

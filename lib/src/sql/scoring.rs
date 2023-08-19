@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
 pub enum Scoring {
 	Bm {
