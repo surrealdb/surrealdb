@@ -17,6 +17,8 @@ impl<'a> Document<'a> {
 		self.allow(ctx, opt, txn, stm).await?;
 		// Alter record data
 		self.alter(ctx, opt, txn, stm).await?;
+		// Store record edges
+		self.edges(ctx, opt, txn, stm).await?;
 		// Merge fields data
 		self.field(ctx, opt, txn, stm).await?;
 		// Reset fields data
@@ -25,8 +27,6 @@ impl<'a> Document<'a> {
 		self.clean(ctx, opt, txn, stm).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
-		// Store record edges
-		self.edges(ctx, opt, txn, stm).await?;
 		// Store index data
 		self.index(ctx, opt, txn, stm).await?;
 		// Store record data
