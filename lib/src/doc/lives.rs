@@ -30,8 +30,16 @@ impl<'a> Document<'a> {
 				// Create a new statement
 				let lq = Statement::from(lv);
 				// Check LIVE SELECT where condition
-				if self.check(ctx, opt, txn, &lq, stm.is_delete()).await.is_err() {
-					continue;
+				if let Some(cond) = lq.conds() {
+					// Check if this is a delete statement
+					let doc = match stm.is_delete() {
+						true => &self.initial,
+						false => &self.current,
+					};
+					// Check if the expression is truthy
+					if !cond.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
+						continue;
+					}
 				}
 				// Check what type of data change this is
 				if stm.is_delete() {
