@@ -617,12 +617,7 @@ impl Transaction {
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!(
-			"Scan {:?} - {:?}",
-			crate::key::debug::sprint_key(&(rng.start).clone().into()),
-			crate::key::debug::sprint_key(&(rng.end).clone().into()),
-			// rng.start, rng.end);
-		);
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -758,16 +753,12 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		trace!(
-			"Getr {:?}..{:?} (limit: {})",
-			crate::key::debug::sprint_key(&beg),
-			crate::key::debug::sprint_key(&end),
-			limit
-		);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
@@ -815,8 +806,10 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -864,8 +857,10 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
 		let mut nxt: Option<Key> = None;
@@ -914,8 +909,10 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Delp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
 		let mut nxt: Option<Key> = None;
