@@ -3,6 +3,7 @@ use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
+use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -503,6 +504,88 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 			},
 		]",
 	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_definition_edge_permissions() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE TABLE business SCHEMAFULL;
+		DEFINE FIELD owner ON TABLE business TYPE record<user>;
+		DEFINE TABLE contact SCHEMAFULL PERMISSIONS FOR create WHERE in.owner.id = $auth.id;
+		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
+		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
+	";
+	let dbs = Datastore::new("memory").await?.with_auth_enabled(true);
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: user:one,
+			},
+			{
+				id: user:two,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: business:one,
+				owner: user:one,
+			},
+			{
+				id: business:two,
+				owner: user:two,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let sql = "
+		RELATE business:one->contact:one->business:two;
+		RELATE business:two->contact:two->business:one;
+	";
+	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "one")).into());
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: contact:one,
+				in: business:one,
+				out: business:two,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
