@@ -250,10 +250,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", key);
+		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -611,10 +611,15 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		trace!(
+			"Scan {:?} - {:?}",
+			crate::key::debug::sprint_key(&(rng.start).clone().into()),
+			crate::key::debug::sprint_key(&(rng.end).clone().into()),
+			// rng.start, rng.end);
+		);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -750,10 +755,16 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug + Clone,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		trace!(
+			"Getr {:?}..{:?} (limit: {})",
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
+			limit
+		);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
@@ -788,6 +799,7 @@ impl Transaction {
 					nxt = Some(k.clone());
 				}
 				// Delete
+				trace!("Found getr {:?} {:?}", crate::key::debug::sprint_key(&k), v);
 				out.push((k, v));
 				// Count
 				num -= 1;
@@ -1145,7 +1157,7 @@ impl Transaction {
 		self.del(key).await
 	}
 
-	pub async fn scan_lq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
+	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
 		let pref = crate::key::node::lq::prefix_nd(node);
 		let suff = crate::key::node::lq::suffix_nd(node);
 		trace!(
@@ -1160,6 +1172,7 @@ impl Transaction {
 			trace!("scan_lq: key={:?} value={:?}", &key, &value);
 			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			let tb: String = String::from_utf8(value).unwrap();
+			trace!("scan_lq Found tb: {:?}", tb);
 			res.push(LqValue {
 				nd: crate::sql::uuid::Uuid::from(lq.nd),
 				ns: lq.ns.to_string(),
@@ -1171,7 +1184,39 @@ impl Transaction {
 		Ok(res)
 	}
 
-	pub async fn putc_lv(
+	pub async fn scan_tblq<'a>(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		limit: u32,
+	) -> Result<Vec<LqValue>, Error> {
+		let pref = crate::key::table::lq::prefix(ns, db, tb);
+		let suff = crate::key::table::lq::suffix(ns, db, tb);
+		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&pref),
+			crate::key::debug::sprint_key(&suff),
+		);
+		let rng = pref..suff;
+		let scanned = self.scan(rng, limit).await?;
+		let mut res: Vec<LqValue> = vec![];
+		for (key, value) in scanned {
+			trace!("scan_lv: key={:?} value={:?}", &key, &value);
+			let val: LiveStatement = value.into();
+			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
+			res.push(LqValue {
+				nd: val.node,
+				ns: lv.ns.to_string(),
+				db: lv.db.to_string(),
+				tb: lv.tb.to_string(),
+				lq: val.id.clone(),
+			});
+		}
+		Ok(res)
+	}
+
+	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
 		db: &str,
