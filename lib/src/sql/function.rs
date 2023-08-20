@@ -239,6 +239,7 @@ pub fn normal(i: &str) -> IResult<&str, Function> {
 pub fn custom(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::")(i)?;
 	let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -249,6 +250,7 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = openparentheses(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
