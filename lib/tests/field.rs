@@ -306,6 +306,125 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_definition_default_value() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE product SCHEMAFULL;
+		DEFINE FIELD primary ON product TYPE number VALUE 123.456;
+		DEFINE FIELD secondary ON product TYPE bool DEFAULT true VALUE $value;
+		DEFINE FIELD tertiary ON product TYPE string DEFAULT 'hello' VALUE 'tester';
+		--
+		CREATE product:test SET primary = NULL;
+		CREATE product:test SET secondary = 'oops';
+		CREATE product:test SET tertiary = 123;
+		CREATE product:test;
+		--
+		UPDATE product:test SET primary = 654.321;
+		UPDATE product:test SET secondary = false;
+		UPDATE product:test SET tertiary = 'something';
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 11);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found NULL for field `primary`, with record `product:test`, but expected a number"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found 'oops' for field `secondary`, with record `product:test`, but expected a bool"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found 123 for field `tertiary`, with record `product:test`, but expected a string"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:test,
+				primary: 123.456,
+				secondary: true,
+				tertiary: 'tester',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:test,
+				primary: 123.456,
+				secondary: true,
+				tertiary: 'tester',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:test,
+				primary: 123.456,
+				secondary: false,
+				tertiary: 'tester',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: product:test,
+				primary: 123.456,
+				secondary: false,
+				tertiary: 'tester',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_value_reference() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE product;
