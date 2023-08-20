@@ -656,17 +656,8 @@ mod tests {
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			"function() { return 'test'; }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Function::Script(
-				Script::parse(" return 'test'; "),
-				vec![]
-			)
-		);
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
 	}
 
 	#[test]
@@ -675,17 +666,8 @@ mod tests {
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			"function() { return 'test'; }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Function::Script(
-				Script::parse(" return 'test'; "),
-				vec![]
-			)
-		);
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
 	}
 
 	#[test]
