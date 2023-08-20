@@ -23,7 +23,7 @@ use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
-use crate::sql::id::Id;
+use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
@@ -531,8 +531,13 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
-			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
+			Id::Object(v) => v.into(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Id::rand().into(),
+				Gen::Ulid => Id::ulid().into(),
+				Gen::Uuid => Id::uuid().into(),
+			},
 		}
 	}
 }
