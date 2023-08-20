@@ -230,6 +230,89 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_table_foreigntable() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE test SCHEMAFUL;
+		DEFINE TABLE view AS SELECT count() FROM test GROUP ALL;
+		INFO FOR DB;
+		INFO FOR TB test;
+		REMOVE TABLE view;
+		INFO FOR DB;
+		INFO FOR TB test;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {
+				test: 'DEFINE TABLE test SCHEMAFULL',
+				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL',
+			},
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: {},
+			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
+			indexes: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {
+				test: 'DEFINE TABLE test SCHEMAFULL',
+			},
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_event() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN true THEN (
