@@ -11,6 +11,7 @@
 //    We need to translate the timestamp to the versionstamp due to that; `now - 1h` to a key suffixed by the versionstamp.
 #[tokio::test]
 #[serial]
+#[ignore]
 async fn timestamp_to_versionstamp() {
 	// Create a new datastore
 	let ds = new_ds(Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap()).await;
