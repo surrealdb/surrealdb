@@ -6,7 +6,6 @@ use futures::{Stream, TryStreamExt};
 use hyper::body;
 use lib_http::{HeaderMap, HeaderValue, StatusCode, Version};
 use serde::de::DeserializeOwned;
-use std::str;
 
 pub struct Response {
 	inner: hyper::Response<hyper::Body>,

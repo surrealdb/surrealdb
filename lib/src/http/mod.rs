@@ -2,8 +2,6 @@
 
 #![allow(dead_code)]
 
-use std::{convert::Infallible, string::FromUtf8Error, sync::Arc};
-
 pub use lib_http::{
 	header, method, status,
 	uri::{self, Uri},
@@ -14,6 +12,7 @@ use lib_http::{
 	method::InvalidMethod,
 	Method, StatusCode,
 };
+use std::{convert::Infallible, string::FromUtf8Error, sync::Arc};
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
