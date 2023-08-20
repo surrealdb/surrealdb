@@ -651,6 +651,44 @@ mod tests {
 	}
 
 	#[test]
+	fn function_simple_together() {
+		let sql = "function() { return 'test'; }";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(
+			"function() { return 'test'; }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Function::Script(
+				Script::parse(" return 'test'; "),
+				vec![]
+			)
+		);
+	}
+
+	#[test]
+	fn function_simple_whitespace() {
+		let sql = "function () { return 'test'; }";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(
+			"function() { return 'test'; }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Function::Script(
+				Script::parse(" return 'test'; "),
+				vec![]
+			)
+		);
+	}
+
+	#[test]
 	fn function_script_expression() {
 		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
 		let res = function(sql);
