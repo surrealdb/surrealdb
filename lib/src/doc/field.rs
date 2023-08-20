@@ -31,24 +31,43 @@ impl<'a> Document<'a> {
 				let old = self.initial.doc.pick(&k);
 				// Get the input value
 				let inp = inp.pick(&k);
+				// Get the default value
+				let def = match &fd.default {
+					Some(v) => Some(v),
+					_ => match &fd.value {
+						Some(v) if v.is_static() => Some(v),
+						_ => None,
+					},
+				};
+				// Check for a DEFAULT clause
+				if let Some(expr) = def {
+					if self.is_new() && val.is_none() {
+						// Configure the context
+						let mut ctx = Context::new(ctx);
+						ctx.add_value("input", &inp);
+						ctx.add_value("value", &val);
+						ctx.add_value("after", &val);
+						ctx.add_value("before", &old);
+						// Process the VALUE clause
+						val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+					}
+				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					if !val.is_none() {
-						val = val.coerce_to(kind).map_err(|e| match e {
-							// There was a conversion error
-							Error::CoerceTo {
-								from,
-								..
-							} => Error::FieldCheck {
-								thing: rid.to_string(),
-								field: fd.name.clone(),
-								value: from.to_string(),
-								check: kind.to_string(),
-							},
-							// There was a different error
-							e => e,
-						})?;
-					}
+					val = val.coerce_to(kind).map_err(|e| match e {
+						// There was a conversion error
+						Error::CoerceTo {
+							from,
+							..
+						} => Error::FieldCheck {
+							thing: rid.to_string(),
+							field: fd.name.clone(),
+							value: from.to_string(),
+							check: kind.to_string(),
+						},
+						// There was a different error
+						e => e,
+					})?;
 				}
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
