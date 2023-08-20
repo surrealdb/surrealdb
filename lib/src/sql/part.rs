@@ -223,12 +223,6 @@ pub fn graph(i: &str) -> IResult<&str, Part> {
 }
 
 #[cfg(test)]
-pub fn start(i: &str) -> IResult<&str, Part> {
-	let (i, v) = value::start(i)?;
-	Ok((i, Part::Start(v)))
-}
-
-#[cfg(test)]
 mod tests {
 
 	use super::*;

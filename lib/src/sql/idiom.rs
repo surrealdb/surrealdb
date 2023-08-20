@@ -269,23 +269,16 @@ pub fn idiom(i: &str) -> IResult<&str, Idiom> {
 	))(i)
 }
 
-/// A complex idiom with graph or many parts
-#[cfg(test)]
-pub fn multi(i: &str) -> IResult<&str, Idiom> {
-	use crate::sql::part::start;
 	alt((
-		|i| {
-			let (i, p) = graph(i)?;
-			let (i, mut v) = many0(part)(i)?;
-			v.insert(0, p);
-			Ok((i, Idiom::from(v)))
-		},
-		|i| {
-			let (i, p) = alt((first, start))(i)?;
-			let (i, mut v) = many1(part)(i)?;
-			v.insert(0, p);
-			Ok((i, Idiom::from(v)))
-		},
+		plain,
+		alt((multi_without_start, |i| {
+			let (i, v) = value(i)?;
+			let (i, v) = reparse_idiom_start(v, i)?;
+			if let Value::Idiom(x) = v {
+				return Ok((i, x));
+			}
+			fail(i)
+		})),
 	))(i)
 }
 
