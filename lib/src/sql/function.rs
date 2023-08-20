@@ -239,6 +239,7 @@ pub fn normal(i: &str) -> IResult<&str, Function> {
 pub fn custom(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::")(i)?;
 	let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -249,6 +250,7 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = openparentheses(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -646,6 +648,26 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("is::numeric(NULL)", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("is::numeric"), vec![Value::Null]));
+	}
+
+	#[test]
+	fn function_simple_together() {
+		let sql = "function() { return 'test'; }";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
+	}
+
+	#[test]
+	fn function_simple_whitespace() {
+		let sql = "function () { return 'test'; }";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
 	}
 
 	#[test]
