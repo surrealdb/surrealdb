@@ -11,23 +11,31 @@
 //    We need to translate the timestamp to the versionstamp due to that; `now - 1h` to a key suffixed by the versionstamp.
 #[tokio::test]
 #[serial]
-#[ignore]
 async fn timestamp_to_versionstamp() {
 	// Create a new datastore
 	let ds = new_ds(Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap()).await;
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(0, "myns", "mydb", true).await.unwrap();
+	tx.commit().await.unwrap();
+	// Get the versionstamp for timestamp 0
+	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs1 = tx.get_versionstamp_from_timestamp(0, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(1, "myns", "mydb", true).await.unwrap();
+	tx.commit().await.unwrap();
+	// Get the versionstamp for timestamp 1
+	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs2 = tx.get_versionstamp_from_timestamp(1, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(2, "myns", "mydb", true).await.unwrap();
+	tx.commit().await.unwrap();
+	// Get the versionstamp for timestamp 2
+	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs3 = tx.get_versionstamp_from_timestamp(2, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	assert!(vs1 < vs2);
