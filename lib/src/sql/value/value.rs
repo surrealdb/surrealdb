@@ -2829,28 +2829,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
-#[cfg(test)]
-/// Used as the starting part of a complex Idiom
-pub fn start(i: &str) -> IResult<&str, Value> {
-	use crate::sql::function;
-	alt((
-		map(function::normal, Value::from),
-		map(function::custom, Value::from),
-		map(subquery, Value::from),
-		map(constant, Value::from),
-		map(datetime, Value::from),
-		map(duration, Value::from),
-		map(unique, Value::from),
-		map(number, Value::from),
-		map(strand, Value::from),
-		map(object, Value::from),
-		map(array, Value::from),
-		map(param, Value::from),
-		map(edges, Value::from),
-		map(thing, Value::from),
-	))(i)
-}
-
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
