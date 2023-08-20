@@ -11,6 +11,7 @@ mod tls;
 
 use crate::api::err::Error;
 use crate::sql::constant::ConstantValue;
+use crate::sql::id::Gen;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -325,6 +326,11 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 				sql::Id::String(s) => Id::String(s),
 				sql::Id::Array(arr) => Id::Array((arr, simplify).into()),
 				sql::Id::Object(obj) => Id::Object((obj, simplify).into()),
+				sql::Id::Generate(v) => match v {
+					Gen::Rand => Id::from((sql::Id::rand(), simplify)),
+					Gen::Ulid => Id::from((sql::Id::ulid(), simplify)),
+					Gen::Uuid => Id::from((sql::Id::uuid(), simplify)),
+				},
 			}
 		}
 	}
