@@ -11,6 +11,7 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn create_with_id() -> Result<(), Error> {
 	let sql = "
+		-- Should succeed
 		CREATE person:test SET name = 'Tester';
 		CREATE person SET id = person:tobie, name = 'Tobie';
 		CREATE person CONTENT { id: person:jaime, name: 'Jaime' };
@@ -21,11 +22,14 @@ async fn create_with_id() -> Result<(), Error> {
 		CREATE test CONTENT { id: other:715917898417176677 };
 		CREATE test CONTENT { id: other:⟨715917898.417176677⟩ };
 		CREATE test CONTENT { id: other:9223372036854775808 };
+		-- Should error as id is empty
+		CREATE person SET id = '';
+		CREATE person CONTENT { id: '', name: 'Tester' };
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
+	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -133,6 +137,18 @@ async fn create_with_id() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found '' for the Record ID but this is not a valid id"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found '' for the Record ID but this is not a valid id"#
+	));
 	//
 	Ok(())
 }

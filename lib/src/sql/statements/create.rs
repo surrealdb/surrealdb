@@ -62,13 +62,11 @@ impl CreateStatement {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(v) => match &self.data {
-					// There is a data clause so check for a record id
-					Some(data) => match data.rid(ctx, opt, txn, &v).await {
-						// There was a problem creating the record id
-						Err(e) => return Err(e),
-						// There is an id field so use the record id
-						Ok(v) => i.ingest(Iterable::Thing(v)),
-					},
+					// There is a data clause so fetch a record id
+					Some(data) => {
+						let id = data.rid(ctx, opt, txn, &v).await?;
+						i.ingest(Iterable::Thing(id))
+					}
 					// There is no data clause so create a record id
 					None => i.ingest(Iterable::Thing(v.generate())),
 				},

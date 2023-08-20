@@ -431,7 +431,7 @@ pub enum Error {
 	},
 
 	/// Found a record id for the record but this is not a valid id
-	#[error("Found '{value}' for the record ID but this is not a valid id")]
+	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
 		value: String,
 	},
