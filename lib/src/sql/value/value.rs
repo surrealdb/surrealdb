@@ -20,11 +20,11 @@ use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
 use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{self, function, Function};
+use crate::sql::function::{function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
-use crate::sql::idiom::{self, Idiom};
+use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::decimal_is_integer;
@@ -40,7 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::Query;
+use crate::sql::{operator, Query};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -1041,6 +1041,25 @@ impl Value {
 			Value::Future(_) => "future".to_string().into(),
 			Value::Function(v) => v.to_idiom(),
 			_ => self.to_string().into(),
+		}
+	}
+
+	/// Returns if this value can be the start of a idiom production.
+	pub fn can_start_idiom(&self) -> bool {
+		match self {
+			Value::Function(x) => !x.is_script(),
+			Value::Subquery(_)
+			| Value::Constant(_)
+			| Value::Datetime(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Number(_)
+			| Value::Object(_)
+			| Value::Array(_)
+			| Value::Param(_)
+			| Value::Edges(_)
+			| Value::Thing(_) => true,
+			_ => false,
 		}
 	}
 
@@ -2709,12 +2728,27 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(binary, Value::from), single))(i)
+	let (i, start) = single(i)?;
+	let (i, expr_tail) = opt(|i| {
+		let (i, o) = operator::binary(i)?;
+		let (i, r) = value(i)?;
+		Ok((i, (o, r)))
+	})(i)?;
+	let v = if let Some((o, r)) = expr_tail {
+		let expr = match r {
+			Value::Expression(r) => r.augment(start, o),
+			_ => Expression::new(start, o, r),
+		};
+		Value::from(expr)
+	} else {
+		start
+	};
+	Ok((i, v))
 }
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
-	alt((
+	let (i, v) = alt((
 		alt((
 			terminated(
 				alt((
@@ -2725,7 +2759,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 				)),
 				keyword,
 			),
-			map(idiom::multi, Value::from),
+			map(idiom::multi_without_start, Value::from),
 		)),
 		alt((
 			map(cast, Value::from),
@@ -2753,11 +2787,12 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(strand, Value::from),
 			map(idiom::path, Value::from),
 		)),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
 pub fn select(i: &str) -> IResult<&str, Value> {
-	alt((
+	let (i, v) = alt((
 		alt((
 			map(unary, Value::from),
 			map(binary, Value::from),
@@ -2765,7 +2800,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::Bool(true)),
 			map(tag_no_case("false"), |_| Value::Bool(false)),
-			map(idiom::multi, Value::from),
+			map(idiom::multi_without_start, Value::from),
 		)),
 		alt((
 			map(cast, Value::from),
@@ -2790,11 +2825,14 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(table, Value::from),
 			map(strand, Value::from),
 		)),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
+#[cfg(test)]
 /// Used as the starting part of a complex Idiom
 pub fn start(i: &str) -> IResult<&str, Value> {
+	use crate::sql::function;
 	alt((
 		map(function::normal, Value::from),
 		map(function::custom, Value::from),
@@ -2815,8 +2853,8 @@ pub fn start(i: &str) -> IResult<&str, Value> {
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
-	alt((
-		map(idiom::multi, Value::from),
+	let (i, v) = alt((
+		map(idiom::multi_without_start, Value::from),
 		map(function, Value::from),
 		map(subquery, Value::from),
 		map(constant, Value::from),
@@ -2830,7 +2868,8 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(range, Value::from),
 		map(thing, Value::from),
 		map(table, Value::from),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
 /// Used to parse any simple JSON-like value

@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, Fmt};
-use crate::sql::part::{all, field, first, graph, index, last, part, start, Part};
+use crate::sql::part::{all, field, first, graph, index, last, part, Part};
 use crate::sql::part::{flatten, Next};
 use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::value::Value;
@@ -210,8 +210,21 @@ pub fn plain(i: &str) -> IResult<&str, Idiom> {
 	Ok((i, Idiom::from(v)))
 }
 
-/// A complex idiom with graph or many parts
-pub fn multi(i: &str) -> IResult<&str, Idiom> {
+/// Reparse a value which might part of an idiom.
+pub fn reparse_idiom_start(start: Value, i: &str) -> IResult<&str, Value> {
+	if start.can_start_idiom() {
+		if let (i, Some(mut parts)) = opt(many1(part))(i)? {
+			let start = Part::Start(start);
+			parts.insert(0, start);
+			let v = Value::from(Idiom::from(parts));
+			return Ok((i, v));
+		}
+	}
+	Ok((i, start))
+}
+
+/// A complex idiom with graph or many parts excluding idioms which start with a value.
+pub fn multi_without_start(i: &str) -> IResult<&str, Idiom> {
 	alt((
 		|i| {
 			let (i, p) = graph(i)?;
@@ -220,7 +233,7 @@ pub fn multi(i: &str) -> IResult<&str, Idiom> {
 			Ok((i, Idiom::from(v)))
 		},
 		|i| {
-			let (i, p) = alt((first, start))(i)?;
+			let (i, p) = first(i)?;
 			let (i, mut v) = many1(part)(i)?;
 			v.insert(0, p);
 			Ok((i, Idiom::from(v)))
@@ -240,6 +253,26 @@ pub fn path(i: &str) -> IResult<&str, Idiom> {
 #[cfg(test)]
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
 	alt((plain, multi))(i)
+}
+
+/// A complex idiom with graph or many parts
+#[cfg(test)]
+pub fn multi(i: &str) -> IResult<&str, Idiom> {
+	use crate::sql::part::start;
+	alt((
+		|i| {
+			let (i, p) = graph(i)?;
+			let (i, mut v) = many0(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+		|i| {
+			let (i, p) = alt((first, start))(i)?;
+			let (i, mut v) = many1(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+	))(i)
 }
 
 #[cfg(test)]
