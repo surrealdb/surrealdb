@@ -278,4 +278,12 @@ mod tests {
 			}
 		);
 	}
+
+	#[test]
+	fn no_empty_permissions() {
+		// This was previouslly allowed,
+		let sql = "PERMISSION ";
+		let res = dbg!(permission(sql));
+		assert!(dbg!(res.is_err()));
+	}
 }
