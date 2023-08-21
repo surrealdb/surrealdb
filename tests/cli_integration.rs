@@ -414,3 +414,93 @@ fn validate_failed_due_to_invalid_surql_files_syntax() {
 
 	assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
 }
+
+#[test(tokio::test)]
+async fn test_server_graceful_shutdown() {
+	let (_, mut server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+
+	info!("* Send SIGINT signal");
+	server.send_signal(nix::sys::signal::Signal::SIGINT).expect("Failed to send SIGINT to server");
+
+	info!("* Waiting for server to exit gracefully ...");
+	tokio::select! {
+		_ = async {
+			loop {
+				if let Ok(Some(exit)) = server.status() {
+					assert!(exit.success(), "Server shutted down successfully");
+					break;
+				}
+				tokio::time::sleep(time::Duration::from_secs(1)).await;
+			}
+		} => {},
+		// Timeout after 5 seconds
+		_ = tokio::time::sleep(time::Duration::from_secs(5)) => {
+			panic!("Server didn't exit after receiving SIGINT");
+		}
+	}
+}
+
+#[test(tokio::test)]
+async fn test_server_second_signal_handling() {
+	let (addr, mut server) = common::start_server(StartServerArguments {
+		auth: false,
+		tls: false,
+		wait_is_ready: true,
+		tick_interval: ONE_SEC,
+	})
+	.await
+	.unwrap();
+
+	// Create a long-lived WS connection so the server don't shutdown gracefully
+	let mut socket = common::connect_ws(&addr).await.expect("Failed to connect to server");
+	let json = serde_json::json!({
+		"id": "1",
+		"method": "query",
+		"params": ["SLEEP 30s;"],
+	});
+	common::ws_send_msg(&mut socket, serde_json::to_string(&json).unwrap())
+		.await
+		.expect("Failed to send WS message");
+
+	info!("* Send first SIGINT signal");
+	server.send_signal(nix::sys::signal::Signal::SIGINT).expect("Failed to send SIGINT to server");
+
+	tokio::select! {
+		_ = async {
+			loop {
+				if let Ok(Some(exit)) = server.status() {
+					panic!("Server unexpectedly exited after receiving first SIGINT: {:?}", exit);
+				}
+				tokio::time::sleep(time::Duration::from_secs(1)).await;
+			}
+		} => {},
+		// Timeout after 5 seconds
+		_ = tokio::time::sleep(time::Duration::from_secs(5)) => ()
+	}
+
+	info!("* Send second SIGINT signal");
+	server.send_signal(nix::sys::signal::Signal::SIGINT).expect("Failed to send SIGINT to server");
+
+	tokio::select! {
+		_ = async {
+			loop {
+				if let Ok(Some(exit)) = server.status() {
+					assert!(exit.success(), "Server shutted down successfully");
+					break;
+				}
+				tokio::time::sleep(time::Duration::from_secs(1)).await;
+			}
+		} => {},
+		// Timeout after 5 seconds
+		_ = tokio::time::sleep(time::Duration::from_secs(5)) => {
+			panic!("Server didn't exit after receiving two SIGINT signals");
+		}
+	}
+}

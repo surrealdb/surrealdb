@@ -43,6 +43,17 @@ impl Child {
 		self
 	}
 
+	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
+		nix::sys::signal::kill(
+			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
+			signal,
+		)
+	}
+
+	pub fn status(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+		self.inner.as_mut().unwrap().try_wait()
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(mut self) -> Result<String, String> {
