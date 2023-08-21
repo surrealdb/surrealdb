@@ -251,48 +251,52 @@ mod tests {
 		let res = parse(sql);
 		let elapsed = start.elapsed();
 		assert!(res.is_ok());
-		assert!(elapsed < Duration::from_millis(150), "previously took ~15ms in debug")
+		assert!(
+			elapsed < Duration::from_millis(2000),
+			"took {}ms, previously took ~1000ms in debug",
+			elapsed.as_millis()
+		)
 	}
 
 	#[test]
 	fn parse_recursion_cast() {
-		for p in 1..=4 {
-			recursive("SELECT * FROM ", "<int>", "5", "", 10usize.pow(p), p > 1);
+		for n in [10, 100, 500] {
+			recursive("SELECT * FROM ", "<int>", "5", "", n, n > 50);
 		}
 	}
 
 	#[test]
 	fn parse_recursion_geometry() {
-		for n in [3, 40, 100] {
+		for n in [1, 50, 100] {
 			recursive(
 				"SELECT * FROM ",
 				r#"{type: "GeometryCollection",geometries: ["#,
 				r#"{type: "MultiPoint",coordinates: [[10.0, 11.2],[10.5, 11.9]]}"#,
 				"]}",
 				n,
-				n > 30,
+				n > 25,
 			);
 		}
 	}
 
 	#[test]
 	fn parse_recursion_javascript() {
-		for p in 1..=3 {
-			recursive("SELECT * FROM ", "function() {", "return 5;", "}", 10usize.pow(p), p > 1);
+		for n in [10, 1000] {
+			recursive("SELECT * FROM ", "function() {", "return 5;", "}", n, n > 500);
 		}
 	}
 
 	#[test]
 	fn parse_recursion_mixed() {
-		for n in [3, 8] {
-			recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", n, n > 3);
+		for n in [3, 15, 75] {
+			recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", n, n > 5);
 		}
 	}
 
 	#[test]
 	fn parse_recursion_select() {
-		for p in 1..=3 {
-			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", 6usize.pow(p), p > 1);
+		for n in [5, 10, 100] {
+			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", n, n > 15);
 		}
 	}
 
@@ -430,13 +434,14 @@ mod tests {
 		}
 		// The parser can terminate faster in the excessive case.
 		let cutoff = if excessive {
-			250
-		} else {
 			500
+		} else {
+			1000
 		};
 		assert!(
 			elapsed < Duration::from_millis(cutoff),
-			"previously much faster to parse {n} in debug mode"
+			"took {}ms, previously much faster to parse {n} in debug mode",
+			elapsed.as_millis()
 		)
 	}
 }

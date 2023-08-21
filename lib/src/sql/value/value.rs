@@ -2692,12 +2692,14 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive()?;
 	alt((map(binary, Value::from), single))(i)
 }
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
+	// Dive in `single` (as opposed to `value`) since it is directly
+	// called by `Cast`
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((
 		alt((
 			terminated(
