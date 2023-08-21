@@ -87,11 +87,10 @@ pub fn init(cx: &TelemetryContext) -> Result<(), MetricsError> {
 //
 // Shutdown the metrics providers
 //
-pub fn shutdown(cx: &TelemetryContext) -> Result<(), MetricsError> {
-	METER_PROVIDER_DURATION.stop(cx)?;
-	METER_PROVIDER_DURATION.collect(cx)?;
-	METER_PROVIDER_SIZE.stop(cx)?;
-	METER_PROVIDER_SIZE.collect(cx)?;
+pub fn shutdown(_cx: &TelemetryContext) -> Result<(), MetricsError> {
+	// TODO(sgirones): The stop method hangs forever, so we are not calling it until we figure out why
+	// METER_PROVIDER_DURATION.stop(cx)?;
+	// METER_PROVIDER_SIZE.stop(cx)?;
 
 	Ok(())
 }
