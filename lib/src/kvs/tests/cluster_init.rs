@@ -148,6 +148,7 @@ async fn single_live_queries_are_garbage_collected() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)
@@ -163,6 +164,7 @@ async fn single_live_queries_are_garbage_collected() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)

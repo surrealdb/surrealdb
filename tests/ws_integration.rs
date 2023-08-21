@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde_json::json;
 use test_log::test;
 
+use crate::common::error::TestError;
 use crate::common::{PASS, USER};
 
 #[test(tokio::test)]

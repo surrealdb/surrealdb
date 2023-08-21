@@ -94,6 +94,7 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			cond: self.cond,
 			fetch: self.fetch,
 			archived: self.archived,
+			auth: None,
 		})
 	}
 }
