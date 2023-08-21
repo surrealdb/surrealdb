@@ -344,44 +344,50 @@ pub enum Error {
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
-	/// Can not execute CREATE query using the specified value
-	#[error("Can not execute CREATE query using value '{value}'")]
+	/// Can not execute statement using the specified value
+	#[error("Can not execute statement using value '{value}'")]
+	InvalidStatementTarget {
+		value: String,
+	},
+
+	/// Can not execute CREATE statement using the specified value
+	#[error("Can not execute CREATE statement using value '{value}'")]
 	CreateStatement {
 		value: String,
 	},
 
-	/// Can not execute UPDATE query using the specified value
-	#[error("Can not execute UPDATE query using value '{value}'")]
+	/// Can not execute UPDATE statement using the specified value
+	#[error("Can not execute UPDATE statement using value '{value}'")]
 	UpdateStatement {
 		value: String,
 	},
 
-	/// Can not execute RELATE query using the specified value
-	#[error("Can not execute RELATE query using value '{value}'")]
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement using value '{value}'")]
 	RelateStatement {
 		value: String,
 	},
 
-	/// Can not execute DELETE query using the specified value
-	#[error("Can not execute DELETE query using value '{value}'")]
+	/// Can not execute DELETE statement using the specified value
+	#[error("Can not execute DELETE statement using value '{value}'")]
 	DeleteStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT query using the specified value
-	#[error("Can not execute INSERT query using value '{value}'")]
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement using value '{value}'")]
 	InsertStatement {
 		value: String,
 	},
 
-	/// Can not execute LIVE query using the specified value
-	#[error("Can not execute LIVE query using value '{value}'")]
+	/// Can not execute LIVE statement using the specified value
+	#[error("Can not execute LIVE statement using value '{value}'")]
 	LiveStatement {
 		value: String,
 	},
 
-	/// Can not execute KILL query using the specified id
-	#[error("Can not execute KILL query using id '{value}'")]
+	/// Can not execute KILL statement using the specified id
+	#[error("Can not execute KILL statement using id '{value}'")]
 	KillStatement {
 		value: String,
 	},
@@ -430,8 +436,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the id field, but a specific record has been specified")]
+	IdMismatch {
+		value: String,
+	},
+
 	/// Found a record id for the record but this is not a valid id
-	#[error("Found '{value}' for the record ID but this is not a valid id")]
+	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
 		value: String,
 	},

@@ -8,8 +8,6 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -46,31 +44,30 @@ impl Data {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		tb: &Table,
-	) -> Result<Thing, Error> {
+	) -> Result<Option<Value>, Error> {
 		match self {
 			Self::MergeExpression(v) => {
 				// This MERGE expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::ReplaceExpression(v) => {
 				// This REPLACE expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::ContentExpression(v) => {
 				// This CONTENT expression has an 'id' field
-				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
+					Ok(v.compute(ctx, opt, txn, None).await?.some())
 				}
 				// This SET expression had no 'id' field
-				_ => Ok(tb.generate()),
+				_ => Ok(None),
 			},
 			// Generate a random id for all other data clauses
-			_ => Ok(tb.generate()),
+			_ => Ok(None),
 		}
 	}
 }
