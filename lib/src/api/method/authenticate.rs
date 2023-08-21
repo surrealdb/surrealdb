@@ -27,7 +27,7 @@ where
 		Box::pin(async move {
 			let router = self.router?;
 			let mut conn = Client::new(Method::Authenticate);
-			conn.execute_unit(router, Param::new(vec![self.token.into()])).await
+			conn.execute_unit(router, Param::new(vec![self.token.0.into()])).await
 		})
 	}
 }

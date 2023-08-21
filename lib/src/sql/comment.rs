@@ -5,15 +5,16 @@ use nom::character::complete::char;
 use nom::character::complete::multispace0;
 use nom::character::complete::multispace1;
 use nom::character::complete::not_line_ending;
+use nom::multi::many0;
 use nom::multi::many1;
 
 pub fn mightbespace(i: &str) -> IResult<&str, ()> {
-	let (i, _) = alt((comment, blank))(i)?;
+	let (i, _) = many0(alt((comment, space)))(i)?;
 	Ok((i, ()))
 }
 
 pub fn shouldbespace(i: &str) -> IResult<&str, ()> {
-	let (i, _) = alt((comment, space))(i)?;
+	let (i, _) = many1(alt((comment, space)))(i)?;
 	Ok((i, ()))
 }
 
@@ -58,12 +59,18 @@ pub fn hash(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn blank(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace0(i)?;
-	Ok((i, ()))
-}
-
 fn space(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace1(i)?;
 	Ok((i, ()))
+}
+
+#[cfg(test)]
+mod test {
+	use crate::sql::parse;
+
+	#[test]
+	fn any_whitespace() {
+		let sql = "USE /* white space and comment between */ NS test;";
+		assert!(parse(sql).is_ok());
+	}
 }
