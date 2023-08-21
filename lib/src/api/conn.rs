@@ -93,6 +93,8 @@ pub enum Method {
 	Signin,
 	/// Signs up on the server
 	Signup,
+	/// Runs a series of node maintenance operations
+	Tick,
 	/// Removes a parameter from a connection
 	Unset,
 	/// Perfoms an update operation
@@ -119,14 +121,16 @@ pub struct Param {
 	pub(crate) query: Option<(Query, BTreeMap<String, Value>)>,
 	pub(crate) other: Vec<Value>,
 	pub(crate) file: Option<PathBuf>,
+	pub(crate) send: Option<channel::Sender<Vec<u8>>>,
 }
 
 impl Param {
 	pub(crate) fn new(other: Vec<Value>) -> Self {
 		Self {
-			other,
 			query: None,
+			other,
 			file: None,
+			send: None,
 		}
 	}
 
@@ -135,6 +139,7 @@ impl Param {
 			query: Some((query, bindings)),
 			other: Vec::new(),
 			file: None,
+			send: None,
 		}
 	}
 
@@ -143,6 +148,16 @@ impl Param {
 			query: None,
 			other: Vec::new(),
 			file: Some(file),
+			send: None,
+		}
+	}
+
+	pub(crate) fn send(send: channel::Sender<Vec<u8>>) -> Self {
+		Self {
+			query: None,
+			other: Vec::new(),
+			file: None,
+			send: Some(send),
 		}
 	}
 }

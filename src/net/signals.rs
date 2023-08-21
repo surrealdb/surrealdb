@@ -1,39 +1,45 @@
-use std::time::Duration;
-
 use axum_server::Handle;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
-use crate::{
-	err::Error,
-	net::rpc::{WebSocketRef, WEBSOCKETS},
-};
+use crate::{err::Error, rpc, telemetry};
 
 /// Start a graceful shutdown:
 /// * Signal the Axum Handle when a shutdown signal is received.
 /// * Stop all WebSocket connections.
+/// * Flush all telemetry data.
 ///
 /// A second signal will force an immediate shutdown.
-pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
+pub fn graceful_shutdown(ct: CancellationToken, http_handle: Handle) -> JoinHandle<()> {
 	tokio::spawn(async move {
 		let result = listen().await.expect("Failed to listen to shutdown signal");
 		info!(target: super::LOG, "{} received. Waiting for graceful shutdown... A second signal will force an immediate shutdown", result);
 
+		let shutdown = {
+			let http_handle = http_handle.clone();
+			let ct = ct.clone();
+
+			tokio::spawn(async move {
+				// Stop accepting new HTTP requests and wait until all connections are closed
+				http_handle.graceful_shutdown(None);
+				while http_handle.connection_count() > 0 {
+					tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+				}
+
+				rpc::graceful_shutdown().await;
+
+				ct.cancel();
+
+				// Flush all telemetry data
+				if let Err(err) = telemetry::shutdown() {
+					error!("Failed to flush telemetry data: {}", err);
+				}
+			})
+		};
+
 		tokio::select! {
 			// Start a normal graceful shutdown
-			_ = async {
-				// First stop accepting new HTTP requests
-				http_handle.graceful_shutdown(None);
-
-				// Close all WebSocket connections. Queued messages will still be processed.
-				for (_, WebSocketRef(_, cancel_token)) in WEBSOCKETS.read().await.iter() {
-					cancel_token.cancel();
-				};
-
-				// Wait for all existing WebSocket connections to gracefully close
-				while WEBSOCKETS.read().await.len() > 0 {
-					tokio::time::sleep(Duration::from_millis(100)).await;
-				};
-			} => (),
+			_ = shutdown => (),
 			// Force an immediate shutdown if a second signal is received
 			_ = async {
 				if let Ok(signal) = listen().await {
@@ -46,9 +52,10 @@ pub fn graceful_shutdown(http_handle: Handle) -> JoinHandle<()> {
 				http_handle.shutdown();
 
 				// Close all WebSocket connections immediately
-				if let Ok(mut writer) = WEBSOCKETS.try_write() {
-					writer.drain();
-				}
+				rpc::shutdown();
+
+				// Cancel cancellation token
+				ct.cancel();
 			} => (),
 		}
 	})

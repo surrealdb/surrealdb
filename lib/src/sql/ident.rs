@@ -12,6 +12,7 @@ use nom::combinator::recognize;
 use nom::combinator::value;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -25,6 +26,7 @@ const BACKTICK: char = '`';
 const BACKTICK_ESC_NUL: &str = "`\\\0";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Ident {

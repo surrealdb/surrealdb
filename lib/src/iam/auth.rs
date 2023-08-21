@@ -66,6 +66,10 @@ impl Auth {
 		Self::new(Actor::new("system_auth".into(), vec![role], (ns, db).into()))
 	}
 
+	pub fn for_sc(rid: String, ns: &str, db: &str, sc: &str) -> Self {
+		Self::new(Actor::new(rid, vec![], (ns, db, sc).into()))
+	}
+
 	//
 	// Permission checks
 	//

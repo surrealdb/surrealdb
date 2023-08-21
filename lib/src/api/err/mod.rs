@@ -9,7 +9,7 @@ use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// An error originating from a remote SurrealDB database.
+/// An error originating from a remote SurrealDB database
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {

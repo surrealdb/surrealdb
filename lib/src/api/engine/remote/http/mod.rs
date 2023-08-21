@@ -76,11 +76,12 @@ impl Surreal<Client> {
 	/// # Examples
 	///
 	/// ```no_run
+	/// use once_cell::sync::Lazy;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::remote::http::Client;
 	/// use surrealdb::engine::remote::http::Http;
 	///
-	/// static DB: Surreal<Client> = Surreal::init();
+	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -93,7 +94,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -320,12 +321,7 @@ async fn router(
 	vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	let mut params = match param.query {
-		Some((query, bindings)) => {
-			vec![query.to_string().into(), bindings.into()]
-		}
-		None => param.other,
-	};
+	let mut params = param.other;
 
 	match method {
 		Method::Use => {
@@ -478,16 +474,13 @@ async fn router(
 		Method::Query => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			match &mut params[..] {
-				[Value::Strand(Strand(statements))] => {
-					request = request.body(mem::take(statements));
-				}
-				[Value::Strand(Strand(statements)), Value::Object(bindings)] => {
+			match param.query {
+				Some((query, bindings)) => {
 					let bindings: Vec<_> =
 						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
-					request = request.query(&bindings).body(mem::take(statements));
+					request = request.query(&bindings).body(query.to_string());
 				}
-				_ => unreachable!(),
+				None => unreachable!(),
 			}
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
@@ -524,6 +517,9 @@ async fn router(
 			let value = health(request).await?;
 			Ok(DbResponse::Other(value))
 		}
+		Method::Tick => Err(crate::Error::Api(crate::error::Api::InvalidRequest(
+			"Tick is not implemented for remote backends".to_string(),
+		))),
 		Method::Version => {
 			let path = base_url.join(method.as_str())?;
 			let request = client.get(path);

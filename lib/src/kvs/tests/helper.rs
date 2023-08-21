@@ -17,10 +17,10 @@ impl TestContext {
 		node_id: crate::sql::uuid::Uuid,
 		time: Timestamp,
 	) -> Result<(), Error> {
-		let mut tx = self.db.transaction(true, true).await?;
+		let mut tx = self.db.transaction(true, false).await?;
 		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
-		let mut tx = self.db.transaction(true, true).await?;
+		let mut tx = self.db.transaction(true, false).await?;
 		self.db.remove_archived(&mut tx, archived).await?;
 		Ok(tx.commit().await?)
 	}
@@ -33,11 +33,11 @@ impl TestContext {
 
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
-pub(crate) async fn init() -> Result<TestContext, Error> {
-	let db = new_ds().await;
+pub(crate) async fn init(node_id: Uuid) -> Result<TestContext, Error> {
+	let db = new_ds(node_id).await;
 	return Ok(TestContext {
 		db,
-		context_id: Uuid::new_v4().to_string(), // The context does not always have to be a uuid
+		context_id: node_id.to_string(), // The context does not always have to be a uuid
 	});
 }
 

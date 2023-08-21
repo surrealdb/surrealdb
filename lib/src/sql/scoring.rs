@@ -6,11 +6,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub enum Scoring {
 	Bm {
 		k1: f32,

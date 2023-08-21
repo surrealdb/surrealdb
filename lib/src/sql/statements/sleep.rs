@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -9,12 +9,14 @@ use crate::sql::error::IResult;
 use crate::sql::{Base, Duration, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct SleepStatement {
-	duration: Duration,
+	pub(crate) duration: Duration,
 }
 
 impl SleepStatement {
@@ -23,6 +25,7 @@ impl SleepStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
+		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -64,8 +67,6 @@ pub fn sleep(i: &str) -> IResult<&str, SleepStatement> {
 mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
-	use crate::iam::{Auth, Role};
-	use std::sync::Arc;
 	use std::time::SystemTime;
 
 	#[test]
@@ -90,10 +91,9 @@ mod tests {
 	async fn test_sleep_compute() {
 		let sql = "SLEEP 500ms";
 		let time = SystemTime::now();
-		let opt = Options::default().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-		let (ctx, _, _) = mock().await;
+		let (ctx, opt, txn) = mock().await;
 		let (_, stm) = sleep(sql).unwrap();
-		let value = stm.compute(&ctx, &opt, None).await.unwrap();
+		let value = stm.compute(&ctx, &opt, &txn, None).await.unwrap();
 		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
 		assert_eq!(value, Value::None);
 	}

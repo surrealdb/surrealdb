@@ -24,13 +24,18 @@
 # Code and tests for the server
 /src/net/ @surrealdb/api
 /src/rpc/ @surrealdb/api
+/tests/http_integration.rs @surrealdb/api
+/tests/ws_integration.rs @surrealdb/api
 
 # Code and tests for the command-line
 /src/cli/ @surrealdb/cli
-/tests/cli.rs @surrealdb/cli
+/tests/cli_integration.rs @surrealdb/cli
 
 # Code and tests for opentelemetry
-/src/o11y/ @surrealdb/monitoring
+/src/telemetry/ @surrealdb/monitoring
 
 # Tests related to the key-value store
 /lib/src/kvs/tests/ @tobiemh @phughk
+
+# IAM
+/lib/src/iam/ @surrealdb/api @surrealdb/security

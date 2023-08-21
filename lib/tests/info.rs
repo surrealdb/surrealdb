@@ -55,7 +55,7 @@ async fn info_for_ns() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let output_regex = Regex::new(
-		r"\{ databases: \{ DB: .* \}, logins: \{  \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}",
+		r"\{ databases: \{ DB: .* \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}",
 	)
 	.unwrap();
 	let out_str = out.unwrap().to_string();
@@ -88,7 +88,7 @@ async fn info_for_db() {
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
-	let output_regex = Regex::new(r"\{ analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, logins: \{  \}, params: \{ param: .* \}, scopes: \{ account: .* \}, tables: \{ TB: .* \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}").unwrap();
+	let output_regex = Regex::new(r"\{ analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, params: \{ param: .* \}, scopes: \{ account: .* \}, tables: \{ TB: .* \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}").unwrap();
 	let out_str = out.unwrap().to_string();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -276,8 +276,8 @@ async fn permissions_checks_info_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ databases: {  }, logins: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -315,8 +315,8 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, logins: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [

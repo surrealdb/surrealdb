@@ -4,10 +4,12 @@ use crate::sql::ident::ident_raw;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct UseStatement {
 	pub ns: Option<String>,
 	pub db: Option<String>,
@@ -26,7 +28,7 @@ impl fmt::Display for UseStatement {
 	}
 }
 
-pub fn yuse(i: &str) -> IResult<&str, UseStatement> {
+pub fn r#use(i: &str) -> IResult<&str, UseStatement> {
 	alt((both, ns, db))(i)
 }
 
@@ -87,7 +89,7 @@ mod tests {
 	#[test]
 	fn use_query_ns() {
 		let sql = "USE NS test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
@@ -103,7 +105,7 @@ mod tests {
 	#[test]
 	fn use_query_db() {
 		let sql = "USE DB test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
@@ -119,7 +121,7 @@ mod tests {
 	#[test]
 	fn use_query_both() {
 		let sql = "USE NS test DB test";
-		let res = yuse(sql);
+		let res = r#use(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(

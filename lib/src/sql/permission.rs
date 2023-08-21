@@ -9,13 +9,16 @@ use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
+use nom::multi::separated_list1;
 use nom::{multi::separated_list0, sequence::tuple};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -136,7 +139,7 @@ fn full(i: &str) -> IResult<&str, Permissions> {
 }
 
 fn specific(i: &str) -> IResult<&str, Permissions> {
-	let (i, perms) = separated_list0(commasorspace, permission)(i)?;
+	let (i, perms) = separated_list1(commasorspace, permission)(i)?;
 	Ok((
 		i,
 		Permissions {
@@ -180,7 +183,8 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Permission {
 	None,
 	Full,
@@ -273,5 +277,13 @@ mod tests {
 				delete: Permission::None,
 			}
 		);
+	}
+
+	#[test]
+	fn no_empty_permissions() {
+		// This was previouslly allowed,
+		let sql = "PERMISSION ";
+		let res = dbg!(permission(sql));
+		assert!(dbg!(res.is_err()));
 	}
 }

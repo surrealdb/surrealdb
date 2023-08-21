@@ -1,10 +1,12 @@
 mod parse;
+
+use channel::{Receiver, TryRecvError};
 use parse::Parse;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Id, Thing, Value};
 
 #[tokio::test]
 async fn delete() -> Result<(), Error> {
@@ -369,4 +371,75 @@ async fn check_permissions_auth_disabled() {
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
 	}
+}
+
+#[tokio::test]
+async fn delete_filtered_live_notification() -> Result<(), Error> {
+	let dbs = Datastore::new("memory").await?.with_notifications();
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	// validate create response
+	let tmp = res.remove(0).result?;
+	let expected_record = Value::parse(
+		"[
+			{
+				id: person:test_true,
+				condition: true,
+			}
+		]",
+	);
+	assert_eq!(tmp, expected_record);
+
+	// Validate live query response
+	let res =
+		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let live_id = res.remove(0).result?;
+	let live_id = match live_id {
+		Value::Uuid(id) => id,
+		_ => panic!("expected uuid"),
+	};
+
+	// Validate delete response
+	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+
+	// Validate notification
+	let notifications = dbs.notifications();
+	let notifications = match notifications {
+		Some(notifications) => notifications,
+		None => panic!("expected notifications"),
+	};
+	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
+	assert_eq!(
+		not,
+		Notification {
+			id: live_id,
+			action: Action::Delete,
+			result: Value::Thing(Thing {
+				tb: "person".to_string(),
+				id: Id::String("test_true".to_string()),
+			}),
+		}
+	);
+	Ok(())
+}
+
+fn recv_notification(
+	notifications: &Receiver<Notification>,
+	tries: u8,
+	poll_rate: std::time::Duration,
+) -> Result<Notification, TryRecvError> {
+	for _ in 0..tries {
+		match notifications.try_recv() {
+			Ok(not) => return Ok(not),
+			Err(_) => {}
+		}
+		std::thread::sleep(poll_rate);
+	}
+	notifications.try_recv()
 }

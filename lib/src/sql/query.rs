@@ -1,15 +1,21 @@
 use crate::sql::error::IResult;
 use crate::sql::fmt::Pretty;
 use crate::sql::statement::{statements, Statement, Statements};
+use crate::sql::Value;
 use derive::Store;
 use nom::combinator::all_consuming;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
+#[serde(rename = "$surrealdb::private::sql::Query")]
 pub struct Query(pub Statements);
 
 impl Deref for Query {
@@ -24,6 +30,12 @@ impl IntoIterator for Query {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl From<Query> for Value {
+	fn from(q: Query) -> Self {
+		Value::Query(q)
 	}
 }
 

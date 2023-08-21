@@ -1,3 +1,5 @@
+use super::verify::verify_creds;
+use super::{Actor, Level};
 use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
@@ -9,9 +11,6 @@ use crate::sql::Value;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
-
-use super::verify::verify_creds;
-use super::{Actor, Level};
 
 pub async fn signin(
 	kvs: &Datastore,

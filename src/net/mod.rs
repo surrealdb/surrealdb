@@ -25,6 +25,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
@@ -53,7 +54,7 @@ struct AppState {
 	client_ip: client_ip::ClientIp,
 }
 
-pub async fn init() -> Result<(), Error> {
+pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
@@ -129,9 +130,9 @@ pub async fn init() -> Result<(), Error> {
 		.merge(key::router())
 		.layer(service);
 
-	// Setup the graceful shutdown with no timeout
+	// Setup the graceful shutdown
 	let handle = Handle::new();
-	let shutdown_handler = graceful_shutdown(handle.clone());
+	let shutdown_handler = graceful_shutdown(ct, handle.clone());
 
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// configure certificate and private key used by https
@@ -158,9 +159,6 @@ pub async fn init() -> Result<(), Error> {
 
 	// Wait for the shutdown to finish
 	let _ = shutdown_handler.await;
-
-	// Flush all telemetry data
-	opentelemetry::global::shutdown_tracer_provider();
 
 	info!(target: LOG, "Web server stopped. Bye!");
 

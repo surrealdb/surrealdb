@@ -1,5 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
+	use chrono::DateTime;
 	use once_cell::sync::Lazy;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -182,7 +183,21 @@ mod api_integration {
             };
 		}
 
+		#[tokio::test]
+		async fn surreal_clone() {
+			use surrealdb::engine::any::Any;
+
+			let db: Surreal<Db> = Surreal::init();
+			db.clone().connect::<Mem>(()).await.unwrap();
+			db.use_ns("test").use_db("test").await.unwrap();
+
+			let db: Surreal<Any> = Surreal::init();
+			db.clone().connect("memory").await.unwrap();
+			db.use_ns("test").use_db("test").await.unwrap();
+		}
+
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -206,6 +221,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -229,6 +245,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -252,6 +269,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -274,6 +292,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -296,6 +315,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
