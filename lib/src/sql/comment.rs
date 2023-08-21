@@ -5,15 +5,16 @@ use nom::character::complete::char;
 use nom::character::complete::multispace0;
 use nom::character::complete::multispace1;
 use nom::character::complete::not_line_ending;
+use nom::multi::many0;
 use nom::multi::many1;
 
 pub fn mightbespace(i: &str) -> IResult<&str, ()> {
-	let (i, _) = alt((comment, blank))(i)?;
+	let (i, _) = many0(alt((comment, space)))(i)?;
 	Ok((i, ()))
 }
 
 pub fn shouldbespace(i: &str) -> IResult<&str, ()> {
-	let (i, _) = alt((comment, space))(i)?;
+	let (i, _) = many1(alt((comment, space)))(i)?;
 	Ok((i, ()))
 }
 
@@ -55,11 +56,6 @@ pub fn hash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
 	let (i, _) = char('#')(i)?;
 	let (i, _) = not_line_ending(i)?;
-	Ok((i, ()))
-}
-
-fn blank(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace0(i)?;
 	Ok((i, ()))
 }
 
