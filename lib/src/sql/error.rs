@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error<I> {
 	Parser(I),
+	ExcessiveDepth,
 	Field(I, String),
 	Split(I, String),
 	Order(I, String),

@@ -2748,6 +2748,10 @@ pub fn value(i: &str) -> IResult<&str, Value> {
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
+	// Dive in `single` (as opposed to `value`) since it is directly
+	// called by `Cast`
+	let _diving = crate::sql::parser::depth::dive()?;
+
 	let (i, v) = alt((
 		alt((
 			terminated(
@@ -2852,6 +2856,8 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive()?;
+
 	// Use a specific parser for JSON objects
 	pub fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;
