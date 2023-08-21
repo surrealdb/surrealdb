@@ -2751,7 +2751,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
 	let _diving = crate::sql::parser::depth::dive()?;
-	
+
 	let (i, v) = alt((
 		alt((
 			terminated(
