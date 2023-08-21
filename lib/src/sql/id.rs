@@ -24,11 +24,20 @@ use ulid::Ulid;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+pub enum Gen {
+	Rand,
+	Ulid,
+	Uuid,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Id {
 	Number(i64),
 	String(String),
 	Array(Array),
 	Object(Object),
+	Generate(Gen),
 }
 
 impl From<i64> for Id {
@@ -149,8 +158,13 @@ impl Id {
 		match self {
 			Self::Number(v) => v.to_string(),
 			Self::String(v) => v.to_string(),
-			Self::Object(v) => v.to_string(),
 			Self::Array(v) => v.to_string(),
+			Self::Object(v) => v.to_string(),
+			Self::Generate(v) => match v {
+				Gen::Rand => "rand()".to_string(),
+				Gen::Ulid => "ulid()".to_string(),
+				Gen::Uuid => "uuid()".to_string(),
+			},
 		}
 	}
 }
@@ -160,8 +174,13 @@ impl Display for Id {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => Display::fmt(&escape_rid(v), f),
-			Self::Object(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
+			Self::Object(v) => Display::fmt(v, f),
+			Self::Generate(v) => match v {
+				Gen::Rand => Display::fmt("rand()", f),
+				Gen::Ulid => Display::fmt("ulid()", f),
+				Gen::Uuid => Display::fmt("uuid()", f),
+			},
 		}
 	}
 }
@@ -178,13 +197,18 @@ impl Id {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
+			Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
+				Value::Array(v) => Ok(Id::Array(v)),
+				_ => unreachable!(),
+			},
 			Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
 				Value::Object(v) => Ok(Id::Object(v)),
 				_ => unreachable!(),
 			},
-			Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
-				Value::Array(v) => Ok(Id::Array(v)),
-				_ => unreachable!(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Ok(Self::rand()),
+				Gen::Ulid => Ok(Self::ulid()),
+				Gen::Uuid => Ok(Self::uuid()),
 			},
 		}
 	}

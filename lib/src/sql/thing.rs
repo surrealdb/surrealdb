@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
-use crate::sql::id::{id, Id};
+use crate::sql::id::{id, Gen, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
@@ -135,9 +135,9 @@ fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, v) = alt((
-		map(tag("rand()"), |_| Id::rand()),
-		map(tag("ulid()"), |_| Id::ulid()),
-		map(tag("uuid()"), |_| Id::uuid()),
+		map(tag("rand()"), |_| Id::Generate(Gen::Rand)),
+		map(tag("ulid()"), |_| Id::Generate(Gen::Ulid)),
+		map(tag("uuid()"), |_| Id::Generate(Gen::Uuid)),
 		id,
 	))(i)?;
 	Ok((

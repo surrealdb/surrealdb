@@ -46,7 +46,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::time::Duration;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct Statements(pub Vec<Statement>);
 
@@ -80,7 +80,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 	Ok((i, Statements(v)))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub enum Statement {
 	Analyze(AnalyzeStatement),

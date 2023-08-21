@@ -17,7 +17,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
+default = ["protocol-ws", "rustls", "kv-mem"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
@@ -120,7 +120,7 @@ env_logger = "0.10.0"
 pprof = { version = "0.11.1", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
-test-log = "0.2.12"
+test-log = { version="0.2.12", features = ["trace"] }
 time = { version = "0.3.25", features = ["serde"] }
 tokio = { version = "1.31.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

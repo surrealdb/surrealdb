@@ -1,3 +1,5 @@
+pub(super) mod opt;
+
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use ser::Serializer as _;
@@ -28,6 +30,18 @@ impl ser::Serializer for Serializer {
 
 	fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
 		Ok(SerializeCompactUuidTuple::default())
+	}
+
+	#[inline]
+	fn serialize_newtype_struct<T>(
+		self,
+		_name: &'static str,
+		value: &T,
+	) -> Result<Self::Ok, Self::Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		value.serialize(self.wrap())
 	}
 }
 

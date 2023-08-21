@@ -23,7 +23,7 @@ use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
-use crate::sql::id::Id;
+use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
@@ -40,6 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
+use crate::sql::Query;
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -65,7 +66,7 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Values(pub Vec<Value>);
 
@@ -148,9 +149,11 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
+	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	Query(Query),
 	// Add new variants here
 }
 
@@ -528,8 +531,13 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
-			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
+			Id::Object(v) => v.into(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Id::rand().into(),
+				Gen::Ulid => Id::ulid().into(),
+				Gen::Uuid => Id::uuid().into(),
+			},
 		}
 	}
 }
@@ -857,6 +865,11 @@ impl Value {
 	/// Check if this Value is a Strand
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
+	}
+
+	/// Check if this Value is a Query
+	pub fn is_query(&self) -> bool {
+		matches!(self, Value::Query(_))
 	}
 
 	/// Check if this Value is a float Number
@@ -2471,6 +2484,7 @@ impl fmt::Display for Value {
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
+			Value::Query(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),

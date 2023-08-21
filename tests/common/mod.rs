@@ -11,6 +11,7 @@ use std::error::Error;
 use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use std::{env, fs};
 use tokio::net::TcpStream;
 use tokio::time;
@@ -91,7 +92,7 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
 	let stdout_path = tmp_file(format!("server-stdout-{}.log", rand::random::<u32>()).as_str());
 	let stderr_path = tmp_file(format!("server-stderr-{}.log", rand::random::<u32>()).as_str());
-	debug!("Logging server output to: ({}, {})", stdout_path, stderr_path);
+	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
 
@@ -255,6 +256,32 @@ pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box
 	ws_recv_msg_with_fmt(socket, Format::Json).await
 }
 
+/// When testing Live Queries, we may receive multiple messages unordered.
+/// This method captures all the expected messages before the given timeout. The result can be inspected later on to find the desired message.
+pub async fn ws_recv_all_msgs(
+	socket: &mut WsStream,
+	expected: usize,
+	timeout: Duration,
+) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
+	let mut res = Vec::new();
+	loop {
+		tokio::select! {
+			_ = time::sleep(timeout) => {
+				debug!("Waited for {:?} and received {} messages", timeout, res.len());
+				if res.len() != expected {
+					return Err(format!("Expected {} messages but got {} after {:?}", expected, res.len(), timeout).into());
+				}
+			}
+			msg = ws_recv_msg(socket) => {
+				res.push(msg?);
+			}
+		}
+		if res.len() == expected {
+			return Ok(res);
+		}
+	}
+}
+
 pub async fn ws_send_msg_and_wait_response(
 	socket: &mut WsStream,
 	msg_req: String,
@@ -333,6 +360,8 @@ pub async fn ws_signin(
 
 	ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 	let msg = ws_recv_msg(socket).await?;
+	debug!("ws_query result json={json:?} msg={msg:?}");
+
 	match msg.as_object() {
 		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
 			Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
@@ -366,6 +395,7 @@ pub async fn ws_query(
 
 	ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 	let msg = ws_recv_msg(socket).await?;
+	debug!("ws_query result json={json:?} msg={msg:?}");
 
 	match msg.as_object() {
 		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -403,6 +433,7 @@ pub async fn ws_use(
 
 	ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 	let msg = ws_recv_msg(socket).await?;
+	debug!("ws_query result json={json:?} msg={msg:?}");
 
 	match msg.as_object() {
 		Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -422,4 +453,24 @@ pub async fn ws_use(
 			Err(format!("unexpected response: {:?}", msg).into())
 		}
 	}
+}
+
+/// Check if the given message is a successful notification from LQ.
+pub fn ws_msg_is_notification(msg: &serde_json::Value) -> bool {
+	// Example of LQ notification:
+	//
+	// Object {"result": Object {"action": String("CREATE"), "id": String("04460f07-b0e1-4339-92db-049a94aeec10"), "result": Object {"id": String("table_FD40A9A361884C56B5908A934164884A:⟨an-id-goes-here⟩"), "name": String("ok")}}}
+	msg.is_object()
+		&& msg["result"].is_object()
+		&& msg["result"]
+			.as_object()
+			.unwrap()
+			.keys()
+			.all(|k| ["id", "action", "result"].contains(&k.as_str()))
+}
+
+/// Check if the given message is a notification from LQ and comes from the given LQ ID.
+pub fn ws_msg_is_notification_from_lq(msg: &serde_json::Value, id: &str) -> bool {
+	ws_msg_is_notification(msg)
+		&& msg["result"].as_object().unwrap().get("id").unwrap().as_str() == Some(id)
 }

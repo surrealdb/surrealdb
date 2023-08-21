@@ -17,8 +17,6 @@ impl<'a> Document<'a> {
 		match self.current.doc.is_some() {
 			// Run INSERT clause
 			false => {
-				// Check if allowed
-				self.allow(ctx, opt, txn, stm).await?;
 				// Merge record data
 				self.merge(ctx, opt, txn, stm).await?;
 				// Merge fields data

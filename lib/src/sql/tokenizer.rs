@@ -1,4 +1,3 @@
-use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use nom::branch::alt;
@@ -10,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Tokenizer {
 	Blank,
@@ -41,8 +40,5 @@ fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
 }
 
 pub(super) fn tokenizers(i: &str) -> IResult<&str, Vec<Tokenizer>> {
-	let (i, _) = tag_no_case("TOKENIZERS")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, t) = separated_list1(commas, tokenizer)(i)?;
-	Ok((i, t))
+	separated_list1(commas, tokenizer)(i)
 }

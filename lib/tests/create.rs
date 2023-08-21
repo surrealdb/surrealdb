@@ -4,6 +4,8 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
+use surrealdb::sql::Part;
+use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -128,6 +130,102 @@ async fn create_with_id() -> Result<(), Error> {
 			{
 				id: test:⟨9223372036854775808⟩
 			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_custom_function() -> Result<(), Error> {
+	let sql = "
+		DEFINE FUNCTION fn::record::create($data: any) {
+			RETURN CREATE person:ulid() CONTENT { data: $data } RETURN AFTER;
+		};
+		RETURN fn::record::create({ test: true, name: 'Tobie' });
+		RETURN fn::record::create({ test: true, name: 'Jaime' });
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?.pick(&[Part::from("data")]);
+	let val = Value::parse(
+		"{
+			test: true,
+			name: 'Tobie'
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?.pick(&[Part::from("data")]);
+	let val = Value::parse(
+		"{
+			test: true,
+			name: 'Jaime'
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_or_insert_with_permissions() -> Result<(), Error> {
+	let sql = "
+		CREATE user:test;
+		DEFINE TABLE user SCHEMAFULL PERMISSIONS FULL;
+		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
+		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
+	";
+	let dbs = Datastore::new("memory").await?.with_auth_enabled(true);
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let sql = "
+		CREATE demo SET id = demo:one;
+		INSERT INTO demo (id) VALUES (demo:two);
+	";
+	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "test")).into());
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: demo:one,
+				user: user:test,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: demo:two,
+				user: user:test,
+			},
 		]",
 	);
 	assert_eq!(tmp, val);
