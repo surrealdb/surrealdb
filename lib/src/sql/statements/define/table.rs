@@ -257,4 +257,12 @@ mod tests {
 		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
 		assert_eq!(out, deserialized);
 	}
+
+	#[test]
+	fn define_table_dissallow_empty_permission() {
+		// This was previouslly allowed,
+		let sql = "DEFINE TABLE mytable PERMISSION ";
+		let res = table(sql);
+		assert!(res.is_err());
+	}
 }

@@ -7,7 +7,7 @@ use crate::sql::table::{tables, Tables};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
-use nom::sequence::{self, preceded};
+use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -108,5 +108,22 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE GROUP BY temp", format!("{}", out))
+	}
+
+	#[test]
+	fn view_disallow_unbalanced_brackets() {
+		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp";
+		let res = view(sql);
+		assert!(res.is_err());
+		let sql = "AS SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
+		let res = view(sql);
+		// The above test won't return an error since the trailing ) might be part of a another
+		// pair.
+		if let Ok((i, _)) = res {
+			// but it should not be parsed.
+			assert_eq!(i, ")")
+		} else {
+			panic!()
+		}
 	}
 }

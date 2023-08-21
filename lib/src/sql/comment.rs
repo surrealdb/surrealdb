@@ -63,3 +63,14 @@ fn space(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace1(i)?;
 	Ok((i, ()))
 }
+
+#[cfg(test)]
+mod test {
+	use crate::sql::parse;
+
+	#[test]
+	fn any_whitespace() {
+		let sql = "USE /* white space and comment between */ NS test;";
+		assert!(parse(sql).is_ok());
+	}
+}
