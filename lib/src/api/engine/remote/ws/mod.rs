@@ -17,21 +17,9 @@ use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
-use futures::Stream;
 use serde::Deserialize;
 use std::marker::PhantomData;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::Instant;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::Interval;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::Instant;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::tokio::Interval;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -148,24 +136,4 @@ impl DbResponse {
 pub(crate) struct Response {
 	id: Option<Value>,
 	pub(crate) result: ServerResult,
-}
-
-struct IntervalStream {
-	inner: Interval,
-}
-
-impl IntervalStream {
-	fn new(interval: Interval) -> Self {
-		Self {
-			inner: interval,
-		}
-	}
-}
-
-impl Stream for IntervalStream {
-	type Item = Instant;
-
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Instant>> {
-		self.inner.poll_tick(cx).map(Some)
-	}
 }

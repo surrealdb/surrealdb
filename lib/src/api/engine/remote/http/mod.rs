@@ -517,9 +517,6 @@ async fn router(
 			let value = health(request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Tick => Err(crate::Error::Api(crate::error::Api::InvalidRequest(
-			"Tick is not implemented for remote backends".to_string(),
-		))),
 		Method::Version => {
 			let path = base_url.join(method.as_str())?;
 			let request = client.get(path);

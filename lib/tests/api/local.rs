@@ -10,8 +10,6 @@ async fn changefeed_with_ts() {
 	response.check().unwrap();
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
-	let ts1 = DateTime::parse_from_rfc3339(ts1_dt.clone()).unwrap();
-	db.tick(ts1.timestamp().try_into().unwrap()).await.unwrap();
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';
@@ -152,9 +150,7 @@ async fn changefeed_with_ts() {
 		.unwrap()
 	);
 	// Save timestamp 2
-	let ts2_dt = "2023-08-01T00:00:05Z";
-	let ts2 = DateTime::parse_from_rfc3339(ts2_dt.clone()).unwrap();
-	db.tick(ts2.timestamp().try_into().unwrap()).await.unwrap();
+	let _ts2_dt = "2023-08-01T00:00:05Z";
 	//
 	// Show changes using timestamp 1
 	//
@@ -195,8 +191,6 @@ async fn changefeed_with_ts() {
 	);
 	// Save timestamp 3
 	let ts3_dt = "2023-08-01T00:00:10Z";
-	let ts3 = DateTime::parse_from_rfc3339(ts3_dt.clone()).unwrap();
-	db.tick(ts3.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 3
 	//

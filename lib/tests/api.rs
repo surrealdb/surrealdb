@@ -9,6 +9,7 @@ mod api_integration {
 	use std::ops::Bound;
 	use std::sync::Arc;
 	use std::sync::Mutex;
+	use std::time::Duration;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
@@ -35,6 +36,7 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
+	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 	// Used to ensure that only one test at a time is setting up the underlaying datastore.
 	// When auth is enabled, multiple tests may try to create the same root user at the same time.
 	static SETUP_MUTEX: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
@@ -132,7 +134,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -223,7 +225,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -248,7 +250,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -273,7 +275,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -297,7 +299,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -321,7 +323,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root);
+			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
 			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db

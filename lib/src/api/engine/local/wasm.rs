@@ -5,17 +5,21 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::Endpoint;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
+use crate::engine::IntervalStream;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
+use futures::future::Either;
 use futures::StreamExt;
+use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -25,6 +29,8 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use wasm_bindgen_futures::spawn_local;
+use wasmtimer::tokio as time;
+use wasmtimer::tokio::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
@@ -108,7 +114,6 @@ pub(crate) fn router(
 						return;
 					}
 				}
-
 				let _ = conn_tx.into_send_async(Ok(())).await;
 				kvs.with_auth_enabled(configured_root.is_some())
 			}
@@ -128,18 +133,45 @@ pub(crate) fn router(
 			false => kvs,
 		};
 
+		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
-		let mut stream = route_rx.into_stream();
 		let mut session = Session::default();
 
-		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &mut session, &mut vars).await {
-				Ok(value) => {
-					let _ = route.response.into_send_async(Ok(value)).await;
+		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
+		let mut interval = time::interval(tick_interval);
+		// Don't bombard the database if we miss some ticks
+		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+		// Delay sending the first tick
+		interval.tick().await;
+
+		let ticker = IntervalStream::new(interval);
+
+		let streams = (route_rx.into_stream().map(Either::Left), ticker.map(|_| Either::Right(())));
+
+		let mut stream = streams.merge();
+
+		while let Some(either) = stream.next().await {
+			match either {
+				Either::Left(Some(route)) => {
+					match super::router(route.request, &kvs, &mut session, &mut vars).await {
+						Ok(value) => {
+							let _ = route.response.into_send_async(Ok(value)).await;
+						}
+						Err(error) => {
+							let _ = route.response.into_send_async(Err(error)).await;
+						}
+					}
 				}
-				Err(error) => {
-					let _ = route.response.into_send_async(Err(error)).await;
+				Either::Right(()) => {
+					let kvs = kvs.clone();
+					spawn_local(async move {
+						match kvs.tick().await {
+							Ok(()) => trace!("Node agent tick ran successfully"),
+							Err(error) => error!("Error running node agent tick: {error}"),
+						}
+					});
 				}
+				Either::Left(None) => break,
 			}
 		}
 	});
