@@ -25,11 +25,14 @@ async fn create_with_id() -> Result<(), Error> {
 		-- Should error as id is empty
 		CREATE person SET id = '';
 		CREATE person CONTENT { id: '', name: 'Tester' };
+		-- Should error as id is mismatched
+		CREATE person:other SET id = 'tobie';
+		CREATE person:other CONTENT { id: 'tobie', name: 'Tester' };
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 12);
+	assert_eq!(res.len(), 14);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -148,6 +151,18 @@ async fn create_with_id() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Found '' for the Record ID but this is not a valid id"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found 'tobie' for the id field, but a specific record has been specified"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found 'tobie' for the id field, but a specific record has been specified"#
 	));
 	//
 	Ok(())

@@ -165,7 +165,10 @@ impl RelateStatement {
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
 						Some(data) => {
-							let id = data.rid(ctx, opt, txn, tb).await?;
+							let id = match data.rid(ctx, opt, txn).await? {
+								Some(id) => id.generate(tb, false)?,
+								None => tb.generate(),
+							};
 							i.ingest(Iterable::Relatable(f, id, w))
 						}
 						// There is no data clause so create a record id
