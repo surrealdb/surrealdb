@@ -269,19 +269,6 @@ pub fn idiom(i: &str) -> IResult<&str, Idiom> {
 	))(i)
 }
 
-	alt((
-		plain,
-		alt((multi_without_start, |i| {
-			let (i, v) = value(i)?;
-			let (i, v) = reparse_idiom_start(v, i)?;
-			if let Value::Idiom(x) = v {
-				return Ok((i, x));
-			}
-			fail(i)
-		})),
-	))(i)
-}
-
 #[cfg(test)]
 mod tests {
 
