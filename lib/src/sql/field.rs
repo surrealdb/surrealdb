@@ -12,6 +12,7 @@ use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -194,9 +195,11 @@ pub fn fields(i: &str) -> IResult<&str, Fields> {
 fn field_one(i: &str) -> IResult<&str, Fields> {
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, f) = alt((alias, alone))(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Fields(vec![f], true)))
+	cut(|i| {
+		let (i, f) = alt((alias, alone))(i)?;
+		let (i, _) = ending(i)?;
+		Ok((i, Fields(vec![f], true)))
+	})(i)
 }
 
 fn field_many(i: &str) -> IResult<&str, Fields> {

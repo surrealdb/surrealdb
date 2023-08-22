@@ -5,7 +5,7 @@ use crate::sql::table::{table, tables, Tables};
 use crate::sql::thing::{thing, Thing};
 use nom::branch::alt;
 use nom::character::complete::char;
-use nom::combinator::map;
+use nom::combinator::{cut, map};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -52,7 +52,7 @@ fn simple(i: &str) -> IResult<&str, Tables> {
 fn custom(i: &str) -> IResult<&str, Tables> {
 	let (i, _) = openparentheses(i)?;
 	let (i, w) = alt((any, tables))(i)?;
-	let (i, _) = closeparentheses(i)?;
+	let (i, _) = cut(closeparentheses)(i)?;
 	Ok((i, w))
 }
 

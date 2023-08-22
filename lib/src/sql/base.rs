@@ -3,7 +3,7 @@ use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::{cut, map};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -56,7 +56,7 @@ pub fn base_or_scope(i: &str) -> IResult<&str, Base> {
 		|i| {
 			let (i, _) = tag_no_case("SCOPE")(i)?;
 			let (i, _) = shouldbespace(i)?;
-			let (i, v) = ident(i)?;
+			let (i, v) = cut(ident)(i)?;
 			Ok((i, Base::Sc(v)))
 		},
 	))(i)

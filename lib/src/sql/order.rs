@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::combinator::{cut, map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -77,10 +77,12 @@ impl fmt::Display for Order {
 
 pub fn order(i: &str) -> IResult<&str, Orders> {
 	let (i, _) = tag_no_case("ORDER")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = alt((order_rand, separated_list1(commas, order_raw)))(i)?;
-	Ok((i, Orders(v)))
+	cut(|i| {
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, v) = alt((order_rand, separated_list1(commas, order_raw)))(i)?;
+		Ok((i, Orders(v)))
+	})(i)
 }
 
 fn order_rand(i: &str) -> IResult<&str, Vec<Order>> {

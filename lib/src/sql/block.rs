@@ -181,7 +181,7 @@ impl Display for Block {
 pub fn block(i: &str) -> IResult<&str, Block> {
 	let (i, _) = openbraces(i)?;
 	let (i, v) = separated_list0(colons, entry)(i)?;
-	let (i, _) = many0(alt((colons, comment)))(i)?;
+	let (i, _) = many0(colons)(i)?;
 	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
 }

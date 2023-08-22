@@ -9,6 +9,7 @@ use crate::sql::kind::{kind, Kind};
 use crate::sql::value::{single, Value};
 use async_recursion::async_recursion;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -60,9 +61,9 @@ impl fmt::Display for Cast {
 }
 
 pub fn cast(i: &str) -> IResult<&str, Cast> {
-	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
+	let (i, k) = delimited(char('<'), cut(kind), char('>'))(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = single(i)?;
+	let (i, v) = cut(single)(i)?;
 	Ok((i, Cast(k, v)))
 }
 

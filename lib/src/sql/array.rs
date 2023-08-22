@@ -10,8 +10,9 @@ use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::multi::separated_list0;
+use nom::sequence::{delimited, preceded};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,6 +20,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use super::util::delimited_list;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
@@ -479,11 +482,13 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, v) = delimited_list(
+		openbracket,
+		preceded(mightbespace, char(',')),
+		preceded(mightbespace, value),
+		preceded(mightbespace, closebracket),
+	)(i)?;
+
 	Ok((i, Array(v)))
 }
 
