@@ -442,8 +442,19 @@ mod cli_integration {
 			.await
 			.expect("Failed to send WS message");
 
-		// Wait 5 seconds to make sure the SLEEP query is being executed
-		tokio::time::sleep(time::Duration::from_secs(5)).await;
+		// Make sure the SLEEP query is being executed
+		tokio::select! {
+			_ = async {
+				loop {
+					if server.stderr().contains("Executing: SLEEP 30s") {
+						break;
+					}
+					tokio::time::sleep(time::Duration::from_secs(1)).await;
+				}
+			} => {},
+			// Timeout after 10 seconds
+			_ = tokio::time::sleep(time::Duration::from_secs(10)) => panic!("Server didn't start executing the SLEEP query"),
+		}
 
 		info!("* Send first SIGINT signal");
 		server

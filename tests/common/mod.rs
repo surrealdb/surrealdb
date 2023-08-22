@@ -54,16 +54,21 @@ impl Child {
 		self.inner.as_mut().unwrap().try_wait()
 	}
 
+	pub fn stdout(&self) -> String {
+		std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file")
+	}
+
+	pub fn stderr(&self) -> String {
+		std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file")
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(mut self) -> Result<String, String> {
 		let status = self.inner.take().unwrap().wait().unwrap();
 
-		let mut buf =
-			std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-		buf.push_str(
-			&std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file"),
-		);
+		let mut buf = self.stdout();
+		buf.push_str(&self.stderr());
 
 		// Cleanup files after reading them
 		std::fs::remove_file(self.stdout_path.as_str()).unwrap();
