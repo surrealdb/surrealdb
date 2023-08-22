@@ -2865,9 +2865,8 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
 	let _diving = crate::sql::parser::depth::dive()?;
-
 	// Use a specific parser for JSON objects
-	pub fn object(i: &str) -> IResult<&str, Object> {
+	fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = separated_list0(commas, |i| {
@@ -2885,7 +2884,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		Ok((i, Object(v.into_iter().collect())))
 	}
 	// Use a specific parser for JSON arrays
-	pub fn array(i: &str) -> IResult<&str, Array> {
+	fn array(i: &str) -> IResult<&str, Array> {
 		let (i, _) = char('[')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = separated_list0(commas, json)(i)?;

@@ -15,6 +15,10 @@ use std::fmt;
 pub struct ContinueStatement;
 
 impl ContinueStatement {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		false
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

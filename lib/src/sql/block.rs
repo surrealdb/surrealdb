@@ -7,13 +7,18 @@ use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::create::{create, CreateStatement};
+use crate::sql::statements::define::{define, DefineStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
 use crate::sql::statements::insert::{insert, InsertStatement};
 use crate::sql::statements::output::{output, OutputStatement};
+use crate::sql::statements::r#break::{r#break, BreakStatement};
+use crate::sql::statements::r#continue::{r#continue, ContinueStatement};
 use crate::sql::statements::relate::{relate, RelateStatement};
+use crate::sql::statements::remove::{remove, RemoveStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::set::{set, SetStatement};
+use crate::sql::statements::throw::{throw, ThrowStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -63,7 +68,7 @@ impl Block {
 		// Duplicate context
 		let mut ctx = Context::new(ctx);
 		// Loop over the statements
-		for v in self.iter() {
+		for (i, v) in self.iter().enumerate() {
 			match v {
 				Entry::Set(v) => {
 					let val = v.compute(&ctx, opt, txn, doc).await?;
@@ -90,11 +95,30 @@ impl Block {
 				Entry::Insert(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
+				Entry::Define(v) => {
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
+				Entry::Remove(v) => {
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
 				Entry::Output(v) => {
 					return v.compute(&ctx, opt, txn, doc).await;
 				}
-				Entry::Value(v) => {
+				Entry::Throw(v) => {
 					return v.compute(&ctx, opt, txn, doc).await;
+				}
+				Entry::Break(v) => {
+					return v.compute(&ctx, opt, txn, doc).await;
+				}
+				Entry::Continue(v) => {
+					return v.compute(&ctx, opt, txn, doc).await;
+				}
+				Entry::Value(v) => {
+					if i == self.len() - 1 {
+						return v.compute(&ctx, opt, txn, doc).await;
+					} else {
+						v.compute(&ctx, opt, txn, doc).await?;
+					}
 				}
 			}
 		}
@@ -169,6 +193,11 @@ pub enum Entry {
 	Relate(RelateStatement),
 	Insert(InsertStatement),
 	Output(OutputStatement),
+	Define(DefineStatement),
+	Remove(RemoveStatement),
+	Throw(ThrowStatement),
+	Break(BreakStatement),
+	Continue(ContinueStatement),
 }
 
 impl PartialOrd for Entry {
@@ -192,6 +221,11 @@ impl Entry {
 			Self::Relate(v) => v.writeable(),
 			Self::Insert(v) => v.writeable(),
 			Self::Output(v) => v.writeable(),
+			Self::Define(v) => v.writeable(),
+			Self::Remove(v) => v.writeable(),
+			Self::Throw(v) => v.writeable(),
+			Self::Break(v) => v.writeable(),
+			Self::Continue(v) => v.writeable(),
 		}
 	}
 }
@@ -209,6 +243,11 @@ impl Display for Entry {
 			Self::Relate(v) => write!(f, "{v}"),
 			Self::Insert(v) => write!(f, "{v}"),
 			Self::Output(v) => write!(f, "{v}"),
+			Self::Define(v) => write!(f, "{v}"),
+			Self::Remove(v) => write!(f, "{v}"),
+			Self::Throw(v) => write!(f, "{v}"),
+			Self::Break(v) => write!(f, "{v}"),
+			Self::Continue(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -226,6 +265,11 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 			map(relate, Entry::Relate),
 			map(delete, Entry::Delete),
 			map(insert, Entry::Insert),
+			map(define, Entry::Define),
+			map(remove, Entry::Remove),
+			map(throw, Entry::Throw),
+			map(r#break, Entry::Break),
+			map(r#continue, Entry::Continue),
 			map(value, Entry::Value),
 		)),
 		mightbespace,
