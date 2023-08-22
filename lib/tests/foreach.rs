@@ -16,13 +16,13 @@ async fn foreach() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 		FOR $test in [4, 5, 6] {
-			IF $test >= 5 {
+			IF $test == 5 {
 				CONTINUE;
 			};
 			UPDATE type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
-		FOR $test in [7, 8, 9] {
+		FOR $test in <future> { [7, 8, 9] } {
 			IF $test > 8 {
 				THROW 'This is an error';
 			};
@@ -63,6 +63,10 @@ async fn foreach() -> Result<(), Error> {
 				id: person:4,
 				test: 4,
 			},
+			{
+				id: person:6,
+				test: 6,
+			},
 		]",
 	);
 	assert_eq!(tmp, val);
@@ -80,6 +84,10 @@ async fn foreach() -> Result<(), Error> {
 			{
 				id: person:4,
 				test: 4,
+			},
+			{
+				id: person:6,
+				test: 6,
 			},
 		]",
 	);
