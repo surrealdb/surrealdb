@@ -15,6 +15,7 @@ use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -144,15 +145,24 @@ pub async fn init(
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});
+	// This is the cancellation token propagated down to
+	// all the async functions that needs to be stopped gracefully.
+	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
 	#[cfg(feature = "has-storage")]
-	node::init().await?;
+	let nd = node::init(ct.clone());
 	// Start the web server
-	net::init().await?;
+	net::init(ct).await?;
+	// Wait for the node agent to stop
+	#[cfg(feature = "has-storage")]
+	if let Err(e) = nd.await {
+		error!("Node agent failed while running: {}", e);
+		return Err(Error::NodeAgent);
+	}
 	// All ok
 	Ok(())
 }

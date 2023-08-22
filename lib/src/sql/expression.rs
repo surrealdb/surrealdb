@@ -50,7 +50,7 @@ impl Expression {
 		}
 	}
 	/// Augment an existing expression
-	fn augment(mut self, l: Value, o: Operator) -> Self {
+	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
 		match &mut self {
 			Self::Binary {
 				l: left,
@@ -228,6 +228,8 @@ pub fn unary(i: &str) -> IResult<&str, Expression> {
 pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = single(i)?;
 	let (i, o) = operator::binary(i)?;
+	// Make sure to dive if the query is a right-deep binary tree.
+	let _diving = crate::sql::parser::depth::dive()?;
 	let (i, r) = value(i)?;
 	let v = match r {
 		Value::Expression(r) => r.augment(l, o),

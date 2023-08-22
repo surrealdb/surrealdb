@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::connect;
 use surrealdb::opt::auth::Root;
+use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
 
@@ -62,7 +63,7 @@ pub async fn init(
 		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
 		// * For remote engines, we connect to the endpoint and then signin.
 		#[cfg(feature = "has-storage")]
-		let address = (endpoint, root);
+		let address = (endpoint, Config::new().user(root));
 		#[cfg(not(feature = "has-storage"))]
 		let address = endpoint;
 		let client = connect(address).await?;

@@ -46,7 +46,7 @@ impl Connection for Client {
 			let mut builder = ClientBuilder::new().default_headers(headers);
 
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			if let Some(tls) = address.tls_config {
+			if let Some(tls) = address.config.tls_config {
 				builder = match tls {
 					#[cfg(feature = "native-tls")]
 					Tls::Native(config) => builder.use_preconfigured_tls(config),

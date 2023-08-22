@@ -5,9 +5,18 @@ use once_cell::sync::Lazy;
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
-/// Specifies how deep various forms of computation will go before the query fails.
+/// Specifies how deep various forms of computation will go before the query fails
+/// with [`Error::ComputationDepthExceeded`].
 ///
 /// For reference, use ~15 per MiB of stack in release mode.
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// this limit.
+///
+/// During query execution, all potentially-recursive code paths count against this limit. Whereas
+/// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
+/// count for more than one unit of depth during execution.
 pub static MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
 	option_env!("SURREAL_MAX_COMPUTATION_DEPTH").and_then(|s| s.parse::<u8>().ok()).unwrap_or(120)
 });

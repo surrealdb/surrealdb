@@ -56,6 +56,10 @@ pub enum DefineStatement {
 }
 
 impl DefineStatement {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		true
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

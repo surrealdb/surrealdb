@@ -217,11 +217,6 @@ pub fn value(i: &str) -> IResult<&str, Part> {
 	Ok((i, Part::Value(v)))
 }
 
-pub fn start(i: &str) -> IResult<&str, Part> {
-	let (i, v) = value::start(i)?;
-	Ok((i, Part::Start(v)))
-}
-
 pub fn graph(i: &str) -> IResult<&str, Part> {
 	let (i, v) = graph::graph(i)?;
 	Ok((i, Part::Graph(v)))

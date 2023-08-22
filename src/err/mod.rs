@@ -54,6 +54,9 @@ pub enum Error {
 
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
+
+	#[error("There was an error with the node agent")]
+	NodeAgent,
 }
 
 impl From<Error> for String {
