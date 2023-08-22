@@ -1,7 +1,9 @@
 pub mod analyze;
 pub mod begin;
+pub mod r#break;
 pub mod cancel;
 pub mod commit;
+pub mod r#continue;
 pub mod create;
 pub mod define;
 pub mod delete;
@@ -18,6 +20,7 @@ pub mod select;
 pub mod set;
 pub mod show;
 pub mod sleep;
+pub mod throw;
 pub mod update;
 pub mod vec;
 pub mod yuse;
@@ -59,8 +62,10 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Analyze" => Ok(Statement::Analyze(value.serialize(analyze::Serializer.wrap())?)),
 			"Begin" => Ok(Statement::Begin(value.serialize(begin::Serializer.wrap())?)),
+			"Break" => Ok(Statement::Break(value.serialize(r#break::Serializer.wrap())?)),
 			"Cancel" => Ok(Statement::Cancel(value.serialize(cancel::Serializer.wrap())?)),
 			"Commit" => Ok(Statement::Commit(value.serialize(commit::Serializer.wrap())?)),
+			"Continue" => Ok(Statement::Continue(value.serialize(r#continue::Serializer.wrap())?)),
 			"Create" => Ok(Statement::Create(value.serialize(create::Serializer.wrap())?)),
 			"Define" => Ok(Statement::Define(value.serialize(define::Serializer.wrap())?)),
 			"Delete" => Ok(Statement::Delete(value.serialize(delete::Serializer.wrap())?)),
@@ -77,6 +82,7 @@ impl ser::Serializer for Serializer {
 			"Set" => Ok(Statement::Set(value.serialize(set::Serializer.wrap())?)),
 			"Show" => Ok(Statement::Show(value.serialize(show::Serializer.wrap())?)),
 			"Sleep" => Ok(Statement::Sleep(value.serialize(sleep::Serializer.wrap())?)),
+			"Throw" => Ok(Statement::Throw(value.serialize(throw::Serializer.wrap())?)),
 			"Update" => Ok(Statement::Update(value.serialize(update::Serializer.wrap())?)),
 			"Use" => Ok(Statement::Use(value.serialize(yuse::Serializer.wrap())?)),
 			variant => {

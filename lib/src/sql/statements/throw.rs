@@ -14,9 +14,15 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
-pub struct ThrowStatement(pub Strand);
+pub struct ThrowStatement {
+	pub error: Strand,
+}
 
 impl ThrowStatement {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		false
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -25,13 +31,13 @@ impl ThrowStatement {
 		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Thrown(self.0.as_str().to_owned()))
+		Err(Error::Thrown(self.error.as_str().to_owned()))
 	}
 }
 
 impl fmt::Display for ThrowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "THROW {}", self.0)
+		write!(f, "THROW {}", self.error)
 	}
 }
 
@@ -39,7 +45,12 @@ pub fn throw(i: &str) -> IResult<&str, ThrowStatement> {
 	let (i, _) = tag_no_case("THROW")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, e) = strand(i)?;
-	Ok((i, ThrowStatement(e)))
+	Ok((
+		i,
+		ThrowStatement {
+			error: e,
+		},
+	))
 }
 
 #[cfg(test)]

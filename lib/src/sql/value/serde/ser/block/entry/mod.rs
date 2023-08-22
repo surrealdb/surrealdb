@@ -37,6 +37,10 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Value" => Ok(Entry::Value(value.serialize(ser::value::Serializer.wrap())?)),
 			"Set" => Ok(Entry::Set(value.serialize(ser::statement::set::Serializer.wrap())?)),
+			"Throw" => Ok(Entry::Throw(value.serialize(ser::statement::throw::Serializer.wrap())?)),
+			"Break" => {
+				Ok(Entry::Break(value.serialize(ser::statement::r#break::Serializer.wrap())?))
+			}
 			"Ifelse" => {
 				Ok(Entry::Ifelse(value.serialize(ser::statement::ifelse::Serializer.wrap())?))
 			}
@@ -60,6 +64,15 @@ impl ser::Serializer for Serializer {
 			}
 			"Output" => {
 				Ok(Entry::Output(value.serialize(ser::statement::output::Serializer.wrap())?))
+			}
+			"Define" => {
+				Ok(Entry::Define(value.serialize(ser::statement::define::Serializer.wrap())?))
+			}
+			"Remove" => {
+				Ok(Entry::Remove(value.serialize(ser::statement::remove::Serializer.wrap())?))
+			}
+			"Continue" => {
+				Ok(Entry::Continue(value.serialize(ser::statement::r#continue::Serializer.wrap())?))
 			}
 			variant => Err(Error::custom(format!("unexpected variant `{name}::{variant}`"))),
 		}

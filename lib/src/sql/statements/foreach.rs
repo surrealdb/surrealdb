@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::block::{block, Block};
+use crate::sql::block::{block, Block, Entry};
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::param::{param, Param};
@@ -29,14 +29,66 @@ impl ForeachStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "FOR statements",
-		})
+		// Check the loop data
+		match &self.range {
+			Value::Array(arr) => {
+				// Loop over the values
+				'foreach: for v in arr.iter() {
+					// Duplicate context
+					let mut ctx = Context::new(ctx);
+					// Set the current parameter
+					let key = self.param.0.to_raw();
+					let val = v.compute(&ctx, opt, txn, doc).await?;
+					ctx.add_value(key, val);
+					// Loop over the code block statements
+					for v in self.block.iter() {
+						// Compute each block entry
+						let res = match v {
+							Entry::Set(v) => {
+								let val = v.compute(&ctx, opt, txn, doc).await?;
+								ctx.add_value(v.name.to_owned(), val);
+								Ok(Value::None)
+							}
+							Entry::Value(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Break(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Continue(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Ifelse(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Select(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Create(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Update(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Delete(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Relate(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Insert(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Define(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Remove(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Output(v) => {
+								return v.compute(&ctx, opt, txn, doc).await;
+							}
+							Entry::Throw(v) => {
+								return v.compute(&ctx, opt, txn, doc).await;
+							}
+						};
+						// Catch any special errors
+						match res {
+							Err(Error::Continue) => continue 'foreach,
+							Err(Error::Break) => return Ok(Value::None),
+							Err(err) => return Err(err),
+							_ => (),
+						};
+					}
+				}
+				// Ok all good
+				Ok(Value::None)
+			}
+			v => Err(Error::InvalidStatementTarget {
+				value: v.to_string(),
+			}),
+		}
 	}
 }
 

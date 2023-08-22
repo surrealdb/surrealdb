@@ -15,6 +15,10 @@ use std::fmt;
 pub struct ContinueStatement;
 
 impl ContinueStatement {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		false
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -23,9 +27,7 @@ impl ContinueStatement {
 		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "CONTINUE statements",
-		})
+		Err(Error::Continue)
 	}
 }
 

@@ -24,6 +24,16 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// This error is used for breaking a loop in a foreach statement
+	#[doc(hidden)]
+	#[error("Break statement has been reached")]
+	Break,
+
+	/// This error is used for skipping a loop in a foreach statement
+	#[doc(hidden)]
+	#[error("Continue statement has been reached")]
+	Continue,
+
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic")]
 	Unreachable,

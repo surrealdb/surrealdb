@@ -18,7 +18,7 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
-pub(super) struct Serializer;
+pub struct Serializer;
 
 impl ser::Serializer for Serializer {
 	type Ok = RemoveStatement;
