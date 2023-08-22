@@ -256,7 +256,7 @@ mod tests {
 	use surrealdb::iam::verify::verify_creds;
 	use surrealdb::kvs::Datastore;
 	use test_log::test;
-	use wiremock::{MockServer, Mock, matchers::method, ResponseTemplate};
+	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 	use super::*;
 
@@ -311,23 +311,25 @@ mod tests {
 	async fn test_capabilities() {
 		let server1 = {
 			let s = MockServer::start().await;
-			let get = Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			let get = Mock::given(method("GET"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
 			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
 
 			s.register(get).await;
 			s.register(head).await;
-			
+
 			s
 		};
 
 		let server2 = {
 			let s = MockServer::start().await;
-			let get = Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			let get = Mock::given(method("GET"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
 			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
 
 			s.register(get).await;
 			s.register(head).await;
-			
+
 			s
 		};
 
@@ -345,7 +347,12 @@ mod tests {
 			//
 			// Scripting is allowed
 			//
-			(Capabilities::default(), "RETURN function() { return '1' }".to_string(), true, "1".to_string()),
+			(
+				Capabilities::default(),
+				"RETURN function() { return '1' }".to_string(),
+				true,
+				"1".to_string(),
+			),
 			//
 			// Scripting is not allowed
 			//
@@ -445,7 +452,6 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
-
 			//
 			// Some net targets are not allowed, on scripting functions
 			//
@@ -461,13 +467,16 @@ mod tests {
 					.with_deny_net(Targets::<NetTarget>::Some(
 						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-				format!(r#"
+				format!(
+					r#"
 					RETURN function() {{
 						let req = new Request("{}");
 						let resp = await fetch(req);
 						return resp.text();
 					}}
-				"#, server1.uri()),
+				"#,
+					server1.uri()
+				),
 				false,
 				format!("Access to network target '{}/' is not allowed", server1.uri()),
 			),
@@ -483,13 +492,15 @@ mod tests {
 					.with_deny_net(Targets::<NetTarget>::Some(
 						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-				format!(r#"
+				format!(
+					r#"
 					RETURN function() {{
 						let req = new Request("http://1.1.1.1/");
 						let resp = await fetch(req);
 						return resp.text();
 					}}
-				"#),
+				"#
+				),
 				false,
 				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
 			),
@@ -505,13 +516,16 @@ mod tests {
 					.with_deny_net(Targets::<NetTarget>::Some(
 						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-					format!(r#"
+				format!(
+					r#"
 					RETURN function() {{
 						let req = new Request("{}");
 						let resp = await fetch(req);
 						return resp.text();
 					}}
-				"#, server2.uri()),
+				"#,
+					server2.uri()
+				),
 				true,
 				"SUCCESS".to_string(),
 			),
@@ -532,7 +546,13 @@ mod tests {
 				res.unwrap_err().to_string()
 			};
 
-			assert!(res.contains(&contains), "Unexpected result for test case {}: expected to contain = `{}`, got `{}`", idx, contains, res);
+			assert!(
+				res.contains(&contains),
+				"Unexpected result for test case {}: expected to contain = `{}`, got `{}`",
+				idx,
+				contains,
+				res
+			);
 		}
 	}
 }

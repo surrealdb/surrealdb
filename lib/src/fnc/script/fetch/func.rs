@@ -1,12 +1,15 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::{fetch::{
-	body::{Body, BodyData, BodyKind},
-	classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-	RequestError,
-}, modules::surrealdb::query::{QUERY_DATA_PROP_NAME, QueryContext}};
+use crate::fnc::script::{
+	fetch::{
+		body::{Body, BodyData, BodyKind},
+		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
+		RequestError,
+	},
+	modules::surrealdb::query::{QueryContext, QUERY_DATA_PROP_NAME},
+};
 use futures::TryStreamExt;
-use js::{function::Opt, Class, Ctx, Exception, Result, Value, class::OwnedBorrow};
+use js::{class::OwnedBorrow, function::Opt, Class, Ctx, Exception, Result, Value};
 use reqwest::{
 	header::{HeaderValue, CONTENT_TYPE},
 	redirect, Body as ReqBody,
@@ -29,13 +32,15 @@ pub async fn fetch<'js>(
 
 	// Check if the url is allowed to be fetched.
 	if ctx.globals().contains_key(QUERY_DATA_PROP_NAME)? {
-		let query_ctx = ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+		let query_ctx =
+			ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
 		query_ctx
 			.context
 			.check_allowed_net(&url)
 			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	} else {
-		debug_assert!(true, "Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
+		#[cfg(debug_assertions)]
+		panic!("Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
 	}
 
 	let req = reqwest::Request::new(js_req.init.method, url.clone());

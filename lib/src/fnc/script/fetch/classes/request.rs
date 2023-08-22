@@ -1,10 +1,6 @@
 //! Request class implementation
 
-use js::{
-	class::Trace,
-	prelude::Coerced,
-	Class, Ctx, Exception, FromJs, Object, Result, Value,
-};
+use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
 use reqwest::Method;
 
 use crate::fnc::script::fetch::{body::Body, RequestError};

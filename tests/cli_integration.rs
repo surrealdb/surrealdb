@@ -4,6 +4,7 @@ mod common;
 mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use std::fs;
+	use std::fs::File;
 	use std::time;
 	use test_log::test;
 	use tokio::time::sleep;
@@ -176,7 +177,7 @@ mod cli_integration {
 		.await
 		.unwrap();
 
-		std::thread::sleep(std::time::Duration::from_millis(2000));
+		std::thread::sleep(std::time::Duration::from_millis(5000));
 		let output = server.kill().output().err().unwrap();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.
@@ -269,6 +270,7 @@ mod cli_integration {
 		info!("* Can't do imports");
 		{
 			let tmp_file = common::tmp_file("exported.surql");
+			File::create(&tmp_file).expect("failed to create tmp file");
 			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
 			let output = common::run(&args).output();
 			assert!(
@@ -412,7 +414,7 @@ mod cli_integration {
 			_ = async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						assert!(exit.success(), "Server shutted down successfully");
+						assert!(exit.success(), "Server didn't shutdown successfully:\n{}", server.output().unwrap_err());
 						break;
 					}
 					tokio::time::sleep(time::Duration::from_secs(1)).await;

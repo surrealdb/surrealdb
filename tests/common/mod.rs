@@ -101,8 +101,8 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file(format!("server-stdout-{}.log", rand::random::<u32>()).as_str());
-	let stderr_path = tmp_file(format!("server-stderr-{}.log", rand::random::<u32>()).as_str());
+	let stdout_path = tmp_file("server-stdout.log");
+	let stderr_path = tmp_file("server-stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
@@ -131,7 +131,7 @@ pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
 }
 
 pub fn tmp_file(name: &str) -> String {
-	let path = Path::new(env!("OUT_DIR")).join(name);
+	let path = Path::new(env!("OUT_DIR")).join(format!("{}-{}", rand::random::<u32>(), name));
 	path.to_string_lossy().into_owned()
 }
 

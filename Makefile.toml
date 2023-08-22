@@ -19,6 +19,7 @@ SURREAL_PATH={ value = "memory", condition = { env_not_set = ["SURREAL_PATH"] } 
 SURREAL_NAMESPACE={ value = "test", condition = { env_not_set = ["SURREAL_NAMESPACE"] } }
 SURREAL_DATABASE={ value = "test", condition = { env_not_set = ["SURREAL_DATABASE"] } }
 
+
 [tasks.empty]
 disabled = true
 private = true
