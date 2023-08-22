@@ -35,7 +35,7 @@ impl ForeachStatement {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check the loop data
-		match &self.range {
+		match &self.range.compute(ctx, opt, txn, doc).await? {
 			Value::Array(arr) => {
 				// Loop over the values
 				'foreach: for v in arr.iter() {
