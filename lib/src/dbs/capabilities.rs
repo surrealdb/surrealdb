@@ -1,6 +1,6 @@
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use ipnet::IpNet;
 use url::Url;

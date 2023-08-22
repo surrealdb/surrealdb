@@ -315,7 +315,7 @@ mod tests {
 			//
 			(
 				Capabilities::default(),
-				"RETURN http::get('http://127.0.0.1')",
+				"RETURN http::get('http://127.0.0.1:9999')",
 				false,
 				"Connection refused",
 			),
@@ -355,7 +355,7 @@ mod tests {
 					.with_deny_funcs(Targets::<FuncTarget>::Some(
 						[FuncTarget::from_str("http::get").unwrap()].into(),
 					)),
-				"RETURN http::head('http://127.0.0.1')",
+				"RETURN http::head('http://127.0.0.1:9999')",
 				false,
 				"Connection refused",
 			),
@@ -388,7 +388,7 @@ mod tests {
 					)),
 				"RETURN http::get('http://127.0.0.1')",
 				false,
-				"Acess to network target 'http://127.0.0.1/' is not allowed",
+				"Access to network target 'http://127.0.0.1/' is not allowed",
 			),
 			(
 				Capabilities::default()
@@ -404,7 +404,7 @@ mod tests {
 					)),
 				"RETURN http::get('http://1.1.1.1')",
 				false,
-				"Acess to network target 'http://1.1.1.1/' is not allowed",
+				"Access to network target 'http://1.1.1.1/' is not allowed",
 			),
 			(
 				Capabilities::default()
@@ -418,7 +418,7 @@ mod tests {
 					.with_deny_net(Targets::<NetTarget>::Some(
 						[NetTarget::from_str("127.0.0.1").unwrap()].into(),
 					)),
-				"RETURN http::get('http://localhost')",
+				"RETURN http::get('http://localhost:9999')",
 				false,
 				"Connection refused",
 			),

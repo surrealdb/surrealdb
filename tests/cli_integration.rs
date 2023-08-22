@@ -557,7 +557,7 @@ mod cli_integration {
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
 				output.contains(
-					format!("Acess to network target 'http://{addr}/version' is not allowed")
+					format!("Access to network target 'http://{addr}/version' is not allowed")
 						.as_str()
 				),
 				"unexpected output: {output:?}"

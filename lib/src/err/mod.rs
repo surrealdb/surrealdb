@@ -604,7 +604,7 @@ pub enum Error {
 	FunctionNotAllowed(String),
 
 	/// Network target is not allowed
-	#[error("Acess to network target '{0}' is not allowed")]
+	#[error("Access to network target '{0}' is not allowed")]
 	NetTargetNotAllowed(String),
 }
 
