@@ -32,8 +32,6 @@ To add this crate as a Rust dependency, simply run
 cargo add surrealdb
 ```
 
-**IMPORTANT**: The client supports SurrealDB `v1.0.0-beta.8+20221030.c12a1cc` or later. So please make sure you have that or a newer version of the server before proceeding. For now, that means a recent nightly version.
-
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Quick look</h2>
 
 This library enables simple and advanced querying of an embedded or remote database from server-side or client-side (via Wasm) code. By default, all remote connections to SurrealDB are made over WebSockets, and automatically reconnect when the connection is terminated. Connections are automatically closed when they get dropped.

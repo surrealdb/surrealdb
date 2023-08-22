@@ -1,3 +1,4 @@
+use crate::iam::Level;
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
@@ -7,47 +8,80 @@ pub struct Config {
 	pub(crate) notifications: bool,
 	pub(crate) query_timeout: Option<Duration>,
 	pub(crate) transaction_timeout: Option<Duration>,
+	#[cfg(any(feature = "native-tls", feature = "rustls"))]
+	pub(crate) tls_config: Option<super::Tls>,
+	// Only used by the local engines
+	// `Level::No` in this context means no authentication information was configured
+	pub(crate) auth: Level,
+	pub(crate) username: String,
+	pub(crate) password: String,
 }
 
 impl Config {
-	///Create a default config that can be modified to configure a connection
+	/// Create a default config that can be modified to configure a connection
 	pub fn new() -> Self {
 		Default::default()
 	}
 
-	///Set the strict value of the config to the supplied value
+	/// Set the strict value of the config to the supplied value
+	/// Enables `strict` server mode
 	pub fn set_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
 		self
 	}
 
-	///Set the config to use strict mode
+	/// Set the config to use strict mode
+	/// Enables `strict` server mode
 	pub fn strict(mut self) -> Self {
 		self.strict = true;
 		self
 	}
 
-	///Set the notifications value of the config to the supplied value
+	/// Set the notifications value of the config to the supplied value
 	pub fn set_notifications(mut self, notifications: bool) -> Self {
 		self.notifications = notifications;
 		self
 	}
 
-	///Set the config to use notifications
+	/// Set the config to use notifications
 	pub fn notifications(mut self) -> Self {
 		self.notifications = true;
 		self
 	}
 
-	///Set the query timeout of the config
+	/// Set the query timeout of the config
 	pub fn query_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
 		self.query_timeout = timeout.into();
 		self
 	}
 
-	///Set the transaction timeout of the config
+	/// Set the transaction timeout of the config
 	pub fn transaction_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
 		self.transaction_timeout = timeout.into();
+		self
+	}
+
+	/// Set the default user
+	pub fn user(mut self, user: crate::opt::auth::Root<'_>) -> Self {
+		self.auth = Level::Root;
+		self.username = user.username.to_owned();
+		self.password = user.password.to_owned();
+		self
+	}
+
+	/// Use Rustls to configure TLS connections
+	#[cfg(feature = "rustls")]
+	#[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
+	pub fn rustls(mut self, config: rustls::ClientConfig) -> Self {
+		self.tls_config = Some(super::Tls::Rust(config));
+		self
+	}
+
+	/// Use native TLS to configure TLS connections
+	#[cfg(feature = "native-tls")]
+	#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
+	pub fn native_tls(mut self, config: native_tls::TlsConnector) -> Self {
+		self.tls_config = Some(super::Tls::Native(config));
 		self
 	}
 }
