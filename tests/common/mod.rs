@@ -215,7 +215,7 @@ pub async fn start_server(
 	}
 
 	// Wait 5 seconds for the server to start
-	let mut interval = time::interval(time::Duration::from_millis(500));
+	let mut interval = time::interval(time::Duration::from_millis(1000));
 	info!("Waiting for server to start...");
 	for _i in 0..10 {
 		interval.tick().await;

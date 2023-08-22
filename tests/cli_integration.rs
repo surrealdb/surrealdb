@@ -442,8 +442,8 @@ mod cli_integration {
 			.await
 			.expect("Failed to send WS message");
 
-		// Wait 1 second to make sure the SLEEP query is being executed
-		tokio::time::sleep(time::Duration::from_secs(1)).await;
+		// Wait 5 seconds to make sure the SLEEP query is being executed
+		tokio::time::sleep(time::Duration::from_secs(5)).await;
 
 		info!("* Send first SIGINT signal");
 		server
