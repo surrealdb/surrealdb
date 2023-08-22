@@ -312,8 +312,10 @@ mod tests {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
-			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+			let head =
+				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(1);
 
 			s.register(get).await;
 			s.register(head).await;
@@ -324,8 +326,10 @@ mod tests {
 		let server2 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
-			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(2);
+			let head =
+				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(0);
 
 			s.register(get).await;
 			s.register(head).await;
@@ -554,5 +558,8 @@ mod tests {
 				res
 			);
 		}
+
+		server1.verify().await;
+		server2.verify().await;
 	}
 }
