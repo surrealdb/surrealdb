@@ -74,6 +74,18 @@ impl Block {
 					let val = v.compute(&ctx, opt, txn, doc).await?;
 					ctx.add_value(v.name.to_owned(), val);
 				}
+				Entry::Throw(v) => {
+					// Always errors immediately
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
+				Entry::Break(v) => {
+					// Always errors immediately
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
+				Entry::Continue(v) => {
+					// Always errors immediately
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
 				Entry::Ifelse(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
@@ -102,21 +114,15 @@ impl Block {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Output(v) => {
-					return v.compute(&ctx, opt, txn, doc).await;
-				}
-				Entry::Throw(v) => {
-					return v.compute(&ctx, opt, txn, doc).await;
-				}
-				Entry::Break(v) => {
-					return v.compute(&ctx, opt, txn, doc).await;
-				}
-				Entry::Continue(v) => {
+					// Return the RETURN value
 					return v.compute(&ctx, opt, txn, doc).await;
 				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
+						// If the last entry then return the value
 						return v.compute(&ctx, opt, txn, doc).await;
 					} else {
+						// Otherwise just process the value
 						v.compute(&ctx, opt, txn, doc).await?;
 					}
 				}
