@@ -23,9 +23,7 @@ impl ContinueStatement {
 		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "CONTINUE statements",
-		})
+		Err(Error::Continue)
 	}
 }
 
