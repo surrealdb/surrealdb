@@ -106,7 +106,7 @@ impl Connection for Client {
 		Box::pin(async move {
 			let url = address.endpoint.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			let maybe_connector = address.tls_config.map(Connector::from);
+			let maybe_connector = address.config.tls_config.map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 

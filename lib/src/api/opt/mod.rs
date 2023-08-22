@@ -6,7 +6,6 @@ mod config;
 mod endpoint;
 mod query;
 mod resource;
-mod strict;
 mod tls;
 
 use crate::api::err::Error;
@@ -26,7 +25,6 @@ pub use config::*;
 pub use endpoint::*;
 pub use query::*;
 pub use resource::*;
-pub use strict::*;
 pub use tls::*;
 
 /// Record ID

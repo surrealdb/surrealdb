@@ -12,7 +12,6 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::iam::Level;
 use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
@@ -33,11 +32,6 @@ impl IntoEndpoint<Test> for () {
 		Ok(Endpoint {
 			endpoint: Url::parse("test://")?,
 			config: Default::default(),
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			tls_config: None,
-			auth: Level::No,
-			username: String::new(),
-			password: String::new(),
 		})
 	}
 }

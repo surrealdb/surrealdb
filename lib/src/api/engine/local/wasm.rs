@@ -86,10 +86,10 @@ pub(crate) fn router(
 ) {
 	spawn_local(async move {
 		let url = address.endpoint;
-		let configured_root = match address.auth {
+		let configured_root = match address.config.auth {
 			Level::Root => Some(Root {
-				username: &address.username,
-				password: &address.password,
+				username: &address.config.username,
+				password: &address.config.password,
 			}),
 			_ => None,
 		};
