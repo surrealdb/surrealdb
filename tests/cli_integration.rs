@@ -496,7 +496,7 @@ mod cli_integration {
 			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
 		}
 
@@ -519,7 +519,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
 				output.contains("Scripting functions are not allowed"),
 				"unexpected output: {output:?}"
@@ -538,7 +538,7 @@ mod cli_integration {
 			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
 				output.contains("Scripting functions are not allowed"),
 				"unexpected output: {output:?}"
@@ -595,7 +595,7 @@ mod cli_integration {
 			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
 
 			let query = "RETURN http::get('https://surrealdb.com');\n\n";
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"

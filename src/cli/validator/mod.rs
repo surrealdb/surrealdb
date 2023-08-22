@@ -87,7 +87,7 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 
 	let mut result = HashSet::new();
 
-	for target in value.split(',').filter(|s| !s.is_empty()).into_iter() {
+	for target in value.split(',').filter(|s| !s.is_empty()) {
 		result.insert(NetTarget::from_str(target)?);
 	}
 
@@ -101,7 +101,7 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 
 	let mut result = HashSet::new();
 
-	for target in value.split(',').filter(|s| !s.is_empty()).into_iter() {
+	for target in value.split(',').filter(|s| !s.is_empty()) {
 		result.insert(FuncTarget::from_str(target)?);
 	}
 

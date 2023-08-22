@@ -256,6 +256,7 @@ mod tests {
 	use surrealdb::iam::verify::verify_creds;
 	use surrealdb::kvs::Datastore;
 	use test_log::test;
+	use wiremock::{MockServer, Mock, matchers::method, ResponseTemplate};
 
 	use super::*;
 
@@ -308,29 +309,51 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_capabilities() {
+		let server1 = {
+			let s = MockServer::start().await;
+			let get = Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
+
+			s.register(get).await;
+			s.register(head).await;
+			
+			s
+		};
+
+		let server2 = {
+			let s = MockServer::start().await;
+			let get = Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			let head = Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200));
+
+			s.register(get).await;
+			s.register(head).await;
+			
+			s
+		};
+
 		// (Capabilities, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
-			// Functions and Networking is allowed
+			// Functions and Networking are allowed
 			//
 			(
 				Capabilities::default(),
-				"RETURN http::get('http://127.0.0.1:9999')",
-				false,
-				"Connection refused",
+				format!("RETURN http::get('{}')", server1.uri()),
+				true,
+				"SUCCESS".to_string(),
 			),
 			//
 			// Scripting is allowed
 			//
-			(Capabilities::default(), "RETURN function() { return '1' }", true, "1"),
+			(Capabilities::default(), "RETURN function() { return '1' }".to_string(), true, "1".to_string()),
 			//
 			// Scripting is not allowed
 			//
 			(
 				Capabilities::default().with_scripting(false),
-				"RETURN function() { return '1' }",
+				"RETURN function() { return '1' }".to_string(),
 				false,
-				"Scripting functions are not allowed",
+				"Scripting functions are not allowed".to_string(),
 			),
 			//
 			// Some functions are not allowed
@@ -343,9 +366,9 @@ mod tests {
 					.with_deny_funcs(Targets::<FuncTarget>::Some(
 						[FuncTarget::from_str("http::get").unwrap()].into(),
 					)),
-				"RETURN http::get('http://127.0.0.1')",
+				format!("RETURN http::get('{}')", server1.uri()),
 				false,
-				"Function 'http::get' is not allowed",
+				"Function 'http::get' is not allowed".to_string(),
 			),
 			(
 				Capabilities::default()
@@ -355,9 +378,9 @@ mod tests {
 					.with_deny_funcs(Targets::<FuncTarget>::Some(
 						[FuncTarget::from_str("http::get").unwrap()].into(),
 					)),
-				"RETURN http::head('http://127.0.0.1:9999')",
-				false,
-				"Connection refused",
+				format!("RETURN http::head('{}')", server1.uri()),
+				true,
+				"NONE".to_string(),
 			),
 			(
 				Capabilities::default()
@@ -367,9 +390,9 @@ mod tests {
 					.with_deny_funcs(Targets::<FuncTarget>::Some(
 						[FuncTarget::from_str("http::get").unwrap()].into(),
 					)),
-				"RETURN string::len('a')",
+				"RETURN string::len('a')".to_string(),
 				false,
-				"Function 'string::len' is not allowed",
+				"Function 'string::len' is not allowed".to_string(),
 			),
 			//
 			// Some net targets are not allowed
@@ -378,49 +401,119 @@ mod tests {
 				Capabilities::default()
 					.with_allow_net(Targets::<NetTarget>::Some(
 						[
-							NetTarget::from_str("localhost").unwrap(),
-							NetTarget::from_str("127.0.0.1").unwrap(),
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
 						]
 						.into(),
 					))
 					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-				"RETURN http::get('http://127.0.0.1')",
+				format!("RETURN http::get('{}')", server1.uri()),
 				false,
-				"Access to network target 'http://127.0.0.1/' is not allowed",
+				format!("Access to network target '{}/' is not allowed", server1.uri()),
 			),
 			(
 				Capabilities::default()
 					.with_allow_net(Targets::<NetTarget>::Some(
 						[
-							NetTarget::from_str("localhost").unwrap(),
-							NetTarget::from_str("127.0.0.1").unwrap(),
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
 						]
 						.into(),
 					))
 					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-				"RETURN http::get('http://1.1.1.1')",
+				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
-				"Access to network target 'http://1.1.1.1/' is not allowed",
+				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
 			),
 			(
 				Capabilities::default()
 					.with_allow_net(Targets::<NetTarget>::Some(
 						[
-							NetTarget::from_str("localhost").unwrap(),
-							NetTarget::from_str("127.0.0.1").unwrap(),
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
 						]
 						.into(),
 					))
 					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 					)),
-				"RETURN http::get('http://localhost:9999')",
+				format!("RETURN http::get('{}')", server2.uri()),
+				true,
+				"SUCCESS".to_string(),
+			),
+
+			//
+			// Some net targets are not allowed, on scripting functions
+			//
+			(
+				Capabilities::default()
+					.with_allow_net(Targets::<NetTarget>::Some(
+						[
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
+						]
+						.into(),
+					))
+					.with_deny_net(Targets::<NetTarget>::Some(
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+					)),
+				format!(r#"
+					RETURN function() {{
+						let req = new Request("{}");
+						let resp = await fetch(req);
+						return resp.text();
+					}}
+				"#, server1.uri()),
 				false,
-				"Connection refused",
+				format!("Access to network target '{}/' is not allowed", server1.uri()),
+			),
+			(
+				Capabilities::default()
+					.with_allow_net(Targets::<NetTarget>::Some(
+						[
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
+						]
+						.into(),
+					))
+					.with_deny_net(Targets::<NetTarget>::Some(
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+					)),
+				format!(r#"
+					RETURN function() {{
+						let req = new Request("http://1.1.1.1/");
+						let resp = await fetch(req);
+						return resp.text();
+					}}
+				"#),
+				false,
+				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
+			),
+			(
+				Capabilities::default()
+					.with_allow_net(Targets::<NetTarget>::Some(
+						[
+							NetTarget::from_str(&server1.address().to_string()).unwrap(),
+							NetTarget::from_str(&server2.address().to_string()).unwrap(),
+						]
+						.into(),
+					))
+					.with_deny_net(Targets::<NetTarget>::Some(
+						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+					)),
+					format!(r#"
+					RETURN function() {{
+						let req = new Request("{}");
+						let resp = await fetch(req);
+						return resp.text();
+					}}
+				"#, server2.uri()),
+				true,
+				"SUCCESS".to_string(),
 			),
 		];
 
@@ -428,7 +521,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap().with_capabilities(caps);
 
 			let sess = Session::owner();
-			let res = ds.execute(query, &sess, None).await;
+			let res = ds.execute(&query, &sess, None).await;
 
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {
@@ -439,7 +532,7 @@ mod tests {
 				res.unwrap_err().to_string()
 			};
 
-			assert!(res.contains(contains), "Unexpected result for test case {}: {}", idx, res);
+			assert!(res.contains(&contains), "Unexpected result for test case {}: expected to contain = `{}`, got `{}`", idx, contains, res);
 		}
 	}
 }
