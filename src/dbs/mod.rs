@@ -327,7 +327,7 @@ mod tests {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
-				.expect(2);
+				.expect(1);
 			let head =
 				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(0);
 
