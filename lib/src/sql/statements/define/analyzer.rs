@@ -45,9 +45,9 @@ impl DefineAnalyzerStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::az::new(ns.id.unwrap(), db.id.unwrap(), &self.name);
 		run.set(key, self).await?;
 		// Release the transaction
 		drop(run); // Do we really need this?

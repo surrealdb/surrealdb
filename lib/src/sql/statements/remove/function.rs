@@ -39,7 +39,8 @@ impl RemoveFunctionStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition
-		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
+		let (ns, db) = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+		let key = crate::key::database::fc::new(ns, db, &self.name);
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)

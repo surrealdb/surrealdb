@@ -35,11 +35,16 @@ impl RemoveDatabaseStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Get ids
+		let (ns, db) = run.get_ns_db_ids(opt.ns(), &self.name).await?;
+		// Delete the alias
+		let key = crate::key::namespace::db::new(ns, &self.name);
+		run.del(key).await?;
 		// Delete the definition
-		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
+		let key = crate::key::database::db::new(ns, db);
 		run.del(key).await?;
 		// Delete the resource data
-		let key = crate::key::database::all::new(opt.ns(), &self.name);
+		let key = crate::key::database::all::new(ns, db);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)

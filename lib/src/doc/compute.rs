@@ -49,8 +49,29 @@ impl<'a> Document<'a> {
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
-					let key = crate::key::thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-					let val = txn.clone().lock().await.get(key).await?;
+					let chk = txn
+						.clone()
+						.lock()
+						.await
+						.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict)
+						.await;
+					let val = match chk {
+						Err(Error::DbNotFound {
+							..
+						})
+						| Err(Error::TbNotFound {
+							..
+						})
+						| Err(Error::NsNotFound {
+							..
+						}) => None,
+						Err(e) => return Err(e),
+						Ok(Some((ns, db, tb))) => {
+							let key = crate::key::thing::new(ns, db, tb, &v.id);
+							txn.clone().lock().await.get(key).await?
+						}
+						Ok(None) => None,
+					};
 					// Parse the data from the store
 					let val = match val {
 						Some(v) => Value::from(v),

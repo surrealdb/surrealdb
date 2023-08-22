@@ -21,13 +21,14 @@ pub async fn read(
 	start: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>, Error> {
+	let (ns_id, db_id) = tx.get_ns_db_ids(ns, db).await?;
 	let beg = match start {
-		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
+		ShowSince::Versionstamp(x) => change::prefix_ts(ns_id, db_id, vs::u64_to_versionstamp(x)),
 		ShowSince::Timestamp(x) => {
 			let ts = x.0.timestamp() as u64;
 			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
 			match vs {
-				Some(vs) => change::prefix_ts(ns, db, vs),
+				Some(vs) => change::prefix_ts(ns_id, db_id, vs),
 				None => {
 					return Err(Error::Internal(
 						"no versionstamp associated to this timestamp exists yet".to_string(),
@@ -36,7 +37,7 @@ pub async fn read(
 			}
 		}
 	};
-	let end = change::suffix(ns, db);
+	let end = change::suffix(ns_id, db_id);
 
 	let limit = limit.unwrap_or(100);
 
@@ -45,6 +46,11 @@ pub async fn read(
 	let mut vs: Option<[u8; 10]> = None;
 	let mut buf: Vec<TableMutations> = Vec::new();
 
+	let tb_id = match tb {
+		Some(tb) => Some(tx.get_tb_id(ns, db, tb).await?),
+		None => None,
+	};
+
 	let mut r = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
 	for (k, v) in _x {
@@ -52,7 +58,7 @@ pub async fn read(
 
 		let dec = crate::key::change::Cf::decode(&k).unwrap();
 
-		if let Some(tb) = tb {
+		if let Some(tb) = tb_id {
 			if dec.tb != tb {
 				continue;
 			}

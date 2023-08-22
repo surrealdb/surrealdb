@@ -35,11 +35,16 @@ impl RemoveNamespaceStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
+		// Get the id
+		let ns = run.get_ns_id(opt.ns()).await?;
+		// Delete the alias
 		let key = crate::key::root::ns::new(&self.name);
 		run.del(key).await?;
+		// Delete the definition
+		let key = crate::key::namespace::ns::new(ns);
+		run.del(key).await?;
 		// Delete the resource data
-		let key = crate::key::namespace::all::new(&self.name);
+		let key = crate::key::namespace::all::new(ns);
 		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)

@@ -1,20 +1,17 @@
 use crate::cf::{TableMutation, TableMutations};
-use crate::kvs::Key;
 use crate::sql::ident::Ident;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-// PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
-// The versionstamp key is the key that contains the current versionstamp and might be used by the
-// specific transaction implementation to make the versionstamp unique and monotonic.
-// The key prefix and key suffix are used to construct the key for the table mutations.
-// The consumer of this library should write KV pairs with the following format:
-// key = key_prefix + versionstamp + key_suffix
-// value = serialized table mutations
-type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
-
+// Writer is a helper for writing table mutations within a transaction.
+// As same as how the SurrealDB transaction works, each transaction and therefore each Writer
+// can contain multiple table mutations across databases within a namespace.
+// Crossing namespaces isn't allowed.
+// To alleviate the slowness due to how versionstamps are generated in some key-value stores,
+// Writer buffer table mutations, add compose written keys containing versionstamps immediately before
+// committing the transaction.
 pub struct Writer {
 	buf: Buffer,
 }
@@ -23,6 +20,7 @@ pub struct Buffer {
 	pub b: HashMap<ChangeKey, TableMutations>,
 }
 
+// ChangeKey distinguishes table mutations within a transaction.
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ChangeKey {
 	pub ns: String,
@@ -72,11 +70,8 @@ impl Writer {
 		}
 	}
 
-	// get returns all the mutations buffered for this transaction,
-	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
-	pub(crate) fn get(&self) -> Vec<PreparedWrite> {
-		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
-		// Get the current timestamp
+	pub(crate) fn drain(&mut self) -> Vec<(String, String, String, TableMutations)> {
+		let mut changes = Vec::new();
 		for (
 			ChangeKey {
 				ns,
@@ -84,15 +79,11 @@ impl Writer {
 				tb,
 			},
 			mutations,
-		) in self.buf.b.iter()
+		) in self.buf.b.drain()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).into();
-			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db);
-			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
-
-			r.push((ts_key, tc_key_prefix, tc_key_suffix, mutations.into()))
+			changes.push((ns, db, tb, mutations));
 		}
-		r
+		changes
 	}
 }
 
@@ -121,16 +112,22 @@ mod tests {
 		let tb = super::Ident("mytb".to_string());
 		let mut dns = DefineNamespaceStatement::default();
 		dns.name = super::Ident(ns.to_string());
+		dns.id = Some(1);
+		let dns2 = dns.clone();
 		let mut ddb = DefineDatabaseStatement::default();
 		ddb.name = super::Ident(db.to_string());
 		ddb.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10),
 		});
+		ddb.id = Some(2);
+		let ddb2 = ddb.clone();
 		let mut dtb = DefineTableStatement::default();
 		dtb.name = tb.clone();
 		dtb.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10),
 		});
+		dtb.id = Some(3);
+		let dtb2 = dtb.clone();
 
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -139,11 +136,20 @@ mod tests {
 		// work.
 		//
 
+		let ns_id = dns.clone().id.unwrap();
+		let db_id = ddb.clone().id.unwrap();
+		let tb_id = dtb.clone().id.unwrap();
+
 		let mut tx0 = ds.transaction(true, false).await.unwrap();
 		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
-		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
+		tx0.put(&crate::key::namespace::ns::new(ns_id), dns2).await.unwrap();
+		tx0.put(&crate::key::namespace::db::new(ns_id, db), ddb).await.unwrap();
+		tx0.put(&crate::key::database::db::new(ns_id, db_id), ddb2).await.unwrap();
 		let tb = tb.clone();
-		tx0.put(&crate::key::database::tb::new(ns, db, tb.as_ref()), dtb.clone()).await.unwrap();
+		tx0.put(&crate::key::database::tb::new(ns_id, db_id, tb.as_ref()), dtb.clone())
+			.await
+			.unwrap();
+		tx0.put(&crate::key::table::tb::new(ns_id, db_id, tb_id), dtb2.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
 		// Let the db remember the timestamp for the current versionstamp

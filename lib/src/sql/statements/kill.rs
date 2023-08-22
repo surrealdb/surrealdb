@@ -67,7 +67,8 @@ impl KillStatement {
 						crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
 					run.del(key).await?;
 					// Delete the table live query
-					let key = crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
+					let (ns, db, tb) = run.get_ns_db_tb_ids(opt.ns(), opt.db(), tb).await?;
+					let key = crate::key::table::lq::new(ns, db, tb, live_query_id.0);
 					run.del(key).await?;
 				}
 				_ => {

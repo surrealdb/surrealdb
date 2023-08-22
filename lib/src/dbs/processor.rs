@@ -138,10 +138,26 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await;
+		let val = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => None,
+			Err(e) => return Err(e),
+			Ok(Some((ns, db, tb))) => {
+				// Fetch the data from the store
+				let key = thing::new(ns, db, tb, &v.id);
+				let r = txn.clone().lock().await.get(key.clone()).await;
+				r?
+			}
+			Ok(None) => None,
+		};
 		// Parse the data from the store
 		let val = Operable::Value(match val {
 			Some(v) => Value::from(v),
@@ -169,10 +185,25 @@ impl<'a> Processor<'a> {
 		o: Value,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await;
+		let val = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => None,
+			Err(e) => return Err(e),
+			Ok(Some((ns, db, tb))) => {
+				// Fetch the data from the store
+				let key = thing::new(ns, db, tb, &v.id);
+				txn.clone().lock().await.get(key).await?
+			}
+			Ok(None) => None,
+		};
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -204,10 +235,25 @@ impl<'a> Processor<'a> {
 		w: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await;
+		let val = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => None,
+			Err(e) => return Err(e),
+			Ok(Some((ns, db, tb))) => {
+				// Fetch the data from the store
+				let key = thing::new(ns, db, tb, &v.id);
+				txn.clone().lock().await.get(key).await?
+			}
+			Ok(None) => None,
+		};
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -236,10 +282,25 @@ impl<'a> Processor<'a> {
 		v: Table,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
+		let tb_name: &str = &v;
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), tb_name, opt.strict).await;
+		let (ns, db, tb) = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => return Ok(()),
+			Err(e) => return Err(e),
+			Ok(Some(v)) => v,
+			Ok(None) => return Ok(()),
+		};
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns(), opt.db(), &v);
-		let end = thing::suffix(opt.ns(), opt.db(), &v);
+		let beg = thing::prefix(ns, db, tb);
+		let end = thing::suffix(ns, db, tb);
 		// Prepare the next holder key
 		let mut nxt: Option<Vec<u8>> = None;
 		// Loop until no more keys
@@ -279,7 +340,7 @@ impl<'a> Processor<'a> {
 					// Parse the data from the store
 					let key: thing::Thing = (&k).into();
 					let val: Value = (&v).into();
-					let rid = Thing::from((key.tb, key.id));
+					let rid = Thing::from((tb_name, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
@@ -308,23 +369,38 @@ impl<'a> Processor<'a> {
 		v: Range,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		let tb_name = v.tb.as_str();
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), tb_name, opt.strict).await;
+		let (ns, db, tb) = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => return Ok(()),
+			Err(e) => return Err(e),
+			Ok(Some(v)) => v,
+			Ok(None) => return Ok(()),
+		};
 		// Prepare the range start key
 		let beg = match &v.beg {
-			Bound::Unbounded => thing::prefix(opt.ns(), opt.db(), &v.tb),
-			Bound::Included(id) => thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(ns, db, tb),
+			Bound::Included(id) => thing::new(ns, db, tb, id).encode().unwrap(),
 			Bound::Excluded(id) => {
-				let mut key = thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+				let mut key = thing::new(ns, db, tb, id).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &v.end {
-			Bound::Unbounded => thing::suffix(opt.ns(), opt.db(), &v.tb),
-			Bound::Excluded(id) => thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(ns, db, tb),
+			Bound::Excluded(id) => thing::new(ns, db, tb, id).encode().unwrap(),
 			Bound::Included(id) => {
-				let mut key = thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+				let mut key = thing::new(ns, db, tb, id).encode().unwrap();
 				key.push(0x00);
 				key
 			}
@@ -368,7 +444,7 @@ impl<'a> Processor<'a> {
 					// Parse the data from the store
 					let key: thing::Thing = (&k).into();
 					let val: Value = (&v).into();
-					let rid = Thing::from((key.tb, key.id));
+					let rid = Thing::from((tb_name, key.id));
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
@@ -397,9 +473,21 @@ impl<'a> Processor<'a> {
 		e: Edges,
 	) -> Result<(), Error> {
 		// Pull out options
-		let ns = opt.ns();
-		let db = opt.db();
-		let tb = &e.from.tb;
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &e.from.tb, opt.strict).await;
+		let (ns, db, tb) = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => return Ok(()),
+			Err(e) => return Err(e),
+			Ok(Some(v)) => v,
+			Ok(None) => return Ok(()),
+		};
 		let id = &e.from.id;
 		// Fetch start and end key pairs
 		let keys = match e.what.len() {
@@ -509,7 +597,13 @@ impl<'a> Processor<'a> {
 						// Parse the data from the store
 						let gra: graph::Graph = (&k).into();
 						// Fetch the data from the store
-						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
+						let (_, _, tb) = txn
+							.clone()
+							.lock()
+							.await
+							.get_ns_db_tb_ids(opt.ns(), opt.db(), gra.ft)
+							.await?;
+						let key = thing::new(ns, db, tb, &gra.fk);
 						let val = txn.lock().await.get(key).await?;
 						let rid = Thing::from((gra.ft, gra.fk));
 						// Parse the data from the store
@@ -547,7 +641,22 @@ impl<'a> Processor<'a> {
 		io: IndexOption,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
+		let tb_name = table.0.as_str();
+		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), tb_name, opt.strict).await;
+		let (ns, db, tb) = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => return Ok(()),
+			Err(e) => return Err(e),
+			Ok(Some(v)) => v,
+			Ok(None) => return Ok(()),
+		};
 		if let Some(pla) = ctx.get_query_planner() {
 			if let Some(exe) = pla.get_query_executor(&table.0) {
 				if let Some(mut iterator) = exe.new_iterator(opt, ir, io).await? {
@@ -570,9 +679,9 @@ impl<'a> Processor<'a> {
 							}
 
 							// Fetch the data from the store
-							let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+							let key = thing::new(ns, db, tb, &thing.id);
 							let val = txn.lock().await.get(key.clone()).await?;
-							let rid = Thing::from((key.tb, key.id));
+							let rid = Thing::from((tb_name, key.id));
 							// Parse the data from the store
 							let val = Operable::Value(match val {
 								Some(v) => Value::from(v),

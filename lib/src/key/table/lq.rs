@@ -8,14 +8,14 @@ use uuid::Uuid;
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Lq<'a> {
+pub struct Lq {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
-	pub db: &'a str,
+	pub db: u32,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: u32,
 	_d: u8,
 	_e: u8,
 	_f: u8,
@@ -23,24 +23,24 @@ pub struct Lq<'a> {
 	pub lq: Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
+pub fn new(ns: u32, db: u32, tb: u32, lq: Uuid) -> Lq {
 	Lq::new(ns, db, tb, lq)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+pub fn prefix(ns: u32, db: u32, tb: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q', 0x00]);
 	k
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+pub fn suffix(ns: u32, db: u32, tb: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q', 0xff]);
 	k
 }
 
-impl<'a> Lq<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Self {
+impl Lq {
+	pub fn new(ns: u32, db: u32, tb: u32, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -66,7 +66,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-		let val = Lq::new("testns", "testdb", "testtb", live_query_id);
+		let val = Lq::new(1, 2, 3, live_query_id);
 		let enc = Lq::encode(&val).unwrap();
 		println!("{:?}", debug::sprint_key(&enc));
 		assert_eq!(
@@ -80,13 +80,13 @@ mod tests {
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("testns", "testdb", "testtb");
+		let val = super::prefix(1, 2, 3);
 		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\x00")
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("testns", "testdb", "testtb");
+		let val = super::suffix(1, 2, 3);
 		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff")
 	}
 }

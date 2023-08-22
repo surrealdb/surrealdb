@@ -84,8 +84,15 @@ impl LiveStatement {
 					crate::key::node::lq::new(opt.id()?, self_override.id.0, opt.ns(), opt.db());
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self_override.id.0);
-				run.putc(key, stm, None).await?;
+				if !opt.strict {
+					run.add_and_cache_ns(opt.ns(), false).await?;
+					run.add_and_cache_db(opt.ns(), opt.db(), false).await?;
+					run.add_and_cache_tb(opt.ns(), opt.db(), &tb, false).await?;
+				}
+				if let Ok((ns, db, tb)) = run.get_ns_db_tb_ids(opt.ns(), opt.db(), &tb).await {
+					let key = crate::key::table::lq::new(ns, db, tb, self_override.id.0);
+					run.putc(key, stm, None).await?;
+				}
 			}
 			v => {
 				return Err(Error::LiveStatement {

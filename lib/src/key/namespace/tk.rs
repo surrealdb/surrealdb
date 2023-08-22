@@ -6,31 +6,31 @@ use serde::{Deserialize, Serialize};
 pub struct Tk<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
 	_c: u8,
 	_d: u8,
 	pub tk: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, tk: &'a str) -> Tk<'a> {
+pub fn new(ns: u32, tk: &str) -> Tk {
 	Tk::new(ns, tk)
 }
 
-pub fn prefix(ns: &str) -> Vec<u8> {
+pub fn prefix(ns: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b't', b'k', 0x00]);
 	k
 }
 
-pub fn suffix(ns: &str) -> Vec<u8> {
+pub fn suffix(ns: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b't', b'k', 0xff]);
 	k
 }
 
 impl<'a> Tk<'a> {
-	pub fn new(ns: &'a str, tk: &'a str) -> Self {
+	pub fn new(ns: u32, tk: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -50,7 +50,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tk::new(
-			"testns",
+			123,
 			"testtk",
 		);
 		let enc = Tk::encode(&val).unwrap();

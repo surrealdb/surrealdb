@@ -30,17 +30,22 @@ impl<'a> Document<'a> {
 		if let Workable::Relate(l, r) = &self.extras {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
+			// Get ns and db ids
+			let (ns, db) = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
 			// Store the left pointer edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &l.tb, &l.id, o, rid);
+			let tb = run.get_tb_id_by_name(ns, db, &l.tb).await?;
+			let key = crate::key::graph::new(ns, db, tb, &l.id, o, rid);
 			run.set(key, vec![]).await?;
 			// Store the left inner edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, i, l);
+			let tb = run.get_tb_id_by_name(ns, db, &rid.tb).await?;
+			let key = crate::key::graph::new(ns, db, tb, &rid.id, i, l);
 			run.set(key, vec![]).await?;
 			// Store the right inner edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, o, r);
+			let key = crate::key::graph::new(ns, db, tb, &rid.id, o, r);
 			run.set(key, vec![]).await?;
 			// Store the right pointer edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
+			let tb = run.get_tb_id_by_name(ns, db, &r.tb).await?;
+			let key = crate::key::graph::new(ns, db, tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));

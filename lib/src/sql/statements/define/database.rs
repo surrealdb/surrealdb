@@ -45,18 +45,25 @@ impl DefineDatabaseStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
+		let key = crate::key::namespace::db::new(ns, &self.name);
 		// Set the id
-		if self.id.is_none() && ns.id.is_some() {
+		let (id, db) = if self.id.is_none() {
 			let mut db = self.clone();
-			db.id = Some(run.get_next_db_id(ns.id.unwrap()).await?);
+			let id = run.get_next_db_id(ns).await?;
+			db.id = Some(id);
 			// Store the db
+			let db2 = db.clone();
 			run.set(key, db).await?;
+			(id, db2)
 		} else {
 			// Store the db
 			run.set(key, self).await?;
-		}
+			(self.id.unwrap(), self.clone())
+		};
+		let key = crate::key::database::db::new(ns, id);
+		run.set(key, db).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

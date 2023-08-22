@@ -47,13 +47,16 @@ impl DefineEventStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let db = db.id.unwrap();
+		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let tb = tb.id.unwrap();
+		let key = crate::key::table::ev::new(ns, db, tb, &self.name);
 		run.set(key, self).await?;
 		// Clear the cache
-		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ev::prefix(ns, db, tb);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

@@ -457,7 +457,8 @@ impl Datastore {
 			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
 			tx.del(key).await?;
 			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
+			let (ns, db, tb) = tx.get_ns_db_tb_ids(&lq.ns, &lq.db, &lq.tb).await?;
+			let key = crate::key::table::lq::new(ns, db, tb, lq.lq.0);
 			tx.del(key).await?;
 		}
 		Ok(())
@@ -516,8 +517,9 @@ impl Datastore {
 
 		// Now delete the table entries for the live queries
 		for lq in hits {
-			let lv =
-				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq.0);
+			let (ns, db, tb) =
+				tx.get_ns_db_tb_ids(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str()).await?;
+			let lv = crate::key::table::lq::new(ns, db, tb, lq.lq.0);
 			tx.del(lv.clone()).await?;
 			trace!("Deleted lv {:?} as part of session garbage collection", lv);
 		}

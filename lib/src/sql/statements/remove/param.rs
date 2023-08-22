@@ -36,7 +36,10 @@ impl RemoveParamStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition
-		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
+		let ns_db = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+		let ns = ns_db.0;
+		let db = ns_db.1;
+		let key = crate::key::database::pa::new(ns, db, &self.name);
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)

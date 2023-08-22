@@ -35,7 +35,10 @@ impl RemoveScopeStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition
-		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
+		let ns_db = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+		let ns = ns_db.0;
+		let db = ns_db.1;
+		let key = crate::key::database::sc::new(ns, db, &self.name);
 		run.del(key).await?;
 		// Remove the resource data
 		let key = crate::key::scope::all::new(opt.ns(), opt.db(), &self.name);

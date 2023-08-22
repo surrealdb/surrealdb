@@ -34,7 +34,8 @@ impl RemoveAnalyzerStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition
-		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
+		let (ns, db) = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+		let key = crate::key::database::az::new(ns, db, &self.name);
 		run.del(key).await?;
 		// TODO Check that the analyzer is not used in any schema
 		// Ok all good

@@ -50,7 +50,8 @@ impl DefineFunctionStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
+		let (ns, db) = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+		let key = crate::key::database::fc::new(ns, db, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;

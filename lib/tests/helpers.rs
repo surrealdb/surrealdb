@@ -56,9 +56,12 @@ pub async fn iam_run_case(
 		for (i, r) in resp.into_iter().enumerate() {
 			let tmp = r.output();
 			if tmp.is_err() {
-				return Err(
-					format!("Check statement errored for test: {}", tmp.unwrap_err()).into()
-				);
+				return Err(format!(
+					"Check statement errored for test: {}: {}",
+					check,
+					tmp.unwrap_err()
+				)
+				.into());
 			}
 
 			let tmp = tmp.unwrap().to_string();

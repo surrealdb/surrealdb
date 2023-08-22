@@ -31,7 +31,8 @@ impl<'a> Document<'a> {
 		// Get the record id
 		if let Some(rid) = self.id {
 			// Purge the record data
-			let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
+			let (ns, db, tb) = run.get_ns_db_tb_ids(opt.ns(), opt.db(), &rid.tb).await?;
+			let key = crate::key::thing::new(ns, db, tb, &rid.id);
 			run.del(key).await?;
 			// Purge the record edges
 			match (
@@ -43,16 +44,19 @@ impl<'a> Document<'a> {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &l.tb, &l.id, o, rid);
+					let tb = run.get_tb_id_by_name(ns, db, &l.tb).await?;
+					let key = crate::key::graph::new(ns, db, tb, &l.id, o, rid);
 					run.del(key).await?;
 					// Purge the left inner edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, i, l);
+					let tb = run.get_tb_id_by_name(ns, db, &rid.tb).await?;
+					let key = crate::key::graph::new(ns, db, tb, &rid.id, i, l);
 					run.del(key).await?;
 					// Purge the right inner edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, o, r);
+					let key = crate::key::graph::new(ns, db, tb, &rid.id, o, r);
 					run.del(key).await?;
 					// Purge the right pointer edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
+					let tb = run.get_tb_id_by_name(ns, db, &r.tb).await?;
+					let key = crate::key::graph::new(ns, db, tb, &r.id, i, rid);
 					run.del(key).await?;
 				}
 				_ => {

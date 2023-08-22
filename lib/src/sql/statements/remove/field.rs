@@ -41,10 +41,11 @@ impl RemoveFieldStatement {
 		run.clear_cache();
 		// Delete the definition
 		let fd = self.name.to_string();
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		let (ns, db, tb) = run.get_ns_db_tb_ids(opt.ns(), opt.db(), &self.what).await?;
+		let key = crate::key::table::fd::new(ns, db, tb, &fd);
 		run.del(key).await?;
 		// Clear the cache
-		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(ns, db, tb);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

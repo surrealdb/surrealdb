@@ -1158,6 +1158,7 @@ impl Transaction {
 
 	pub async fn del_lv(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
 		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let key = crate::key::table::lq::new(ns, db, tb, lv);
 		self.cache.del(&key.clone().into());
 		self.del(key).await
@@ -1197,6 +1198,7 @@ impl Transaction {
 		tb: &str,
 		limit: u32,
 	) -> Result<Vec<LqValue>, Error> {
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let pref = crate::key::table::lq::prefix(ns, db, tb);
 		let suff = crate::key::table::lq::suffix(ns, db, tb);
 		trace!(
@@ -1230,6 +1232,7 @@ impl Transaction {
 		live_stm: LiveStatement,
 		expected: Option<LiveStatement>,
 	) -> Result<(), Error> {
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
@@ -1257,6 +1260,16 @@ impl Transaction {
 
 	/// Retrieve all namespace user definitions for a specific namespace.
 	pub async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let ns = match self.get_ns(ns).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns.id.unwrap();
 		let key = crate::key::namespace::us::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nus(v) = e {
@@ -1276,6 +1289,16 @@ impl Transaction {
 
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
+		let ns = match self.get_ns(ns).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns.id.unwrap();
 		let key = crate::key::namespace::tk::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nts(v) = e {
@@ -1295,6 +1318,16 @@ impl Transaction {
 
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
+		let ns = match self.get_ns(ns).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns.id.unwrap();
 		let key = crate::key::namespace::db::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Dbs(v) = e {
@@ -1306,9 +1339,18 @@ impl Transaction {
 			let beg = crate::key::namespace::db::prefix(ns);
 			let end = crate::key::namespace::db::suffix(ns);
 			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Dbs(Arc::clone(&val)));
-			val
+			let val: Vec<DefineDatabaseStatement> = val.convert();
+			let mut dbs: Vec<DefineDatabaseStatement> = vec![];
+			for db in val.iter() {
+				let db = db.id.unwrap();
+				let key = crate::key::database::db::new(ns, db);
+				let db = self.get(key).await?.unwrap();
+				let db: DefineDatabaseStatement = db.into();
+				dbs.push(db.clone());
+			}
+			let dbs: Arc<[DefineDatabaseStatement]> = dbs.into();
+			self.cache.set(key, Entry::Dbs(dbs.clone()));
+			dbs
 		})
 	}
 
@@ -1318,6 +1360,21 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Ensure returning empty result if namespace and the db does not exist
+		let ns_db = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns_db.0;
+		let db = ns_db.1;
 		let key = crate::key::database::us::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Dus(v) = e {
@@ -1341,6 +1398,20 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
+		let ns_db = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns_db.0;
+		let db = ns_db.1;
 		let key = crate::key::database::tk::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Dts(v) = e {
@@ -1364,6 +1435,18 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		let (ns, db) = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::database::fc::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Fcs(v) = e {
@@ -1387,6 +1470,20 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineScopeStatement]>, Error> {
+		let ns_db = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns_db.0;
+		let db = ns_db.1;
 		let key = crate::key::database::sc::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Scs(v) = e {
@@ -1434,6 +1531,18 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		let (ns, db) = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::database::pa::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Pas(v) = e {
@@ -1457,6 +1566,20 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		let ns_db = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
+		let ns = ns_db.0;
+		let db = ns_db.1;
 		let key = crate::key::database::tb::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Tbs(v) = e {
@@ -1481,6 +1604,21 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
+		let (ns, db, tb) = match self.get_ns_db_tb_ids(ns, db, tb).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::table::ev::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Evs(v) = e {
@@ -1505,6 +1643,21 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
+		let (ns, db, tb) = match self.get_ns_db_tb_ids(ns, db, tb).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::table::fd::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Fds(v) = e {
@@ -1529,6 +1682,21 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
+		let (ns, db, tb) = match self.get_ns_db_tb_ids(ns, db, tb).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::table::ix::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Ixs(v) = e {
@@ -1553,6 +1721,21 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		let (ns, db, tb) = match self.get_ns_db_tb_ids(ns, db, tb).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::table::ft::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Fts(v) = e {
@@ -1577,6 +1760,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let key = crate::key::table::lq::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Lvs(v) = e {
@@ -1623,6 +1807,18 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
+		let (ns, db) = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Ok(Arc::new([]));
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::database::az::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Azs(v) = e {
@@ -1652,16 +1848,58 @@ impl Transaction {
 
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
+		let id = self.get_ns_id(ns).await?;
+		let key = crate::key::namespace::ns::new(id);
+		let val: Vec<u8> = self
+			.get(key)
+			.await?
+			.unwrap_or_else(|| panic!("Namespace not found: name={} id={}", ns, id));
+		Ok(val.into())
+	}
+
+	/// Retrieves the id of a specific namespace
+	pub async fn get_ns_id(&mut self, ns: &str) -> Result<u32, Error> {
 		let key = crate::key::root::ns::new(ns);
-		let val = self.get(key).await?.ok_or(Error::NsNotFound {
+		let val: Vec<u8> = self.get(key).await?.ok_or(Error::NsNotFound {
 			value: ns.to_owned(),
 		})?;
-		Ok(val.into())
+		let dns: DefineNamespaceStatement = val.into();
+		let id = dns.id.unwrap();
+		Ok(id)
+	}
+
+	/// Retrieves the ids of specific namespace and database
+	pub async fn get_ns_db_ids(&mut self, ns: &str, db: &str) -> Result<(u32, u32), Error> {
+		let ns = self.get_ns_id(ns).await?;
+		let key = crate::key::namespace::db::new(ns, db);
+		let val = self.get(key).await?.ok_or(Error::DbNotFound {
+			value: db.to_owned(),
+		})?;
+		let db: DefineDatabaseStatement = val.into();
+		let db = db.id.unwrap();
+		Ok((ns, db))
+	}
+
+	/// Retrieves the ids of specific namespace, database and table
+	pub async fn get_ns_db_tb_ids(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<(u32, u32, u32), Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
+		let key = crate::key::database::tb::new(ns, db, tb);
+		let val: Vec<u8> = self.get(key).await?.ok_or(Error::TbNotFound {
+			value: tb.to_owned(),
+		})?;
+		let dtb: DefineTableStatement = val.into();
+		let id = dtb.id.unwrap();
+		Ok((ns, db, id))
 	}
 
 	/// Retrieve a specific namespace token definition.
 	pub async fn get_nt(&mut self, ns: &str, nt: &str) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::namespace::tk::new(ns, nt);
+		let key = crate::key::namespace::tk::new(self.get_ns_id(ns).await?, nt);
 		let val = self.get(key).await?.ok_or(Error::NtNotFound {
 			value: nt.to_owned(),
 		})?;
@@ -1670,11 +1908,18 @@ impl Transaction {
 
 	/// Retrieve a specific database definition.
 	pub async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
-		let key = crate::key::namespace::db::new(ns, db);
+		let (ns, db_id) = self.get_ns_db_ids(ns, db).await?;
+		let key = crate::key::database::db::new(ns, db_id);
 		let val = self.get(key).await?.ok_or(Error::DbNotFound {
 			value: db.to_owned(),
 		})?;
 		Ok(val.into())
+	}
+
+	/// Retrieve the id of a specific database
+	pub async fn get_db_id(&mut self, ns: &str, db: &str) -> Result<u32, Error> {
+		let (_, db_id) = self.get_ns_db_ids(ns, db).await?;
+		Ok(db_id)
 	}
 
 	/// Retrieve a specific database token definition.
@@ -1684,6 +1929,9 @@ impl Transaction {
 		db: &str,
 		dt: &str,
 	) -> Result<DefineTokenStatement, Error> {
+		let ns_db = self.get_ns_db_ids(ns, db).await?;
+		let ns = ns_db.0;
+		let db = ns_db.1;
 		let key = crate::key::database::tk::new(ns, db, dt);
 		let val = self.get(key).await?.ok_or(Error::DtNotFound {
 			value: dt.to_owned(),
@@ -1698,6 +1946,20 @@ impl Transaction {
 		db: &str,
 		sc: &str,
 	) -> Result<DefineScopeStatement, Error> {
+		let (ns, db) = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Err(Error::ScNotFound {
+					value: sc.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+		};
 		let key = crate::key::database::sc::new(ns, db, sc);
 		let val = self.get(key).await?.ok_or(Error::ScNotFound {
 			value: sc.to_owned(),
@@ -1727,6 +1989,7 @@ impl Transaction {
 		db: &str,
 		fc: &str,
 	) -> Result<DefineFunctionStatement, Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
 		let key = crate::key::database::fc::new(ns, db, fc);
 		let val = self.get(key).await?.ok_or(Error::FcNotFound {
 			value: fc.to_owned(),
@@ -1756,6 +2019,7 @@ impl Transaction {
 		tb: &str,
 		lv: &Uuid,
 	) -> Result<LiveStatement, Error> {
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let key = crate::key::table::lq::new(ns, db, tb, *lv);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
@@ -1772,6 +2036,7 @@ impl Transaction {
 		db: &str,
 		pa: &str,
 	) -> Result<DefineParamStatement, Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
 		let key = crate::key::database::pa::new(ns, db, pa);
 		let val = self.get(key).await?.ok_or(Error::PaNotFound {
 			value: pa.to_owned(),
@@ -1786,12 +2051,45 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<DefineTableStatement, Error> {
-		let key = crate::key::database::tb::new(ns, db, tb);
+		let (ns, db, tb_id) = self.get_ns_db_tb_ids(ns, db, tb).await?;
+		let key = crate::key::table::tb::new(ns, db, tb_id);
 		let val = self.get(key).await?.ok_or(Error::TbNotFound {
 			value: tb.to_owned(),
 		})?;
 		Ok(val.into())
 	}
+
+	// Retrieves the id of a specific table.
+	pub async fn get_tb_id(&mut self, ns: &str, db: &str, tb: &str) -> Result<u32, Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
+		self.get_tb_id_by_name(ns, db, tb).await
+	}
+
+	/// Retrieves a specific table definition by ns id, db id, and the table name.
+	pub async fn get_tb_id_by_name(&mut self, ns: u32, db: u32, tb: &str) -> Result<u32, Error> {
+		let key = crate::key::database::tb::new(ns, db, tb);
+		let val: Vec<u8> = self.get(key).await?.ok_or(Error::TbNotFound {
+			value: tb.to_owned(),
+		})?;
+		let dtb: DefineTableStatement = val.into();
+		let id = dtb.id.unwrap();
+		Ok(id)
+	}
+
+	/// Retrieve a specific table definition by ns, db, and tb ids.
+	pub async fn get_tb_by_ids(
+		&mut self,
+		ns: u32,
+		db: u32,
+		tb: u32,
+	) -> Result<DefineTableStatement, Error> {
+		let key = crate::key::table::tb::new(ns, db, tb);
+		let val = self.get(key).await?.ok_or(Error::DbNotFound {
+			value: format!("{}", tb),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific analyzer definition.
 	pub async fn get_az(
 		&mut self,
@@ -1799,6 +2097,7 @@ impl Transaction {
 		db: &str,
 		az: &str,
 	) -> Result<DefineAnalyzerStatement, Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
 		let key = crate::key::database::az::new(ns, db, az);
 		let val = self.get(key).await?.ok_or(Error::AzNotFound {
 			value: az.to_owned(),
@@ -1813,6 +2112,7 @@ impl Transaction {
 		tb: &str,
 		ix: &str,
 	) -> Result<DefineIndexStatement, Error> {
+		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
 		let key = crate::key::table::ix::new(ns, db, tb, ix);
 		let val = self.get(key).await?.ok_or(Error::IxNotFound {
 			value: ix.to_owned(),
@@ -1835,7 +2135,19 @@ impl Transaction {
 		ns: &str,
 		user: &str,
 	) -> Result<DefineUserStatement, Error> {
-		let key = crate::key::namespace::us::new(ns, user);
+		let id = match self.get_ns_id(ns).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Err(Error::UserNsNotFound {
+					value: user.to_owned(),
+					ns: ns.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+		};
+		let key = crate::key::namespace::us::new(id, user);
 		let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
 			value: user.to_owned(),
 			ns: ns.to_owned(),
@@ -1850,7 +2162,23 @@ impl Transaction {
 		db: &str,
 		user: &str,
 	) -> Result<DefineUserStatement, Error> {
-		let key = crate::key::database::us::new(ns, db, user);
+		let (ns_id, db_id) = match self.get_ns_db_ids(ns, db).await {
+			Ok(v) => v,
+			Err(Error::NsNotFound {
+				..
+			})
+			| Err(Error::DbNotFound {
+				..
+			}) => {
+				return Err(Error::UserDbNotFound {
+					value: user.to_owned(),
+					ns: ns.to_owned(),
+					db: db.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+		};
+		let key = crate::key::database::us::new(ns_id, db_id, user);
 		let val = self.get(key).await?.ok_or(Error::UserDbNotFound {
 			value: user.to_owned(),
 			ns: ns.to_owned(),
@@ -1871,8 +2199,17 @@ impl Transaction {
 			}) => match strict {
 				false => {
 					let key = crate::key::root::ns::new(ns);
+					let id = self.get_next_ns_id().await?;
 					let val = DefineNamespaceStatement {
 						name: ns.to_owned().into(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::namespace::ns::new(id);
+					let val = DefineNamespaceStatement {
+						name: ns.to_owned().into(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -1894,14 +2231,25 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 	) -> Result<DefineDatabaseStatement, Error> {
+		let added_ns: DefineNamespaceStatement = self.add_ns(ns, strict).await?;
 		match self.get_db(ns, db).await {
 			Err(Error::DbNotFound {
 				value,
 			}) => match strict {
 				false => {
+					let ns = added_ns.id.unwrap();
 					let key = crate::key::namespace::db::new(ns, db);
+					let id = self.get_next_db_id(ns).await?;
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::database::db::new(ns, id);
+					let val = DefineDatabaseStatement {
+						name: db.to_owned().into(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -1929,6 +2277,9 @@ impl Transaction {
 				value,
 			}) => match strict {
 				false => {
+					let db = self.add_db(ns, db, strict).await?;
+					let db = db.id.unwrap();
+					let ns = self.get_ns_id(ns).await?;
 					let key = crate::key::database::sc::new(ns, db, sc);
 					let val = DefineScopeStatement {
 						name: sc.to_owned().into(),
@@ -1954,15 +2305,29 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<DefineTableStatement, Error> {
+		let added_db: DefineDatabaseStatement = self.add_db(ns, db, strict).await?;
 		match self.get_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
 				value,
 			}) => match strict {
 				false => {
+					let db = added_db.id.unwrap();
+					let ns = self.add_ns(ns, false).await?;
+					let ns = ns.id.unwrap();
 					let key = crate::key::database::tb::new(ns, db, tb);
+					let id = self.get_next_tb_id(ns, db).await?;
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::table::tb::new(ns, db, id);
+					let val = DefineTableStatement {
+						name: tb.to_owned().into(),
+						permissions: Permissions::none(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -1978,12 +2343,13 @@ impl Transaction {
 	}
 
 	/// Retrieve and cache a specific namespace definition.
+	/// Returns Err(Error::NsNotFound) if the namespace does not exist.
 	pub async fn get_and_cache_ns(
 		&mut self,
 		ns: &str,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		let key = crate::key::root::ns::new(ns).encode()?;
-		Ok(if let Some(e) = self.cache.get(&key) {
+		let dns = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Ns(v) = e {
 				v
 			} else {
@@ -1996,17 +2362,51 @@ impl Transaction {
 			let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
 			self.cache.set(key, Entry::Ns(Arc::clone(&val)));
 			val
-		})
+		};
+		let id = dns.id.unwrap();
+		let key = crate::key::namespace::ns::new(id).encode()?;
+		let dns = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ns(v) = e {
+				if v.id.unwrap() != id {
+					panic!("Namespace ID mismatch");
+				}
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::NsNotFound {
+				value: ns.to_owned(),
+			})?;
+			let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ns(Arc::clone(&val)));
+			val
+		};
+		Ok(dns)
 	}
 
 	/// Retrieve and cache a specific database definition.
+	/// Returns Err(Error::DbNotFound) if the namespace or the database does not exist.
 	pub async fn get_and_cache_db(
 		&mut self,
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		// Treat NsNotFound as DbNotFound for compatibility with the old code.
+		let ns = match self.get_and_cache_ns(ns).await {
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Err(Error::DbNotFound {
+					value: db.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+			Ok(v) => v,
+		};
+		let ns = ns.id.unwrap();
 		let key = crate::key::namespace::db::new(ns, db).encode()?;
-		Ok(if let Some(e) = self.cache.get(&key) {
+		let ddb = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Db(v) = e {
 				v
 			} else {
@@ -2019,18 +2419,67 @@ impl Transaction {
 			let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
 			self.cache.set(key, Entry::Db(Arc::clone(&val)));
 			val
-		})
+		};
+		let id = ddb.id.unwrap();
+		let key = crate::key::database::db::new(ns, id).encode()?;
+		let ddb = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Db(v) = e {
+				if v.id.unwrap() != id {
+					panic!("Database ID mismatch");
+				}
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::DbNotFound {
+				value: db.to_owned(),
+			})?;
+			let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Db(Arc::clone(&val)));
+			val
+		};
+		Ok(ddb)
 	}
 
 	/// Retrieve and cache a specific table definition.
+	/// Returns Err(Error::TbNotFound) if the namespace, the database or the table does not exist.
 	pub async fn get_and_cache_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		let key = crate::key::database::tb::new(ns, db, tb).encode()?;
-		Ok(if let Some(e) = self.cache.get(&key) {
+		// Treat NsNotFound as TbNotFound for compatibility with the old code.
+		let ns_id = match self.get_and_cache_ns(ns).await {
+			Err(Error::NsNotFound {
+				..
+			}) => {
+				return Err(Error::TbNotFound {
+					value: tb.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+			Ok(v) => v,
+		}
+		.id
+		.unwrap();
+		// Treat DbNotFound as TbNotFound for compatibility with the old code.
+		let db = match self.get_and_cache_db(ns, db).await {
+			Err(Error::DbNotFound {
+				..
+			}) => {
+				return Err(Error::TbNotFound {
+					value: tb.to_owned(),
+				});
+			}
+			Err(e) => return Err(e),
+			Ok(v) => v,
+		};
+		let db = db.id.unwrap();
+		// Finally try to get the table.
+		let key = crate::key::database::tb::new(ns_id, db, tb).encode()?;
+		let dtb = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Tb(v) = e {
 				v
 			} else {
@@ -2043,7 +2492,27 @@ impl Transaction {
 			let val: Arc<DefineTableStatement> = Arc::new(val.into());
 			self.cache.set(key, Entry::Tb(Arc::clone(&val)));
 			val
-		})
+		};
+		let id = dtb.id.unwrap();
+		let key = crate::key::table::tb::new(ns_id, db, id).encode()?;
+		let dtb = if let Some(e) = self.cache.get(&key) {
+			if let Entry::Tb(v) = e {
+				if v.id.unwrap() != id {
+					panic!("Table ID mismatch");
+				}
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::TbNotFound {
+				value: tb.to_owned(),
+			})?;
+			let val: Arc<DefineTableStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Tb(Arc::clone(&val)));
+			val
+		};
+		Ok(dtb)
 	}
 
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
@@ -2058,8 +2527,17 @@ impl Transaction {
 			}) => match strict {
 				false => {
 					let key = crate::key::root::ns::new(ns);
+					let id = self.get_next_ns_id().await?;
 					let val = DefineNamespaceStatement {
 						name: ns.to_owned().into(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::namespace::ns::new(id);
+					let val = DefineNamespaceStatement {
+						name: ns.to_owned().into(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -2081,14 +2559,25 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		let cached_ns = self.add_and_cache_ns(ns, strict).await?;
 		match self.get_and_cache_db(ns, db).await {
 			Err(Error::DbNotFound {
 				value,
 			}) => match strict {
 				false => {
+					let ns = cached_ns.id.unwrap();
 					let key = crate::key::namespace::db::new(ns, db);
+					let id = self.get_next_db_id(ns).await?;
 					let val = DefineDatabaseStatement {
 						name: db.to_owned().into(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::database::db::new(ns, id);
+					let val = DefineDatabaseStatement {
+						name: db.to_owned().into(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -2111,15 +2600,28 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		let cached_db = self.add_and_cache_db(ns, db, strict).await?;
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
 				value,
 			}) => match strict {
 				false => {
+					let db = cached_db.id.unwrap();
+					let ns = self.get_ns_id(ns).await?;
 					let key = crate::key::database::tb::new(ns, db, tb);
+					let id = self.get_next_tb_id(ns, db).await?;
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						id: Some(id),
+						..Default::default()
+					};
+					self.put(key, &val).await?;
+					let key = crate::key::table::tb::new(ns, db, id);
+					let val = DefineTableStatement {
+						name: tb.to_owned().into(),
+						permissions: Permissions::none(),
+						id: Some(id),
 						..Default::default()
 					};
 					self.put(key, &val).await?;
@@ -2141,16 +2643,28 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-	) -> Result<(), Error> {
+	) -> Result<Option<(u32, u32, u32)>, Error> {
 		match strict {
 			// Strict mode is disabled
-			false => Ok(()),
+			false => {
+				let tb = self.get_and_cache_tb(ns, db, tb).await;
+				let db = self.get_and_cache_db(ns, db).await;
+				let ns = self.get_and_cache_ns(ns).await;
+
+				match (ns, db, tb) {
+					(Ok(ns), Ok(db), Ok(tb)) => {
+						Ok(Some((ns.id.unwrap(), db.id.unwrap(), tb.id.unwrap())))
+					}
+					_ => Ok(None),
+				}
+			}
 			// Strict mode is enabled
 			true => {
-				self.get_and_cache_ns(ns).await?;
-				self.get_and_cache_db(ns, db).await?;
-				self.get_and_cache_tb(ns, db, tb).await?;
-				Ok(())
+				// We assume that the ns, db, and tb specifieid by the ids always exist
+				let dns = self.get_and_cache_ns(ns).await?;
+				let ddb = self.get_and_cache_db(ns, db).await?;
+				let dtb: Arc<DefineTableStatement> = self.get_and_cache_tb(ns, db, tb).await?;
+				Ok(Some((dns.id.unwrap(), ddb.id.unwrap(), dtb.id.unwrap())))
 			}
 		}
 	}
@@ -2319,8 +2833,10 @@ impl Transaction {
 					chn.send(bytes!("-- ------------------------------")).await?;
 					chn.send(bytes!("")).await?;
 					// Fetch records
-					let beg = crate::key::thing::prefix(ns, db, &tb.name);
-					let end = crate::key::thing::suffix(ns, db, &tb.name);
+					let tb_name = tb.name.as_str();
+					let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb_name).await?;
+					let beg = crate::key::thing::prefix(ns, db, tb);
+					let end = crate::key::thing::suffix(ns, db, tb);
 					let mut nxt: Option<Vec<u8>> = None;
 					loop {
 						let res = match nxt {
@@ -2352,7 +2868,7 @@ impl Transaction {
 								// Parse the key and the value
 								let k: crate::key::thing::Thing = (&k).into();
 								let v: Value = (&v).into();
-								let t = Thing::from((k.tb, k.id));
+								let t = Thing::from((tb_name, k.id));
 								// Check if this is a graph edge
 								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 									// This is a graph edge record
@@ -2572,9 +3088,14 @@ impl Transaction {
 			}
 		}
 
-		let changes = self.cf.get();
-		for (tskey, prefix, suffix, v) in changes {
-			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
+		// Get the current timestamp
+		for (ns, db, tb, mutations) in self.cf.drain() {
+			let (ns, db, tb) = self.get_ns_db_tb_ids(ns.as_str(), db.as_str(), tb.as_str()).await?;
+			let ts_key: Key = crate::key::database::vs::new(ns, db).into();
+			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db);
+			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb);
+			let v: Val = mutations.into();
+			self.set_versionstamped_key(ts_key, tc_key_prefix, tc_key_suffix, v).await?
 		}
 		Ok(())
 	}
@@ -2588,6 +3109,8 @@ impl Transaction {
 		db: &str,
 		lock: bool,
 	) -> Result<(), Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
+
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
@@ -2619,6 +3142,7 @@ impl Transaction {
 		db: &str,
 		_lock: bool,
 	) -> Result<Option<Versionstamp>, Error> {
+		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
@@ -2729,7 +3253,10 @@ mod tests {
 			..Default::default()
 		};
 
-		let key = crate::key::namespace::us::new("ns", "user");
+		let ns = txn.add_ns("ns", false).await.unwrap();
+		let ns_id = ns.id.unwrap();
+
+		let key = crate::key::namespace::us::new(ns_id, "user");
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_ns_user("ns", "user").await.unwrap();
 		assert_eq!(res, data);
@@ -2755,7 +3282,12 @@ mod tests {
 			..Default::default()
 		};
 
-		let key = crate::key::database::us::new("ns", "db", "user");
+		let ns = txn.add_ns("ns", false).await.unwrap();
+		let ns = ns.id.unwrap();
+		let db = txn.add_db("ns", "db", false).await.unwrap();
+		let db = db.id.unwrap();
+
+		let key = crate::key::database::us::new(ns, db, "user");
 		let _ = txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
 		assert_eq!(res, data);
@@ -2805,8 +3337,11 @@ mod tests {
 			..Default::default()
 		};
 
-		let key1 = crate::key::namespace::us::new("ns", "user1");
-		let key2 = crate::key::namespace::us::new("ns", "user2");
+		let ns = txn.add_ns("ns", false).await.unwrap();
+		let ns_id = ns.id.unwrap();
+
+		let key1 = crate::key::namespace::us::new(ns_id, "user1");
+		let key2 = crate::key::namespace::us::new(ns_id, "user2");
 		let _ = txn.set(key1, data.to_owned()).await.unwrap();
 		let _ = txn.set(key2, data.to_owned()).await.unwrap();
 
@@ -2835,8 +3370,13 @@ mod tests {
 			..Default::default()
 		};
 
-		let key1 = crate::key::database::us::new("ns", "db", "user1");
-		let key2 = crate::key::database::us::new("ns", "db", "user2");
+		let ns = txn.add_ns("ns", false).await.unwrap();
+		let ns_id = ns.id.unwrap();
+		let db = txn.add_db("ns", "db", false).await.unwrap();
+		let db_id = db.id.unwrap();
+
+		let key1 = crate::key::database::us::new(ns_id, db_id, "user1");
+		let key2 = crate::key::database::us::new(ns_id, db_id, "user2");
 		let _ = txn.set(key1, data.to_owned()).await.unwrap();
 		let _ = txn.set(key2, data.to_owned()).await.unwrap();
 

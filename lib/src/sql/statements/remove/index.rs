@@ -37,14 +37,30 @@ impl RemoveIndexStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Get ids
+		let chk = run.check_ns_db_tb(opt.ns(), opt.db(), &self.what, true).await;
+		let (ns, db, tb) = match chk {
+			Err(Error::DbNotFound {
+				..
+			})
+			| Err(Error::TbNotFound {
+				..
+			})
+			| Err(Error::NsNotFound {
+				..
+			}) => return Ok(Value::None),
+			Err(e) => return Err(e),
+			Ok(Some((ns, db, tb))) => (ns, db, tb),
+			Ok(None) => return Ok(Value::None),
+		};
 		// Delete the definition
-		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::table::ix::new(ns, db, tb, &self.name);
 		run.del(key).await?;
 		// Remove the index data
-		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::index::all::new(ns, db, tb, &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Clear the cache
-		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ix::prefix(ns, db, tb);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

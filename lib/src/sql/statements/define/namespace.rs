@@ -45,13 +45,19 @@ impl DefineNamespaceStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Set the id
-		if self.id.is_none() {
+		let (id, ns) = if self.id.is_none() {
 			let mut ns = self.clone();
-			ns.id = Some(run.get_next_ns_id().await?);
+			let id = run.get_next_ns_id().await?;
+			ns.id = Some(id);
+			let ns2 = ns.clone();
 			run.set(key, ns).await?;
+			(id, ns2)
 		} else {
 			run.set(key, self).await?;
-		}
+			(self.id.unwrap(), self.clone())
+		};
+		let key = crate::key::namespace::ns::new(id);
+		run.set(key, ns).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

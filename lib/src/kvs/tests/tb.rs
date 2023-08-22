@@ -11,8 +11,8 @@ async fn table_definitions_can_be_scanned() {
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
-	let namespace = "test_namespace";
-	let database = "test_database";
+	let namespace = 1;
+	let database = 2;
 	let table = "test_table";
 	let key = Tb::new(namespace, database, table);
 	let value = DefineTableStatement {
@@ -48,8 +48,8 @@ async fn table_definitions_can_be_deleted() {
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	// Create a table definition
-	let namespace = "test_namespace";
-	let database = "test_database";
+	let namespace = 1;
+	let database = 2;
 	let table = "test_table";
 	let key = Tb::new(namespace, database, table);
 	let value = DefineTableStatement {

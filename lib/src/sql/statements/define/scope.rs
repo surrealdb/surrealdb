@@ -49,9 +49,11 @@ impl DefineScopeStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let db = db.id.unwrap();
+		let key = crate::key::database::sc::new(ns, db, &self.name);
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)

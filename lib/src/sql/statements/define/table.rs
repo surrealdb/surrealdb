@@ -53,28 +53,39 @@ impl DefineTableStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
 		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
+		let db = db.id.unwrap();
+		let key = crate::key::database::tb::new(ns, db, &self.name);
+		let (id, tb) = if self.id.is_none() {
 			let mut tb = self.clone();
-			tb.id = Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?);
+			let id = run.get_next_tb_id(ns, db).await?;
+			tb.id = Some(id);
+			let tb2 = tb.clone();
 			run.set(key, tb).await?;
+			(id, tb2)
 		} else {
 			run.set(key, self).await?;
-		}
+			(self.id.unwrap(), self.clone())
+		};
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
-			let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
-			run.delp(key, u32::MAX).await?;
+			let del_key = crate::key::table::all::new(ns, db, id);
+			run.delp(del_key, u32::MAX).await?;
+			// Save the table definition
+			let key = crate::key::table::tb::new(ns, db, id);
+			run.set(key, tb).await?;
 			// Process each foreign table
 			for v in view.what.0.iter() {
+				let view = run.get_tb(opt.ns(), opt.db(), v).await?;
+				let view_id = view.id.unwrap();
 				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
+				let key = crate::key::table::ft::new(ns, db, view_id, &self.name);
 				run.set(key, self).await?;
 				// Clear the cache
-				let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), v);
+				let key = crate::key::table::ft::prefix(ns, db, view_id);
 				run.clr(key).await?;
 			}
 			// Release the transaction
@@ -96,6 +107,9 @@ impl DefineTableStatement {
 				};
 				stm.compute(ctx, opt, txn, doc).await?;
 			}
+		} else {
+			let key = crate::key::table::tb::new(ns, db, id);
+			run.set(key, tb).await?;
 		}
 		// Ok all good
 		Ok(Value::None)

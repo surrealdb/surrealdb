@@ -56,13 +56,16 @@ impl DefineFieldStatement {
 		run.clear_cache();
 		// Process the statement
 		let fd = self.name.to_string();
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let db = db.id.unwrap();
+		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let tb = tb.id.unwrap();
+		let key = crate::key::table::fd::new(ns, db, tb, &fd);
 		run.set(key, self).await?;
 		// Clear the cache
-		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(ns, db, tb);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

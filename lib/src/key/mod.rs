@@ -4,26 +4,28 @@
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
-/// crate::key::root::ns                 /!ns{ns}
+/// crate::key::root::ns                 /!ns{ns name}
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
 /// crate::key::namespace::all           /*{ns}
-/// crate::key::namespace::db            /*{ns}!db{db}
-/// crate::key::namespace::di            /+{ns id}!di
+/// crate::key::namespace::db            /*{ns}!db{db name}
+/// crate::key::namespace::di            /*{ns}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
+/// crate::key::namespace::ns            /*{ns}!ns [new]
 /// crate::key::namespace::tk            /*{ns}!tk{tk}
 ///
 /// crate::key::database::all            /*{ns}*{db}
-/// crate::key::database::az             /*{ns}*{db}!az{az}
-/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
-/// crate::key::database::lg             /*{ns}*{db}!lg{lg}
-/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
-/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
-/// crate::key::database::tb             /*{ns}*{db}!tb{tb}
-/// crate::key::database::ti             /+{ns id}*{db id}!ti
-/// crate::key::database::tk             /*{ns}*{db}!tk{tk}
+/// crate::key::database::az             /*{ns}*{db}!az{az name}
+/// crate::key::database::db             /*{ns}*{db}!db
+/// crate::key::database::fc             /*{ns}*{db}!fn{fc name}
+/// crate::key::database::lg             /*{ns}*{db}!lg{lg name}
+/// crate::key::database::pa             /*{ns}*{db}!pa{pa name}
+/// crate::key::database::sc             /*{ns}*{db}!sc{sc name}
+/// crate::key::database::tb             /*{ns}*{db}!tb{tb name}
+/// crate::key::database::ti             /*{ns}*{db}!ti
+/// crate::key::database::tk             /*{ns}*{db}!tk{tk name}
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::vs             /*{ns}*{db}!vs
 ///
@@ -36,6 +38,7 @@
 /// crate::key::table::ft                /*{ns}*{db}*{tb}!ft{ft}
 /// crate::key::table::ix                /*{ns}*{db}*{tb}!ix{ix}
 /// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
+/// crate::key::table::tb                /*{ns}*{db}*{tb}!tb [new]
 ///
 /// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
 /// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}

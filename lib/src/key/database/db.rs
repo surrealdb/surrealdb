@@ -1,10 +1,9 @@
-//! Stores database versionstamps
+/// Stores a DEFINE DATABASE config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-// Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Vs {
+pub struct Db {
 	__: u8,
 	_a: u8,
 	pub ns: u32,
@@ -15,22 +14,21 @@ pub struct Vs {
 	_e: u8,
 }
 
-#[allow(unused)]
-pub fn new(ns: u32, db: u32) -> Vs {
-	Vs::new(ns, db)
+pub fn new(ns: u32, db: u32) -> Db {
+	Db::new(ns, db)
 }
 
-impl Vs {
+impl Db {
 	pub fn new(ns: u32, db: u32) -> Self {
-		Vs {
+		Self {
 			__: b'/',
 			_a: b'*',
 			ns,
 			_b: b'*',
 			db,
 			_c: b'!',
-			_d: b'v',
-			_e: b's',
+			_d: b'd',
+			_e: b'b',
 		}
 	}
 }
@@ -41,12 +39,14 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Vs::new(
+		let val = Db::new(
 			1,
 			2,
 		);
-		let enc = Vs::encode(&val).unwrap();
-		let dec = Vs::decode(&enc).unwrap();
+		let enc = Db::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
+
+		let dec = Db::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

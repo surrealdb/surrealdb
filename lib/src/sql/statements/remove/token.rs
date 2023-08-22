@@ -39,7 +39,9 @@ impl RemoveTokenStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
-				let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
+				let ns = run.get_ns(opt.ns()).await?;
+				let ns = ns.id.unwrap();
+				let key = crate::key::namespace::tk::new(ns, &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -50,7 +52,11 @@ impl RemoveTokenStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
-				let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
+				let ns = run.get_ns(opt.ns()).await?;
+				let ns = ns.id.unwrap();
+				let db = run.get_db(opt.ns(), opt.db()).await?;
+				let db = db.id.unwrap();
+				let key = crate::key::database::tk::new(ns, db, &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)

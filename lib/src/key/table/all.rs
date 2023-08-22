@@ -3,22 +3,22 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Table<'a> {
+pub struct Table {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
-	pub db: &'a str,
+	pub db: u32,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: u32,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
+pub fn new(ns: u32, db: u32, tb: u32) -> Table {
 	Table::new(ns, db, tb)
 }
 
-impl<'a> Table<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
+impl Table {
+	pub fn new(ns: u32, db: u32, tb: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -38,9 +38,9 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Table::new(
-			"testns",
-			"testdb",
-			"testtb",
+			1,
+			2,
+			3,
 		);
 		let enc = Table::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");

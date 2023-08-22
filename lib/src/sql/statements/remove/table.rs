@@ -35,19 +35,26 @@ impl RemoveTableStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Get the defined table
+		let ns = run.get_ns(opt.ns()).await?;
+		let ns = ns.id.unwrap();
+		let db = run.get_db(opt.ns(), opt.db()).await?;
+		let db = db.id.unwrap();
 		let tb = run.get_tb(opt.ns(), opt.db(), &self.name).await?;
+		let id = tb.id.unwrap();
 		// Delete the definition
-		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::database::tb::new(ns, db, &self.name);
 		run.del(key).await?;
 		// Remove the resource data
-		let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
+		let key = crate::key::table::all::new(ns, db, id);
 		run.delp(key, u32::MAX).await?;
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
 			// Process each foreign table
 			for v in view.what.0.iter() {
+				let view = run.get_tb(opt.ns(), opt.db(), v).await?;
+				let view_id = view.id.unwrap();
 				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
+				let key = crate::key::table::ft::new(ns, db, view_id, &self.name);
 				run.del(key).await?;
 			}
 		}

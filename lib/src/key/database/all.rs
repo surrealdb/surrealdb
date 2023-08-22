@@ -3,20 +3,20 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct All<'a> {
+pub struct All {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
-	pub db: &'a str,
+	pub db: u32,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
+pub fn new(ns: u32, db: u32) -> All {
 	All::new(ns, db)
 }
 
-impl<'a> All<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl All {
+	pub fn new(ns: u32, db: u32) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *
@@ -34,8 +34,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = All::new(
-			"testns",
-			"testdb",
+			1,
+			2,
 		);
 		let enc = All::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0");

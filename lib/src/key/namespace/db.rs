@@ -6,31 +6,31 @@ use serde::{Deserialize, Serialize};
 pub struct Db<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
 	_c: u8,
 	_d: u8,
 	pub db: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
+pub fn new(ns: u32, db: &str) -> Db {
 	Db::new(ns, db)
 }
 
-pub fn prefix(ns: &str) -> Vec<u8> {
+pub fn prefix(ns: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'd', b'b', 0x00]);
 	k
 }
 
-pub fn suffix(ns: &str) -> Vec<u8> {
+pub fn suffix(ns: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'd', b'b', 0xff]);
 	k
 }
 
 impl<'a> Db<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+	pub fn new(ns: u32, db: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -50,7 +50,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
-			"testns",
+			123,
 			"testdb",
 		);
 		let enc = Db::encode(&val).unwrap();
@@ -62,13 +62,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns");
+		let val = super::prefix(123);
 		assert_eq!(val, b"/*testns\0!db\0")
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns");
+		let val = super::suffix(123);
 		assert_eq!(val, b"/*testns\0!db\xff")
 	}
 }

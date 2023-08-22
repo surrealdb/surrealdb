@@ -1,9 +1,9 @@
-//! Stores the key prefix for all keys under an index
+//! Stores a DEFINE TABLE config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct All<'a> {
+pub struct Tb {
 	__: u8,
 	_a: u8,
 	pub ns: u32,
@@ -12,15 +12,16 @@ pub struct All<'a> {
 	_c: u8,
 	pub tb: u32,
 	_d: u8,
-	pub ix: &'a str,
+	_e: u8,
+	_f: u8,
 }
 
-pub fn new(ns: u32, db: u32, tb: u32, ix: &str) -> All {
-	All::new(ns, db, tb, ix)
+pub fn new(ns: u32, db: u32, tb: u32) -> Tb {
+	Tb::new(ns, db, tb)
 }
 
-impl<'a> All<'a> {
-	pub fn new(ns: u32, db: u32, tb: u32, ix: &'a str) -> Self {
+impl Tb {
+	pub fn new(ns: u32, db: u32, tb: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -29,8 +30,9 @@ impl<'a> All<'a> {
 			db,
 			_c: b'*',
 			tb,
-			_d: b'+',
-			ix,
+			_d: b'!',
+			_e: b't',
+			_f: b'b',
 		}
 	}
 }
@@ -41,16 +43,15 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = All::new(
+		let val = Tb::new(
 			1,
 			2,
 			3,
-			"testix",
 		);
-		let enc = All::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
+		let enc = Tb::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0!tbtesttb\0");
 
-		let dec = All::decode(&enc).unwrap();
+		let dec = Tb::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

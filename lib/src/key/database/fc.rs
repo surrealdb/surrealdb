@@ -6,33 +6,33 @@ use serde::{Deserialize, Serialize};
 pub struct Fc<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
-	pub db: &'a str,
+	pub db: u32,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	pub fc: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, fc: &'a str) -> Fc<'a> {
+pub fn new(ns: u32, db: u32, fc: &str) -> Fc {
 	Fc::new(ns, db, fc)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
+pub fn prefix(ns: u32, db: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'f', b'n', 0x00]);
 	k
 }
 
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
+pub fn suffix(ns: u32, db: u32) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'f', b'n', 0xff]);
 	k
 }
 
 impl<'a> Fc<'a> {
-	pub fn new(ns: &'a str, db: &'a str, fc: &'a str) -> Self {
+	pub fn new(ns: u32, db: u32, fc: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -54,25 +54,31 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Fc::new(
-			"testns",
-			"testdb",
+			1,
+			2,
 			"testfc",
 		);
 		let enc = Fc::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!fntestfc\x00");
+		assert_eq!(
+			enc,
+			vec![
+				b'/', b'*', 0, 0, 0, 1u8, b'*', 0, 0, 0, 2u8, b'!', b'f', b'n', b't', b'e', b's',
+				b't', b'f', b'c', 0x00
+			]
+		);
 		let dec = Fc::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb");
-		assert_eq!(val, b"/*testns\0*testdb\0!fn\0");
+		let val = super::prefix(1, 2);
+		assert_eq!(val, vec![b'/', b'*', 0, 0, 0, 1u8, b'*', 0, 0, 0, 2u8, b'!', b'f', b'n', 0x00]);
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb");
-		assert_eq!(val, b"/*testns\0*testdb\0!fn\xff");
+		let val = super::suffix(1, 2);
+		assert_eq!(val, vec![b'/', b'*', 0, 0, 0, 1u8, b'*', 0, 0, 0, 2u8, b'!', b'f', b'n', 0xff]);
 	}
 }

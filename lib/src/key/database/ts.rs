@@ -6,38 +6,38 @@ use serde::{Deserialize, Serialize};
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Ts<'a> {
+pub struct Ts {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: u32,
 	_b: u8,
-	pub db: &'a str,
+	pub db: u32,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	pub ts: u64,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
+pub fn new(ns: u32, db: u32, ts: u64) -> Ts {
 	Ts::new(ns, db, ts)
 }
 
 /// Returns the prefix for the whole database timestamps
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
+pub fn prefix(ns: u32, db: u32) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b't', b's']);
 	k
 }
 
 /// Returns the prefix for the whole database timestamps
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
+pub fn suffix(ns: u32, db: u32) -> Vec<u8> {
 	let mut k = prefix(ns, db);
 	k.extend_from_slice(&[0xff]);
 	k
 }
 
-impl<'a> Ts<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ts: u64) -> Self {
+impl Ts {
+	pub fn new(ns: u32, db: u32, ts: u64) -> Self {
 		Ts {
 			__: b'/',
 			_a: b'*',
@@ -59,8 +59,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ts::new(
-			"test",
-			"test",
+			1,
+			2,
 			123,
 		);
 		let enc = Ts::encode(&val).unwrap();

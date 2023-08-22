@@ -52,16 +52,19 @@ impl DefineIndexStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement
-		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let ns = ns.id.unwrap();
+		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let db = db.id.unwrap();
+		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let tb = tb.id.unwrap();
+		let key = crate::key::table::ix::new(ns, db, tb, &self.name);
 		run.set(key, self).await?;
 		// Remove the index data
-		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::index::all::new(ns, db, tb, &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Clear the cache
-		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ix::prefix(ns, db, tb);
 		run.clr(key).await?;
 		// Release the transaction
 		drop(run);

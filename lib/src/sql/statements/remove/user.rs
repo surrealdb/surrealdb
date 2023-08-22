@@ -50,7 +50,9 @@ impl RemoveUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
-				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+				let ns = run.get_ns(opt.ns()).await?;
+				let ns = ns.id.unwrap();
+				let key = crate::key::namespace::us::new(ns, &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -61,7 +63,11 @@ impl RemoveUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
-				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+				let ns = run.get_ns(opt.ns()).await?;
+				let ns = ns.id.unwrap();
+				let db = run.get_db(opt.db(), opt.db()).await?;
+				let db = db.id.unwrap();
+				let key = crate::key::database::us::new(ns, db, &self.name);
 				run.del(key).await?;
 				// Ok all good
 				Ok(Value::None)
