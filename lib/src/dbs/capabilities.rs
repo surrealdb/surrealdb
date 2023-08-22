@@ -126,7 +126,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug> Targets<T> {
 /// - Functions: Whether or not the user can execute certain functions
 /// - Network: Whether or not the user can access certain network addresses
 ///
-/// Capabilities can be configured globally or per context based on the Namespace/Database/Scope configuration. The default capabilities are:
+/// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: true
 /// - Functions: All functions are allowed
 /// - Network: All network addresses are allowed
