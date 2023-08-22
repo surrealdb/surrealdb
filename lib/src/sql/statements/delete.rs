@@ -13,9 +13,10 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::sequence::tuple;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -97,23 +98,25 @@ impl fmt::Display for DeleteStatement {
 
 pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, _) = tag_no_case("DELETE")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("FROM"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, what) = whats(i)?;
-	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	Ok((
-		i,
-		DeleteStatement {
-			what,
-			cond,
-			output,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
+	cut(|i| {
+		let (i, _) = opt(terminated(tag_no_case("FROM"), shouldbespace))(i)?;
+		let (i, what) = whats(i)?;
+		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+		Ok((
+			i,
+			DeleteStatement {
+				what,
+				cond,
+				output,
+				timeout,
+				parallel: parallel.is_some(),
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ use crate::sql::param::{param, Param};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -101,21 +102,23 @@ impl Display for ForeachStatement {
 pub fn foreach(i: &str) -> IResult<&str, ForeachStatement> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, param) = param(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IN")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, range) = value(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, block) = block(i)?;
-	Ok((
-		i,
-		ForeachStatement {
-			param,
-			range,
-			block,
-		},
-	))
+	cut(|i| {
+		let (i, param) = param(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("IN")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, range) = value(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, block) = block(i)?;
+		Ok((
+			i,
+			ForeachStatement {
+				param,
+				range,
+				block,
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

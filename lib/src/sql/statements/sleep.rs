@@ -9,6 +9,7 @@ use crate::sql::error::IResult;
 use crate::sql::{Base, Duration, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -54,13 +55,15 @@ impl fmt::Display for SleepStatement {
 pub fn sleep(i: &str) -> IResult<&str, SleepStatement> {
 	let (i, _) = tag_no_case("SLEEP")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = duration(i)?;
-	Ok((
-		i,
-		SleepStatement {
-			duration: v,
-		},
-	))
+	cut(|i| {
+		let (i, v) = duration(i)?;
+		Ok((
+			i,
+			SleepStatement {
+				duration: v,
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

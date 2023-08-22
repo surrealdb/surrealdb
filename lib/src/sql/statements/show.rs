@@ -17,6 +17,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::u32;
+use nom::combinator::cut;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -108,32 +109,36 @@ pub fn since(i: &str) -> IResult<&str, ShowSince> {
 	let (i, _) = tag_no_case("SINCE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
-	alt((map(take_u64, ShowSince::Versionstamp), map(datetime, ShowSince::Timestamp)))(i)
+	cut(alt((map(take_u64, ShowSince::Versionstamp), map(datetime, ShowSince::Timestamp))))(i)
 }
 
 pub fn limit(i: &str) -> IResult<&str, u32> {
 	let (i, _) = tag_no_case("LIMIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
-	u32(i)
+	cut(u32)(i)
 }
 
 pub fn show(i: &str) -> IResult<&str, ShowStatement> {
-	let (i, _) = tag_no_case("SHOW CHANGES")(i)?;
+	let (i, _) = tag_no_case("SHOW")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FOR")(i)?;
+	let (i, _) = tag_no_case("CHANGES")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, table) = table_or_database(i)?;
-	let (i, since) = preceded(shouldbespace, since)(i)?;
-	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
-	Ok((
-		i,
-		ShowStatement {
-			table,
-			since,
-			limit,
-		},
-	))
+	cut(|i| {
+		let (i, _) = tag_no_case("FOR")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, table) = table_or_database(i)?;
+		let (i, since) = preceded(shouldbespace, since)(i)?;
+		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
+		Ok((
+			i,
+			ShowStatement {
+				table,
+				since,
+				limit,
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

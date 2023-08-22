@@ -13,6 +13,7 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -98,21 +99,23 @@ impl fmt::Display for CreateStatement {
 pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 	let (i, _) = tag_no_case("CREATE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, what) = whats(i)?;
-	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
-	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	Ok((
-		i,
-		CreateStatement {
-			what,
-			data,
-			output,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
+	cut(|i| {
+		let (i, what) = whats(i)?;
+		let (i, data) = opt(preceded(shouldbespace, data))(i)?;
+		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+		Ok((
+			i,
+			CreateStatement {
+				what,
+				data,
+				output,
+				timeout,
+				parallel: parallel.is_some(),
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

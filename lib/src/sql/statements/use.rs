@@ -2,8 +2,13 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use derive::Store;
-use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
+use nom::sequence::{preceded, tuple};
+use nom::{
+	branch::alt,
+	combinator::{cut, map},
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -29,56 +34,31 @@ impl fmt::Display for UseStatement {
 }
 
 pub fn r#use(i: &str) -> IResult<&str, UseStatement> {
-	alt((both, ns, db))(i)
-}
-
-fn both(i: &str) -> IResult<&str, UseStatement> {
 	let (i, _) = tag_no_case("USE")(i)?;
 	let (i, _) = shouldbespace(i)?;
+	let (i, (ns, db)) = cut(alt((
+		map(tuple((namespace, opt(preceded(shouldbespace, database)))), |x| (Some(x.0), x.1)),
+		map(database, |x| (None, Some(x))),
+	)))(i)?;
+	Ok((
+		i,
+		UseStatement {
+			ns,
+			db,
+		},
+	))
+}
+
+fn namespace(i: &str) -> IResult<&str, String> {
 	let (i, _) = alt((tag_no_case("NAMESPACE"), tag_no_case("NS")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, ns) = ident_raw(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = alt((tag_no_case("DATABASE"), tag_no_case("DB")))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, db) = ident_raw(i)?;
-	Ok((
-		i,
-		UseStatement {
-			ns: Some(ns),
-			db: Some(db),
-		},
-	))
+	cut(ident_raw)(i)
 }
 
-fn ns(i: &str) -> IResult<&str, UseStatement> {
-	let (i, _) = tag_no_case("USE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = alt((tag_no_case("NAMESPACE"), tag_no_case("NS")))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, ns) = ident_raw(i)?;
-	Ok((
-		i,
-		UseStatement {
-			ns: Some(ns),
-			db: None,
-		},
-	))
-}
-
-fn db(i: &str) -> IResult<&str, UseStatement> {
-	let (i, _) = tag_no_case("USE")(i)?;
-	let (i, _) = shouldbespace(i)?;
+fn database(i: &str) -> IResult<&str, String> {
 	let (i, _) = alt((tag_no_case("DATABASE"), tag_no_case("DB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, db) = ident_raw(i)?;
-	Ok((
-		i,
-		UseStatement {
-			ns: None,
-			db: Some(db),
-		},
-	))
+	cut(ident_raw)(i)
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -62,15 +62,17 @@ impl fmt::Display for OutputStatement {
 pub fn output(i: &str) -> IResult<&str, OutputStatement> {
 	let (i, _) = tag_no_case("RETURN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, what) = value(i)?;
-	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-	Ok((
-		i,
-		OutputStatement {
-			what,
-			fetch,
-		},
-	))
+	cut(|i| {
+		let (i, what) = value(i)?;
+		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
+		Ok((
+			i,
+			OutputStatement {
+				what,
+				fetch,
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

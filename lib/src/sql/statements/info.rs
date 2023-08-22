@@ -15,6 +15,7 @@ use crate::sql::Base;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -234,9 +235,11 @@ impl fmt::Display for InfoStatement {
 pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = tag_no_case("INFO")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FOR")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	alt((root, ns, db, sc, tb, user))(i)
+	cut(|i| {
+		let (i, _) = tag_no_case("FOR")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		alt((root, ns, db, sc, tb, user))(i)
+	})(i)
 }
 
 fn root(i: &str) -> IResult<&str, InfoStatement> {
@@ -257,30 +260,38 @@ fn db(i: &str) -> IResult<&str, InfoStatement> {
 fn sc(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, scope) = ident(i)?;
-	Ok((i, InfoStatement::Sc(scope)))
+	cut(|i| {
+		let (i, scope) = ident(i)?;
+		Ok((i, InfoStatement::Sc(scope)))
+	})(i)
 }
 
 fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, table) = ident(i)?;
-	Ok((i, InfoStatement::Tb(table)))
+	cut(|i| {
+		let (i, table) = ident(i)?;
+		Ok((i, InfoStatement::Tb(table)))
+	})(i)
 }
 
 fn user(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("USER"), tag_no_case("US")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, user) = ident(i)?;
-	let (i, base) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("ON")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, base) = base(i)?;
-		Ok((i, base))
-	})(i)?;
+	cut(|i| {
+		let (i, user) = ident(i)?;
+		let (i, base) = opt(|i| {
+			let (i, _) = shouldbespace(i)?;
+			let (i, _) = tag_no_case("ON")(i)?;
+			cut(|i| {
+				let (i, _) = shouldbespace(i)?;
+				let (i, base) = base(i)?;
+				Ok((i, base))
+			})(i)
+		})(i)?;
 
-	Ok((i, InfoStatement::User(user, base)))
+		Ok((i, InfoStatement::User(user, base)))
+	})(i)
 }
 
 #[cfg(test)]

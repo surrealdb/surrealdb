@@ -28,6 +28,7 @@ use crate::sql::version::{version, Version};
 use crate::sql::with::{with, With};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -93,6 +94,7 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
@@ -192,47 +194,49 @@ impl fmt::Display for SelectStatement {
 pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, expr) = fields(i)?;
-	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = selects(i)?;
-	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
-	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
-	check_split_on_fields(i, &expr, &split)?;
-	let (i, group) = opt(preceded(shouldbespace, group))(i)?;
-	check_group_by_fields(i, &expr, &group)?;
-	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
-	check_order_by_fields(i, &expr, &order)?;
-	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
-	let (i, start) = opt(preceded(shouldbespace, start))(i)?;
-	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
-	Ok((
-		i,
-		SelectStatement {
-			expr,
-			omit,
-			what,
-			with,
-			cond,
-			split,
-			group,
-			order,
-			limit,
-			start,
-			fetch,
-			version,
-			timeout,
-			parallel: parallel.is_some(),
-			explain,
-		},
-	))
+	cut(|i|{
+		let (i, expr) = fields(i)?;
+		let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("FROM")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = selects(i)?;
+		let (i, with) = opt(preceded(shouldbespace, with))(i)?;
+		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+		let (i, split) = opt(preceded(shouldbespace, split))(i)?;
+		check_split_on_fields(i, &expr, &split)?;
+		let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+		check_group_by_fields(i, &expr, &group)?;
+		let (i, order) = opt(preceded(shouldbespace, order))(i)?;
+		check_order_by_fields(i, &expr, &order)?;
+		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
+		let (i, start) = opt(preceded(shouldbespace, start))(i)?;
+		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
+		let (i, version) = opt(preceded(shouldbespace, version))(i)?;
+		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+		let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
+		Ok((
+			i,
+			SelectStatement {
+				expr,
+				omit,
+				what,
+				with,
+				cond,
+				split,
+				group,
+				order,
+				limit,
+				start,
+				fetch,
+				version,
+				timeout,
+				parallel: parallel.is_some(),
+				explain,
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

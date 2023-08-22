@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::{comment, mightbespace};
+use crate::sql::comment::mightbespace;
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -76,7 +76,7 @@ impl Display for Statements {
 
 pub fn statements(i: &str) -> IResult<&str, Statements> {
 	let (i, v) = separated_list1(colons, statement)(i)?;
-	let (i, _) = many0(alt((colons, comment)))(i)?;
+	let (i, _) = many0(colons)(i)?;
 	Ok((i, Statements(v)))
 }
 

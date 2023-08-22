@@ -6,6 +6,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -32,18 +33,20 @@ impl fmt::Display for OptionStatement {
 pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = tag_no_case("OPTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, n) = ident(i)?;
-	let (i, v) = opt(alt((
-		map(tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE"))), |_| true),
-		map(tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE"))), |_| false),
-	)))(i)?;
-	Ok((
-		i,
-		OptionStatement {
-			name: n,
-			what: v.unwrap_or(true),
-		},
-	))
+	cut(|i| {
+		let (i, n) = ident(i)?;
+		let (i, v) = opt(alt((
+			map(tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE"))), |_| true),
+			map(tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE"))), |_| false),
+		)))(i)?;
+		Ok((
+			i,
+			OptionStatement {
+				name: n,
+				what: v.unwrap_or(true),
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

@@ -16,8 +16,10 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::{map, opt};
 use nom::sequence::preceded;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -145,29 +147,31 @@ impl fmt::Display for InsertStatement {
 
 pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, _) = tag_no_case("INSERT")(i)?;
-	let (i, ignore) = opt(preceded(shouldbespace, tag_no_case("IGNORE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("INTO")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, into) = alt((map(table, Value::Table), map(param, Value::Param)))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, data) = alt((values, single))(i)?;
-	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
-	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	Ok((
-		i,
-		InsertStatement {
-			into,
-			data,
-			ignore: ignore.is_some(),
-			update,
-			output,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
+	cut(|i| {
+		let (i, ignore) = opt(terminated(tag_no_case("IGNORE"), shouldbespace))(i)?;
+		let (i, _) = tag_no_case("INTO")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, into) = alt((map(table, Value::Table), map(param, Value::Param)))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, data) = alt((values, single))(i)?;
+		let (i, update) = opt(preceded(shouldbespace, update))(i)?;
+		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+		Ok((
+			i,
+			InsertStatement {
+				into,
+				data,
+				ignore: ignore.is_some(),
+				update,
+				output,
+				timeout,
+				parallel: parallel.is_some(),
+			},
+		))
+	})(i)
 }
 
 #[cfg(test)]

@@ -8,10 +8,9 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::value::{value, Value};
 use derive::Store;
-use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
 use nom::combinator::opt;
+use nom::combinator::{cut, map};
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -149,10 +148,20 @@ impl Display for IfelseStatement {
 }
 
 pub fn ifelse(i: &str) -> IResult<&str, IfelseStatement> {
-	alt((worded, bracketed))(i)
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	cut(|i| {
+		let (i, cond) = value(i)?;
+		let (i, _) = shouldbespace(i)?;
+		if let (i, Some(_)) = opt(tag_no_case("THEN"))(i)? {
+			worded(i, cond)
+		} else {
+			bracketed(i, cond)
+		}
+	})(i)
 }
 
-fn worded(i: &str) -> IResult<&str, IfelseStatement> {
+fn worded(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 	//
 	fn exprs(i: &str) -> IResult<&str, (Value, Value)> {
 		let (i, _) = tag_no_case("IF")(i)?;
@@ -179,8 +188,11 @@ fn worded(i: &str) -> IResult<&str, IfelseStatement> {
 		let (i, _) = shouldbespace(i)?;
 		Ok((i, ()))
 	}
-	//
-	let (i, exprs) = separated_list1(split, exprs)(i)?;
+
+	let (i, then) = value(i)?;
+
+	let (i, mut exprs) = separated_list1(split, exprs)(i)?;
+	exprs.insert(0, (initial_cond, then));
 	let (i, close) = opt(close)(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("END")(i)?;
@@ -193,7 +205,7 @@ fn worded(i: &str) -> IResult<&str, IfelseStatement> {
 	))
 }
 
-fn bracketed(i: &str) -> IResult<&str, IfelseStatement> {
+fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 	//
 	fn exprs(i: &str) -> IResult<&str, (Value, Value)> {
 		let (i, _) = tag_no_case("IF")(i)?;
@@ -218,8 +230,10 @@ fn bracketed(i: &str) -> IResult<&str, IfelseStatement> {
 		let (i, _) = shouldbespace(i)?;
 		Ok((i, ()))
 	}
-	//
-	let (i, exprs) = separated_list1(split, exprs)(i)?;
+
+	let (i, then) = map(block, Value::from)(i)?;
+	let (i, mut exprs) = separated_list1(split, exprs)(i)?;
+	exprs.insert(0, (initial_cond, then));
 	let (i, close) = opt(close)(i)?;
 	Ok((
 		i,
