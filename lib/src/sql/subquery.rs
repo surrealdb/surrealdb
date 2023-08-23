@@ -63,8 +63,8 @@ impl Subquery {
 			Self::Delete(v) => v.writeable(),
 			Self::Relate(v) => v.writeable(),
 			Self::Insert(v) => v.writeable(),
-			Self::Define(_) => true,
-			Self::Remove(_) => true,
+			Self::Define(v) => v.writeable(),
+			Self::Remove(v) => v.writeable(),
 		}
 	}
 	/// Process this type returning a computed simple Value
