@@ -35,12 +35,20 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match variant {
-			"No" => Ok(Level::No),
-			"Root" => Ok(Level::Root),
-			"Namespace" => Ok(Level::Namespace(value.serialize(ser::string::Serializer.wrap())?)),
-			// TODO not sure how to parse 2-strings and 3-strings from a single value without vec or changing enum
-			// "Database" => Ok(Number::Float(value.serialize(ser::primitive::f64::Serializer.wrap())?)),
-			// "Scope" => Ok(Number::Float(value.serialize(ser::primitive::f64::Serializer.wrap())?)),
+			"Any" => Ok(ResourceKind::Any),
+			"Namespace" => Ok(ResourceKind::Namespace),
+			"Database" => Ok(ResourceKind::Database),
+			"Scope" => Ok(ResourceKind::Scope),
+			"Table" => Ok(ResourceKind::Table),
+			"Document" => Ok(ResourceKind::Document),
+			"Option" => Ok(ResourceKind::Option),
+			"Function" => Ok(ResourceKind::Function),
+			"Analyzer" => Ok(ResourceKind::Analyzer),
+			"Parameter" => Ok(ResourceKind::Parameter),
+			"Event" => Ok(ResourceKind::Event),
+			"Field" => Ok(ResourceKind::Field),
+			"Index" => Ok(ResourceKind::Index),
+			"Actor" => Ok(ResourceKind::Actor),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}

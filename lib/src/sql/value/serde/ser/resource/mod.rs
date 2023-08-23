@@ -19,7 +19,7 @@ impl ser::Serializer for Serializer {
 	type SerializeTupleVariant = Impossible<Resource, Error>;
 	type SerializeMap = Impossible<Resource, Error>;
 	type SerializeStruct = SerializeResourceModel;
-	type SerializeStructVariant = Impossible<Actor, Error>;
+	type SerializeStructVariant = Impossible<Resource, Error>;
 
 	const EXPECTED: &'static str = "a 'Resource' struct";
 }
@@ -40,7 +40,7 @@ impl serde::ser::SerializeStruct for SerializeResourceModel {
 	{
 		match key {
 			"id" => {
-				self.actor = value.serialize(ser::string::Serializer.wrap())?;
+				self.id = value.serialize(ser::string::Serializer.wrap())?;
 			}
 			"kind" => {
 				self.kind = value.serialize(ser::resource_kind::Serializer.wrap())?;
@@ -49,7 +49,7 @@ impl serde::ser::SerializeStruct for SerializeResourceModel {
 				self.level = value.serialize(ser::level::Serializer.wrap())?;
 			}
 			key => {
-				return Err(Error::custom(format!("unexpected field `Actor::{key}`")));
+				return Err(Error::custom(format!("unexpected field `Resource::{key}`")));
 			}
 		}
 		Ok(())

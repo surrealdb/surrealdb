@@ -39,7 +39,7 @@ impl serde::ser::SerializeStruct for SerializeActorModel {
 	{
 		match key {
 			"res" => {
-				self.actor = value.serialize(ser::resource::Serializer.wrap())?;
+				self.res = value.serialize(ser::resource::Serializer.wrap())?;
 			}
 			"roles" => {
 				self.roles = value.serialize(ser::role::vec::Serializer.wrap())?;
