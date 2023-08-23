@@ -6,11 +6,13 @@ use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
+use crate::sql::statements::define::{define, DefineStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
 use crate::sql::statements::insert::{insert, InsertStatement};
 use crate::sql::statements::output::{output, OutputStatement};
 use crate::sql::statements::relate::{relate, RelateStatement};
+use crate::sql::statements::remove::{remove, RemoveStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
@@ -36,6 +38,8 @@ pub enum Subquery {
 	Delete(DeleteStatement),
 	Relate(RelateStatement),
 	Insert(InsertStatement),
+	Define(DefineStatement),
+	Remove(RemoveStatement),
 	// Add new variants here
 }
 
@@ -59,6 +63,8 @@ impl Subquery {
 			Self::Delete(v) => v.writeable(),
 			Self::Relate(v) => v.writeable(),
 			Self::Insert(v) => v.writeable(),
+			Self::Define(_) => true,
+			Self::Remove(_) => true,
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -76,6 +82,8 @@ impl Subquery {
 			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Define(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Remove(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {
 				// Is this a single output?
 				let one = v.single();
@@ -223,6 +231,8 @@ impl Display for Subquery {
 			Self::Delete(v) => write!(f, "({v})"),
 			Self::Relate(v) => write!(f, "({v})"),
 			Self::Insert(v) => write!(f, "({v})"),
+			Self::Define(v) => write!(f, "({v})"),
+			Self::Remove(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}
@@ -269,6 +279,8 @@ fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
 		map(delete, Subquery::Delete),
 		map(relate, Subquery::Relate),
 		map(insert, Subquery::Insert),
+		map(define, Subquery::Define),
+		map(remove, Subquery::Remove),
 	))(i)
 }
 
@@ -302,5 +314,23 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(SELECT * FROM test)", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_define_statement() {
+		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_remove_statement() {
+		let sql = "(REMOVE EVENT foo_event ON foo)";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
 	}
 }
