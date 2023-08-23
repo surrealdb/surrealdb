@@ -15,7 +15,6 @@ use opentelemetry::{Context as TelemetryContext, KeyValue};
 use tracing::{Level, Subscriber};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
-#[cfg(feature = "has-storage")]
 use tracing_subscriber::EnvFilter;
 
 pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
@@ -66,7 +65,6 @@ impl Builder {
 	}
 
 	/// Set the filter on the builder
-	#[cfg(feature = "has-storage")]
 	pub fn with_filter(mut self, filter: CustomEnvFilter) -> Self {
 		self.filter = filter;
 		self

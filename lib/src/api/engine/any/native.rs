@@ -9,10 +9,10 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
-use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
+use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
@@ -61,8 +61,8 @@ impl Connection for Any {
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
-			match address.endpoint.scheme() {
-				"fdb" => {
+			match EndpointKind::from(address.endpoint.scheme()) {
+				EndpointKind::FoundationDb => {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -76,7 +76,7 @@ impl Connection for Any {
 					);
 				}
 
-				"mem" => {
+				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -90,7 +90,7 @@ impl Connection for Any {
 					);
 				}
 
-				"file" | "rocksdb" => {
+				EndpointKind::File | EndpointKind::RocksDb => {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -105,7 +105,7 @@ impl Connection for Any {
 					.into());
 				}
 
-				"speedb" => {
+				EndpointKind::SpeeDb => {
 					#[cfg(feature = "kv-speedb")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -120,7 +120,7 @@ impl Connection for Any {
 					.into());
 				}
 
-				"tikv" => {
+				EndpointKind::TiKv => {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -134,7 +134,7 @@ impl Connection for Any {
 					);
 				}
 
-				"http" | "https" => {
+				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -166,7 +166,7 @@ impl Connection for Any {
 					.into());
 				}
 
-				"ws" | "wss" => {
+				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
 						let url = address.endpoint.join(engine::remote::ws::PATH)?;
@@ -205,10 +205,7 @@ impl Connection for Any {
 					)
 					.into());
 				}
-
-				scheme => {
-					return Err(Error::Scheme(scheme.to_owned()).into());
-				}
+				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
 			Ok(Surreal {

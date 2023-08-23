@@ -7,7 +7,7 @@ use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::err::Error;
-use crate::api::opt::Endpoint;
+use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
@@ -105,9 +105,12 @@ pub(crate) fn router(
 		};
 
 		let kvs = {
-			let path = match url.scheme() {
-				"mem" => "memory".to_owned(),
-				"fdb" | "rocksdb" | "speedb" | "file" => match url.to_file_path() {
+			let path = match EndpointKind::from(url.scheme()) {
+				EndpointKind::Memory => "memory".to_owned(),
+				EndpointKind::FoundationDb
+				| EndpointKind::RocksDb
+				| EndpointKind::File
+				| EndpointKind::SpeeDb => match url.to_file_path() {
 					Ok(path) => format!("{}://{}", url.scheme(), path.display()),
 					Err(_) => {
 						let error = Error::InvalidUrl(url.as_str().to_owned());

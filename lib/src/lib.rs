@@ -137,6 +137,9 @@ pub mod kvs;
 
 #[doc(inline)]
 pub use api::engine;
+#[cfg(feature = "protocol-http")]
+#[doc(inline)]
+pub use api::headers;
 #[doc(inline)]
 pub use api::method;
 #[doc(inline)]
