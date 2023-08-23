@@ -43,7 +43,7 @@ pub enum Error {
 	Deprecated(String),
 
 	/// A custom error has been thrown
-	#[error("{0}")]
+	#[error("An error occurred: {0}")]
 	Thrown(String),
 
 	/// There was a problem with the underlying datastore
