@@ -113,6 +113,9 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
 		}

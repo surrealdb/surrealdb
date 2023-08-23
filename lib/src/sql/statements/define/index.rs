@@ -90,6 +90,9 @@ impl Display for DefineIndexStatement {
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
 		Ok(())
 	}
 }
