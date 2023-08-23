@@ -160,12 +160,16 @@ impl Function {
 		// Process the function type
 		match self {
 			Self::Normal(s, x) => {
+				// Check this function is allowed
+				ctx.check_allowed_function(s)?;
 				// Compute the function arguments
 				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 				// Run the normal function
 				fnc::run(ctx, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
+				// Check this function is allowed
+				ctx.check_allowed_function(format!("fn::{s}").as_str())?;
 				// Get the function definition
 				let val = {
 					// Claim transaction
@@ -198,6 +202,8 @@ impl Function {
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
+					// Check if scripting is allowed
+					ctx.check_allowed_scripting()?;
 					// Compute the function arguments
 					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 					// Run the script function

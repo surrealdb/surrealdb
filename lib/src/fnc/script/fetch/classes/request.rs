@@ -395,6 +395,7 @@ impl<'js> Request<'js> {
 			let url_str = url.to_string()?;
 			let url = Url::parse(&url_str)
 				.map_err(|e| Exception::throw_type(&ctx, &format!("failed to parse url: {e}")))?;
+
 			if !url.username().is_empty() || !url.password().map(str::is_empty).unwrap_or(true) {
 				// url cannot contain non empty username and passwords
 				return Err(Exception::throw_type(&ctx, "Url contained credentials."));

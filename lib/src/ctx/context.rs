@@ -1,16 +1,20 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::Notification;
+use crate::dbs::capabilities::{FuncTarget, NetTarget};
+use crate::dbs::{Capabilities, Notification};
+use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use trice::Instant;
+use url::Url;
 
 impl<'a> From<Value> for Cow<'a, Value> {
 	fn from(v: Value) -> Cow<'a, Value> {
@@ -36,6 +40,8 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// Capabilities
+	capabilities: Arc<Capabilities>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -65,6 +71,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
 
@@ -77,6 +84,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
+			capabilities: parent.capabilities.clone(),
 		}
 	}
 
@@ -189,5 +197,55 @@ impl<'a> Context<'a> {
 				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)
+	}
+
+	//
+	// Capabilities
+	//
+
+	/// Set the capabilities for this context
+	pub fn add_capabilities(&mut self, caps: Capabilities) {
+		self.capabilities = Arc::new(caps);
+	}
+
+	/// Get the capabilities for this context
+	pub fn get_capabilities(&self) -> Arc<Capabilities> {
+		self.capabilities.clone()
+	}
+
+	/// Check if scripting is allowed
+	pub fn check_allowed_scripting(&self) -> Result<(), Error> {
+		if !self.capabilities.is_allowed_scripting() {
+			return Err(Error::ScriptingNotAllowed);
+		}
+		Ok(())
+	}
+
+	/// Check if a function is allowed
+	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
+		let func_target = FuncTarget::from_str(target).map_err(|_| Error::InvalidFunction {
+			name: target.to_string(),
+			message: "Invalid function name".to_string(),
+		})?;
+
+		if !self.capabilities.is_allowed_func(&func_target) {
+			return Err(Error::FunctionNotAllowed(target.to_string()));
+		}
+		Ok(())
+	}
+
+	/// Check if a network target is allowed
+	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
+		match target.host() {
+			Some(host)
+				if self.capabilities.is_allowed_net(&NetTarget::Host(
+					host.to_owned(),
+					target.port_or_known_default(),
+				)) =>
+			{
+				Ok(())
+			}
+			_ => Err(Error::NetTargetNotAllowed(target.to_string())),
+		}
 	}
 }

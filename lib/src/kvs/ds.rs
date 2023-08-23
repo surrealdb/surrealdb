@@ -3,6 +3,7 @@ use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
+use crate::dbs::Capabilities;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
 use crate::dbs::Options;
@@ -62,6 +63,8 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
 	auth_enabled: bool,
+	// Capabilities for this datastore
+	capabilities: Capabilities,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -260,6 +263,7 @@ impl Datastore {
 			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
 			auth_enabled: false,
+			capabilities: Capabilities::default(),
 		})
 	}
 
@@ -323,6 +327,12 @@ impl Datastore {
 	/// Set a global transaction timeout for this Datastore
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
+		self
+	}
+
+	/// Configure Datastore capabilities
+	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
+		self.capabilities = caps;
 		self
 	}
 
@@ -752,6 +762,7 @@ impl Datastore {
 		let mut exe = Executor::new(self);
 		// Create a default context
 		let mut ctx = Context::default();
+		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
@@ -808,6 +819,8 @@ impl Datastore {
 		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
 		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
