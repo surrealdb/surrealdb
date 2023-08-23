@@ -66,7 +66,11 @@ impl Display for DefineEventStatement {
 			f,
 			"DEFINE EVENT {} ON {} WHEN {} THEN {}",
 			self.name, self.what, self.when, self.then
-		)
+		)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
+		Ok(())
 	}
 }
 
