@@ -27,7 +27,7 @@ impl ser::Serializer for Serializer {
 		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
-		value: &T,
+		_value: &T,
 	) -> Result<Self::Ok, Error>
 	where
 		T: ?Sized + Serialize,

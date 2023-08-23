@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::iam::{Actor, Resource, Role};
 use crate::sql::value::serde::ser;
-use crate::sql::Model;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;

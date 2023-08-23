@@ -3,7 +3,6 @@ use crate::iam::Auth;
 use crate::sql::value::serde::ser;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
-use uuid::Uuid;
 
 pub struct Serializer;
 

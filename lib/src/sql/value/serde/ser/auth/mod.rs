@@ -29,11 +29,6 @@ pub(super) struct SerializeAuthModel {
 	actor: Actor,
 }
 
-enum Inner {
-	Count(Option<String>, Option<u64>),
-	Range(Option<String>, Option<u64>, Option<u64>),
-}
-
 impl serde::ser::SerializeStruct for SerializeAuthModel {
 	type Ok = Auth;
 	type Error = Error;
