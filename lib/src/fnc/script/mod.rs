@@ -16,3 +16,6 @@ mod fetch;
 mod fetch_stub;
 #[cfg(not(feature = "http"))]
 use self::fetch_stub as fetch;
+
+#[cfg(test)]
+mod tests;

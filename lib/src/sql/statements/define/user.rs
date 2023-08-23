@@ -128,7 +128,11 @@ impl Display for DefineUserStatement {
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
 			)
-		)
+		)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
+		Ok(())
 	}
 }
 

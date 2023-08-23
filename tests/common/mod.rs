@@ -54,16 +54,21 @@ impl Child {
 		self.inner.as_mut().unwrap().try_wait()
 	}
 
+	pub fn stdout(&self) -> String {
+		std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file")
+	}
+
+	pub fn stderr(&self) -> String {
+		std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file")
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(mut self) -> Result<String, String> {
 		let status = self.inner.take().unwrap().wait().unwrap();
 
-		let mut buf =
-			std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-		buf.push_str(
-			&std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file"),
-		);
+		let mut buf = self.stdout();
+		buf.push_str(&self.stderr());
 
 		// Cleanup files after reading them
 		std::fs::remove_file(self.stdout_path.as_str()).unwrap();
@@ -101,8 +106,8 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file(format!("server-stdout-{}.log", rand::random::<u32>()).as_str());
-	let stderr_path = tmp_file(format!("server-stderr-{}.log", rand::random::<u32>()).as_str());
+	let stdout_path = tmp_file("server-stdout.log");
+	let stderr_path = tmp_file("server-stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
@@ -131,7 +136,7 @@ pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
 }
 
 pub fn tmp_file(name: &str) -> String {
-	let path = Path::new(env!("OUT_DIR")).join(name);
+	let path = Path::new(env!("OUT_DIR")).join(format!("{}-{}", rand::random::<u32>(), name));
 	path.to_string_lossy().into_owned()
 }
 
@@ -140,6 +145,7 @@ pub struct StartServerArguments {
 	pub tls: bool,
 	pub wait_is_ready: bool,
 	pub tick_interval: time::Duration,
+	pub args: String,
 }
 
 impl Default for StartServerArguments {
@@ -149,6 +155,7 @@ impl Default for StartServerArguments {
 			tls: false,
 			wait_is_ready: true,
 			tick_interval: time::Duration::new(1, 0),
+			args: String::default(),
 		}
 	}
 }
@@ -171,6 +178,7 @@ pub async fn start_server(
 		tls,
 		wait_is_ready,
 		tick_interval,
+		args,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
@@ -178,7 +186,7 @@ pub async fn start_server(
 	let port: u16 = rng.gen_range(13000..14000);
 	let addr = format!("127.0.0.1:{port}");
 
-	let mut extra_args = String::default();
+	let mut extra_args = args.clone();
 	if tls {
 		// Test the crt/key args but the keys are self signed so don't actually connect.
 		let crt_path = tmp_file("crt.crt");
@@ -212,7 +220,7 @@ pub async fn start_server(
 	}
 
 	// Wait 5 seconds for the server to start
-	let mut interval = time::interval(time::Duration::from_millis(500));
+	let mut interval = time::interval(time::Duration::from_millis(1000));
 	info!("Waiting for server to start...");
 	for _i in 0..10 {
 		interval.tick().await;

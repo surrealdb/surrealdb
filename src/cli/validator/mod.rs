@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 #[cfg(feature = "has-storage")]
 use std::{
 	path::{Path, PathBuf},
 	str::FromStr,
 	time::Duration,
 };
+
+use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Targets};
 
 pub(crate) mod parser;
 
@@ -75,4 +78,78 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 #[cfg(feature = "has-storage")]
 pub(crate) fn duration(v: &str) -> Result<Duration, String> {
 	surrealdb::sql::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
+}
+
+pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(NetTarget::from_str(target)?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(FuncTarget::from_str(target)?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_func_targets() {
+		assert_eq!(func_targets("*").unwrap(), Targets::<FuncTarget>::All);
+		assert_eq!(func_targets("").unwrap(), Targets::<FuncTarget>::All);
+		assert_eq!(
+			func_targets("foo").unwrap(),
+			Targets::<FuncTarget>::Some(vec!["foo".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			func_targets("foo,bar").unwrap(),
+			Targets::<FuncTarget>::Some(
+				vec!["foo".parse().unwrap(), "bar".parse().unwrap()].into_iter().collect()
+			)
+		);
+	}
+
+	#[test]
+	fn test_net_targets() {
+		assert_eq!(net_targets("*").unwrap(), Targets::<NetTarget>::All);
+		assert_eq!(net_targets("").unwrap(), Targets::<NetTarget>::All);
+		assert_eq!(
+			net_targets("example.com").unwrap(),
+			Targets::<NetTarget>::Some(vec!["example.com".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			net_targets("127.0.0.1:80,[2001:db8::1]:443,2001:db8::1").unwrap(),
+			Targets::<NetTarget>::Some(
+				vec![
+					"127.0.0.1:80".parse().unwrap(),
+					"[2001:db8::1]:443".parse().unwrap(),
+					"2001:db8::1".parse().unwrap()
+				]
+				.into_iter()
+				.collect()
+			)
+		);
+
+		assert!(net_targets("127777.0.0.1").is_err());
+		assert!(net_targets("127.0.0.1,127777.0.0.1").is_err());
+	}
 }

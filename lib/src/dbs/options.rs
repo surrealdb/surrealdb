@@ -1,3 +1,4 @@
+use super::capabilities::Capabilities;
 use crate::cnf;
 use crate::dbs::Notification;
 use crate::err::Error;
@@ -46,6 +47,8 @@ pub struct Options {
 	pub futures: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
+	/// Datastore capabilities
+	pub capabilities: Arc<Capabilities>,
 }
 
 impl Default for Options {
@@ -74,6 +77,7 @@ impl Options {
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
+			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
 
@@ -208,6 +212,12 @@ impl Options {
 		self
 	}
 
+	/// Create a new Options object with the given Capabilities
+	pub fn with_capabilities(mut self, capabilities: Arc<Capabilities>) -> Self {
+		self.capabilities = capabilities;
+		self
+	}
+
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -215,6 +225,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			perms,
@@ -227,6 +238,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
@@ -239,6 +251,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			strict,
@@ -251,6 +264,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			fields,
@@ -263,6 +277,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			events,
@@ -275,6 +290,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			tables,
@@ -287,6 +303,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			indexes,
@@ -299,6 +316,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			futures,
@@ -311,6 +329,7 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			fields: !import,
@@ -324,6 +343,7 @@ impl Options {
 	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
 		Self {
 			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			sender: Some(sender),
@@ -351,6 +371,7 @@ impl Options {
 			Ok(Self {
 				sender: self.sender.clone(),
 				auth: self.auth.clone(),
+				capabilities: self.capabilities.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
 				dive,
