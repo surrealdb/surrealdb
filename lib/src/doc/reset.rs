@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 		// Set default field values
 		self.current.doc.to_mut().def(rid);
 		// Ensure edge fields are reset
-		if self.initial.doc.pick(&*EDGE).is_true() {
+		if self.is_edge() || self.initial.doc.pick(&*EDGE).is_true() {
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, self.initial.doc.pick(&*IN));
 			self.current.doc.to_mut().put(&*OUT, self.initial.doc.pick(&*OUT));

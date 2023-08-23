@@ -108,6 +108,10 @@ impl<'a> Document<'a> {
 	pub fn is_new(&self) -> bool {
 		self.initial.doc.is_none()
 	}
+	/// Check if this is a graph edge
+	pub fn is_edge(&self) -> bool {
+		matches!(self.extras, Workable::Relate(_, _))
+	}
 	/// Get the table for this document
 	pub async fn tb(
 		&self,
