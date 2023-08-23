@@ -86,6 +86,7 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	let mut res = DefineEventStatement {
 		name,
 		what,
+		when: Value::Bool(true),
 		..Default::default()
 	};
 	// Assign any defined options
