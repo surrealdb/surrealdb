@@ -162,16 +162,7 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 }
 
 pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
-	let res = start_server(StartServerArguments::default()).await;
-	let debug_override = true;
-	if debug_override {
-		if let Ok(inner) = res {
-			return Ok(("localhost:8000".to_string(), inner.1));
-		}
-		res
-	} else {
-		res
-	}
+	start_server(StartServerArguments::default()).await
 }
 
 pub async fn start_server(
@@ -321,7 +312,7 @@ pub async fn ws_recv_msg_with_fmt(
 
 	tokio::select! {
 		_ = time::sleep(time::Duration::from_millis(5000)) => {
-			Err("timeout after 5s waiting for the response".into())
+			Err(Box::new(TestError::NetworkError {message: "timeout after 5s waiting for the response".to_string()}))
 		}
 		res = f.select_next_some() => {
 			debug!("Response received in {:?}", now.elapsed());

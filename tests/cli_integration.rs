@@ -45,7 +45,6 @@ async fn all_commands() {
 	})
 	.await
 	.unwrap();
-	println!("addr: {}", addr);
 	let creds = ""; // Anonymous user
 
 	info!("* Create a record");
