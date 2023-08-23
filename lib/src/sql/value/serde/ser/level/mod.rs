@@ -1,8 +1,6 @@
 use crate::err::Error;
 use crate::iam::Level;
 use crate::sql::value::serde::ser;
-use crate::sql::Number;
-use rust_decimal::Decimal;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;

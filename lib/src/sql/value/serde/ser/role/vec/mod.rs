@@ -1,8 +1,6 @@
 use crate::err::Error;
 use crate::iam::Role;
 use crate::sql::value::serde::ser;
-use crate::sql::Fetch;
-use crate::sql::Idiom;
 use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
