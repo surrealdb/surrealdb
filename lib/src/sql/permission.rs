@@ -8,6 +8,7 @@ use crate::sql::fmt::pretty_sequence_item;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::map;
 use nom::multi::separated_list1;
 use nom::{multi::separated_list0, sequence::tuple};
@@ -125,7 +126,7 @@ impl Display for Permissions {
 pub fn permissions(i: &str) -> IResult<&str, Permissions> {
 	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	alt((none, full, specific))(i)
+	cut(alt((none, full, specific)))(i)
 }
 
 fn none(i: &str) -> IResult<&str, Permissions> {
@@ -210,24 +211,26 @@ impl Display for Permission {
 fn permission(i: &str) -> IResult<&str, Vec<(char, Permission)>> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, kind) = separated_list0(
-		commas,
-		alt((
-			map(tag_no_case("SELECT"), |_| 's'),
-			map(tag_no_case("CREATE"), |_| 'c'),
-			map(tag_no_case("UPDATE"), |_| 'u'),
-			map(tag_no_case("DELETE"), |_| 'd'),
-		)),
-	)(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, expr) = alt((
-		map(tag_no_case("NONE"), |_| Permission::None),
-		map(tag_no_case("FULL"), |_| Permission::Full),
-		map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
-			Permission::Specific(v)
-		}),
-	))(i)?;
-	Ok((i, kind.into_iter().map(|k| (k, expr.clone())).collect()))
+	cut(|i| {
+		let (i, kind) = separated_list0(
+			commas,
+			alt((
+				map(tag_no_case("SELECT"), |_| 's'),
+				map(tag_no_case("CREATE"), |_| 'c'),
+				map(tag_no_case("UPDATE"), |_| 'u'),
+				map(tag_no_case("DELETE"), |_| 'd'),
+			)),
+		)(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, expr) = alt((
+			map(tag_no_case("NONE"), |_| Permission::None),
+			map(tag_no_case("FULL"), |_| Permission::Full),
+			map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
+				Permission::Specific(v)
+			}),
+		))(i)?;
+		Ok((i, kind.into_iter().map(|k| (k, expr.clone())).collect()))
+	})(i)
 }
 
 #[cfg(test)]

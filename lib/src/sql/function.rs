@@ -18,7 +18,6 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
 use nom::combinator::{cut, recognize};
-use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -26,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::util::delimited_list;
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -239,7 +238,7 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 pub fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
 	cut(|i| {
-		let (i, a) = delimited_list(openparentheses, commas, value, closeparentheses)(i)?;
+		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
 		Ok((i, Function::Normal(s.to_string(), a)))
 	})(i)
 }
@@ -249,7 +248,7 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 	cut(|i| {
 		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list(openparentheses, commas, value, closeparentheses)(i)?;
+		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
 		Ok((i, Function::Custom(s.to_string(), a)))
 	})(i)
 }
@@ -258,7 +257,7 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
 	cut(|i| {
 		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list(openparentheses, commas, value, closeparentheses)(i)?;
+		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char('{')(i)?;
 		let (i, v) = func(i)?;

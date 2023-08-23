@@ -3,7 +3,7 @@ use crate::sql::error::IResult;
 use crate::sql::Error::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::{cut, map};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
 use revision::revisioned;
@@ -84,19 +84,21 @@ pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 		|i| {
 			let (i, _) = tag_no_case("BM25")(i)?;
 			let (i, _) = openparentheses(i)?;
-			let (i, k1) = recognize_float(i)?;
-			let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-			let (i, _) = commas(i)?;
-			let (i, b) = recognize_float(i)?;
-			let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-			let (i, _) = closeparentheses(i)?;
-			Ok((
-				i,
-				Scoring::Bm {
-					k1,
-					b,
-				},
-			))
+			cut(|i| {
+				let (i, k1): (&str, &str) = recognize_float(i)?;
+				let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+				let (i, _) = commas(i)?;
+				let (i, b) = recognize_float(i)?;
+				let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+				let (i, _) = closeparentheses(i)?;
+				Ok((
+					i,
+					Scoring::Bm {
+						k1,
+						b,
+					},
+				))
+			})(i)
 		},
 		map(tag_no_case("BM25"), |_| Scoring::bm25()),
 	))(i)

@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::{comment, mightbespace};
+use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};

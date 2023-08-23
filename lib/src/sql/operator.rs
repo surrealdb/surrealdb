@@ -7,6 +7,7 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::character::complete::u8 as uint8;
+use nom::combinator::cut;
 use nom::combinator::{map, opt};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -257,9 +258,11 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 pub fn matches(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('@')(i)?;
 	// let (i, reference) = opt(|i| uint8(i))(i)?;
-	let (i, reference) = opt(uint8)(i)?;
-	let (i, _) = char('@')(i)?;
-	Ok((i, Operator::Matches(reference)))
+	cut(|i| {
+		let (i, reference) = opt(uint8)(i)?;
+		let (i, _) = char('@')(i)?;
+		Ok((i, Operator::Matches(reference)))
+	})(i)
 }
 
 #[cfg(test)]

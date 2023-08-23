@@ -7,7 +7,7 @@ use crate::sql::error::IResult;
 use crate::sql::number::Number;
 use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -46,10 +46,12 @@ impl fmt::Display for Limit {
 
 pub fn limit(i: &str) -> IResult<&str, Limit> {
 	let (i, _) = tag_no_case("LIMIT")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, Limit(v)))
+	cut(|i| {
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, v) = value(i)?;
+		Ok((i, Limit(v)))
+	})(i)
 }
 
 #[cfg(test)]

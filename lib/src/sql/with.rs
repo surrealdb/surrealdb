@@ -2,9 +2,9 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
-use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
+use nom::{branch::alt, combinator::cut};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter, Result};
@@ -37,14 +37,14 @@ fn no_index(i: &str) -> IResult<&str, With> {
 fn index(i: &str) -> IResult<&str, With> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_list1(commas, ident_raw)(i)?;
+	let (i, v) = cut(separated_list1(commas, ident_raw))(i)?;
 	Ok((i, With::Index(v)))
 }
 
 pub fn with(i: &str) -> IResult<&str, With> {
 	let (i, _) = tag_no_case("WITH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	alt((no_index, index))(i)
+	cut(alt((no_index, index)))(i)
 }
 
 #[cfg(test)]

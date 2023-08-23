@@ -6,7 +6,7 @@ use crate::sql::group::{group, Groups};
 use crate::sql::table::{tables, Tables};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -37,22 +37,26 @@ impl fmt::Display for View {
 pub fn view(i: &str) -> IResult<&str, View> {
 	let select_view = |i| {
 		let (i, _) = tag_no_case("SELECT")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, expr) = fields(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("FROM")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, what) = tables(i)?;
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, group) = opt(preceded(shouldbespace, group))(i)?;
-		Ok((i, (expr, what, cond, group)))
+		cut(|i| {
+			let (i, _) = shouldbespace(i)?;
+			let (i, expr) = fields(i)?;
+			let (i, _) = shouldbespace(i)?;
+			let (i, _) = tag_no_case("FROM")(i)?;
+			let (i, _) = shouldbespace(i)?;
+			let (i, what) = tables(i)?;
+			let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+			let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+			Ok((i, (expr, what, cond, group)))
+		})(i)
 	};
 
 	let select_view_delimited = |i| {
 		let (i, _) = tag("(")(i)?;
-		let (i, res) = select_view(i)?;
-		let (i, _) = tag(")")(i)?;
-		Ok((i, res))
+		cut(|i| {
+			let (i, res) = select_view(i)?;
+			let (i, _) = tag(")")(i)?;
+			Ok((i, res))
+		})(i)
 	};
 
 	let (i, _) = tag_no_case("AS")(i)?;

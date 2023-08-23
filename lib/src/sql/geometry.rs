@@ -17,7 +17,6 @@ use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
-use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
@@ -26,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
 use std::{fmt, hash};
+
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
@@ -785,11 +786,7 @@ fn point_vals(i: &str) -> IResult<&str, Point<f64>> {
 }
 
 fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list1(commas, coordinate)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, v) = delimited_list0(openbracket, commas, coordinate, closebracket)(i)?;
 	Ok((i, v.into()))
 }
 
@@ -807,38 +804,22 @@ fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
 }
 
 fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list1(commas, point_vals)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, v))
+	let (i, v) = delimited_list0(openbracket, commas, point_vals, closebracket)(i)?;
+	Ok((i, v.into()))
 }
 
 fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list1(commas, line_vals)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, v))
+	let (i, v) = delimited_list0(openbracket, commas, line_vals, closebracket)(i)?;
+	Ok((i, v.into()))
 }
 
 fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list1(commas, polygon_vals)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, v) = delimited_list0(openbracket, commas, polygon_vals, closebracket)(i)?;
 	Ok((i, v))
 }
 
 fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list1(commas, geometry)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, v) = delimited_list0(openbracket, commas, geometry, closebracket)(i)?;
 	Ok((i, v))
 }
 

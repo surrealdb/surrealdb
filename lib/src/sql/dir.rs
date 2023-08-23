@@ -1,5 +1,4 @@
 use crate::sql::error::IResult;
-use nom::character::complete::char;
 use nom::{branch::alt, bytes::complete::tag, combinator::map};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

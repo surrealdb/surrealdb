@@ -3,16 +3,14 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebracket, commas, openbracket};
+use crate::sql::common::{closebracket, openbracket};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
-use nom::combinator::{cut, opt};
-use nom::multi::separated_list0;
-use nom::sequence::{delimited, preceded};
+use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -21,7 +19,7 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use super::util::delimited_list;
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
@@ -482,7 +480,7 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, v) = delimited_list(
+	let (i, v) = delimited_list0(
 		openbracket,
 		preceded(mightbespace, char(',')),
 		preceded(mightbespace, value),

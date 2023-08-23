@@ -8,8 +8,8 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::u64;
-use nom::combinator::map;
 use nom::combinator::opt;
+use nom::combinator::{cut, map};
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -137,24 +137,26 @@ fn either(i: &str) -> IResult<&str, Kind> {
 fn option(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("option")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('<')(i)?;
-	let (i, v) = map(alt((either, simple, geometry, record, array, set)), Box::new)(i)?;
-	let (i, _) = char('>')(i)?;
-	Ok((i, Kind::Option(v)))
+	cut(|i| {
+		let (i, _) = char('<')(i)?;
+		let (i, v) = map(alt((either, simple, geometry, record, array, set)), Box::new)(i)?;
+		let (i, _) = char('>')(i)?;
+		Ok((i, Kind::Option(v)))
+	})(i)
 }
 
 fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("record")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, v) = opt(alt((
 		|i| {
-			let (i, _) = mightbespace(i)?;
+			// TODO
 			let (i, _) = openparentheses(i)?;
 			let (i, v) = separated_list1(commas, table)(i)?;
 			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {
-			let (i, _) = mightbespace(i)?;
 			let (i, _) = char('<')(i)?;
 			let (i, v) = separated_list1(verbar, table)(i)?;
 			let (i, _) = char('>')(i)?;

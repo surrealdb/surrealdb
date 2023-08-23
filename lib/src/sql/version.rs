@@ -2,6 +2,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -19,7 +20,7 @@ impl fmt::Display for Version {
 pub fn version(i: &str) -> IResult<&str, Version> {
 	let (i, _) = tag_no_case("VERSION")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = datetime(i)?;
+	let (i, v) = cut(datetime)(i)?;
 	Ok((i, Version(v)))
 }
 

@@ -14,8 +14,6 @@ use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
-use nom::combinator::opt;
-use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -24,6 +22,9 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use super::common::{closebraces, openbraces};
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -321,20 +322,16 @@ mod no_nul_bytes_in_keys {
 }
 
 pub fn object(i: &str) -> IResult<&str, Object> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, |i| {
+	fn entry(i: &str) -> IResult<&str, (String, Value)> {
 		let (i, k) = key(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char(':')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = value(i)?;
 		Ok((i, (String::from(k), v)))
-	})(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	}
+
+	let (i, v) = delimited_list0(openbraces, commas, entry, closebraces)(i)?;
 	Ok((i, Object(v.into_iter().collect())))
 }
 

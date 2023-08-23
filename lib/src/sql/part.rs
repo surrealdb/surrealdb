@@ -14,7 +14,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{map, not, peek};
+use nom::combinator::{cut, map, not, peek};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -156,8 +156,7 @@ pub fn first(i: &str) -> IResult<&str, Part> {
 pub fn all(i: &str) -> IResult<&str, Part> {
 	let (i, _) = alt((
 		|i| {
-			let (i, _) = char('.')(i)?;
-			let (i, _) = char('*')(i)?;
+			let (i, _) = tag(".*")(i)?;
 			Ok((i, ()))
 		},
 		|i| {
@@ -192,29 +191,35 @@ pub fn flatten(i: &str) -> IResult<&str, Part> {
 
 pub fn field(i: &str) -> IResult<&str, Part> {
 	let (i, _) = char('.')(i)?;
-	let (i, v) = ident::ident(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Part::Field(v)))
+	cut(|i| {
+		let (i, v) = ident::ident(i)?;
+		let (i, _) = ending(i)?;
+		Ok((i, Part::Field(v)))
+	})(i)
 }
 
 pub fn filter(i: &str) -> IResult<&str, Part> {
 	let (i, _) = openbracket(i)?;
 	let (i, _) = alt((tag_no_case("WHERE"), tag("?")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value::value(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, Part::Where(v)))
+	cut(|i| {
+		let (i, v) = value::value(i)?;
+		let (i, _) = closebracket(i)?;
+		Ok((i, Part::Where(v)))
+	})(i)
 }
 
 pub fn value(i: &str) -> IResult<&str, Part> {
 	let (i, _) = openbracket(i)?;
-	let (i, v) = alt((
-		map(strand::strand, Value::Strand),
-		map(param::param, Value::Param),
-		map(idiom::basic, Value::Idiom),
-	))(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, Part::Value(v)))
+	cut(|i| {
+		let (i, v) = alt((
+			map(strand::strand, Value::Strand),
+			map(param::param, Value::Param),
+			map(idiom::basic, Value::Idiom),
+		))(i)?;
+		let (i, _) = closebracket(i)?;
+		Ok((i, Part::Value(v)))
+	})(i)
 }
 
 pub fn graph(i: &str) -> IResult<&str, Part> {
