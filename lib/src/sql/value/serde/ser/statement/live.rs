@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::iam::Auth;
 use crate::sql::statements::LiveStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
@@ -46,6 +47,7 @@ pub struct SerializeLiveStatement {
 	cond: Option<Cond>,
 	fetch: Option<Fetchs>,
 	archived: Option<Uuid>,
+	auth: Option<Auth>,
 }
 
 impl serde::ser::SerializeStruct for SerializeLiveStatement {
@@ -77,6 +79,9 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			}
 			"archived" => {
 				self.archived = value.serialize(ser::uuid::opt::Serializer.wrap())?.map(Uuid);
+			}
+			"auth" => {
+				self.auth = None;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `LiveStatement::{key}`")));
