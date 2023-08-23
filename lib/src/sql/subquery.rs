@@ -322,7 +322,10 @@ mod tests {
 		let res = subquery(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))", format!("{}", out))
+		assert_eq!(
+			"(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))",
+			format!("{}", out)
+		)
 	}
 
 	#[test]
