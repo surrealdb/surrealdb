@@ -1,3 +1,4 @@
+use revision::revisioned;
 use std::{
 	collections::{HashMap, HashSet},
 	str::FromStr,
@@ -9,6 +10,7 @@ use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpres
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub enum ResourceKind {
 	#[default]
 	Any,
@@ -74,30 +76,43 @@ impl ResourceKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct Resource(String, ResourceKind, Level);
+#[revisioned(revision = 1)]
+pub struct Resource {
+	pub(crate) id: String,
+	pub(crate) kind: ResourceKind,
+	pub(crate) level: Level,
+}
 
 impl std::fmt::Display for Resource {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let Resource(id, kind, level) = self;
+		let Resource {
+			id,
+			kind,
+			level,
+		} = self;
 		write!(f, "{}{}:\"{}\"", level, kind, id)
 	}
 }
 
 impl Resource {
 	pub fn new(id: String, kind: ResourceKind, level: Level) -> Self {
-		Self(id, kind, level)
+		Self {
+			id,
+			kind,
+			level,
+		}
 	}
 
 	pub fn id(&self) -> &str {
-		&self.0
+		&self.id
 	}
 
 	pub fn kind(&self) -> &ResourceKind {
-		&self.1
+		&self.kind
 	}
 
 	pub fn level(&self) -> &Level {
-		&self.2
+		&self.level
 	}
 
 	// Cedar policy helpers

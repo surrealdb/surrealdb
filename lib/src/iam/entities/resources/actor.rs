@@ -14,8 +14,8 @@ use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
 //
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct Actor {
-	res: Resource,
-	roles: Vec<Role>,
+	pub(crate) res: Resource,
+	pub(crate) roles: Vec<Role>,
 }
 
 impl Default for Actor {

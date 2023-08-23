@@ -10,6 +10,7 @@ use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
+use crate::iam::Auth;
 
 pub struct Serializer;
 
@@ -46,6 +47,7 @@ pub struct SerializeLiveStatement {
 	cond: Option<Cond>,
 	fetch: Option<Fetchs>,
 	archived: Option<Uuid>,
+	auth: Option<Auth>,
 }
 
 impl serde::ser::SerializeStruct for SerializeLiveStatement {
@@ -77,6 +79,9 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			}
 			"archived" => {
 				self.archived = value.serialize(ser::uuid::opt::Serializer.wrap())?.map(Uuid);
+			}
+			"auth" => {
+				self.auth = value.serialize(ser::auth::opt::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `LiveStatement::{key}`")));
