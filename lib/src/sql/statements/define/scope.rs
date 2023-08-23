@@ -70,6 +70,9 @@ impl Display for DefineScopeStatement {
 		if let Some(ref v) = self.signin {
 			write!(f, " SIGNIN {v}")?
 		}
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
 		Ok(())
 	}
 }
