@@ -98,11 +98,11 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} {creds} --ns N3 --db D3 --multi --pretty");
 			let output = common::run(&args)
 				.input(
-					r#"CREATE thing:success; \
+					"CREATE thing:success; \
 				CREATE thing:fail SET bad=rand('evil'); \
 				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
 				CREATE thing:also_success;
-				"#,
+				",
 				)
 				.output()
 				.unwrap();
@@ -121,13 +121,13 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} {creds} --ns N4 --db D4 --multi --pretty");
 			let output = common::run(&args)
 				.input(
-					r#"BEGIN; \
+					"BEGIN; \
 				CREATE thing:success; \
 				CREATE thing:fail SET bad=rand('evil'); \
 				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
 				CREATE thing:also_success; \
 				COMMIT;
-				"#,
+				",
 				)
 				.output()
 				.unwrap();
