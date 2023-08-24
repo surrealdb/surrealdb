@@ -1,10 +1,12 @@
 use crate::ctx::Context;
+use crate::dbs::node::Timestamp;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::{Action, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql;
 use crate::sql::Value;
 use std::sync::Arc;
 
@@ -50,55 +52,62 @@ impl<'a> Document<'a> {
 					continue;
 				}
 				// Check what type of data change this is
-				if stm.is_delete() {
-					// Send a DELETE notification
-					if opt.id()? == lv.node.0 {
-						let thing = (*rid).clone();
-						chn.send(Notification {
-							id: lv.id.clone(),
+				{
+					let mut tx = txn.lock().await;
+					let ts = tx.clock();
+					let not_id = sql::Uuid::new_v4();
+					if stm.is_delete() {
+						// Send a DELETE notification
+						let notification = Notification {
+							live_id: lv.id.clone(),
+							node_id: lv.node.clone(),
+							notification_id: not_id,
 							action: Action::Delete,
-							result: Value::Thing(thing),
-						})
-						.await?;
-					} else {
-						let ts = txn.lock().await.clock();
-						txn.lock()
-							.await
-							.putc_tbnt(
+							result: Value::Thing((*rid).clone()),
+							timestamp: ts,
+						};
+						if opt.id()? == lv.node.0 {
+							let thing = (*rid).clone();
+							chn.send(notification).await?;
+						} else {
+							tx.putc_tbnt(
 								opt.ns(),
 								opt.db(),
 								&self.id.unwrap().tb,
 								lv.id.clone(),
 								ts,
+								not_id,
+								notification,
 								None,
 							)
 							.await?;
-					}
-				} else if self.is_new() {
-					// Send a CREATE notification
-					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id.clone(),
-							action: Action::Create,
-							result: self.pluck(ctx, opt, txn, &lq).await?,
-						})
-						.await?;
+						}
+					} else if self.is_new() {
+						// Send a CREATE notification
+						if opt.id()? == lv.node.0 {
+							chn.send(Notification {
+								live_id: lv.id.clone(),
+								action: Action::Create,
+								result: self.pluck(ctx, opt, txn, &lq).await?,
+							})
+							.await?;
+						} else {
+							// TODO: Send to storage
+						}
 					} else {
-						// TODO: Send to storage
-					}
-				} else {
-					// Send a UPDATE notification
-					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id.clone(),
-							action: Action::Update,
-							result: self.pluck(ctx, opt, txn, &lq).await?,
-						})
-						.await?;
-					} else {
-						// TODO: Send to storage
-					}
-				};
+						// Send a UPDATE notification
+						if opt.id()? == lv.node.0 {
+							chn.send(Notification {
+								live_id: lv.id.clone(),
+								action: Action::Update,
+								result: self.pluck(ctx, opt, txn, &lq).await?,
+							})
+							.await?;
+						} else {
+							// TODO: Send to storage
+						}
+					};
+				}
 			}
 		}
 		// Carry on

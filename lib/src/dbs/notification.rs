@@ -1,3 +1,4 @@
+use crate::dbs::node::Timestamp;
 use crate::sql::{Object, Uuid, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
@@ -22,15 +23,18 @@ impl Display for Action {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
-	pub id: Uuid,
+	pub live_id: Uuid,
+	pub node_id: Uuid,
+	pub notification_id: Uuid,
 	pub action: Action,
 	pub result: Value,
+	pub timestamp: Timestamp,
 }
 
 impl Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let obj: Object = map! {
-			"id".to_string() => self.id.to_string().into(),
+			"id".to_string() => self.live_id.to_string().into(),
 			"action".to_string() => self.action.to_string().into(),
 			"result".to_string() => self.result.clone(),
 		}
