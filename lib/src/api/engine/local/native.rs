@@ -19,7 +19,6 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
-use futures::future::Either;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
@@ -30,6 +29,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
@@ -149,9 +149,31 @@ pub(crate) fn router(
 
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
+		let mut stream = route_rx.into_stream();
 		let mut session = Session::default();
 
+		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
+		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
+
+		while let Some(Some(route)) = stream.next().await {
+			match super::router(route.request, &kvs, &mut session, &mut vars).await {
+				Ok(value) => {
+					let _ = route.response.into_send_async(Ok(value)).await;
+				}
+				Err(error) => {
+					let _ = route.response.into_send_async(Err(error)).await;
+				}
+			}
+		}
+
+		// Stop maintenance tasks
+		let _ = maintenance_tx.into_send_async(()).await;
+	});
+}
+
+fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
+	tokio::spawn(async move {
 		let mut interval = time::interval(tick_interval);
 		// Don't bombard the database if we miss some ticks
 		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -160,32 +182,14 @@ pub(crate) fn router(
 
 		let ticker = IntervalStream::new(interval);
 
-		let streams = (route_rx.into_stream().map(Either::Left), ticker.map(|_| Either::Right(())));
+		let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
 
 		let mut stream = streams.merge();
 
-		while let Some(either) = stream.next().await {
-			match either {
-				Either::Left(Some(route)) => {
-					match super::router(route.request, &kvs, &mut session, &mut vars).await {
-						Ok(value) => {
-							let _ = route.response.into_send_async(Ok(value)).await;
-						}
-						Err(error) => {
-							let _ = route.response.into_send_async(Err(error)).await;
-						}
-					}
-				}
-				Either::Right(()) => {
-					let kvs = kvs.clone();
-					tokio::spawn(async move {
-						match kvs.tick().await {
-							Ok(()) => trace!("Node agent tick ran successfully"),
-							Err(error) => error!("Error running node agent tick: {error}"),
-						}
-					});
-				}
-				Either::Left(None) => break,
+		while let Some(Some(_)) = stream.next().await {
+			match kvs.tick().await {
+				Ok(()) => trace!("Node agent tick ran successfully"),
+				Err(error) => error!("Error running node agent tick: {error}"),
 			}
 		}
 	});
