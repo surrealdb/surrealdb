@@ -360,7 +360,7 @@ pub async fn ws_signin(
 	db: Option<&str>,
 	sc: Option<&str>,
 ) -> Result<String, Box<dyn Error>> {
-	let request_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+	let request_id = uuid::Uuid::new_v4().to_string().replace('-', "");
 	let json = json!({
 		"id": request_id,
 		"method": "signin",

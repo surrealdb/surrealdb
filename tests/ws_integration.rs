@@ -207,11 +207,9 @@ mod ws_integration {
 			socket,
 			"email@email.com",
 			"pass",
-			None,
-			None,
-			None, // Some("N"),
-			      // Some("D"),
-			      // Some("scope"),
+			Some("N"),
+			Some("D"),
+			Some("scope"),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
