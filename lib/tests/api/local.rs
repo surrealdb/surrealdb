@@ -46,12 +46,18 @@ async fn changefeed_with_ts() {
     ";
 	let mut response = db.query(sql).await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else { unreachable!() };
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
 	assert_eq!(array.len(), 4);
 	// UPDATE user:amos
 	let a = array.get(0).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
@@ -69,8 +75,12 @@ async fn changefeed_with_ts() {
 	);
 	// UPDATE user:jane
 	let a = array.get(1).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -89,8 +99,12 @@ async fn changefeed_with_ts() {
 	);
 	// UPDATE user:amos
 	let a = array.get(2).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -109,8 +123,12 @@ async fn changefeed_with_ts() {
 	);
 	// UPDATE table
 	let a = array.get(3).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -147,12 +165,18 @@ async fn changefeed_with_ts() {
 	);
 	let mut response = db.query(sql).await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else { unreachable!() };
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
 	assert_eq!(array.len(), 4);
 	// UPDATE user:amos
 	let a = array.get(0).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp1 == versionstamp1b);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -179,6 +203,8 @@ async fn changefeed_with_ts() {
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE '{ts3_dt}' LIMIT 10;");
 	let mut response = db.query(sql).await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else { unreachable!() };
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
 	assert_eq!(array.len(), 0);
 }

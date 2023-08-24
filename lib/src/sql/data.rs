@@ -188,10 +188,7 @@ pub fn values(i: &str) -> IResult<&str, Data> {
 	Ok((
 		i,
 		Data::ValuesExpression(
-			values
-				.into_iter()
-				.map(|row| fields.iter().cloned().zip(row.into_iter()).collect())
-				.collect(),
+			values.into_iter().map(|row| fields.iter().cloned().zip(row).collect()).collect(),
 		),
 	))
 }
