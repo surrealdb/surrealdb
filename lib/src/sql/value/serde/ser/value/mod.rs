@@ -15,6 +15,8 @@ use crate::sql::Future;
 use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
+use crate::sql::Query;
+use crate::sql::Statements;
 use crate::sql::Strand;
 use crate::sql::Table;
 use crate::sql::Uuid;
@@ -219,6 +221,9 @@ impl ser::Serializer for Serializer {
 			sql::param::TOKEN => {
 				Ok(Value::Param(Param(Ident(value.serialize(ser::string::Serializer.wrap())?))))
 			}
+			sql::query::TOKEN => Ok(Value::Query(Query(Statements(
+				value.serialize(ser::statement::vec::Serializer.wrap())?,
+			)))),
 			sql::array::TOKEN => Ok(Value::Array(Array(value.serialize(vec::Serializer.wrap())?))),
 			sql::object::TOKEN => {
 				Ok(Value::Object(Object(value.serialize(map::Serializer.wrap())?)))
@@ -863,6 +868,15 @@ mod tests {
 		let function = Box::new(Function::Normal(Default::default(), Default::default()));
 		let value = to_value(&function).unwrap();
 		let expected = Value::Function(function);
+		assert_eq!(value, expected);
+		assert_eq!(expected, to_value(&expected).unwrap());
+	}
+
+	#[test]
+	fn query() {
+		let query = sql::parse("SELECT * FROM foo").unwrap();
+		let value = to_value(&query).unwrap();
+		let expected = Value::Query(query);
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}

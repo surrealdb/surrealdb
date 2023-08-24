@@ -9,12 +9,12 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use flume::Receiver;
 use futures::StreamExt;
 use indexmap::IndexMap;
-use once_cell::sync::OnceCell;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
@@ -23,6 +23,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use url::Url;
 
 impl crate::api::Connection for Client {}
@@ -45,7 +46,7 @@ impl Connection for Client {
 			let mut builder = ClientBuilder::new().default_headers(headers);
 
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			if let Some(tls) = address.tls_config {
+			if let Some(tls) = address.config.tls_config {
 				builder = match tls {
 					#[cfg(feature = "native-tls")]
 					Tls::Native(config) => builder.use_preconfigured_tls(config),
@@ -71,7 +72,7 @@ impl Connection for Client {
 			features.insert(ExtraFeatures::Backup);
 
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(Router {
+				router: Arc::new(OnceLock::with_value(Router {
 					features,
 					conn: PhantomData,
 					sender: route_tx,

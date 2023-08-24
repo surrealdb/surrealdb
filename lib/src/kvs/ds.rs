@@ -3,6 +3,7 @@ use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
+use crate::dbs::Capabilities;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
 use crate::dbs::Options;
@@ -10,11 +11,13 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::iam::{Action, Auth, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
+use crate::sql::statements::DefineUserStatement;
+use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
 use crate::vs;
@@ -22,6 +25,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +63,8 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
 	auth_enabled: bool,
+	// Capabilities for this datastore
+	capabilities: Capabilities,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -257,6 +263,7 @@ impl Datastore {
 			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
 			auth_enabled: false,
+			capabilities: Capabilities::default(),
 		})
 	}
 
@@ -290,34 +297,42 @@ impl Datastore {
 
 	/// Setup the initial credentials
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
-		let mut txn = self.transaction(false, false).await?;
-		match txn.all_root_users().await {
+		let txn = Arc::new(Mutex::new(self.transaction(true, false).await?));
+		let root_users = txn.lock().await.all_root_users().await;
+		match root_users {
 			Ok(val) if val.is_empty() => {
 				info!(
 					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
 				);
-
-				let sql = format!(
-					"DEFINE USER {user} ON ROOT PASSWORD '{pass}' ROLES OWNER",
-					user = creds.username,
-					pass = creds.password
-				);
-				let sess = Session::owner();
-				self.execute(&sql, &sess, None).await?;
+				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+				let ctx = Context::default();
+				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
 			Ok(_) => {
 				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
 				warn!("Consider removing the --user/--pass arguments from the server start.");
+				txn.lock().await.commit().await?;
 				Ok(())
 			}
-			Err(e) => Err(e),
+			Err(e) => {
+				txn.lock().await.cancel().await?;
+				Err(e)
+			}
 		}
 	}
 
 	/// Set a global transaction timeout for this Datastore
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
+		self
+	}
+
+	/// Configure Datastore capabilities
+	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
+		self.capabilities = caps;
 		self
 	}
 
@@ -408,7 +423,7 @@ impl Datastore {
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_lq(nd, 1000).await?;
+			let node_lqs = tx.scan_ndlq(nd, 1000).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
@@ -462,6 +477,43 @@ impl Datastore {
 		Ok(())
 	}
 
+	// Garbage collection task to run when a client disconnects from a surrealdb node
+	// i.e. we know the node, we are not performing a full wipe on the node
+	// and the wipe must be fully performed by this node
+	pub async fn garbage_collect_dead_session(
+		&self,
+		live_queries: &[uuid::Uuid],
+	) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+
+		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
+		// We may improve this in future by tracking in web layer
+		let lqs = tx.scan_ndlq(&self.id, 1000).await?;
+		let mut hits = vec![];
+		for lq_value in lqs {
+			if live_queries.contains(&lq_value.lq) {
+				hits.push(lq_value.clone());
+				let lq = crate::key::node::lq::Lq::new(
+					lq_value.nd.0,
+					lq_value.lq.0,
+					lq_value.ns.as_str(),
+					lq_value.db.as_str(),
+				);
+				tx.del(lq).await?;
+				trace!("Deleted lq {:?} as part of session garbage collection", lq_value.clone());
+			}
+		}
+
+		// Now delete the table entries for the live queries
+		for lq in hits {
+			let lv =
+				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq.0);
+			tx.del(lv.clone()).await?;
+			trace!("Deleted lv {:?} as part of session garbage collection", lv);
+		}
+		tx.commit().await
+	}
+
 	// Returns a list of live query IDs
 	pub async fn archive_lv_for_node(
 		&self,
@@ -475,7 +527,7 @@ impl Datastore {
 		for lq in lqs {
 			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
 			let archived_lvs = lvs.clone().archive(this_node_id.clone());
-			tx.putc_lv(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
+			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);
 		}
 		Ok(ret)
@@ -590,6 +642,14 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#[cfg(debug_assertions)]
+		if lock {
+			warn!("There are issues with pessimistic locking in TiKV");
+		}
+		self.transaction_inner(write, lock).await
+	}
+
+	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
@@ -631,6 +691,7 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
+			write_buffer: HashMap::new(),
 			vso: self.vso.clone(),
 		})
 	}
@@ -701,6 +762,7 @@ impl Datastore {
 		let mut exe = Executor::new(self);
 		// Create a default context
 		let mut ctx = Context::default();
+		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);
@@ -757,6 +819,8 @@ impl Datastore {
 		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
 		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
 			ctx.add_timeout(timeout);

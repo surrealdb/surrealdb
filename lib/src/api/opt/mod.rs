@@ -6,11 +6,11 @@ mod config;
 mod endpoint;
 mod query;
 mod resource;
-mod strict;
 mod tls;
 
 use crate::api::err::Error;
 use crate::sql::constant::ConstantValue;
+use crate::sql::id::Gen;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -25,7 +25,6 @@ pub use config::*;
 pub use endpoint::*;
 pub use query::*;
 pub use resource::*;
-pub use strict::*;
 pub use tls::*;
 
 /// Record ID
@@ -325,6 +324,11 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 				sql::Id::String(s) => Id::String(s),
 				sql::Id::Array(arr) => Id::Array((arr, simplify).into()),
 				sql::Id::Object(obj) => Id::Object((obj, simplify).into()),
+				sql::Id::Generate(v) => match v {
+					Gen::Rand => Id::from((sql::Id::rand(), simplify)),
+					Gen::Ulid => Id::from((sql::Id::ulid(), simplify)),
+					Gen::Uuid => Id::from((sql::Id::uuid(), simplify)),
+				},
 			}
 		}
 	}
@@ -402,6 +406,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		},
 		Value::Cast(cast) => json!(cast),
 		Value::Function(function) => json!(function),
+		Value::Query(query) => json!(query),
 		Value::Subquery(subquery) => json!(subquery),
 		Value::Expression(expression) => json!(expression),
 	}

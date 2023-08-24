@@ -7,6 +7,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
 use crate::sql::operator::{self, Operator};
 use crate::sql::value::{single, value, Value};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -16,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 /// Binary expressions.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
+#[revisioned(revision = 1)]
 pub enum Expression {
 	Unary {
 		o: Operator,
@@ -48,7 +50,7 @@ impl Expression {
 		}
 	}
 	/// Augment an existing expression
-	fn augment(mut self, l: Value, o: Operator) -> Self {
+	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
 		match &mut self {
 			Self::Binary {
 				l: left,
@@ -226,6 +228,8 @@ pub fn unary(i: &str) -> IResult<&str, Expression> {
 pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = single(i)?;
 	let (i, o) = operator::binary(i)?;
+	// Make sure to dive if the query is a right-deep binary tree.
+	let _diving = crate::sql::parser::depth::dive()?;
 	let (i, r) = value(i)?;
 	let v = match r {
 		Value::Expression(r) => r.augment(l, o),

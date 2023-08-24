@@ -21,6 +21,7 @@ use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
@@ -33,6 +34,7 @@ const DOUBLE: char = '\"';
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]
+#[revisioned(revision = 1)]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
@@ -625,6 +627,7 @@ impl hash::Hash for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((simple, normal))(i)
 }
 

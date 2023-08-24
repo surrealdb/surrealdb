@@ -3,12 +3,9 @@ use uuid::Uuid;
 #[tokio::test]
 #[serial]
 async fn scan_node_lq() {
-	let test = init().await.unwrap();
+	let node_id = Uuid::parse_str("63bb5c1a-b14e-4075-a7f8-680267fbe136").unwrap();
+	let test = init(node_id).await.unwrap();
 	let mut tx = test.db.transaction(true, true).await.unwrap();
-	let node_id = Uuid::from_bytes([
-		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
-		0x0F,
-	]);
 	let namespace = "test_namespace";
 	let database = "test_database";
 	let live_query_id = Uuid::from_bytes([
@@ -27,9 +24,9 @@ async fn scan_node_lq() {
 	);
 	let _ = tx.putc(key, "value", None).await.unwrap();
 	tx.commit().await.unwrap();
-	let mut tx = test.db.transaction(true, true).await.unwrap();
+	let mut tx = test.db.transaction(true, false).await.unwrap();
 
-	let res = tx.scan_lq(&node_id, 100).await.unwrap();
+	let res = tx.scan_ndlq(&node_id, 100).await.unwrap();
 	assert_eq!(res.len(), 1);
 	for val in res {
 		assert_eq!(val.nd.0, node_id.clone());

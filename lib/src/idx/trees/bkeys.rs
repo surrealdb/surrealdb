@@ -238,7 +238,7 @@ impl BKeys for FstKeys {
 			bincode::serialize_into(c, b)?;
 			Ok(())
 		} else {
-			Err(Error::Serde(ser::Error::custom(
+			Err(Error::Bincode(ser::Error::custom(
 				"bkeys.to_map() should be called prior serializing",
 			)))
 		}

@@ -166,7 +166,7 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 fn ok_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
-		// Run a chasting query which succeeds
+		// Run a casting query which succeeds
 		let mut res = run_queries(&cast_chain(10)).await?;
 		//
 		assert_eq!(res.len(), 1);
@@ -183,13 +183,16 @@ fn ok_cast_chain_depth() -> Result<(), Error> {
 fn excessive_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
-		// Run a casting query which will fail
-		let mut res = run_queries(&cast_chain(125)).await?;
-		//
-		assert_eq!(res.len(), 1);
-		//
-		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		// Run a casting query which will fail (either while parsing or executing)
+		match run_queries(&cast_chain(125)).await {
+			Ok(mut res) => {
+				assert_eq!(res.len(), 1);
+				//
+				let tmp = res.next().unwrap();
+				assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+			}
+			Err(e) => assert!(matches!(e, Error::ComputationDepthExceeded)),
+		}
 		//
 		Ok(())
 	})

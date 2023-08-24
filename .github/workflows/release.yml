@@ -16,24 +16,55 @@ jobs:
     runs-on: ubuntu-latest-16-cores
     steps:
 
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Free up some disk space
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run cargo test (+coverage)
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
+
+      - name: Test workspace + coverage
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-workspace-coverage-complete
+
+      - name: Debug info
+        if: always()
         run: |
-          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
-          cargo llvm-cov --html --workspace --features protocol-ws,protocol-http,kv-mem,kv-rocksdb
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
@@ -53,7 +84,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -61,20 +91,35 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Run cargo check
-        run: cargo check --workspace
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-      - name: Check format of code
-        run: cargo fmt --all --check
+      - name: Check workspace
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check
 
-      - name: Check format of unlinked tests
-        run: cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-format
 
-      - name: Check linting with clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Check wasm
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-check-wasm
 
-      - name: Run WebAssembly check
-        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
+      - name: Check clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-clippy
 
   build:
     name: Build ${{ matrix.arch }}
@@ -116,10 +161,7 @@ jobs:
       - name: Install dependencies
         if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-msvc')
         run: |
-          vcpkg upgrade
           vcpkg integrate install
-          vcpkg install openssl:x64-windows-static
-          choco install protoc
 
       - name: Install dependencies
         if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
@@ -132,7 +174,6 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
@@ -154,13 +195,6 @@ jobs:
         env:
           BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1-node16
-        with:
-          aws-region: us-east-2
-          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
-
       - name: Package binaries
         if: ${{ !contains(matrix.arch, 'windows') }}
         shell: bash
@@ -169,9 +203,6 @@ jobs:
           chmod +x surreal
           tar -zcvf ${{ matrix.file }}.tgz surreal
           echo $(shasum -a 256 ${{ matrix.file }}.tgz | cut -f1 -d' ') > ${{ matrix.file }}.txt
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.tgz s3://download.surrealdb.com/${{ github.ref_name }}/
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/${{ github.ref_name }}/
-          cd -
 
       - name: Package binaries
         if: ${{ contains(matrix.arch, 'windows') }}
@@ -180,9 +211,6 @@ jobs:
           cd target/${{ matrix.arch }}/release
           cp surreal.exe ${{ matrix.file }}.exe
           echo $(shasum -a 256 ${{ matrix.file }}.exe | cut -f1 -d' ') > ${{ matrix.file }}.txt
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.exe s3://download.surrealdb.com/${{ github.ref_name }}/
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/${{ github.ref_name }}/
-          cd -
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -194,22 +222,151 @@ jobs:
             target/${{ matrix.arch }}/release/${{ matrix.file }}.txt
             target/${{ matrix.arch }}/release/${{ matrix.file }}.exe
 
-  package:
-    name: Package macOS
+  docker:
+    name: Build and publish Docker image
     needs: [build]
-    runs-on: macos-latest-xl
+    runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
       - name: Download amd64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-${{ github.ref_name }}.darwin-amd64
+          name: surreal-nightly.linux-amd64
           path: amd64
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-${{ github.ref_name }}.darwin-arm64
+          name: surreal-nightly.linux-arm64
+          path: arm64
+
+      - name: Set file permissions
+        shell: bash
+        run: |
+          chmod +x amd64/surreal arm64/surreal
+
+      - name: Configure DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Configure tag
+        shell: bash
+        run: |
+          VERSION=${{ github.ref_name }}
+          echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
+
+      - name: Build the Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          load: true
+          tags: surrealdb/surrealdb:latest,surrealdb/surrealdb:${{ env.VERSION }}
+
+      # Start the docker image as server and wait until it is ready
+      - name: Test the Docker image
+        run: |
+          docker run --net=host --rm surrealdb/surrealdb:${{ env.VERSION }} start 2>&1 >surreal.log &
+
+          retries=5
+          until docker run --net=host --rm surrealdb/surrealdb:${{ env.VERSION }} is-ready; do
+            retries=$((retries-1))
+            if [[ $retries -eq 0 ]]; then
+              echo "###"
+              echo "### The container is not ready after 5 seconds!"
+              echo "###"
+              cat surreal.log
+              echo "###"
+              echo "### ERROR: The docker image is not valid. Aborting."
+              echo "###"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      # This second build reuses the cache from the build above
+      - name: Push the Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: surrealdb/surrealdb:latest,surrealdb/surrealdb:${{ env.VERSION }}
+
+  publish:
+    name: Publish binaries for ${{ matrix.arch }}
+    needs: [docker]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-apple-darwin
+            os: macos-latest
+            file: surreal-nightly.darwin-amd64
+          - arch: aarch64-apple-darwin
+            os: macos-latest
+            file: surreal-nightly.darwin-arm64
+          - arch: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            file: surreal-nightly.linux-amd64
+          - arch: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            file: surreal-nightly.linux-arm64
+          - arch: x86_64-pc-windows-msvc
+            os: windows-latest
+            file: surreal-nightly.windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ matrix.file }}
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v1-node16
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Publish non-windows binaries
+        if: ${{ !contains(matrix.arch, 'windows') }}
+        shell: bash
+        run: |
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.tgz s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/nightly/
+
+      - name: Publish windows binaries
+        if: ${{ contains(matrix.arch, 'windows') }}
+        shell: bash
+        run: |
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.exe s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/nightly/
+
+  package-macos:
+    name: Package macOS universal binary
+    needs: [publish]
+    runs-on: macos-latest
+    steps:
+      - name: Download amd64 binary
+        uses: actions/download-artifact@v3
+        with:
+          name: surreal-nightly.darwin-amd64
+          path: amd64
+
+      - name: Download arm64 binary
+        uses: actions/download-artifact@v3
+        with:
+          name: surreal-nightly.darwin-arm64
           path: arm64
 
       - name: Configure AWS
@@ -219,21 +376,21 @@ jobs:
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
-      - name: Package universal binary
+      - name: Package universal MacOS binary
         shell: bash
         run: |
-          FILE="surreal-${{ github.ref_name }}.darwin-universal"
+          FILE="surreal-nightly.darwin-universal"
           lipo -create -output surreal amd64/surreal arm64/surreal
           chmod +x surreal
           tar -zcvf $FILE.tgz surreal
           echo $(shasum -a 256 $FILE.tgz | cut -f1 -d' ') > $FILE.txt
-          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ github.ref_name }}/
-          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ github.ref_name }}/
+          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/nightly/
 
   deploy:
     name: Deploy
-    needs: [package]
-    runs-on: ubuntu-latest-16-cores
+    needs: [publish, package-macos]
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -271,55 +428,3 @@ jobs:
           for region in ${regions[@]}; do
               aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
           done
-
-  docker:
-    name: Docker
-    needs: [build]
-    runs-on: ubuntu-latest-16-cores
-    steps:
-
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Download amd64 binary
-        uses: actions/download-artifact@v3
-        with:
-          name: surreal-${{ github.ref_name }}.linux-amd64
-          path: amd64
-
-      - name: Download arm64 binary
-        uses: actions/download-artifact@v3
-        with:
-          name: surreal-${{ github.ref_name }}.linux-arm64
-          path: arm64
-
-      - name: Set file permissions
-        shell: bash
-        run: |
-          chmod +x amd64/surreal arm64/surreal
-
-      - name: Configure DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_PASS }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Configure tag
-        shell: bash
-        run: |
-          VERSION=${{ github.ref_name }}
-          echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
-
-      - name: Build and Push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: surrealdb/surrealdb:latest,surrealdb/surrealdb:${{ env.VERSION }}

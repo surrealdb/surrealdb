@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Iterable, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -15,10 +15,12 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct CreateStatement {
 	pub what: Values,
 	pub data: Option<Data>,
@@ -53,72 +55,22 @@ impl CreateStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
 		// Loop over the create targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
-			match v {
-				Value::Table(v) => match &self.data {
-					// There is a data clause so check for a record id
-					Some(data) => match data.rid(ctx, opt, txn, &v).await {
-						// There was a problem creating the record id
-						Err(e) => return Err(e),
-						// There is an id field so use the record id
-						Ok(v) => i.ingest(Iterable::Thing(v)),
-					},
-					// There is no data clause so create a record id
-					None => i.ingest(Iterable::Thing(v.generate())),
+			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+				Error::InvalidStatementTarget {
+					value: v,
+				} => Error::CreateStatement {
+					value: v,
 				},
-				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-				Value::Model(v) => {
-					for v in v {
-						i.ingest(Iterable::Thing(v));
-					}
-				}
-				Value::Array(v) => {
-					for v in v {
-						match v {
-							Value::Table(v) => i.ingest(Iterable::Thing(v.generate())),
-							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-							Value::Model(v) => {
-								for v in v {
-									i.ingest(Iterable::Thing(v));
-								}
-							}
-							Value::Object(v) => match v.rid() {
-								Some(v) => i.ingest(Iterable::Thing(v)),
-								None => {
-									return Err(Error::CreateStatement {
-										value: v.to_string(),
-									})
-								}
-							},
-							v => {
-								return Err(Error::CreateStatement {
-									value: v.to_string(),
-								})
-							}
-						};
-					}
-				}
-				Value::Object(v) => match v.rid() {
-					Some(v) => i.ingest(Iterable::Thing(v)),
-					None => {
-						return Err(Error::CreateStatement {
-							value: v.to_string(),
-						})
-					}
-				},
-				v => {
-					return Err(Error::CreateStatement {
-						value: v.to_string(),
-					})
-				}
-			};
+				e => e,
+			})?;
 		}
-		// Assign the statement
-		let stm = Statement::from(self);
 		// Output the results
 		i.output(ctx, opt, txn, &stm).await
 	}

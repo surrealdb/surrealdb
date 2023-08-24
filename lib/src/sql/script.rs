@@ -7,6 +7,7 @@ use nom::character::complete::{anychar, char, multispace0};
 use nom::combinator::recognize;
 use nom::multi::{many0, many1};
 use nom::sequence::delimited;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -25,6 +26,7 @@ const OBJECT_BEG: char = '{';
 const OBJECT_END: char = '}';
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Script(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Script {
@@ -58,6 +60,7 @@ pub fn script(i: &str) -> IResult<&str, Script> {
 }
 
 fn script_raw(i: &str) -> IResult<&str, &str> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	recognize(many0(alt((
 		script_comment,
 		script_object,

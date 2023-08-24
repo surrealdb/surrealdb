@@ -2,12 +2,14 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::time;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 }

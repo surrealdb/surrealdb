@@ -9,17 +9,17 @@ use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::ExtraFeatures;
+use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::iam::Level;
 use flume::Receiver;
-use once_cell::sync::OnceCell;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use url::Url;
 
 #[derive(Debug)]
@@ -32,11 +32,6 @@ impl IntoEndpoint<Test> for () {
 		Ok(Endpoint {
 			endpoint: Url::parse("test://")?,
 			config: Default::default(),
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			tls_config: None,
-			auth: Level::No,
-			username: String::new(),
-			password: String::new(),
 		})
 	}
 }
@@ -52,7 +47,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: Some(&self.router),
+			router: self.router.clone(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -86,7 +81,7 @@ impl Connection for Client {
 			};
 			server::mock(route_rx);
 			Ok(Surreal {
-				router: OnceCell::with_value(Arc::new(router)),
+				router: Arc::new(OnceLock::with_value(router)),
 			})
 		})
 	}

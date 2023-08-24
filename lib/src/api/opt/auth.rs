@@ -1,6 +1,5 @@
 //! Authentication types
 
-use crate::sql::Value;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -132,12 +131,6 @@ impl<'a> From<&'a String> for Jwt {
 impl<'a> From<&'a str> for Jwt {
 	fn from(jwt: &'a str) -> Self {
 		Jwt(jwt.to_owned())
-	}
-}
-
-impl From<Jwt> for Value {
-	fn from(Jwt(jwt): Jwt) -> Self {
-		jwt.into()
 	}
 }
 

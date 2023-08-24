@@ -18,7 +18,6 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [x] Compiles to WebAssembly
 - [x] Supports typed SQL statements
 - [x] Invalid SQL queries are never sent to the server, the client uses the same parser the server uses
-- [x] Static clients, no need for `once_cell` or `lazy_static`
 - [x] Clonable connections with auto-reconnect capabilities, no need for a connection pool
 - [x] Range queries
 - [x] Consistent API across all supported protocols and storage engines
@@ -32,8 +31,6 @@ To add this crate as a Rust dependency, simply run
 ```bash
 cargo add surrealdb
 ```
-
-**IMPORTANT**: The client supports SurrealDB `v1.0.0-beta.8+20221030.c12a1cc` or later. So please make sure you have that or a newer version of the server before proceeding. For now, that means a recent nightly version.
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Quick look</h2>
 

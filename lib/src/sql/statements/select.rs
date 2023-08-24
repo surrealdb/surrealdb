@@ -28,10 +28,12 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
@@ -109,7 +111,6 @@ impl SelectStatement {
 				Value::Array(v) => {
 					for v in v {
 						match v {
-							Value::Table(v) => i.ingest(Iterable::Table(v)),
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 							Value::Model(v) => {
