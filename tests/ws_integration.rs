@@ -153,6 +153,9 @@ mod ws_integration {
 
 		// Verify it returns a token
 		assert!(res["result"].is_string(), "result: {:?}", res);
+
+		let res = res["result"].as_str().unwrap();
+		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 		Ok(())
 	}
 
