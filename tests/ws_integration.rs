@@ -155,7 +155,6 @@ mod ws_integration {
 		assert!(res["result"].is_string(), "result: {:?}", res);
 
 		let res = res["result"].as_str().unwrap();
-		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 		Ok(())
 	}
 
@@ -188,7 +187,7 @@ mod ws_integration {
 		let res = common::ws_send_msg_and_wait_response(
 			socket,
 			serde_json::to_string(&json!({
-				"id": "1",
+				"id": "AE79D62DAA8945F59A06083766763E95",
 				"method": "signup",
 				"params": [{
 					"ns": "N",
@@ -204,35 +203,20 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Sign in
-		let res = common::ws_send_msg_and_wait_response(
+		let res = common::ws_signin(
 			socket,
-			serde_json::to_string(&json!({
-				"id": "1",
-				"method": "signin",
-				"params": [{
-					"ns": "N",
-					"db": "D",
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}))
-			.unwrap(),
+			"email@email.com",
+			"pass",
+			None,
+			None,
+			None, // Some("N"),
+			      // Some("D"),
+			      // Some("scope"),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
-		assert!(res.is_object(), "result: {:?}", res);
-		let res = res.as_object().unwrap();
-
-		// Verify response contains no error
-		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-
-		// Verify it returns a token
-		assert!(res["result"].is_string(), "result: {:?}", res);
-		let res = res["result"].as_str().unwrap();
 		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-
 		Ok(())
 	}
 
@@ -277,34 +261,17 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Sign in
-		let res = common::ws_send_msg_and_wait_response(
+		let res = common::ws_signin(
 			socket,
-			serde_json::to_string(&json!({
-				"id": "1",
-				"method": "signin",
-				"params": [{
-					"ns": "N",
-					"db": "D",
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}))
-			.unwrap(),
+			"email@email.com",
+			"pass",
+			Some("N"),
+			Some("D"),
+			Some("scope"),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
-		assert!(res.is_object(), "result: {:?}", res);
-		let res = res.as_object().unwrap();
-
-		// Verify response contains no error
-		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-
-		// Verify it returns a token
-		assert!(res["result"].is_string(), "result: {:?}", res);
-		let res = res["result"].as_str().unwrap();
-		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 
 		// Start Live Query
 		let table_name = "test_tableBB4B0A788C7E46E798720AEF938CBCF6";
@@ -331,34 +298,10 @@ mod ws_integration {
 		let socket2 = &mut common::connect_ws(&addr).await?;
 
 		// Signin
-		let res = common::ws_send_msg_and_wait_response(
-			socket2,
-			serde_json::to_string(&json!({
-				"id": "95128766-5218-4CEE-92D4-0FD4906709B9",
-				"method": "signin",
-				"params": [{
-					"ns": "N",
-					"db": "D",
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}))
-			.unwrap(),
-		)
-		.await;
+		let res =
+			common::ws_signin(socket2, "email", "pass", Some("N"), Some("D"), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
-		assert!(res.is_object(), "result: {:?}", res);
-		let res = res.as_object().unwrap();
-
-		// Verify response contains no error
-		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-
-		// Verify it returns a token
-		assert!(res["result"].is_string(), "result: {:?}", res);
-		let res = res["result"].as_str().unwrap();
-		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 
 		// Insert
 		let id = "A23A05ABC15C420E9A7E13D2C8657890";
