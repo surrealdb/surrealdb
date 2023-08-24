@@ -6,6 +6,7 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::Value;
+use std::sync::Arc;
 
 impl<'a> Document<'a> {
 	pub async fn lives(
@@ -40,6 +41,13 @@ impl<'a> Document<'a> {
 					if !cond.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
 						continue;
 					}
+				}
+				// Check authorization
+				trace!("Checking live query auth: {:?}", lv);
+				let lq_options = Options::new_with_perms(opt, true)
+					.with_auth(Arc::from(lv.auth.clone().ok_or(Error::UnknownAuth)?));
+				if self.allow(ctx, &lq_options, txn, &lq).await.is_err() {
+					continue;
 				}
 				// Check what type of data change this is
 				if stm.is_delete() {

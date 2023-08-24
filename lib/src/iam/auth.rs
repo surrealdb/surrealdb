@@ -1,10 +1,12 @@
 use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{is_allowed, Action, Actor, Error, Level, Resource, Role};
 
 /// Specifies the current authentication for the datastore execution context.
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Auth {
 	actor: Actor,
 }

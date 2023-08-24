@@ -1,3 +1,4 @@
+use revision::revisioned;
 use std::{
 	collections::{HashMap, HashSet},
 	str::FromStr,
@@ -9,6 +10,7 @@ use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpres
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub enum ResourceKind {
 	#[default]
 	Any,
@@ -74,6 +76,7 @@ impl ResourceKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Resource(String, ResourceKind, Level);
 
 impl std::fmt::Display for Resource {

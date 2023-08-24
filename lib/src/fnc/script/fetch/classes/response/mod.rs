@@ -227,7 +227,7 @@ impl<'js> Response<'js> {
 	// Static methods
 	// ------------------------------
 
-	#[qjs(r#static, rename = "json")]
+	#[qjs(static, rename = "json")]
 	pub fn static_json(
 		ctx: Ctx<'js>,
 		data: Value<'js>,
@@ -254,7 +254,7 @@ impl<'js> Response<'js> {
 	}
 
 	// Returns a new response representing a network error
-	#[qjs(r#static)]
+	#[qjs(static)]
 	pub fn error(ctx: Ctx<'js>) -> Result<Self> {
 		let headers = Class::instance(ctx, Headers::new_empty())?;
 		Ok(Response {
@@ -271,7 +271,7 @@ impl<'js> Response<'js> {
 	}
 
 	// Creates a new response with a different URL
-	#[qjs(r#static)]
+	#[qjs(static)]
 	pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response> {
 		let url = url
 			.parse::<Url>()

@@ -320,7 +320,7 @@ pub async fn ws_recv_msg_with_fmt(
 
 	tokio::select! {
 		_ = time::sleep(time::Duration::from_millis(5000)) => {
-			Err("timeout after 5s waiting for the response".into())
+			Err(Box::new(TestError::NetworkError {message: "timeout after 5s waiting for the response".to_string()}))
 		}
 		res = f.select_next_some() => {
 			debug!("Response received in {:?}", now.elapsed());
@@ -360,8 +360,9 @@ pub async fn ws_signin(
 	db: Option<&str>,
 	sc: Option<&str>,
 ) -> Result<String, Box<dyn Error>> {
+	let request_id = uuid::Uuid::new_v4().to_string().replace('-', "");
 	let json = json!({
-		"id": "1",
+		"id": request_id,
 		"method": "signin",
 		"params": [
 			SigninParams { user, pass, ns, db, sc }
