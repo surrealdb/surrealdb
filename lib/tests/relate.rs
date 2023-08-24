@@ -10,7 +10,7 @@ async fn relate_with_parameters() -> Result<(), Error> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
-		RELATE $tobie->knows->$jaime SET id = knows:test;
+		RELATE $tobie->knows->$jaime SET id = knows:test, brother = true;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -32,6 +32,7 @@ async fn relate_with_parameters() -> Result<(), Error> {
 				id: knows:test,
 				in: person:tobie,
 				out: person:jaime,
+				brother: true,
 			}
 		]",
 	);
@@ -45,7 +46,7 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
-		RELATE $tobie->knows->$jaime SET id = knows:test;
+		RELATE $tobie->knows->$jaime CONTENT { id: knows:test, brother: true };
 		UPDATE knows:test CONTENT { test: true };
 		SELECT * FROM knows:test;
 	";
@@ -69,6 +70,7 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 				id: knows:test,
 				in: person:tobie,
 				out: person:jaime,
+				brother: true,
 			}
 		]",
 	);
