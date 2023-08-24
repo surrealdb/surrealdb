@@ -292,7 +292,6 @@ mod tests {
 	fn relate_statement_in() {
 		let sql = "RELATE animal:koala<-like<-person:tobie";
 		let res = relate(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RELATE person:tobie -> like -> animal:koala", format!("{}", out))
 	}
@@ -301,7 +300,6 @@ mod tests {
 	fn relate_statement_out() {
 		let sql = "RELATE person:tobie->like->animal:koala";
 		let res = relate(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RELATE person:tobie -> like -> animal:koala", format!("{}", out))
 	}
@@ -310,7 +308,6 @@ mod tests {
 	fn relate_statement_params() {
 		let sql = "RELATE $tobie->like->$koala";
 		let res = relate(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RELATE $tobie -> like -> $koala", format!("{}", out))
 	}

@@ -139,6 +139,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 				cond,
 				fetch,
 				archived: None,
+				auth: None, // Auth is set via options in compute()
 			},
 		))
 	})(i)

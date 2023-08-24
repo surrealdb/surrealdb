@@ -75,7 +75,6 @@ mod tests {
 	fn fetch_statement() {
 		let sql = "FETCH field";
 		let res = fetch(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Fetchs(vec![Fetch(Idiom::parse("field"))]));
 		assert_eq!("FETCH field", format!("{}", out));
@@ -85,7 +84,6 @@ mod tests {
 	fn fetch_statement_multiple() {
 		let sql = "FETCH field, other.field";
 		let res = fetch(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

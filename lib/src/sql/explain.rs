@@ -36,7 +36,6 @@ mod tests {
 	fn explain_statement() {
 		let sql = "EXPLAIN";
 		let res = explain(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Explain(false));
 		assert_eq!("EXPLAIN", format!("{}", out));
@@ -46,7 +45,6 @@ mod tests {
 	fn explain_full_statement() {
 		let sql = "EXPLAIN FULL";
 		let res = explain(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Explain(true));
 		assert_eq!("EXPLAIN FULL", format!("{}", out));

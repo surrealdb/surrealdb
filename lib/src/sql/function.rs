@@ -237,10 +237,8 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 
 pub fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
-	cut(|i| {
-		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
-		Ok((i, Function::Normal(s.to_string(), a)))
-	})(i)
+	let (i, a) = delimited_list0(openparentheses, commas, cut(value), closeparentheses)(i)?;
+	Ok((i, Function::Normal(s.to_string(), a)))
 }
 
 pub fn custom(i: &str) -> IResult<&str, Function> {
@@ -248,7 +246,7 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 	cut(|i| {
 		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
+		let (i, a) = delimited_list0(openparentheses, commas, cut(value), closeparentheses)(i)?;
 		Ok((i, Function::Custom(s.to_string(), a)))
 	})(i)
 }
@@ -257,7 +255,7 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
 	cut(|i| {
 		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list0(openparentheses, commas, value, closeparentheses)(i)?;
+		let (i, a) = delimited_list0(openparentheses, commas, cut(value), closeparentheses)(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char('{')(i)?;
 		let (i, v) = func(i)?;
@@ -618,7 +616,6 @@ mod tests {
 	fn function_single() {
 		let sql = "count()";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("count()", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("count"), vec![]));
@@ -628,7 +625,6 @@ mod tests {
 	fn function_single_not() {
 		let sql = "not(10)";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("not(10)", format!("{}", out));
 		assert_eq!(out, Function::Normal("not".to_owned(), vec![10.into()]));
@@ -638,7 +634,6 @@ mod tests {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("rand::uuid()", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("rand::uuid"), vec![]));
@@ -648,7 +643,6 @@ mod tests {
 	fn function_arguments() {
 		let sql = "is::numeric(null)";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("is::numeric(NULL)", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("is::numeric"), vec![Value::Null]));
@@ -658,7 +652,6 @@ mod tests {
 	fn function_simple_together() {
 		let sql = "function() { return 'test'; }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
 		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
@@ -668,7 +661,6 @@ mod tests {
 	fn function_simple_whitespace() {
 		let sql = "function () { return 'test'; }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
 		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
@@ -678,7 +670,6 @@ mod tests {
 	fn function_script_expression() {
 		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"function() { return this.tags.filter(t => { return t.length > 3; }); }",

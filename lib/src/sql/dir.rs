@@ -43,7 +43,6 @@ mod tests {
 	fn dir_in() {
 		let sql = "<-";
 		let res = dir(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<-", format!("{}", out));
 	}
@@ -52,7 +51,6 @@ mod tests {
 	fn dir_out() {
 		let sql = "->";
 		let res = dir(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->", format!("{}", out));
 	}
@@ -61,7 +59,6 @@ mod tests {
 	fn dir_both() {
 		let sql = "<->";
 		let res = dir(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<->", format!("{}", out));
 	}

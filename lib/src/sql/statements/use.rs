@@ -70,7 +70,6 @@ mod tests {
 	fn use_query_ns() {
 		let sql = "USE NS test";
 		let res = r#use(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -86,7 +85,6 @@ mod tests {
 	fn use_query_db() {
 		let sql = "USE DB test";
 		let res = r#use(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -102,7 +100,6 @@ mod tests {
 	fn use_query_both() {
 		let sql = "USE NS test DB test";
 		let res = r#use(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

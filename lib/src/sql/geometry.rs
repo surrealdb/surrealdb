@@ -16,7 +16,6 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::opt;
-use nom::multi::separated_list0;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
@@ -26,7 +25,7 @@ use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
 use std::{fmt, hash};
 
-use super::util::delimited_list0;
+use super::util::{delimited_list0, delimited_list1};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
@@ -791,26 +790,21 @@ fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
 }
 
 fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
-	let (i, _) = openbracket(i)?;
-	let (i, e) = line_vals(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, line_vals)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, mut e) = delimited_list1(openbracket, commas, line_vals, closebracket)(i)?;
+	let v = e.split_off(1);
+	// delimited_list1 guarentees there is atleast one value.
+	let e = e.into_iter().next().unwrap();
 	Ok((i, Polygon::new(e, v)))
 }
 
 fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
 	let (i, v) = delimited_list0(openbracket, commas, point_vals, closebracket)(i)?;
-	Ok((i, v.into()))
+	Ok((i, v))
 }
 
 fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
 	let (i, v) = delimited_list0(openbracket, commas, line_vals, closebracket)(i)?;
-	Ok((i, v.into()))
+	Ok((i, v))
 }
 
 fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
@@ -947,7 +941,6 @@ mod tests {
 	fn simple() {
 		let sql = "(-0.118092, 51.509865)";
 		let res = geometry(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
 	}
@@ -959,7 +952,6 @@ mod tests {
 			coordinates: [-0.118092, 51.509865]
 		}"#;
 		let res = geometry(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
 	}
@@ -977,7 +969,6 @@ mod tests {
 			]
 		}"#;
 		let res = geometry(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
 	}
@@ -1000,7 +991,6 @@ mod tests {
 			]
 		}"#;
 		let res = geometry(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]]] }", format!("{}", out));
 	}

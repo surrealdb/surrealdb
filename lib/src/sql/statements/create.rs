@@ -127,7 +127,6 @@ mod tests {
 	fn create_statement() {
 		let sql = "CREATE test";
 		let res = create(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test", format!("{}", out))
 	}

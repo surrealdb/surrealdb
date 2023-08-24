@@ -56,7 +56,6 @@ mod tests {
 	fn with_no_index() {
 		let sql = "WITH NOINDEX";
 		let res = with(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, With::NoIndex);
 		assert_eq!("WITH NOINDEX", format!("{}", out));
@@ -66,7 +65,6 @@ mod tests {
 	fn with_index() {
 		let sql = "WITH INDEX idx,uniq";
 		let res = with(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, With::Index(vec!["idx".to_string(), "uniq".to_string()]));
 		assert_eq!("WITH INDEX idx,uniq", format!("{}", out));

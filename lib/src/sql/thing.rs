@@ -161,7 +161,6 @@ mod tests {
 	fn thing_normal() {
 		let sql = "test:id";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -177,7 +176,6 @@ mod tests {
 	fn thing_integer() {
 		let sql = "test:001";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
@@ -193,7 +191,6 @@ mod tests {
 	fn thing_quoted_backtick() {
 		let sql = "`test`:`id`";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -209,7 +206,6 @@ mod tests {
 	fn thing_quoted_brackets() {
 		let sql = "⟨test⟩:⟨id⟩";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -225,7 +221,6 @@ mod tests {
 	fn thing_object() {
 		let sql = "test:{ location: 'GBR', year: 2022 }";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
@@ -244,7 +239,6 @@ mod tests {
 	fn thing_array() {
 		let sql = "test:['GBR', 2022]";
 		let res = thing(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(

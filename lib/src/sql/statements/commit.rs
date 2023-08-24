@@ -33,7 +33,6 @@ mod tests {
 	fn commit_basic() {
 		let sql = "COMMIT";
 		let res = commit(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("COMMIT TRANSACTION", format!("{}", out))
 	}
@@ -42,7 +41,6 @@ mod tests {
 	fn commit_query() {
 		let sql = "COMMIT TRANSACTION";
 		let res = commit(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("COMMIT TRANSACTION", format!("{}", out))
 	}

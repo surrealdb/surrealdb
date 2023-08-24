@@ -33,7 +33,6 @@ mod tests {
 	fn cancel_basic() {
 		let sql = "CANCEL";
 		let res = cancel(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CANCEL TRANSACTION", format!("{}", out))
 	}
@@ -42,7 +41,6 @@ mod tests {
 	fn cancel_query() {
 		let sql = "CANCEL TRANSACTION";
 		let res = cancel(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CANCEL TRANSACTION", format!("{}", out))
 	}

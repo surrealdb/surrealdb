@@ -129,7 +129,6 @@ mod tests {
 	fn order_statement() {
 		let sql = "ORDER field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -148,7 +147,6 @@ mod tests {
 	fn order_statement_by() {
 		let sql = "ORDER BY field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -167,7 +165,6 @@ mod tests {
 	fn order_statement_random() {
 		let sql = "ORDER RAND()";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -186,7 +183,6 @@ mod tests {
 	fn order_statement_multiple() {
 		let sql = "ORDER field, other.field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -214,7 +210,6 @@ mod tests {
 	fn order_statement_collate() {
 		let sql = "ORDER field COLLATE";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -233,7 +228,6 @@ mod tests {
 	fn order_statement_numeric() {
 		let sql = "ORDER field NUMERIC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -252,7 +246,6 @@ mod tests {
 	fn order_statement_direction() {
 		let sql = "ORDER field DESC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -271,7 +264,6 @@ mod tests {
 	fn order_statement_all() {
 		let sql = "ORDER field COLLATE NUMERIC DESC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

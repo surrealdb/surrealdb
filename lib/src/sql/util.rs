@@ -1,6 +1,6 @@
 use nom::{error::ParseError, Err, IResult, InputLength, Parser};
 
-/// Parsest a delimited list in the form of:
+/// Parses a delimited list with an option trailing seperator in the form of:
 ///
 ///```text
 /// PREFIX $(PARSER)SEPERATOR* $(SEPERATOR)? TERMINATOR
@@ -44,10 +44,7 @@ where
 					break;
 				}
 			}
-			let (i, value) = value.parse(input).map_err(|e| match e {
-				Err::Error(e) => Err::Failure(e),
-				e => e,
-			})?;
+			let (i, value) = value.parse(input)?;
 			res.push(value);
 			match seperator.parse(i.clone()) {
 				Ok((i, _)) => {
@@ -68,7 +65,7 @@ where
 	}
 }
 
-/// Parsest a delimited list in the form of:
+/// Parses a delimited list with an option trailing seperator in the form of:
 ///
 ///```text
 /// PREFIX $(PARSER)SEPERATOR+ $(SEPERATOR)? TERMINATOR
@@ -112,10 +109,7 @@ where
 					break;
 				}
 			}
-			let (i, value) = value.parse(input).map_err(|e| match e {
-				Err::Error(e) => Err::Failure(e),
-				e => e,
-			})?;
+			let (i, value) = value.parse(input)?;
 			res.push(value);
 			match seperator.parse(i.clone()) {
 				Ok((i, _)) => {

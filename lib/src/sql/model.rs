@@ -115,7 +115,6 @@ mod tests {
 	fn model_count() {
 		let sql = "|test:1000|";
 		let res = model(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("|test:1000|", format!("{}", out));
 		assert_eq!(out, Model::Count(String::from("test"), 1000));
@@ -125,7 +124,6 @@ mod tests {
 	fn model_range() {
 		let sql = "|test:1..1000|";
 		let res = model(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("|test:1..1000|", format!("{}", out));
 		assert_eq!(out, Model::Range(String::from("test"), 1, 1000));

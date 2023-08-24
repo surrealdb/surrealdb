@@ -248,7 +248,6 @@ mod tests {
 	fn select_statement_param() {
 		let sql = "SELECT * FROM $test";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -257,7 +256,6 @@ mod tests {
 	fn select_statement_table() {
 		let sql = "SELECT * FROM test";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 	}
@@ -275,7 +273,6 @@ mod tests {
 	fn select_statement_thing() {
 		let sql = "SELECT * FROM test:thingy ORDER BY name";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -284,7 +281,6 @@ mod tests {
 	fn select_statement_clash() {
 		let sql = "SELECT * FROM order ORDER BY order";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -293,7 +289,6 @@ mod tests {
 	fn select_statement_table_thing() {
 		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

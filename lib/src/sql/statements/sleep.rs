@@ -76,7 +76,6 @@ mod tests {
 	fn test_sleep_statement_sec() {
 		let sql = "SLEEP 2s";
 		let res = sleep(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SLEEP 2s", format!("{}", out))
 	}
@@ -85,7 +84,6 @@ mod tests {
 	fn test_sleep_statement_ms() {
 		let sql = "SLEEP 500ms";
 		let res = sleep(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SLEEP 500ms", format!("{}", out))
 	}

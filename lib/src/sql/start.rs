@@ -63,7 +63,6 @@ mod tests {
 	fn start_statement() {
 		let sql = "START 100";
 		let res = start(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Start(Value::from(100)));
 		assert_eq!("START 100", format!("{}", out));
@@ -73,7 +72,6 @@ mod tests {
 	fn start_statement_at() {
 		let sql = "START AT 100";
 		let res = start(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Start(Value::from(100)));
 		assert_eq!("START 100", format!("{}", out));

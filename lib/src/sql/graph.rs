@@ -144,7 +144,6 @@ mod tests {
 	fn graph_in() {
 		let sql = "<-likes";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<-likes", format!("{}", out));
 	}
@@ -153,7 +152,6 @@ mod tests {
 	fn graph_out() {
 		let sql = "->likes";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->likes", format!("{}", out));
 	}
@@ -162,7 +160,6 @@ mod tests {
 	fn graph_both() {
 		let sql = "<->likes";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<->likes", format!("{}", out));
 	}
@@ -171,7 +168,6 @@ mod tests {
 	fn graph_multiple() {
 		let sql = "->(likes, follows)";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->(likes, follows)", format!("{}", out));
 	}
@@ -180,7 +176,6 @@ mod tests {
 	fn graph_aliases() {
 		let sql = "->(likes, follows AS connections)";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->(likes, follows AS connections)", format!("{}", out));
 	}
@@ -189,7 +184,6 @@ mod tests {
 	fn graph_conditions() {
 		let sql = "->(likes, follows WHERE influencer = true)";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->(likes, follows WHERE influencer = true)", format!("{}", out));
 	}
@@ -198,7 +192,6 @@ mod tests {
 	fn graph_conditions_aliases() {
 		let sql = "->(likes, follows WHERE influencer = true AS connections)";
 		let res = graph(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("->(likes, follows WHERE influencer = true AS connections)", format!("{}", out));
 	}

@@ -244,7 +244,6 @@ mod tests {
 	fn permissions_none() {
 		let sql = "PERMISSIONS NONE";
 		let res = permissions(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("PERMISSIONS NONE", format!("{}", out));
 		assert_eq!(out, Permissions::none());
@@ -254,7 +253,6 @@ mod tests {
 	fn permissions_full() {
 		let sql = "PERMISSIONS FULL";
 		let res = permissions(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("PERMISSIONS FULL", format!("{}", out));
 		assert_eq!(out, Permissions::full());
@@ -265,7 +263,6 @@ mod tests {
 		let sql =
 			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE";
 		let res = permissions(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE",
@@ -286,7 +283,6 @@ mod tests {
 	fn no_empty_permissions() {
 		// This was previouslly allowed,
 		let sql = "PERMISSION ";
-		let res = dbg!(permission(sql));
-		assert!(dbg!(res.is_err()));
+		permission(sql).unwrap_err();
 	}
 }

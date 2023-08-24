@@ -15,6 +15,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+use super::util::delimited_list1;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Kind {
@@ -148,42 +150,26 @@ fn option(i: &str) -> IResult<&str, Kind> {
 fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("record")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = opt(alt((
-		|i| {
-			// TODO
-			let (i, _) = openparentheses(i)?;
-			let (i, v) = separated_list1(commas, table)(i)?;
-			let (i, _) = closeparentheses(i)?;
-			Ok((i, v))
-		},
-		|i| {
+	let (i, v) =
+		opt(alt((delimited_list1(openparentheses, commas, cut(table), closeparentheses), |i| {
 			let (i, _) = char('<')(i)?;
 			let (i, v) = separated_list1(verbar, table)(i)?;
 			let (i, _) = char('>')(i)?;
 			Ok((i, v))
-		},
-	)))(i)?;
+		})))(i)?;
 	Ok((i, Kind::Record(v.unwrap_or_default())))
 }
 
 fn geometry(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("geometry")(i)?;
-	let (i, v) = opt(alt((
-		|i| {
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = char('(')(i)?;
-			let (i, v) = separated_list1(commas, geo)(i)?;
-			let (i, _) = char(')')(i)?;
-			Ok((i, v))
-		},
-		|i| {
+	let (i, v) =
+		opt(alt((delimited_list1(openparentheses, commas, cut(geo), closeparentheses), |i| {
 			let (i, _) = mightbespace(i)?;
 			let (i, _) = char('<')(i)?;
-			let (i, v) = separated_list1(verbar, geo)(i)?;
+			let (i, v) = separated_list1(verbar, cut(geo))(i)?;
 			let (i, _) = char('>')(i)?;
 			Ok((i, v))
-		},
-	)))(i)?;
+		})))(i)?;
 	Ok((i, Kind::Geometry(v.unwrap_or_default())))
 }
 
@@ -265,7 +251,6 @@ mod tests {
 	fn kind_any() {
 		let sql = "any";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("any", format!("{}", out));
 		assert_eq!(out, Kind::Any);
@@ -285,7 +270,6 @@ mod tests {
 	fn kind_bool() {
 		let sql = "bool";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("bool", format!("{}", out));
 		assert_eq!(out, Kind::Bool);
@@ -295,7 +279,6 @@ mod tests {
 	fn kind_bytes() {
 		let sql = "bytes";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("bytes", format!("{}", out));
 		assert_eq!(out, Kind::Bytes);
@@ -305,7 +288,6 @@ mod tests {
 	fn kind_datetime() {
 		let sql = "datetime";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("datetime", format!("{}", out));
 		assert_eq!(out, Kind::Datetime);
@@ -315,7 +297,6 @@ mod tests {
 	fn kind_decimal() {
 		let sql = "decimal";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("decimal", format!("{}", out));
 		assert_eq!(out, Kind::Decimal);
@@ -325,7 +306,6 @@ mod tests {
 	fn kind_duration() {
 		let sql = "duration";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("duration", format!("{}", out));
 		assert_eq!(out, Kind::Duration);
@@ -335,7 +315,6 @@ mod tests {
 	fn kind_float() {
 		let sql = "float";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("float", format!("{}", out));
 		assert_eq!(out, Kind::Float);
@@ -345,7 +324,6 @@ mod tests {
 	fn kind_number() {
 		let sql = "number";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("number", format!("{}", out));
 		assert_eq!(out, Kind::Number);
@@ -355,7 +333,6 @@ mod tests {
 	fn kind_object() {
 		let sql = "object";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("object", format!("{}", out));
 		assert_eq!(out, Kind::Object);
@@ -365,7 +342,6 @@ mod tests {
 	fn kind_point() {
 		let sql = "point";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("point", format!("{}", out));
 		assert_eq!(out, Kind::Point);
@@ -375,7 +351,6 @@ mod tests {
 	fn kind_string() {
 		let sql = "string";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("string", format!("{}", out));
 		assert_eq!(out, Kind::String);
@@ -385,7 +360,6 @@ mod tests {
 	fn kind_uuid() {
 		let sql = "uuid";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("uuid", format!("{}", out));
 		assert_eq!(out, Kind::Uuid);
@@ -395,7 +369,6 @@ mod tests {
 	fn kind_either() {
 		let sql = "int | float";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("int | float", format!("{}", out));
 		assert_eq!(out, Kind::Either(vec![Kind::Int, Kind::Float]));
@@ -405,7 +378,6 @@ mod tests {
 	fn kind_record_any() {
 		let sql = "record";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("record", format!("{}", out));
 		assert_eq!(out, Kind::Record(vec![]));
@@ -415,7 +387,6 @@ mod tests {
 	fn kind_record_one() {
 		let sql = "record<person>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("record<person>", format!("{}", out));
 		assert_eq!(out, Kind::Record(vec![Table::from("person")]));
@@ -425,7 +396,6 @@ mod tests {
 	fn kind_record_many() {
 		let sql = "record<person | animal>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("record<person | animal>", format!("{}", out));
 		assert_eq!(out, Kind::Record(vec![Table::from("person"), Table::from("animal")]));
@@ -435,7 +405,6 @@ mod tests {
 	fn kind_geometry_any() {
 		let sql = "geometry";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("geometry", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![]));
@@ -445,7 +414,6 @@ mod tests {
 	fn kind_geometry_one() {
 		let sql = "geometry<point>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("geometry<point>", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![String::from("point")]));
@@ -455,7 +423,6 @@ mod tests {
 	fn kind_geometry_many() {
 		let sql = "geometry<point | multipoint>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("geometry<point | multipoint>", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![String::from("point"), String::from("multipoint")]));
@@ -465,7 +432,6 @@ mod tests {
 	fn kind_option_one() {
 		let sql = "option<int>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("option<int>", format!("{}", out));
 		assert_eq!(out, Kind::Option(Box::new(Kind::Int)));
@@ -475,7 +441,6 @@ mod tests {
 	fn kind_option_many() {
 		let sql = "option<int | float>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("option<int | float>", format!("{}", out));
 		assert_eq!(out, Kind::Option(Box::new(Kind::Either(vec![Kind::Int, Kind::Float]))));
@@ -485,7 +450,6 @@ mod tests {
 	fn kind_array_any() {
 		let sql = "array";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("array", format!("{}", out));
 		assert_eq!(out, Kind::Array(Box::new(Kind::Any), None));
@@ -495,7 +459,6 @@ mod tests {
 	fn kind_array_some() {
 		let sql = "array<float>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("array<float>", format!("{}", out));
 		assert_eq!(out, Kind::Array(Box::new(Kind::Float), None));
@@ -505,7 +468,6 @@ mod tests {
 	fn kind_array_some_size() {
 		let sql = "array<float, 10>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("array<float, 10>", format!("{}", out));
 		assert_eq!(out, Kind::Array(Box::new(Kind::Float), Some(10)));
@@ -515,7 +477,6 @@ mod tests {
 	fn kind_set_any() {
 		let sql = "set";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("set", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Any), None));
@@ -525,7 +486,6 @@ mod tests {
 	fn kind_set_some() {
 		let sql = "set<float>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("set<float>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), None));
@@ -535,7 +495,6 @@ mod tests {
 	fn kind_set_some_size() {
 		let sql = "set<float, 10>";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("set<float, 10>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), Some(10)));

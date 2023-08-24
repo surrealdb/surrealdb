@@ -74,7 +74,6 @@ mod tests {
 	fn edges_in() {
 		let sql = "person:test<-likes";
 		let res = edges(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("person:test<-likes", format!("{}", out));
 	}
@@ -83,7 +82,6 @@ mod tests {
 	fn edges_out() {
 		let sql = "person:test->likes";
 		let res = edges(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("person:test->likes", format!("{}", out));
 	}
@@ -92,7 +90,6 @@ mod tests {
 	fn edges_both() {
 		let sql = "person:test<->likes";
 		let res = edges(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("person:test<->likes", format!("{}", out));
 	}
@@ -101,7 +98,6 @@ mod tests {
 	fn edges_multiple() {
 		let sql = "person:test->(likes, follows)";
 		let res = edges(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("person:test->(likes, follows)", format!("{}", out));
 	}

@@ -303,7 +303,6 @@ mod tests {
 	fn info_query_root() {
 		let sql = "INFO FOR ROOT";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Root);
 		assert_eq!("INFO FOR ROOT", format!("{}", out));
@@ -313,7 +312,6 @@ mod tests {
 	fn info_query_ns() {
 		let sql = "INFO FOR NAMESPACE";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Ns);
 		assert_eq!("INFO FOR NAMESPACE", format!("{}", out));
@@ -323,7 +321,6 @@ mod tests {
 	fn info_query_db() {
 		let sql = "INFO FOR DATABASE";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Db);
 		assert_eq!("INFO FOR DATABASE", format!("{}", out));
@@ -333,7 +330,6 @@ mod tests {
 	fn info_query_sc() {
 		let sql = "INFO FOR SCOPE test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Sc(Ident::from("test")));
 		assert_eq!("INFO FOR SCOPE test", format!("{}", out));
@@ -343,7 +339,6 @@ mod tests {
 	fn info_query_tb() {
 		let sql = "INFO FOR TABLE test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Tb(Ident::from("test")));
 		assert_eq!("INFO FOR TABLE test", format!("{}", out));
@@ -353,28 +348,24 @@ mod tests {
 	fn info_query_user() {
 		let sql = "INFO FOR USER test ON ROOT";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Root)));
 		assert_eq!("INFO FOR USER test ON ROOT", format!("{}", out));
 
 		let sql = "INFO FOR USER test ON NS";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Ns)));
 		assert_eq!("INFO FOR USER test ON NAMESPACE", format!("{}", out));
 
 		let sql = "INFO FOR USER test ON DB";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Db)));
 		assert_eq!("INFO FOR USER test ON DATABASE", format!("{}", out));
 
 		let sql = "INFO FOR USER test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), None));
 		assert_eq!("INFO FOR USER test", format!("{}", out));

@@ -58,7 +58,6 @@ mod tests {
 	fn option_statement() {
 		let sql = "OPTION IMPORT";
 		let res = option(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("OPTION IMPORT", format!("{}", out));
 	}
@@ -67,7 +66,6 @@ mod tests {
 	fn option_statement_true() {
 		let sql = "OPTION IMPORT = TRUE";
 		let res = option(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("OPTION IMPORT", format!("{}", out));
 	}
@@ -76,7 +74,6 @@ mod tests {
 	fn option_statement_false() {
 		let sql = "OPTION IMPORT = FALSE";
 		let res = option(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("OPTION IMPORT = FALSE", format!("{}", out));
 	}

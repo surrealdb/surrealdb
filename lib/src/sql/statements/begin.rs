@@ -33,7 +33,6 @@ mod tests {
 	fn begin_basic() {
 		let sql = "BEGIN";
 		let res = begin(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BEGIN TRANSACTION", format!("{}", out))
 	}
@@ -42,7 +41,6 @@ mod tests {
 	fn begin_query() {
 		let sql = "BEGIN TRANSACTION";
 		let res = begin(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BEGIN TRANSACTION", format!("{}", out))
 	}

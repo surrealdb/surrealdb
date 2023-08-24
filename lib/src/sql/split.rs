@@ -79,7 +79,6 @@ mod tests {
 	fn split_statement() {
 		let sql = "SPLIT field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Splits(vec![Split(Idiom::parse("field"))]),);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -89,7 +88,6 @@ mod tests {
 	fn split_statement_on() {
 		let sql = "SPLIT ON field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Splits(vec![Split(Idiom::parse("field"))]),);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -99,7 +97,6 @@ mod tests {
 	fn split_statement_multiple() {
 		let sql = "SPLIT field, other.field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

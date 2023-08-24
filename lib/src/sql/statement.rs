@@ -279,7 +279,6 @@ mod tests {
 	fn single_statement() {
 		let sql = "CREATE test";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test", format!("{}", out))
 	}
@@ -288,7 +287,6 @@ mod tests {
 	fn multiple_statements() {
 		let sql = "CREATE test; CREATE temp;";
 		let res = statements(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
 	}
@@ -297,7 +295,6 @@ mod tests {
 	fn multiple_statements_semicolons() {
 		let sql = "CREATE test;;;CREATE temp;;;";
 		let res = statements(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
 	}
@@ -306,7 +303,6 @@ mod tests {
 	fn show_table_changes() {
 		let sql = "SHOW CHANGES FOR TABLE test SINCE 123456";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SHOW CHANGES FOR TABLE test SINCE 123456", format!("{}", out))
 	}
@@ -315,7 +311,6 @@ mod tests {
 	fn show_database_changes() {
 		let sql = "SHOW CHANGES FOR DATABASE SINCE 123456";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SHOW CHANGES FOR DATABASE SINCE 123456", format!("{}", out))
 	}

@@ -128,7 +128,6 @@ mod tests {
 	fn delete_statement() {
 		let sql = "DELETE test";
 		let res = delete(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("DELETE test", format!("{}", out))
 	}

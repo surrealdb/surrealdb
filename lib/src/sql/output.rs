@@ -64,7 +64,6 @@ mod tests {
 	fn output_statement() {
 		let sql = "RETURN field, other.field";
 		let res = output(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RETURN field, other.field", format!("{}", out));
 	}

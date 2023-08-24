@@ -110,7 +110,6 @@ mod tests {
 	fn param_normal() {
 		let sql = "$test";
 		let res = param(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test", format!("{}", out));
 		assert_eq!(out, Param::parse("$test"));
@@ -120,7 +119,6 @@ mod tests {
 	fn param_longer() {
 		let sql = "$test_and_deliver";
 		let res = param(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test_and_deliver", format!("{}", out));
 		assert_eq!(out, Param::parse("$test_and_deliver"));

@@ -76,7 +76,6 @@ mod tests {
 	fn cast_int() {
 		let sql = "<int>1.2345";
 		let res = cast(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<int> 1.2345f", format!("{}", out));
 		assert_eq!(out, Cast(Kind::Int, 1.2345.into()));
@@ -86,7 +85,6 @@ mod tests {
 	fn cast_string() {
 		let sql = "<string>1.2345";
 		let res = cast(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345f", format!("{}", out));
 		assert_eq!(out, Cast(Kind::String, 1.2345.into()));

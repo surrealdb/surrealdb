@@ -272,7 +272,6 @@ mod tests {
 	#[test]
 	fn matches_without_reference() {
 		let res = matches("@@");
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("@@", format!("{}", out));
 		assert_eq!(out, Operator::Matches(None));
@@ -281,7 +280,6 @@ mod tests {
 	#[test]
 	fn matches_with_reference() {
 		let res = matches("@12@");
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("@12@", format!("{}", out));
 		assert_eq!(out, Operator::Matches(Some(12u8)));
@@ -290,6 +288,6 @@ mod tests {
 	#[test]
 	fn matches_with_invalid_reference() {
 		let res = matches("@256@");
-		assert!(res.is_err());
+		res.unwrap_err();
 	}
 }

@@ -221,7 +221,6 @@ mod tests {
 	fn set_statement() {
 		let sql = "SET field = true";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true", format!("{}", out));
 	}
@@ -230,7 +229,6 @@ mod tests {
 	fn set_statement_multiple() {
 		let sql = "SET field = true, other.field = false";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true, other.field = false", format!("{}", out));
 	}
@@ -239,7 +237,6 @@ mod tests {
 	fn unset_statement() {
 		let sql = "UNSET field";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("UNSET field", format!("{}", out));
 	}
@@ -248,7 +245,6 @@ mod tests {
 	fn unset_statement_multiple_fields() {
 		let sql = "UNSET field, other.field";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("UNSET field, other.field", format!("{}", out));
 	}
@@ -257,7 +253,6 @@ mod tests {
 	fn patch_statement() {
 		let sql = "PATCH [{ field: true }]";
 		let res = patch(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("PATCH [{ field: true }]", format!("{}", out));
 	}
@@ -266,7 +261,6 @@ mod tests {
 	fn merge_statement() {
 		let sql = "MERGE { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("MERGE { field: true }", format!("{}", out));
 	}
@@ -275,7 +269,6 @@ mod tests {
 	fn content_statement() {
 		let sql = "CONTENT { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CONTENT { field: true }", format!("{}", out));
 	}
@@ -284,7 +277,6 @@ mod tests {
 	fn replace_statement() {
 		let sql = "REPLACE { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("REPLACE { field: true }", format!("{}", out));
 	}
@@ -293,7 +285,6 @@ mod tests {
 	fn values_statement() {
 		let sql = "(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])";
 		let res = values(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])",
@@ -305,7 +296,6 @@ mod tests {
 	fn update_statement() {
 		let sql = "ON DUPLICATE KEY UPDATE field = true, other.field = false";
 		let res = update(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("ON DUPLICATE KEY UPDATE field = true, other.field = false", format!("{}", out));
 	}

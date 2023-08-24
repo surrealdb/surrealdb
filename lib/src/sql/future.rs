@@ -72,7 +72,6 @@ mod tests {
 	fn future_expression() {
 		let sql = "<future> { 5 + 10 }";
 		let res = future(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
 		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));

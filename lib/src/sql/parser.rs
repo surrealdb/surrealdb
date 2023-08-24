@@ -205,52 +205,45 @@ mod tests {
 	#[test]
 	fn no_ending() {
 		let sql = "SELECT * FROM test";
-		let res = parse(sql);
-		assert!(res.is_ok());
+		parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_query_string() {
 		let sql = "SELECT * FROM test;";
-		let res = parse(sql);
-		assert!(res.is_ok());
+		parse(sql).unwrap();
 	}
 
 	#[test]
 	fn trim_query_string() {
 		let sql = "    SELECT    *    FROM    test    ;    ";
-		let res = parse(sql);
-		assert!(res.is_ok());
+		parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_complex_rubbish() {
 		let sql = "    SELECT    *    FROM    test    ; /* shouldbespace */ ;;;    ";
-		let res = parse(sql);
-		assert!(res.is_ok());
+		parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_complex_failure() {
 		let sql = "    SELECT    *    FROM    { }} ";
-		let res = parse(sql);
-		assert!(res.is_err());
+		parse(sql).unwrap_err();
 	}
 
 	#[test]
 	fn parse_ok_recursion() {
 		let sql = "SELECT * FROM ((SELECT * FROM (5))) * 5;";
-		let res = parse(sql);
-		assert!(res.is_ok());
+		parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_ok_recursion_deeper() {
 		let sql = "SELECT * FROM (((( SELECT * FROM ((5)) + ((5)) + ((5)) )))) * ((( function() {return 5;} )));";
 		let start = Instant::now();
-		let res = parse(sql);
+		parse(sql).unwrap();
 		let elapsed = start.elapsed();
-		assert!(res.is_ok());
 		assert!(
 			elapsed < Duration::from_millis(2000),
 			"took {}ms, previously took ~1000ms in debug",
@@ -339,9 +332,7 @@ mod tests {
 
 			CREATE person SET name = 'Tobie', age += 18;
 		";
-		let res = parse(sql);
-		assert!(res.is_ok());
-		let tmp = res.unwrap();
+		let tmp = parse(sql).unwrap();
 
 		let enc: Vec<u8> = Vec::from(&tmp);
 		let dec: Query = Query::from(enc);
@@ -438,7 +429,7 @@ mod tests {
 		if excessive {
 			assert!(
 				matches!(res, Err(Error::ComputationDepthExceeded)),
-				"expected computation depth exceeded, got {:?}",
+				"expected computation depthexceeded, got {:?}",
 				res
 			);
 		} else {

@@ -14,6 +14,7 @@ use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -327,7 +328,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char(':')(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, v) = value(i)?;
+		let (i, v) = cut(value)(i)?;
 		Ok((i, (String::from(k), v)))
 	}
 
@@ -360,7 +361,6 @@ mod tests {
 	fn object_normal() {
 		let sql = "{one:1,two:2,tre:3}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -370,7 +370,6 @@ mod tests {
 	fn object_commas() {
 		let sql = "{one:1,two:2,tre:3,}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -380,7 +379,6 @@ mod tests {
 	fn object_expression() {
 		let sql = "{one:1,two:2,tre:3+1}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3 + 1, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);

@@ -183,7 +183,6 @@ mod tests {
 	fn insert_statement_basic() {
 		let sql = "INSERT INTO test (field) VALUES ($value)";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT INTO test (field) VALUES ($value)", format!("{}", out))
 	}
@@ -192,7 +191,6 @@ mod tests {
 	fn insert_statement_ignore() {
 		let sql = "INSERT IGNORE INTO test (field) VALUES ($value)";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value)", format!("{}", out))
 	}
@@ -201,7 +199,6 @@ mod tests {
 	fn insert_statement_ignore_update() {
 		let sql = "INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value", format!("{}", out))
 	}

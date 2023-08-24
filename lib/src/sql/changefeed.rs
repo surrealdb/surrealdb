@@ -57,7 +57,6 @@ mod tests {
 	fn changefeed_enabled() {
 		let sql = "CHANGEFEED 1h";
 		let res = changefeed(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CHANGEFEED 1h", format!("{}", out));
 		assert_eq!(

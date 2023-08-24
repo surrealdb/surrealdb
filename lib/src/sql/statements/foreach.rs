@@ -130,7 +130,6 @@ mod tests {
 	fn foreach_statement_first() {
 		let sql = "FOR $test IN [1, 2, 3, 4, 5] { UPDATE person:test SET scores += $test; }";
 		let res = foreach(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

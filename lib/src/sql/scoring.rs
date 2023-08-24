@@ -112,7 +112,6 @@ mod tests {
 	fn scoring_bm_25_with_parameters() {
 		let sql = "BM25(1.0,0.6)";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BM25(1,0.6)", format!("{}", out))
 	}
@@ -121,7 +120,6 @@ mod tests {
 	fn scoring_bm_25_without_parameters() {
 		let sql = "BM25";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BM25(1.2,0.75)", format!("{}", out))
 	}
@@ -130,7 +128,6 @@ mod tests {
 	fn scoring_vs() {
 		let sql = "VS";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("VS", format!("{}", out))
 	}

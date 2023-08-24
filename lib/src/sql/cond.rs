@@ -41,7 +41,6 @@ mod tests {
 	fn cond_statement() {
 		let sql = "WHERE field = true";
 		let res = cond(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("WHERE field = true", format!("{}", out));
 	}
@@ -50,7 +49,6 @@ mod tests {
 	fn cond_statement_multiple() {
 		let sql = "WHERE field = true AND other.field = false";
 		let res = cond(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("WHERE field = true AND other.field = false", format!("{}", out));
 	}

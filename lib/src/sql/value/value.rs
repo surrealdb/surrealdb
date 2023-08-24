@@ -2785,7 +2785,6 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
 	let _diving = crate::sql::parser::depth::dive()?;
-
 	let (i, v) = alt((
 		alt((
 			terminated(
@@ -2800,14 +2799,14 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(idiom::multi_without_start, Value::from),
 		)),
 		alt((
+			map(future, Value::from),
 			map(cast, Value::from),
 			map(function, Value::from),
+			map(geometry, Value::from),
 			map(subquery, Value::from),
 			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
-			map(geometry, Value::from),
-			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(unary, Value::from),
@@ -2843,11 +2842,11 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		alt((
 			map(cast, Value::from),
 			map(function, Value::from),
+			map(geometry, Value::from),
 			map(subquery, Value::from),
 			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
-			map(geometry, Value::from),
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),

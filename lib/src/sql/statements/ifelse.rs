@@ -11,7 +11,7 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::combinator::{cut, map};
-use nom::multi::separated_list1;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -150,22 +150,18 @@ impl Display for IfelseStatement {
 pub fn ifelse(i: &str) -> IResult<&str, IfelseStatement> {
 	let (i, _) = tag_no_case("IF")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, cond) = value(i)?;
-		let (i, _) = shouldbespace(i)?;
-		if let (i, Some(_)) = opt(tag_no_case("THEN"))(i)? {
-			worded(i, cond)
-		} else {
-			bracketed(i, cond)
-		}
-	})(i)
+	let (i, cond) = value(i)?;
+	let (i, _) = shouldbespace(i)?;
+	if let (i, Some(_)) = opt(terminated(tag_no_case("THEN"), shouldbespace))(i)? {
+		worded(i, cond)
+	} else {
+		bracketed(i, cond)
+	}
 }
 
 fn worded(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 	//
-	fn exprs(i: &str) -> IResult<&str, (Value, Value)> {
-		let (i, _) = tag_no_case("IF")(i)?;
-		let (i, _) = shouldbespace(i)?;
+	fn expr(i: &str) -> IResult<&str, (Value, Value)> {
 		let (i, cond) = value(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, _) = tag_no_case("THEN")(i)?;
@@ -173,15 +169,7 @@ fn worded(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 		let (i, then) = value(i)?;
 		Ok((i, (cond, then)))
 	}
-	//
-	fn close(i: &str) -> IResult<&str, Value> {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("ELSE")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, then) = value(i)?;
-		Ok((i, then))
-	}
-	//
+
 	fn split(i: &str) -> IResult<&str, ()> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, _) = tag_no_case("ELSE")(i)?;
@@ -189,12 +177,26 @@ fn worded(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 		Ok((i, ()))
 	}
 
-	let (i, then) = value(i)?;
+	let (mut input, then) = value(i)?;
+	let mut exprs = vec![(initial_cond, then)];
+	let mut close = None;
 
-	let (i, mut exprs) = separated_list1(split, exprs)(i)?;
-	exprs.insert(0, (initial_cond, then));
-	let (i, close) = opt(close)(i)?;
-	let (i, _) = shouldbespace(i)?;
+	loop {
+		let (i, Some(_)) = opt(split)(input)? else {
+			break;
+		};
+		let (i, Some(_)) = opt(terminated(tag_no_case("IF"), shouldbespace))(i)? else {
+			let (i, v) = cut(value)(i)?;
+			close = Some(v);
+			input = i;
+			break;
+		};
+		let (i, branch) = cut(expr)(i)?;
+		exprs.push(branch);
+		input = i;
+	}
+
+	let (i, _) = shouldbespace(input)?;
 	let (i, _) = tag_no_case("END")(i)?;
 	Ok((
 		i,
@@ -207,21 +209,11 @@ fn worded(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 
 fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 	//
-	fn exprs(i: &str) -> IResult<&str, (Value, Value)> {
-		let (i, _) = tag_no_case("IF")(i)?;
-		let (i, _) = shouldbespace(i)?;
+	fn expr(i: &str) -> IResult<&str, (Value, Value)> {
 		let (i, cond) = value(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, then) = map(block, Value::from)(i)?;
 		Ok((i, (cond, then)))
-	}
-	//
-	fn close(i: &str) -> IResult<&str, Value> {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("ELSE")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, then) = map(block, Value::from)(i)?;
-		Ok((i, then))
 	}
 	//
 	fn split(i: &str) -> IResult<&str, ()> {
@@ -231,12 +223,27 @@ fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 		Ok((i, ()))
 	}
 
-	let (i, then) = map(block, Value::from)(i)?;
-	let (i, mut exprs) = separated_list1(split, exprs)(i)?;
-	exprs.insert(0, (initial_cond, then));
-	let (i, close) = opt(close)(i)?;
+	let (mut input, then) = map(block, Value::from)(i)?;
+	let mut exprs = vec![(initial_cond, then)];
+	let mut close = None;
+
+	loop {
+		let (i, Some(_)) = opt(split)(input)? else {
+			break;
+		};
+		let (i, Some(_)) = opt(terminated(tag_no_case("IF"), shouldbespace))(i)? else {
+			let (i, c) = map(cut(block), Value::from)(i)?;
+			close = Some(c);
+			input = i;
+			break;
+		};
+		let (i, branch) = cut(expr)(i)?;
+		exprs.push(branch);
+		input = i;
+	}
+
 	Ok((
-		i,
+		input,
 		IfelseStatement {
 			exprs,
 			close,
@@ -253,7 +260,6 @@ mod tests {
 	fn ifelse_worded_statement_first() {
 		let sql = "IF this THEN that END";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -262,7 +268,6 @@ mod tests {
 	fn ifelse_worded_statement_close() {
 		let sql = "IF this THEN that ELSE that END";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -271,7 +276,6 @@ mod tests {
 	fn ifelse_worded_statement_other() {
 		let sql = "IF this THEN that ELSE IF this THEN that END";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -280,7 +284,6 @@ mod tests {
 	fn ifelse_worded_statement_other_close() {
 		let sql = "IF this THEN that ELSE IF this THEN that ELSE that END";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -289,16 +292,14 @@ mod tests {
 	fn ifelse_bracketed_statement_first() {
 		let sql = "IF this { that }";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
+		let res = res.unwrap().1.to_string();
+		assert_eq!(sql, res)
 	}
 
 	#[test]
 	fn ifelse_bracketed_statement_close() {
 		let sql = "IF this { that } ELSE { that }";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -307,7 +308,6 @@ mod tests {
 	fn ifelse_bracketed_statement_other() {
 		let sql = "IF this { that } ELSE IF this { that }";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -316,7 +316,6 @@ mod tests {
 	fn ifelse_bracketed_statement_other_close() {
 		let sql = "IF this { that } ELSE IF this { that } ELSE { that }";
 		let res = ifelse(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

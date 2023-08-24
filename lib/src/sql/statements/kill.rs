@@ -134,7 +134,6 @@ mod tests {
 	fn kill_param() {
 		let sql = "kill $id";
 		let res = kill(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

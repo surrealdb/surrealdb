@@ -82,7 +82,6 @@ mod tests {
 	fn view_simple() {
 		let sql = "AS SELECT * FROM test";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT * FROM test", format!("{}", out))
 	}
@@ -91,7 +90,6 @@ mod tests {
 	fn view_brackets() {
 		let sql = "AS (SELECT * FROM test)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT * FROM test", format!("{}", out))
 	}
@@ -100,7 +98,6 @@ mod tests {
 	fn view_brackets_where() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE", format!("{}", out))
 	}
@@ -109,7 +106,6 @@ mod tests {
 	fn view_brackets_group() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE GROUP BY temp", format!("{}", out))
 	}
@@ -117,17 +113,11 @@ mod tests {
 	#[test]
 	fn view_disallow_unbalanced_brackets() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp";
-		let res = view(sql);
-		assert!(res.is_err());
+		view(sql).unwrap_err();
 		let sql = "AS SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
-		let res = view(sql);
+		let (i, _) = view(sql).unwrap();
 		// The above test won't return an error since the trailing ) might be part of a another
 		// pair.
-		if let Ok((i, _)) = res {
-			// but it should not be parsed.
-			assert_eq!(i, ")")
-		} else {
-			panic!()
-		}
+		assert_eq!(i, ")");
 	}
 }

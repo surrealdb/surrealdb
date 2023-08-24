@@ -293,7 +293,6 @@ mod tests {
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
 	}
@@ -302,7 +301,6 @@ mod tests {
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("IF true THEN false END", format!("{}", out))
 	}
@@ -311,7 +309,6 @@ mod tests {
 	fn subquery_select_statement() {
 		let sql = "(SELECT * FROM test)";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(SELECT * FROM test)", format!("{}", out))
 	}

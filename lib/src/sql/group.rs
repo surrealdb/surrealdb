@@ -91,7 +91,6 @@ mod tests {
 	fn group_statement() {
 		let sql = "GROUP field";
 		let res = group(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Groups(vec![Group(Idiom::parse("field"))]));
 		assert_eq!("GROUP BY field", format!("{}", out));
@@ -101,7 +100,6 @@ mod tests {
 	fn group_statement_by() {
 		let sql = "GROUP BY field";
 		let res = group(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Groups(vec![Group(Idiom::parse("field"))]));
 		assert_eq!("GROUP BY field", format!("{}", out));
@@ -111,7 +109,6 @@ mod tests {
 	fn group_statement_multiple() {
 		let sql = "GROUP field, other.field";
 		let res = group(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

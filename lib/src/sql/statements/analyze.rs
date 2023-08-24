@@ -112,7 +112,6 @@ mod tests {
 	fn analyze_index() {
 		let sql = "ANALYZE INDEX my_index ON my_table";
 		let res = analyze(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, AnalyzeStatement::Idx(Ident::from("my_table"), Ident::from("my_index")));
 		assert_eq!("ANALYZE INDEX my_index ON my_table", format!("{}", out));

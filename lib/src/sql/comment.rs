@@ -71,6 +71,6 @@ mod test {
 	#[test]
 	fn any_whitespace() {
 		let sql = "USE /* white space and comment between */ NS test;";
-		assert!(parse(sql).is_ok());
+		parse(sql).unwrap();
 	}
 }

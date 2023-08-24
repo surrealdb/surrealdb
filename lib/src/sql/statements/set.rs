@@ -85,7 +85,6 @@ mod tests {
 	fn let_statement() {
 		let sql = "LET $name = NULL";
 		let res = set(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("LET $name = NULL", format!("{}", out));
 	}
