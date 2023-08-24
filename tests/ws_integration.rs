@@ -176,8 +176,8 @@ mod ws_integration {
 			socket,
 			r#"
 			DEFINE SCOPE scope SESSION 24h
-				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
-				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE user = $user AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
 		.await;
@@ -193,7 +193,7 @@ mod ws_integration {
 					"ns": "N",
 					"db": "D",
 					"sc": "scope",
-					"email": "email@email.com",
+					"user": "user",
 					"pass": "pass",
 				}],
 			}))
@@ -203,15 +203,8 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Sign in
-		let res = common::ws_signin(
-			socket,
-			"email@email.com",
-			"pass",
-			Some("N"),
-			Some("D"),
-			Some("scope"),
-		)
-		.await;
+		let res =
+			common::ws_signin(socket, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 		assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
@@ -234,8 +227,8 @@ mod ws_integration {
 		// Setup scope
 		let res = common::ws_query(socket, r#"
         DEFINE SCOPE scope SESSION 2s
-            SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
-            SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+            SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE user = $user AND crypto::argon2::compare(pass, $pass) )
         ;"#).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
@@ -249,7 +242,7 @@ mod ws_integration {
 					"ns": "N",
 					"db": "D",
 					"sc": "scope",
-					"email": "email@email.com",
+					"user": "user",
 					"pass": "pass",
 				}],
 			}))
@@ -259,15 +252,8 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Sign in
-		let res = common::ws_signin(
-			socket,
-			"email@email.com",
-			"pass",
-			Some("N"),
-			Some("D"),
-			Some("scope"),
-		)
-		.await;
+		let res =
+			common::ws_signin(socket, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 
@@ -297,7 +283,7 @@ mod ws_integration {
 
 		// Signin
 		let res =
-			common::ws_signin(socket2, "email", "pass", Some("N"), Some("D"), Some("scope")).await;
+			common::ws_signin(socket2, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 
