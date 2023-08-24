@@ -67,15 +67,21 @@ async fn ml_handler(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 
-	let file = SurMlFile::from_bytes(body).map_err(|_| Error::Request)?;
-	let id = format!("{}-{}", file.header.name, file.header.version);
-	let bytes = file.to_bytes().map_err(|_| Error::Request)?;
+	let file = SurMlFile::from_bytes(body.to_vec()).map_err(|_| Error::Request)?;
+	let id = format!("{}-{}", file.header.name.to_string(), file.header.version.to_string());
+
+	let bytes = file.to_bytes();
+	let byte_string = String::from_utf8(bytes).map_err(|_| Error::Request)?;
+
+	let id_value = surrealdb::sql::value(&id)?;
+	let data_value = surrealdb::sql::value(&byte_string)?;
+
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	let sql = "DEFINE_MODEL $id CONTENT $data";
 	let vars = map!{
-		String::from("id") => id,
-		String::from("data") => bytes
+		String::from("id") => id_value,
+		String::from("data") => data_value
 	};
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match maybe_output.as_deref() {
