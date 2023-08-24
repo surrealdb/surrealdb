@@ -185,7 +185,7 @@ mod ws_integration {
 		let res = common::ws_send_msg_and_wait_response(
 			socket,
 			serde_json::to_string(&json!({
-				"id": "AE79D62DAA8945F59A06083766763E95",
+				"id": "1",
 				"method": "signup",
 				"params": [{
 					"ns": "N",
