@@ -188,7 +188,6 @@ mod cli_integration {
 	async fn with_root_auth() {
 		// Commands with credentials when auth is enabled, should succeed
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		println!("addr: {}", addr);
 		let creds = format!("--user {USER} --pass {PASS}");
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
