@@ -58,16 +58,17 @@ impl<'a> Document<'a> {
 					let not_id = sql::Uuid::new_v4();
 					if stm.is_delete() {
 						// Send a DELETE notification
+						let thing = (*rid).clone();
 						let notification = Notification {
 							live_id: lv.id.clone(),
 							node_id: lv.node.clone(),
-							notification_id: not_id,
+							notification_id: not_id.clone(),
 							action: Action::Delete,
 							result: Value::Thing((*rid).clone()),
-							timestamp: ts,
+							timestamp: ts.clone(),
 						};
 						if opt.id()? == lv.node.0 {
-							let thing = (*rid).clone();
+							// TODO read pending remote notifications
 							chn.send(notification).await?;
 						} else {
 							tx.putc_tbnt(
@@ -84,25 +85,33 @@ impl<'a> Document<'a> {
 						}
 					} else if self.is_new() {
 						// Send a CREATE notification
+						let notification = Notification {
+							live_id: lv.id.clone(),
+							node_id: lv.node.clone(),
+							notification_id: not_id,
+							action: Action::Create,
+							result: self.pluck(ctx, opt, txn, &lq).await?,
+							timestamp: ts.clone(),
+						};
 						if opt.id()? == lv.node.0 {
-							chn.send(Notification {
-								live_id: lv.id.clone(),
-								action: Action::Create,
-								result: self.pluck(ctx, opt, txn, &lq).await?,
-							})
-							.await?;
+							// TODO read pending remote notifications
+							chn.send(notification).await?;
 						} else {
 							// TODO: Send to storage
 						}
 					} else {
 						// Send a UPDATE notification
+						let notification = Notification {
+							live_id: lv.id.clone(),
+							node_id: lv.node.clone(),
+							notification_id: not_id.clone(),
+							action: Action::Update,
+							result: self.pluck(ctx, opt, txn, &lq).await?,
+							timestamp: ts.clone(),
+						};
 						if opt.id()? == lv.node.0 {
-							chn.send(Notification {
-								live_id: lv.id.clone(),
-								action: Action::Update,
-								result: self.pluck(ctx, opt, txn, &lq).await?,
-							})
-							.await?;
+							// TODO read pending remote notifications
+							chn.send(notification).await?;
 						} else {
 							// TODO: Send to storage
 						}
