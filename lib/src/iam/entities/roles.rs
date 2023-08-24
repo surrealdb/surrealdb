@@ -1,11 +1,13 @@
 use crate::iam::Error;
 use crate::sql::Ident;
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 // In the future, we will allow for custom roles. For now, provide predefined roles.
 #[derive(Hash, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub enum Role {
 	#[default]
 	Viewer,

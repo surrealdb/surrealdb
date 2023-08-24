@@ -106,6 +106,10 @@ pub enum Error {
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
+	/// Auth was expected to be set but was unknown
+	#[error("Auth was expected to be set but was unknown")]
+	UnknownAuth,
+
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
 	InvalidQuery {
