@@ -153,8 +153,6 @@ mod ws_integration {
 
 		// Verify it returns a token
 		assert!(res["result"].is_string(), "result: {:?}", res);
-
-		let res = res["result"].as_str().unwrap();
 		Ok(())
 	}
 
@@ -285,7 +283,6 @@ mod ws_integration {
 		let res =
 			common::ws_signin(socket2, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = res.unwrap();
 
 		// Insert
 		let id = "A23A05ABC15C420E9A7E13D2C8657890";
