@@ -150,8 +150,8 @@ mod api_integration {
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
-                panic!("record not found");
-            };
+				panic!("record not found");
+			};
 			assert_eq!(record.id.to_string(), "item:foo");
 		}
 
@@ -159,14 +159,16 @@ mod api_integration {
 		async fn cant_sign_into_default_root_account() {
 			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
-			let Error::Db(DbError::InvalidAuth) = db.signin(Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
-			})
-			.await
-			.unwrap_err() else {
-                panic!("unexpected successful login");
-            };
+			let Error::Db(DbError::InvalidAuth) = db
+				.signin(Root {
+					username: ROOT_USER,
+					password: ROOT_PASS,
+				})
+				.await
+				.unwrap_err()
+			else {
+				panic!("unexpected successful login");
+			};
 		}
 
 		#[tokio::test]
@@ -179,9 +181,14 @@ mod api_integration {
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let res = db.create(Resource::from("item:foo")).await;
-			let Error::Db(DbError::IamError(iam::Error::NotAllowed { actor: _, action: _, resource: _ })) = res.unwrap_err() else {
-                panic!("expected permissions error");
-            };
+			let Error::Db(DbError::IamError(iam::Error::NotAllowed {
+				actor: _,
+				action: _,
+				resource: _,
+			})) = res.unwrap_err()
+			else {
+				panic!("expected permissions error");
+			};
 		}
 
 		#[tokio::test]
