@@ -1223,11 +1223,12 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		live_stm: LiveStatement,
+		expected: Option<LiveStatement>,
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
-		self.putc(key_enc, live_stm, None).await
+		self.putc(key_enc, live_stm, expected).await
 	}
 
 	/// Retrieve all namespace definitions in a datastore.

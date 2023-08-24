@@ -53,7 +53,10 @@ impl<'a> Document<'a> {
 						})
 						.await?;
 					} else {
-						txn.lock().await.putc_tblq(opt.ns(), opt.db(),&self.id.unwrap().tb, lv.clone()).await?;
+						txn.lock()
+							.await
+							.putc_tblq(opt.ns(), opt.db(), &self.id.unwrap().tb, lv.clone(), None)
+							.await?;
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
