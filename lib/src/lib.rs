@@ -114,6 +114,9 @@ mod exe;
 mod fnc;
 mod vs;
 
+#[cfg(feature = "ml")]
+mod ml;
+
 pub mod sql;
 
 #[doc(hidden)]
