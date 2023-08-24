@@ -12,6 +12,7 @@ use bytes::Bytes;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
+use surrealml::storage::surml_file::SurMlFile;
 
 use super::headers::Accept;
 
@@ -63,16 +64,28 @@ async fn handler(
 async fn ml_handler(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
-	// surreal_ml_file: Bytes,
+	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+
+	let file = SurMlFile::from_bytes(body).map_err(|_| Error::Request)?;
+	let id = format!("{}-{}", file.header.name, file.header.version);
+	let bytes = file.to_bytes().map_err(|_| Error::Request)?;
 	// Get the datastore reference
 	let db = DB.get().unwrap();
-	// Convert the body to a byte slice
-	let sql = bytes_to_utf8(&sql)?;
-	// Execute the sql query in the database
-	match db.import(sql, &session).await {
+	let sql = "DEFINE_MODEL $id CONTENT $data";
+	let vars = map!{
+		String::from("id") => id,
+		String::from("data") => bytes
+	};
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match maybe_output.as_deref() {
-			// we don't return anything
+			// Simple serialization but we are returning nothing
+			Some(Accept::ApplicationJson) => Ok(output::none()),
+			Some(Accept::ApplicationCbor) => Ok(output::none()),
+			Some(Accept::ApplicationPack) => Ok(output::none()),
+			// Internal serialization
+			Some(Accept::Surrealdb) => Ok(output::full(&res)),
+			// Return nothing
 			Some(Accept::ApplicationOctetStream) => Ok(output::none()),
 			// An incorrect content-type was requested
 			_ => Err(Error::InvalidType),
