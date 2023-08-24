@@ -33,7 +33,7 @@ use crate::sql::statements::show::{show, ShowStatement};
 use crate::sql::statements::sleep::{sleep, SleepStatement};
 use crate::sql::statements::throw::{throw, ThrowStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::value::Value;
+use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -83,6 +83,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub enum Statement {
+	Value(Value),
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
 	Break(BreakStatement),
@@ -127,6 +128,7 @@ impl Statement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Self::Value(v) => v.writeable(),
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
 			Self::Continue(_) => false,
@@ -183,6 +185,12 @@ impl Statement {
 			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Throw(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Value(v) => {
+				// Ensure futures are processed
+				let opt = &opt.new_with_futures(true);
+				// Process the output value
+				v.compute(ctx, opt, txn, doc).await
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -191,6 +199,7 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
+			Self::Value(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Break(v) => write!(Pretty::from(f), "{v}"),
@@ -255,6 +264,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 				map(update, Statement::Update),
 				map(r#use, Statement::Use),
 			)),
+			map(value, Statement::Value),
 		)),
 		mightbespace,
 	)(i)
