@@ -53,9 +53,17 @@ impl<'a> Document<'a> {
 						})
 						.await?;
 					} else {
+						let ts = txn.lock().await.clock();
 						txn.lock()
 							.await
-							.putc_tblq(opt.ns(), opt.db(), &self.id.unwrap().tb, lv.clone(), None)
+							.putc_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								lv.id.clone(),
+								ts,
+								None,
+							)
 							.await?;
 					}
 				} else if self.is_new() {

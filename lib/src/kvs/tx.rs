@@ -5,6 +5,7 @@ use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
+use crate::dbs::Notification;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::kvs::cache::Cache;
@@ -1216,7 +1217,39 @@ impl Transaction {
 		Ok(res)
 	}
 
-	/// Add live notification to table
+	pub async fn scan_tbnt<'a>(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		limit: u32,
+	) -> Result<Vec<LqValue>, Error> {
+		let pref = crate::key::table::lq::prefix(ns, db, tb);
+		let suff = crate::key::table::lq::suffix(ns, db, tb);
+		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&pref),
+			crate::key::debug::sprint_key(&suff),
+		);
+		let rng = pref..suff;
+		let scanned = self.scan(rng, limit).await?;
+		let mut res: Vec<LqValue> = vec![];
+		for (key, value) in scanned {
+			trace!("scan_lv: key={:?} value={:?}", &key, &value);
+			let val: LiveStatement = value.into();
+			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
+			res.push(LqValue {
+				nd: val.node,
+				ns: lv.ns.to_string(),
+				db: lv.db.to_string(),
+				tb: lv.tb.to_string(),
+				lq: val.id.clone(),
+			});
+		}
+		Ok(res)
+	}
+
+	/// Add live query to table
 	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
@@ -1227,8 +1260,26 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
+	}
+
+	/// Add live notification to table live query
+	pub async fn putc_tbnt(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		lq: sql::Uuid,
+		ts: Timestamp,
+		id: sql::Uuid,
+		nt: Notification,
+		expected: Option<Notification>,
+	) -> Result<(), Error> {
+		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
+		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
+		trace!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
+		self.putc(key_enc, nt, expected).await
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
