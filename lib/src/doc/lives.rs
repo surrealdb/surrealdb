@@ -53,7 +53,7 @@ impl<'a> Document<'a> {
 						})
 						.await?;
 					} else {
-						// TODO: Send to storage
+						txn.lock().await.putc_tblq(opt.ns(), opt.db(),&self.id.unwrap().tb, lv.clone()).await?;
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
