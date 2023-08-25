@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
@@ -11,11 +12,14 @@ use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::sequence::preceded;
+use nom::combinator::opt;
+use nom::sequence::{preceded, terminated};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct SetStatement {
 	pub name: String,
 	pub what: Value,
@@ -34,7 +38,16 @@ impl SetStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		self.what.compute(ctx, opt, txn, doc).await
+		// Check if the variable is a protected variable
+		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
+			// The variable isn't protected and can be stored
+			false => self.what.compute(ctx, opt, txn, doc).await,
+			// The user tried to set a protected variable
+			true => Err(Error::InvalidParam {
+				// Move the parameter name, as we no longer need it
+				name: self.name.to_owned(),
+			}),
+		}
 	}
 }
 
@@ -45,8 +58,7 @@ impl fmt::Display for SetStatement {
 }
 
 pub fn set(i: &str) -> IResult<&str, SetStatement> {
-	let (i, _) = tag_no_case("LET")(i)?;
-	let (i, _) = shouldbespace(i)?;
+	let (i, _) = opt(terminated(tag_no_case("LET"), shouldbespace))(i)?;
 	let (i, n) = preceded(char('$'), ident_raw)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('=')(i)?;

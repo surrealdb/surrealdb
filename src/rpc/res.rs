@@ -75,7 +75,7 @@ impl Response {
 			Ok(data) => {
 				let value = match data {
 					Data::Query(vec) => sql::to_value(vec).unwrap(),
-					Data::Live(nofication) => sql::to_value(nofication).unwrap(),
+					Data::Live(notification) => sql::to_value(notification).unwrap(),
 					Data::Other(value) => value,
 				};
 				json!({

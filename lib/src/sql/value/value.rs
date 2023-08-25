@@ -20,11 +20,11 @@ use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
 use crate::sql::expression::{binary, unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{self, function, Function};
+use crate::sql::function::{function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
-use crate::sql::id::Id;
-use crate::sql::idiom::{self, Idiom};
+use crate::sql::id::{Gen, Id};
+use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::decimal_is_integer;
@@ -40,6 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
+use crate::sql::{operator, Query};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -51,6 +52,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
+use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -64,7 +66,8 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -105,6 +108,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to
@@ -145,9 +149,11 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
+	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	Query(Query),
 	// Add new variants here
 }
 
@@ -525,8 +531,13 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
-			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
+			Id::Object(v) => v.into(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Id::rand().into(),
+				Gen::Ulid => Id::ulid().into(),
+				Gen::Uuid => Id::uuid().into(),
+			},
 		}
 	}
 }
@@ -770,6 +781,14 @@ impl Value {
 		Ok(self)
 	}
 
+	/// Convert this Value to an Option
+	pub fn some(self) -> Option<Value> {
+		match self {
+			Value::None => None,
+			val => Some(val),
+		}
+	}
+
 	// -----------------------------------
 	// Simple value detection
 	// -----------------------------------
@@ -854,6 +873,11 @@ impl Value {
 	/// Check if this Value is a Strand
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
+	}
+
+	/// Check if this Value is a Query
+	pub fn is_query(&self) -> bool {
+		matches!(self, Value::Query(_))
 	}
 
 	/// Check if this Value is a float Number
@@ -1028,6 +1052,25 @@ impl Value {
 		}
 	}
 
+	/// Returns if this value can be the start of a idiom production.
+	pub fn can_start_idiom(&self) -> bool {
+		match self {
+			Value::Function(x) => !x.is_script(),
+			Value::Subquery(_)
+			| Value::Constant(_)
+			| Value::Datetime(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Number(_)
+			| Value::Object(_)
+			| Value::Array(_)
+			| Value::Param(_)
+			| Value::Edges(_)
+			| Value::Thing(_) => true,
+			_ => false,
+		}
+	}
+
 	/// Try to convert this Value into a set of JSONPatch operations
 	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
 		match self {
@@ -1153,7 +1196,7 @@ impl Value {
 				}
 				Err(Error::CoerceTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1165,7 +1208,7 @@ impl Value {
 				..
 			}) => Err(Error::CoerceTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -1547,7 +1590,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -1565,13 +1608,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1591,7 +1634,7 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -1610,13 +1653,13 @@ impl Value {
 					..
 				} => Error::CoerceTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -1679,7 +1722,7 @@ impl Value {
 				}
 				Err(Error::ConvertTo {
 					from: val,
-					into: kind.to_string().into(),
+					into: kind.to_string(),
 				})
 			}
 		};
@@ -1691,7 +1734,7 @@ impl Value {
 				..
 			}) => Err(Error::ConvertTo {
 				from,
-				into: kind.to_string().into(),
+				into: kind.to_string(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -2108,7 +2151,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}>").into(),
+					into: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -2126,13 +2169,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("array<{kind}, {len}>").into(),
+					into: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>").into(),
+					kind: format!("array<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -2152,7 +2195,7 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}>").into(),
+					into: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -2171,13 +2214,13 @@ impl Value {
 					..
 				} => Error::ConvertTo {
 					from,
-					into: format!("set<{kind}, {len}>").into(),
+					into: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
 			.and_then(|v| match v.len() {
 				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>").into(),
+					kind: format!("set<{kind}, {len}>"),
 					size: v,
 				}),
 				_ => Ok(v),
@@ -2468,6 +2511,7 @@ impl fmt::Display for Value {
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
+			Value::Query(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
@@ -2692,12 +2736,31 @@ impl TryNeg for Value {
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((map(binary, Value::from), single))(i)
+	let (i, start) = single(i)?;
+	let (i, expr_tail) = opt(|i| {
+		let (i, o) = operator::binary(i)?;
+		let (i, r) = value(i)?;
+		Ok((i, (o, r)))
+	})(i)?;
+	let v = if let Some((o, r)) = expr_tail {
+		let expr = match r {
+			Value::Expression(r) => r.augment(start, o),
+			_ => Expression::new(start, o, r),
+		};
+		Value::from(expr)
+	} else {
+		start
+	};
+	Ok((i, v))
 }
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
-	alt((
+	// Dive in `single` (as opposed to `value`) since it is directly
+	// called by `Cast`
+	let _diving = crate::sql::parser::depth::dive()?;
+
+	let (i, v) = alt((
 		alt((
 			terminated(
 				alt((
@@ -2708,7 +2771,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 				)),
 				keyword,
 			),
-			map(idiom::multi, Value::from),
+			map(idiom::multi_without_start, Value::from),
 		)),
 		alt((
 			map(cast, Value::from),
@@ -2736,11 +2799,12 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(strand, Value::from),
 			map(idiom::path, Value::from),
 		)),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
 pub fn select(i: &str) -> IResult<&str, Value> {
-	alt((
+	let (i, v) = alt((
 		alt((
 			map(unary, Value::from),
 			map(binary, Value::from),
@@ -2748,7 +2812,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::Bool(true)),
 			map(tag_no_case("false"), |_| Value::Bool(false)),
-			map(idiom::multi, Value::from),
+			map(idiom::multi_without_start, Value::from),
 		)),
 		alt((
 			map(cast, Value::from),
@@ -2773,33 +2837,14 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(table, Value::from),
 			map(strand, Value::from),
 		)),
-	))(i)
-}
-
-/// Used as the starting part of a complex Idiom
-pub fn start(i: &str) -> IResult<&str, Value> {
-	alt((
-		map(function::normal, Value::from),
-		map(function::custom, Value::from),
-		map(subquery, Value::from),
-		map(constant, Value::from),
-		map(datetime, Value::from),
-		map(duration, Value::from),
-		map(unique, Value::from),
-		map(number, Value::from),
-		map(strand, Value::from),
-		map(object, Value::from),
-		map(array, Value::from),
-		map(param, Value::from),
-		map(edges, Value::from),
-		map(thing, Value::from),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
-	alt((
-		map(idiom::multi, Value::from),
+	let (i, v) = alt((
+		map(idiom::multi_without_start, Value::from),
 		map(function, Value::from),
 		map(subquery, Value::from),
 		map(constant, Value::from),
@@ -2813,13 +2858,15 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(range, Value::from),
 		map(thing, Value::from),
 		map(table, Value::from),
-	))(i)
+	))(i)?;
+	reparse_idiom_start(v, i)
 }
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	// Use a specific parser for JSON objects
-	pub fn object(i: &str) -> IResult<&str, Object> {
+	fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = separated_list0(commas, |i| {
@@ -2837,7 +2884,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		Ok((i, Object(v.into_iter().collect())))
 	}
 	// Use a specific parser for JSON arrays
-	pub fn array(i: &str) -> IResult<&str, Array> {
+	fn array(i: &str) -> IResult<&str, Array> {
 		let (i, _) = char('[')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = separated_list0(commas, json)(i)?;
@@ -2964,13 +3011,20 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(1, Value::None.to_vec().len());
-		assert_eq!(1, Value::Null.to_vec().len());
-		assert_eq!(2, Value::Bool(true).to_vec().len());
-		assert_eq!(2, Value::Bool(false).to_vec().len());
-		assert_eq!(6, Value::from("test").to_vec().len());
-		assert_eq!(15, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(22, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		let enc: Vec<u8> = Value::None.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Null.try_into().unwrap();
+		assert_eq!(2, enc.len());
+		let enc: Vec<u8> = Value::Bool(true).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::Bool(false).try_into().unwrap();
+		assert_eq!(3, enc.len());
+		let enc: Vec<u8> = Value::from("test").try_into().unwrap();
+		assert_eq!(8, enc.len());
+		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").try_into().unwrap();
+		assert_eq!(19, enc.len());
+		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").try_into().unwrap();
+		assert_eq!(27, enc.len());
 	}
 
 	#[test]
@@ -2981,8 +3035,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.into();
-		let dec: Value = enc.into();
+		let enc: Vec<u8> = val.try_into().unwrap();
+		let dec: Value = enc.try_into().unwrap();
 		assert_eq!(res, dec);
 	}
 }

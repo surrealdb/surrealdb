@@ -48,6 +48,7 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
+use crate::sql::Number;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
@@ -108,13 +109,14 @@ use tokio::io::AsyncWriteExt;
 /// Instantiating an in-memory strict instance
 ///
 /// ```
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::Mem;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// let db = Surreal::new::<Mem>(Strict).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<Mem>(config).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -145,11 +147,12 @@ pub struct Mem;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::File;
 ///
-/// let db = Surreal::new::<File>(("temp.db", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<File>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -180,11 +183,12 @@ pub struct File;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::RocksDb;
 ///
-/// let db = Surreal::new::<RocksDb>(("temp.db", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -215,11 +219,12 @@ pub struct RocksDb;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::SpeeDb;
 ///
-/// let db = Surreal::new::<SpeeDb>(("temp.db", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<SpeeDb>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -250,11 +255,12 @@ pub struct SpeeDb;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::IndxDb;
 ///
-/// let db = Surreal::new::<IndxDb>(("MyDatabase", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<IndxDb>(("MyDatabase", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -285,11 +291,12 @@ pub struct IndxDb;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::TiKv;
 ///
-/// let db = Surreal::new::<TiKv>(("localhost:2379", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<TiKv>(("localhost:2379", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -307,7 +314,6 @@ pub struct TiKv;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::FDb;
 ///
@@ -321,11 +327,12 @@ pub struct TiKv;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
+/// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::FDb;
 ///
-/// let db = Surreal::new::<FDb>(("fdb.cluster", Strict)).await?;
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<FDb>(("fdb.cluster", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -632,6 +639,17 @@ async fn router(
 				_ => unreachable!(),
 			};
 			vars.insert(key, value);
+			Ok(DbResponse::Other(Value::None))
+		}
+		Method::Tick => {
+			let ts = match &mut params[..1] {
+				[Value::Number(Number::Int(ts))] => {
+					let ts = ts.to_owned();
+					ts as u64
+				}
+				_ => unreachable!(),
+			};
+			kvs.tick_at(ts).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {

@@ -144,6 +144,12 @@ impl<R> IntoResource<Option<R>> for Thing {
 	}
 }
 
+impl<R> IntoResource<Option<R>> for &Thing {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::RecordId(self.clone()))
+	}
+}
+
 impl<R, T, I> IntoResource<Option<R>> for (T, I)
 where
 	T: Into<String>,

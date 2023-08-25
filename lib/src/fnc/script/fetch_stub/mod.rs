@@ -1,6 +1,10 @@
 //! stub implementations for the fetch API when `http` is not enabled.
 
-use js::{class::Trace, Class, Ctx, Exception, Function, Result};
+use js::{
+	class::{ClassId, JsClass, Trace, Tracer},
+	function::Constructor,
+	Class, Ctx, Exception, Function, Object, Result,
+};
 
 #[cfg(test)]
 mod test;
@@ -29,24 +33,44 @@ macro_rules! impl_stub_class {
 			mod $module{
 				use super::*;
 
-				#[js::class]
-				#[derive(Trace)]
 				pub struct $name;
 
-				#[js::methods]
-				impl $name {
-					#[qjs(constructor)]
-					pub fn new(ctx: Ctx<'_>) -> Result<Self> {
-						Err(Exception::throw_internal(
-							&ctx,
-							concat!(
-								"The '",
-								stringify!($name),
-								"' class is not available in this build of SurrealDB. In order to use '",
-								stringify!($name),
-								"', enable the 'http' feature."
-							),
-						))
+				impl<'js> Trace<'js> for $name{
+					fn trace<'a>(&self, _tracer: Tracer<'a, 'js>){}
+				}
+
+				impl<'js> JsClass<'js> for $name {
+					const NAME: &'static str = stringify!($name);
+
+					type Mutable = js::class::Readable;
+
+					/// A unique id for the class.
+					fn class_id() -> &'static ClassId{
+						static ID: ClassId = ClassId::new();
+						&ID
+					}
+
+					/// Returns the class prototype,
+					fn prototype(ctx: &Ctx<'js>) -> Result<Option<Object<'js>>>{
+						Object::new(ctx.clone()).map(Some)
+					}
+
+					/// Returns a predefined constructor for this specific class type if there is one.
+					fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>>{
+						fn new(ctx: Ctx<'_>) -> Result<()> {
+							Err(Exception::throw_internal(
+								&ctx,
+								concat!(
+									"The '",
+									stringify!($name),
+									"' class is not available in this build of SurrealDB. In order to use '",
+									stringify!($name),
+									"', enable the 'http' feature."
+								),
+							))
+						}
+
+						Constructor::new_class::<$name,_,_>(ctx.clone(), new).map(Some)
 					}
 				}
 			}

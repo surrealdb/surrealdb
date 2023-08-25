@@ -25,6 +25,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
@@ -53,7 +54,7 @@ struct AppState {
 	client_ip: client_ip::ClientIp,
 }
 
-pub async fn init() -> Result<(), Error> {
+pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
@@ -131,7 +132,7 @@ pub async fn init() -> Result<(), Error> {
 
 	// Setup the graceful shutdown
 	let handle = Handle::new();
-	let shutdown_handler = graceful_shutdown(handle.clone());
+	let shutdown_handler = graceful_shutdown(ct, handle.clone());
 
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// configure certificate and private key used by https

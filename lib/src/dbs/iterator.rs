@@ -77,9 +77,187 @@ impl Iterator {
 		Self::default()
 	}
 
-	/// Prepares a value for processing
+	/// Ingests an iterable for processing
 	pub fn ingest(&mut self, val: Iterable) {
 		self.entries.push(val)
+	}
+
+	/// Prepares a value for processing
+	pub async fn prepare(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		val: Value,
+	) -> Result<(), Error> {
+		// Match the values
+		match val {
+			Value::Table(v) => match stm.data() {
+				// There is a data clause so fetch a record id
+				Some(data) => match stm {
+					Statement::Create(_) => {
+						let id = match data.rid(ctx, opt, txn).await? {
+							// Generate a new id from the id field
+							Some(id) => id.generate(&v, false)?,
+							// Generate a new random table id
+							None => v.generate(),
+						};
+						self.ingest(Iterable::Thing(id))
+					}
+					_ => {
+						// Ingest the table for scanning
+						self.ingest(Iterable::Table(v))
+					}
+				},
+				// There is no data clause so create a record id
+				None => match stm {
+					Statement::Create(_) => {
+						// Generate a new random table id
+						self.ingest(Iterable::Thing(v.generate()))
+					}
+					_ => {
+						// Ingest the table for scanning
+						self.ingest(Iterable::Table(v))
+					}
+				},
+			},
+			Value::Thing(v) => {
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						// Check to see the type of the id
+						match id {
+							// The id is a match, so don't error
+							Value::Thing(id) if id == v => (),
+							// The id does not match
+							id => {
+								return Err(Error::IdMismatch {
+									value: id.to_string(),
+								});
+							}
+						}
+					}
+				}
+				// Add the record to the iterator
+				self.ingest(Iterable::Thing(v));
+			}
+			Value::Model(v) => {
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						return Err(Error::IdMismatch {
+							value: id.to_string(),
+						});
+					}
+				}
+				// Add the records to the iterator
+				for v in v {
+					self.ingest(Iterable::Thing(v))
+				}
+			}
+			Value::Range(v) => {
+				// Check if this is a create statement
+				if let Statement::Create(_) = stm {
+					return Err(Error::InvalidStatementTarget {
+						value: v.to_string(),
+					});
+				}
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						return Err(Error::IdMismatch {
+							value: id.to_string(),
+						});
+					}
+				}
+				// Add the record to the iterator
+				self.ingest(Iterable::Range(*v));
+			}
+			Value::Edges(v) => {
+				// Check if this is a create statement
+				if let Statement::Create(_) = stm {
+					return Err(Error::InvalidStatementTarget {
+						value: v.to_string(),
+					});
+				}
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						return Err(Error::IdMismatch {
+							value: id.to_string(),
+						});
+					}
+				}
+				// Add the record to the iterator
+				self.ingest(Iterable::Edges(*v));
+			}
+			Value::Object(v) => {
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						return Err(Error::IdMismatch {
+							value: id.to_string(),
+						});
+					}
+				}
+				// Check if the object has an id field
+				match v.rid() {
+					Some(id) => {
+						// Add the record to the iterator
+						self.ingest(Iterable::Thing(id))
+					}
+					None => {
+						return Err(Error::InvalidStatementTarget {
+							value: v.to_string(),
+						});
+					}
+				}
+			}
+			Value::Array(v) => {
+				// Check if there is a data clause
+				if let Some(data) = stm.data() {
+					// Check if there is an id field specified
+					if let Some(id) = data.rid(ctx, opt, txn).await? {
+						return Err(Error::IdMismatch {
+							value: id.to_string(),
+						});
+					}
+				}
+				// Add the records to the iterator
+				for v in v {
+					match v {
+						Value::Thing(v) => self.ingest(Iterable::Thing(v)),
+						Value::Edges(v) => self.ingest(Iterable::Edges(*v)),
+						Value::Object(v) => match v.rid() {
+							Some(v) => self.ingest(Iterable::Thing(v)),
+							None => {
+								return Err(Error::InvalidStatementTarget {
+									value: v.to_string(),
+								})
+							}
+						},
+						_ => {
+							return Err(Error::InvalidStatementTarget {
+								value: v.to_string(),
+							})
+						}
+					}
+				}
+			}
+			v => {
+				return Err(Error::InvalidStatementTarget {
+					value: v.to_string(),
+				})
+			}
+		};
+		// All ingested ok
+		Ok(())
 	}
 
 	/// Process the records and output

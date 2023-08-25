@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Iterable, Transaction};
+use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -16,10 +16,12 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct UpdateStatement {
 	pub what: Values,
 	pub data: Option<Data>,
@@ -54,65 +56,22 @@ impl UpdateStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
 		// Loop over the update targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
-			match v {
-				Value::Table(v) => i.ingest(Iterable::Table(v)),
-				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-				Value::Range(v) => i.ingest(Iterable::Range(*v)),
-				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-				Value::Model(v) => {
-					for v in v {
-						i.ingest(Iterable::Thing(v));
-					}
-				}
-				Value::Array(v) => {
-					for v in v {
-						match v {
-							Value::Table(v) => i.ingest(Iterable::Table(v)),
-							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-							Value::Model(v) => {
-								for v in v {
-									i.ingest(Iterable::Thing(v));
-								}
-							}
-							Value::Object(v) => match v.rid() {
-								Some(v) => i.ingest(Iterable::Thing(v)),
-								None => {
-									return Err(Error::UpdateStatement {
-										value: v.to_string(),
-									})
-								}
-							},
-							v => {
-								return Err(Error::UpdateStatement {
-									value: v.to_string(),
-								})
-							}
-						};
-					}
-				}
-				Value::Object(v) => match v.rid() {
-					Some(v) => i.ingest(Iterable::Thing(v)),
-					None => {
-						return Err(Error::UpdateStatement {
-							value: v.to_string(),
-						})
-					}
+			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+				Error::InvalidStatementTarget {
+					value: v,
+				} => Error::UpdateStatement {
+					value: v,
 				},
-				v => {
-					return Err(Error::UpdateStatement {
-						value: v.to_string(),
-					})
-				}
-			};
+				e => e,
+			})?;
 		}
-		// Assign the statement
-		let stm = Statement::from(self);
 		// Output the results
 		i.output(ctx, opt, txn, &stm).await
 	}

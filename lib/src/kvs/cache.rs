@@ -1,3 +1,4 @@
+use crate::idg::u32::U32;
 use crate::kvs::kv::Key;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -5,12 +6,12 @@ use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineFunctionStatement;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineLoginStatement;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineScopeStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::DefineTokenStatement;
+use crate::sql::statements::DefineUserStatement;
 use crate::sql::statements::LiveStatement;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,19 +25,20 @@ pub enum Entry {
 	// Multi definitions
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
-	Dls(Arc<[DefineLoginStatement]>),
 	Dts(Arc<[DefineTokenStatement]>),
+	Dus(Arc<[DefineUserStatement]>),
 	Evs(Arc<[DefineEventStatement]>),
 	Fcs(Arc<[DefineFunctionStatement]>),
 	Fds(Arc<[DefineFieldStatement]>),
 	Fts(Arc<[DefineTableStatement]>),
 	Ixs(Arc<[DefineIndexStatement]>),
 	Lvs(Arc<[LiveStatement]>),
-	Nls(Arc<[DefineLoginStatement]>),
 	Nss(Arc<[DefineNamespaceStatement]>),
 	Nts(Arc<[DefineTokenStatement]>),
+	Nus(Arc<[DefineUserStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
+	Seq(U32),
 	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
 }
@@ -56,5 +58,9 @@ impl Cache {
 	/// Delete a key from the cache
 	pub fn del(&mut self, key: &Key) -> Option<Entry> {
 		self.0.remove(key)
+	}
+	/// Clears a cache completely
+	pub fn clear(&mut self) {
+		self.0.clear()
 	}
 }

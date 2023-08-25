@@ -1,5 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
+	use chrono::DateTime;
 	use once_cell::sync::Lazy;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -15,6 +16,7 @@ mod api_integration {
 	use surrealdb::opt::auth::Namespace;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::auth::Scope;
+	use surrealdb::opt::Config;
 	use surrealdb::opt::PatchOp;
 	use surrealdb::opt::Resource;
 	use surrealdb::sql::statements::BeginStatement;
@@ -130,7 +132,8 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<Mem>(root).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
@@ -147,8 +150,8 @@ mod api_integration {
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
-                panic!("record not found");
-            };
+				panic!("record not found");
+			};
 			assert_eq!(record.id.to_string(), "item:foo");
 		}
 
@@ -156,30 +159,36 @@ mod api_integration {
 		async fn cant_sign_into_default_root_account() {
 			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
-			let Error::Db(DbError::InvalidAuth) = db.signin(Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
-			})
-			.await
-			.unwrap_err() else {
-                panic!("unexpected successful login");
-            };
+			let Error::Db(DbError::InvalidAuth) = db
+				.signin(Root {
+					username: ROOT_USER,
+					password: ROOT_PASS,
+				})
+				.await
+				.unwrap_err()
+			else {
+				panic!("unexpected successful login");
+			};
 		}
 
 		#[tokio::test]
 		async fn credentials_activate_authentication() {
 			init_logger();
-			let db = Surreal::new::<Mem>(Root {
+			let config = Config::new().user(Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
-			})
-			.await
-			.unwrap();
+			});
+			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let res = db.create(Resource::from("item:foo")).await;
-			let Error::Db(DbError::IamError(iam::Error::NotAllowed { actor: _, action: _, resource: _ })) = res.unwrap_err() else {
-                panic!("expected permissions error");
-            };
+			let Error::Db(DbError::IamError(iam::Error::NotAllowed {
+				actor: _,
+				action: _,
+				resource: _,
+			})) = res.unwrap_err()
+			else {
+				panic!("expected permissions error");
+			};
 		}
 
 		#[tokio::test]
@@ -196,6 +205,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -213,12 +223,14 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<File>((path.as_str(), root)).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -236,12 +248,14 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<RocksDb>((path.as_str(), root)).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -259,12 +273,14 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<SpeeDb>((path.as_str(), root)).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -281,12 +297,14 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", root)).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 
@@ -303,12 +321,14 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", root)).await.unwrap();
+			let config = Config::new().user(root);
+			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
 
 		include!("api/mod.rs");
+		include!("api/local.rs");
 		include!("api/backup.rs");
 	}
 

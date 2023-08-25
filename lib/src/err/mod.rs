@@ -5,11 +5,10 @@ use crate::sql::value::Value;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-use bung::encode::Error as SerdeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use revision::Error as RevisionError;
 use serde::Serialize;
-use std::borrow::Cow;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
@@ -25,6 +24,16 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// This error is used for breaking a loop in a foreach statement
+	#[doc(hidden)]
+	#[error("Break statement has been reached")]
+	Break,
+
+	/// This error is used for skipping a loop in a foreach statement
+	#[doc(hidden)]
+	#[error("Continue statement has been reached")]
+	Continue,
+
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic")]
 	Unreachable,
@@ -32,6 +41,10 @@ pub enum Error {
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Deprecated(String),
+
+	/// A custom error has been thrown
+	#[error("An error occurred: {0}")]
+	Thrown(String),
 
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
@@ -92,6 +105,10 @@ pub enum Error {
 	/// There was an error with authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
+
+	/// Auth was expected to be set but was unknown
+	#[error("Auth was expected to be set but was unknown")]
+	UnknownAuth,
 
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
@@ -179,6 +196,10 @@ pub enum Error {
 		name: String,
 		message: String,
 	},
+
+	/// The URL is invalid
+	#[error("The URL `{0}` is invalid")]
+	InvalidUrl(String),
 
 	/// The size of the vector is incorrect
 	#[error("Incorrect vector dimension ({current}). Expected a vector of {expected} dimension.")]
@@ -361,44 +382,50 @@ pub enum Error {
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
-	/// Can not execute CREATE query using the specified value
-	#[error("Can not execute CREATE query using value '{value}'")]
+	/// Can not execute statement using the specified value
+	#[error("Can not execute statement using value '{value}'")]
+	InvalidStatementTarget {
+		value: String,
+	},
+
+	/// Can not execute CREATE statement using the specified value
+	#[error("Can not execute CREATE statement using value '{value}'")]
 	CreateStatement {
 		value: String,
 	},
 
-	/// Can not execute UPDATE query using the specified value
-	#[error("Can not execute UPDATE query using value '{value}'")]
+	/// Can not execute UPDATE statement using the specified value
+	#[error("Can not execute UPDATE statement using value '{value}'")]
 	UpdateStatement {
 		value: String,
 	},
 
-	/// Can not execute RELATE query using the specified value
-	#[error("Can not execute RELATE query using value '{value}'")]
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement using value '{value}'")]
 	RelateStatement {
 		value: String,
 	},
 
-	/// Can not execute DELETE query using the specified value
-	#[error("Can not execute DELETE query using value '{value}'")]
+	/// Can not execute DELETE statement using the specified value
+	#[error("Can not execute DELETE statement using value '{value}'")]
 	DeleteStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT query using the specified value
-	#[error("Can not execute INSERT query using value '{value}'")]
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement using value '{value}'")]
 	InsertStatement {
 		value: String,
 	},
 
-	/// Can not execute LIVE query using the specified value
-	#[error("Can not execute LIVE query using value '{value}'")]
+	/// Can not execute LIVE statement using the specified value
+	#[error("Can not execute LIVE statement using value '{value}'")]
 	LiveStatement {
 		value: String,
 	},
 
-	/// Can not execute KILL query using the specified id
-	#[error("Can not execute KILL query using id '{value}'")]
+	/// Can not execute KILL statement using the specified id
+	#[error("Can not execute KILL statement using id '{value}'")]
 	KillStatement {
 		value: String,
 	},
@@ -447,8 +474,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the id field, but a specific record has been specified")]
+	IdMismatch {
+		value: String,
+	},
+
 	/// Found a record id for the record but this is not a valid id
-	#[error("Found '{value}' for the record ID but this is not a valid id")]
+	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
 		value: String,
 	},
@@ -457,20 +490,20 @@ pub enum Error {
 	#[error("Expected a {into} but found {from}")]
 	CoerceTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to convert a value to another value
 	#[error("Expected a {into} but cannot convert {from} into a {into}")]
 	ConvertTo {
 		from: Value,
-		into: Cow<'static, str>,
+		into: String,
 	},
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
 	LengthInvalid {
-		kind: Cow<'static, str>,
+		kind: String,
 		size: usize,
 	},
 
@@ -510,10 +543,6 @@ pub enum Error {
 	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
-	/// Represents an underlying error with Serde encoding / decoding
-	#[error("Serde error: {0}")]
-	Serde(#[from] SerdeError),
-
 	/// Represents an underlying error with IO encoding / decoding
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
@@ -525,6 +554,10 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// Represents an underlying error with versioned data encoding / decoding
+	#[error("Versioned error: {0}")]
+	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]
@@ -592,6 +625,21 @@ pub enum Error {
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),
+
+	//
+	// Capabilities
+	//
+	/// Scripting is not allowed
+	#[error("Scripting functions are not allowed")]
+	ScriptingNotAllowed,
+
+	/// Function is not allowed
+	#[error("Function '{0}' is not allowed to be executed")]
+	FunctionNotAllowed(String),
+
+	/// Network target is not allowed
+	#[error("Access to network target '{0}' is not allowed")]
+	NetTargetNotAllowed(String),
 }
 
 impl From<Error> for String {

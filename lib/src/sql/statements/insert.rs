@@ -18,10 +18,12 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct InsertStatement {
 	pub into: Value,
 	pub data: Data,
@@ -125,6 +127,9 @@ impl fmt::Display for InsertStatement {
 			f.write_str(" IGNORE")?
 		}
 		write!(f, " INTO {} {}", self.into, self.data)?;
+		if let Some(ref v) = self.update {
+			write!(f, " {v}")?
+		}
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
@@ -186,5 +191,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value)", format!("{}", out))
+	}
+
+	#[test]
+	fn insert_statement_ignore_update() {
+		let sql = "INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value";
+		let res = insert(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value", format!("{}", out))
 	}
 }

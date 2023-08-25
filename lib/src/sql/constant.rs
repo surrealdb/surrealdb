@@ -12,6 +12,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::sequence::preceded;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -19,6 +20,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Constant")]
+#[revisioned(revision = 1)]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,

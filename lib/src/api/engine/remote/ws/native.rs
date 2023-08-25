@@ -17,7 +17,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
-use crate::sql::serde::deserialize;
+use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -106,7 +106,7 @@ impl Connection for Client {
 		Box::pin(async move {
 			let url = address.endpoint.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			let maybe_connector = address.tls_config.map(Connector::from);
+			let maybe_connector = address.config.tls_config.map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
@@ -172,7 +172,8 @@ pub(crate) fn router(
 			let mut request = BTreeMap::new();
 			request.insert("method".to_owned(), PING_METHOD.into());
 			let value = Value::from(request);
-			Message::Binary(value.into())
+			let value = serialize(&value).unwrap();
+			Message::Binary(value)
 		};
 
 		let mut vars = IndexMap::new();
@@ -214,7 +215,7 @@ pub(crate) fn router(
 							let (id, method, param) = request;
 							let params = match param.query {
 								Some((query, bindings)) => {
-									vec![query.to_string().into(), bindings.into()]
+									vec![query.into(), bindings.into()]
 								}
 								None => param.other,
 							};
@@ -228,6 +229,10 @@ pub(crate) fn router(
 									if let [Value::Strand(Strand(key))] = &params[..1] {
 										vars.remove(key);
 									}
+								}
+								Method::Tick => {
+									// Remote backend doesn't support tick
+									return;
 								}
 								_ => {}
 							}
@@ -244,7 +249,8 @@ pub(crate) fn router(
 								}
 								let payload = Value::from(request);
 								trace!("Request {payload}");
-								Message::Binary(payload.into())
+								let payload = serialize(&payload).unwrap();
+								Message::Binary(payload)
 							};
 							if let Method::Authenticate
 							| Method::Invalidate

@@ -9,13 +9,16 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::u16 as uint16;
 use nom::character::complete::u32 as uint32;
 use nom::combinator::{map, opt};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
+	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
@@ -67,12 +70,6 @@ impl Display for Distance {
 	}
 }
 
-impl Default for Index {
-	fn default() -> Self {
-		Self::Idx
-	}
-}
-
 impl Display for Index {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
@@ -106,12 +103,7 @@ impl Display for Index {
 }
 
 pub fn index(i: &str) -> IResult<&str, Index> {
-	alt((unique, search, mtree, non_unique))(i)
-}
-
-pub fn non_unique(i: &str) -> IResult<&str, Index> {
-	let (i, _) = tag("")(i)?;
-	Ok((i, Index::Idx))
+	alt((unique, search, mtree))(i)
 }
 
 pub fn unique(i: &str) -> IResult<&str, Index> {

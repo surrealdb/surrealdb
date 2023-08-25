@@ -1,10 +1,12 @@
 use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::character::complete::char;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Dir {
 	In,
 	Out,

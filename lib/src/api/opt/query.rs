@@ -292,8 +292,8 @@ where
 					return Ok(None);
 				}
 				let Some(value) = object.remove(key) else {
-                    return Ok(None);
-                };
+					return Ok(None);
+				};
 				from_value(value).map_err(Into::into)
 			}
 			_ => Ok(None),

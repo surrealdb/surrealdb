@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
+use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::paths::EDGE;
@@ -21,7 +22,13 @@ impl<'a> Document<'a> {
 		let rid = self.id.as_ref().unwrap();
 		// Set default field values
 		self.current.doc.to_mut().def(rid);
-		// Ensure edge fields are reset
+		// This is a RELATE statement, so reset fields
+		if let Workable::Relate(l, r) = &self.extras {
+			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.doc.to_mut().put(&*IN, l.clone().into());
+			self.current.doc.to_mut().put(&*OUT, r.clone().into());
+		}
+		// This is an UPDATE of a graph edge, so reset fields
 		if self.initial.doc.pick(&*EDGE).is_true() {
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, self.initial.doc.pick(&*IN));

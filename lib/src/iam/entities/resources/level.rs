@@ -1,3 +1,4 @@
+use revision::revisioned;
 use std::{
 	collections::{HashMap, HashSet},
 	str::FromStr,
@@ -7,6 +8,7 @@ use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Level {
 	#[default]
 	No,
@@ -123,20 +125,20 @@ impl From<()> for Level {
 }
 
 impl From<(&str,)> for Level {
-	fn from(val: (&str,)) -> Self {
-		Level::Namespace(val.0.to_owned())
+	fn from((ns,): (&str,)) -> Self {
+		Level::Namespace(ns.to_owned())
 	}
 }
 
 impl From<(&str, &str)> for Level {
-	fn from(val: (&str, &str)) -> Self {
-		Level::Database(val.0.to_owned(), val.1.to_owned())
+	fn from((ns, db): (&str, &str)) -> Self {
+		Level::Database(ns.to_owned(), db.to_owned())
 	}
 }
 
 impl From<(&str, &str, &str)> for Level {
-	fn from(val: (&str, &str, &str)) -> Self {
-		Level::Scope(val.0.to_owned(), val.1.to_owned(), val.2.to_owned())
+	fn from((ns, db, sc): (&str, &str, &str)) -> Self {
+		Level::Scope(ns.to_owned(), db.to_owned(), sc.to_owned())
 	}
 }
 

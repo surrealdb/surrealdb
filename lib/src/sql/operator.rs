@@ -9,12 +9,14 @@ use nom::character::complete::char;
 use nom::character::complete::u32 as uint32;
 use nom::character::complete::u8 as uint8;
 use nom::combinator::{map, opt};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
 /// Binary operators.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Operator {
 	//
 	Neg, // -

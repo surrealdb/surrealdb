@@ -1,9 +1,9 @@
 use crate::err::Error;
 use crate::iam::Error as IamError;
-use crate::sql::error::Error::{Field, Group, Order, Parser, Role, Split};
+use crate::sql::error::Error::{ExcessiveDepth, Field, Group, Order, Parser, Role, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
-use crate::sql::subquery::{subquery, Subquery};
+use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use nom::Err;
@@ -11,15 +11,18 @@ use std::str;
 use tracing::instrument;
 
 /// Parses a SurrealQL [`Query`]
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// a computation depth limit. If the limit is reached, parsing will return
+/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
+/// overflowing the call stack.
+///
+/// If you encounter this limit and believe that it should be increased,
+/// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
-}
-
-/// Parses a SurrealQL Subquery [`Subquery`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
-pub fn sub_query(input: &str) -> Result<Subquery, Error> {
-	parse_impl(input, subquery)
 }
 
 /// Parses a SurrealQL [`Thing`]
@@ -34,6 +37,12 @@ pub fn value(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::value)
 }
 
+/// Parses a SurrealQL Subquery [`Subquery`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn subquery(input: &str) -> Result<Subquery, Error> {
+	parse_impl(input, super::subquery::subquery)
+}
+
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
@@ -41,6 +50,9 @@ pub fn json(input: &str) -> Result<Value, Error> {
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
+	// Reset the parse depth limiter
+	depth::reset();
+
 	// Check the length of the input
 	match input.trim().len() {
 		// The input query was empty
@@ -64,6 +76,8 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 						sql: s.to_string(),
 					}
 				}
+				// There was a parsing error
+				ExcessiveDepth => Error::ComputationDepthExceeded,
 				// There was a SPLIT ON error
 				Field(e, f) => Error::InvalidField {
 					line: locate(input, e).1,
@@ -117,12 +131,76 @@ fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 	(tried, 0, 0)
 }
 
+pub(crate) mod depth {
+	use crate::cnf::MAX_COMPUTATION_DEPTH;
+	use crate::sql::Error::ExcessiveDepth;
+	use nom::Err;
+	use std::cell::Cell;
+	use std::thread::panicking;
+
+	thread_local! {
+		/// How many recursion levels deep parsing is currently.
+		static DEPTH: Cell<u8> = Cell::default();
+	}
+
+	/// Scale down `MAX_COMPUTATION_DEPTH` for parsing because:
+	///  - Only a few intermediate parsers, collectively sufficient to limit depth, call dive.
+	///  - Some of the depth budget during execution is for futures, graph traversal, and
+	///    other operations that don't exist during parsing.
+	///  - The parser currently runs in exponential time, so a lower limit guards against
+	///    CPU-intensive, time-consuming parsing.
+	const DEPTH_PER_DIVE: u8 = 4;
+
+	/// Call when starting the parser to reset the recursion depth.
+	#[inline(never)]
+	pub(super) fn reset() {
+		DEPTH.with(|cell| {
+			debug_assert_eq!(cell.get(), 0, "previous parsing stopped abruptly");
+			cell.set(0)
+		});
+	}
+
+	/// Call at least once in recursive parsing code paths to limit recursion depth.
+	#[inline(never)]
+	#[must_use = "must store and implicitly drop when returning"]
+	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
+		DEPTH.with(|cell| {
+			let depth = cell.get().saturating_add(DEPTH_PER_DIVE);
+			if depth <= *MAX_COMPUTATION_DEPTH {
+				cell.replace(depth);
+				Ok(Diving)
+			} else {
+				Err(Err::Failure(ExcessiveDepth))
+			}
+		})
+	}
+
+	#[must_use]
+	#[non_exhaustive]
+	pub(crate) struct Diving;
+
+	impl Drop for Diving {
+		fn drop(&mut self) {
+			DEPTH.with(|cell| {
+				if let Some(depth) = cell.get().checked_sub(DEPTH_PER_DIVE) {
+					cell.replace(depth);
+				} else {
+					debug_assert!(panicking());
+				}
+			});
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
 	use serde::Serialize;
-	use std::{collections::HashMap, time::Instant};
+	use std::{
+		collections::HashMap,
+		time::{Duration, Instant},
+	};
 
 	#[test]
 	fn no_ending() {
@@ -157,6 +235,83 @@ mod tests {
 		let sql = "    SELECT    *    FROM    { }} ";
 		let res = parse(sql);
 		assert!(res.is_err());
+	}
+
+	#[test]
+	fn parse_ok_recursion() {
+		let sql = "SELECT * FROM ((SELECT * FROM (5))) * 5;";
+		let res = parse(sql);
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn parse_ok_recursion_deeper() {
+		let sql = "SELECT * FROM (((( SELECT * FROM ((5)) + ((5)) + ((5)) )))) * ((( function() {return 5;} )));";
+		let start = Instant::now();
+		let res = parse(sql);
+		let elapsed = start.elapsed();
+		assert!(res.is_ok());
+		assert!(
+			elapsed < Duration::from_millis(2000),
+			"took {}ms, previously took ~1000ms in debug",
+			elapsed.as_millis()
+		)
+	}
+
+	#[test]
+	fn parse_recursion_cast() {
+		for n in [10, 100, 500] {
+			recursive("SELECT * FROM ", "<int>", "5", "", n, n > 50);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_geometry() {
+		for n in [1, 50, 100] {
+			recursive(
+				"SELECT * FROM ",
+				r#"{type: "GeometryCollection",geometries: ["#,
+				r#"{type: "MultiPoint",coordinates: [[10.0, 11.2],[10.5, 11.9]]}"#,
+				"]}",
+				n,
+				n > 25,
+			);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_javascript() {
+		for n in [10, 1000] {
+			recursive("SELECT * FROM ", "function() {", "return 5;", "}", n, n > 500);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_mixed() {
+		for n in [3, 15, 75] {
+			recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", n, n > 5);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_select() {
+		for n in [5, 10, 100] {
+			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", n, n > 15);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_value_subquery() {
+		for p in 1..=4 {
+			recursive("SELECT * FROM ", "(", "5", ")", 10usize.pow(p), p > 1);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_if_subquery() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "IF true THEN ", "5", " ELSE 4 END", 6usize.pow(p), p > 1);
+		}
 	}
 
 	#[test]
@@ -245,5 +400,48 @@ mod tests {
 		};
 
 		println!("sql::json took {:.10}s/iter", benchmark(|s| crate::sql::json(s).unwrap()));
+	}
+
+	/// Try parsing a query with O(n) recursion depth and expect to fail if and only if
+	/// `excessive` is true.
+	fn recursive(
+		prefix: &str,
+		recursive_start: &str,
+		base: &str,
+		recursive_end: &str,
+		n: usize,
+		excessive: bool,
+	) {
+		let mut sql = String::from(prefix);
+		for _ in 0..n {
+			sql.push_str(recursive_start);
+		}
+		sql.push_str(base);
+		for _ in 0..n {
+			sql.push_str(recursive_end);
+		}
+		let start = Instant::now();
+		let res = parse(&sql);
+		let elapsed = start.elapsed();
+		if excessive {
+			assert!(
+				matches!(res, Err(Error::ComputationDepthExceeded)),
+				"expected computation depth exceeded, got {:?}",
+				res
+			);
+		} else {
+			res.unwrap();
+		}
+		// The parser can terminate faster in the excessive case.
+		let cutoff = if excessive {
+			500
+		} else {
+			1000
+		};
+		assert!(
+			elapsed < Duration::from_millis(cutoff),
+			"took {}ms, previously much faster to parse {n} in debug mode",
+			elapsed.as_millis()
+		)
 	}
 }

@@ -10,11 +10,11 @@ use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
 use crate::node;
 use clap::Args;
-use ipnet::IpNet;
 use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -23,8 +23,35 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
+	#[arg(help = "The logging level for the database server")]
+	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
+	#[arg(default_value = "info")]
+	#[arg(value_parser = CustomEnvFilterParser::new())]
+	log: CustomEnvFilter,
+	#[arg(help = "Whether to hide the startup banner")]
+	#[arg(env = "SURREAL_NO_BANNER", long)]
+	#[arg(default_value_t = false)]
+	no_banner: bool,
+	#[arg(help = "Encryption key to use for on-disk encryption")]
+	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
+	#[arg(value_parser = super::validator::key_valid)]
+	#[arg(hide = true)] // Not currently in use
+	key: Option<String>,
+
 	#[arg(
-		help = "The username for the initial database root user. Only if no other root user exists"
+		help = "The interval at which to run node agent tick (including garbage collection)",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "10s")]
+	tick_interval: Duration,
+
+	//
+	// Authentication
+	//
+	#[arg(
+		help = "The username for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
 	)]
 	#[arg(
 		env = "SURREAL_USER",
@@ -35,7 +62,8 @@ pub struct StartCommandArguments {
 	)]
 	username: Option<String>,
 	#[arg(
-		help = "The password for the initial database root user. Only if no other root user exists"
+		help = "The password for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
 	)]
 	#[arg(
 		env = "SURREAL_PASS",
@@ -45,10 +73,20 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-	#[arg(help = "The allowed networks for master authentication")]
-	#[arg(env = "SURREAL_ADDR", long = "addr")]
-	#[arg(default_value = "127.0.0.1/32")]
-	allowed_networks: Vec<IpNet>,
+
+	//
+	// Datastore connection
+	//
+	#[command(next_help_heading = "Datastore connection")]
+	#[command(flatten)]
+	kvs: Option<StartCommandRemoteTlsOptions>,
+
+	//
+	// HTTP Server
+	//
+	#[command(next_help_heading = "HTTP server")]
+	#[command(flatten)]
+	web: Option<StartCommandWebTlsOptions>,
 	#[arg(help = "The method of detecting the client's IP address")]
 	#[arg(env = "SURREAL_CLIENT_IP", long)]
 	#[arg(default_value = "socket", value_enum)]
@@ -57,29 +95,13 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
 	listen_addresses: Vec<SocketAddr>,
-	#[arg(help = "The interval at which to run node agent tick (including garbage collection)")]
-	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "10s")]
-	tick_interval: Duration,
+
+	//
+	// Database options
+	//
 	#[command(flatten)]
+	#[command(next_help_heading = "Database")]
 	dbs: StartCommandDbsOptions,
-	#[arg(help = "Encryption key to use for on-disk encryption")]
-	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
-	#[arg(value_parser = super::validator::key_valid)]
-	key: Option<String>,
-	#[command(flatten)]
-	kvs: Option<StartCommandRemoteTlsOptions>,
-	#[command(flatten)]
-	web: Option<StartCommandWebTlsOptions>,
-	#[arg(help = "The logging level for the database server")]
-	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
-	#[arg(default_value = "info")]
-	#[arg(value_parser = CustomEnvFilterParser::new())]
-	log: CustomEnvFilter,
-	#[arg(help = "Whether to hide the startup banner")]
-	#[arg(env = "SURREAL_NO_BANNER", long)]
-	#[arg(default_value_t = false)]
-	no_banner: bool,
 }
 
 #[derive(Args, Debug)]
@@ -144,15 +166,24 @@ pub async fn init(
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});
+	// This is the cancellation token propagated down to
+	// all the async functions that needs to be stopped gracefully.
+	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
 	#[cfg(feature = "has-storage")]
-	node::init().await?;
+	let nd = node::init(ct.clone());
 	// Start the web server
-	net::init().await?;
+	net::init(ct).await?;
+	// Wait for the node agent to stop
+	#[cfg(feature = "has-storage")]
+	if let Err(e) = nd.await {
+		error!("Node agent failed while running: {}", e);
+		return Err(Error::NodeAgent);
+	}
 	// All ok
 	Ok(())
 }

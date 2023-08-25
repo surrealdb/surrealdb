@@ -186,8 +186,8 @@ async fn query() {
 		.unwrap();
 	let mut response = db.query("SELECT name FROM user:john").await.unwrap().check().unwrap();
 	let Some(name): Option<String> = response.take("name").unwrap() else {
-        panic!("query returned no record");
-    };
+		panic!("query returned no record");
+	};
 	assert_eq!(name, "John Doe");
 }
 
@@ -198,8 +198,8 @@ async fn query_binds() {
 	let mut response =
 		db.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
-        panic!("query returned no record");
-    };
+		panic!("query returned no record");
+	};
 	assert_eq!(record.name, "John Doe");
 	let mut response = db
 		.query("SELECT * FROM $record_id")
@@ -207,8 +207,8 @@ async fn query_binds() {
 		.await
 		.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
-        panic!("query returned no record");
-    };
+		panic!("query returned no record");
+	};
 	assert_eq!(record.name, "John Doe");
 	let mut response = db
 		.query("CREATE user SET name = $name")
@@ -218,8 +218,8 @@ async fn query_binds() {
 		.await
 		.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
-        panic!("query returned no record");
-    };
+		panic!("query returned no record");
+	};
 	assert_eq!(record.name, "John Doe");
 }
 
@@ -327,8 +327,8 @@ async fn select_record_id() {
 	let record_id = ("user", "john");
 	let _: Option<RecordId> = db.create(record_id).await.unwrap();
 	let Some(record): Option<RecordId> = db.select(record_id).await.unwrap() else {
-        panic!("record not found");
-    };
+		panic!("record not found");
+	};
 	assert_eq!(record.id, thing("user:john").unwrap());
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
 	assert_eq!(value.record(), thing("user:john").ok());
@@ -358,9 +358,11 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["jane"]);
 	let users: Vec<RecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
-	let Value::Array(array): Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap() else {
-        unreachable!();
-    };
+	let Value::Array(array): Value =
+		db.select(Resource::from(table)).range("jane"..="john").await.unwrap()
+	else {
+		unreachable!();
+	};
 	assert_eq!(array.len(), 2);
 	let users: Vec<RecordId> =
 		db.select(table).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
@@ -719,12 +721,18 @@ async fn changefeed() {
     ";
 	let mut response = db.query(sql).await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else { unreachable!() };
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
 	assert_eq!(array.len(), 4);
 	// UPDATE user:amos
 	let a = array.get(0).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
@@ -742,8 +750,12 @@ async fn changefeed() {
 	);
 	// UPDATE user:jane
 	let a = array.get(1).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -762,8 +774,12 @@ async fn changefeed() {
 	);
 	// UPDATE user:amos
 	let a = array.get(2).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -782,8 +798,12 @@ async fn changefeed() {
 	);
 	// UPDATE table
 	let a = array.get(3).unwrap();
-	let Value::Object(a) = a else { unreachable!() };
-	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else { unreachable!() };
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
 	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
@@ -823,8 +843,8 @@ async fn set_unset() {
 	db.set(key, value).await.unwrap();
 	let mut response = db.query(sql).await.unwrap();
 	let Some(name): Option<String> = response.take(0).unwrap() else {
-        panic!("record not found");
-    };
+		panic!("record not found");
+	};
 	assert_eq!(name, value);
 	db.unset(key).await.unwrap();
 	let mut response = db.query(sql).await.unwrap();
@@ -837,8 +857,8 @@ async fn return_bool() {
 	let db = new_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();
 	let Some(boolean): Option<bool> = response.take(0).unwrap() else {
-        panic!("record not found");
-    };
+		panic!("record not found");
+	};
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();

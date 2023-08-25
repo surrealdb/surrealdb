@@ -20,8 +20,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.71.1
           components: rustfmt
 
       - name: Checkout sources
@@ -50,7 +51,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -82,8 +85,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.71.1
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
@@ -112,8 +116,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.71.1
           components: clippy
 
       - name: Checkout sources
@@ -146,7 +151,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -171,6 +178,16 @@ jobs:
         with:
           command: make
           args: ci-cli-integration
+      
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+          
 
   http-server:
     name: HTTP integration tests
@@ -178,7 +195,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -210,7 +229,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -242,7 +263,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -284,6 +307,8 @@ jobs:
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
+        timeout-minutes: 1
+        continue-on-error: true
         with:
           name: code-coverage-report
           path: target/llvm-cov/html/
@@ -295,7 +320,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -326,13 +353,24 @@ jobs:
           command: make
           args: ci-api-integration-ws
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   http-engine:
     name: HTTP engine
     runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -363,42 +401,62 @@ jobs:
           command: make
           args: ci-api-integration-http
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   any-engine:
-      name: Any engine
-      runs-on: ubuntu-latest
-      steps:
+    name: Any engine
+    runs-on: ubuntu-latest
+    steps:
 
-        - name: Install stable toolchain
-          uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
-        - name: Checkout sources
-          uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
-        - name: Setup cache
-          uses: Swatinem/rust-cache@v2
-          with:
-            save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-        - name: Install dependencies
-          run: |
-            sudo apt-get -y update
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
 
-        - name: Setup FoundationDB
-          uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
-          with:
-            version: "7.1.30"
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v2.0.0
+        with:
+          version: "7.1.30"
 
-        - name: Install cargo-make
-          uses: actions-rs/cargo@v1
-          with:
-            command: install
-            args: --debug cargo-make
+      - name: Install cargo-make
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --debug cargo-make
 
-        - name: Test any engine
-          uses: actions-rs/cargo@v1
-          with:
-            command: make
-            args: ci-api-integration-any
+      - name: Test any engine
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: ci-api-integration-any
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
 
   mem-engine:
     name: Memory engine
@@ -406,7 +464,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -434,7 +494,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -462,7 +524,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -490,7 +554,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -518,7 +584,9 @@ jobs:
      steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -549,13 +617,24 @@ jobs:
           command: make
           args: ci-api-integration-tikv
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
   fdb-engine:
     name: FoundationDB engine
     runs-on: ubuntu-latest
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -581,3 +660,12 @@ jobs:
         with:
           command: make
           args: ci-api-integration-fdb
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
