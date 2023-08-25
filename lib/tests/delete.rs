@@ -2,7 +2,8 @@ mod parse;
 
 use channel::{Receiver, TryRecvError};
 use parse::Parse;
-use surrealdb::dbs::{Action, Notification, Session};
+use surrealdb::api::model::{Action, Notification};
+use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
@@ -418,7 +419,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(
 		not,
 		Notification {
-			live_id: live_id,
+			id: live_id,
 			action: Action::Delete,
 			result: Value::Thing(Thing {
 				tb: "person".to_string(),

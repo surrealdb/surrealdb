@@ -1,8 +1,8 @@
 //! Stores a LIVE SELECT query notification on the table, ordered by time
 use crate::dbs::node::Timestamp;
-use crate::sql::Uuid;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use uuid::serde::compact;
 
 /// Nt is used to track live query notifications for remote nodes (nodes, from which
 /// the notification wasn't generated, but which the notification belongs to).
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Notifications are on a different prefix to the table live queries, because when we scan table
 /// live queries, we do not want to pick up notifications.
 ///
-/// The value of the entry is a Notification struct.
+/// The value of the entry is a Notification model.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Nt<'a> {
 	__: u8,
@@ -26,37 +26,52 @@ pub struct Nt<'a> {
 	_f: u8,
 	// We will only be interested in a specific lq notification list
 	#[serde(with = "uuid::serde::compact")]
-	pub lq: Uuid,
+	pub lq: uuid::Uuid,
 	_g: u8,
 	// We want the notifications to be ordered by timestamp
 	pub ts: Timestamp,
 	_h: u8,
 	// If timestamps collide, we still want uniqueness
-	pub id: Uuid,
+	#[serde(with = "uuid::serde::compact")]
+	pub id: uuid::Uuid,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid, ts: Timestamp, id: Uuid) -> Nt<'a> {
+pub fn new<'a>(
+	ns: &'a str,
+	db: &'a str,
+	tb: &'a str,
+	lq: crate::sql::Uuid,
+	ts: Timestamp,
+	id: crate::sql::Uuid,
+) -> Nt<'a> {
 	Nt::new(ns, db, tb, lq, ts, id)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, lq: Uuid) -> Vec<u8> {
+pub fn prefix(ns: &str, db: &str, tb: &str, lq: crate::sql::Uuid) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b't']);
-	k.extend_from_slice(&lq.as_bytes());
+	k.extend_from_slice(lq.0.as_bytes());
 	k.extend_from_slice(&[0x00]);
 	k
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, lq: Uuid) -> Vec<u8> {
+pub fn suffix(ns: &str, db: &str, tb: &str, lq: crate::sql::Uuid) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b't']);
-	k.extend_from_slice(&lq.as_bytes());
+	k.extend_from_slice(lq.0.as_bytes());
 	k.extend_from_slice(&[0xff]);
 	k
 }
 
 impl<'a> Nt<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid, ts: Timestamp, id: Uuid) -> Self {
+	pub fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		lq: crate::sql::Uuid,
+		ts: Timestamp,
+		id: crate::sql::Uuid,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -68,11 +83,11 @@ impl<'a> Nt<'a> {
 			_d: b'!',
 			_e: b'n',
 			_f: b't',
-			lq,
+			lq: lq.0,
 			_g: b'!',
 			ts,
 			_h: b'!',
-			id,
+			id: id.0,
 		}
 	}
 }
@@ -113,7 +128,7 @@ mod tests {
 
 	#[test]
 	fn prefix() {
-		let live_query_id = Uuid::from(uuid::Uuid::from_bytes([
+		let live_query_id = crate::sql::Uuid::from(uuid::Uuid::from_bytes([
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 		]));
 
@@ -131,7 +146,7 @@ mod tests {
 	#[test]
 	fn suffix() {
 		let live_query_id =
-			Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+			crate::sql::Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let val = super::suffix("testns", "testdb", "testtb", live_query_id);
 		assert_eq!(
 			val,

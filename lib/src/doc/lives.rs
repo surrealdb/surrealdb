@@ -64,7 +64,7 @@ impl<'a> Document<'a> {
 							node_id: lv.node.clone(),
 							notification_id: not_id.clone(),
 							action: Action::Delete,
-							result: Value::Thing((*rid).clone()),
+							result: Value::Thing(thing),
 							timestamp: ts.clone(),
 						};
 						if opt.id()? == lv.node.0 {
@@ -88,7 +88,7 @@ impl<'a> Document<'a> {
 						let notification = Notification {
 							live_id: lv.id.clone(),
 							node_id: lv.node.clone(),
-							notification_id: not_id,
+							notification_id: not_id.clone(),
 							action: Action::Create,
 							result: self.pluck(ctx, opt, txn, &lq).await?,
 							timestamp: ts.clone(),
@@ -97,7 +97,17 @@ impl<'a> Document<'a> {
 							// TODO read pending remote notifications
 							chn.send(notification).await?;
 						} else {
-							// TODO: Send to storage
+							tx.putc_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								lv.id.clone(),
+								ts,
+								not_id,
+								notification,
+								None,
+							)
+							.await?;
 						}
 					} else {
 						// Send a UPDATE notification
@@ -113,7 +123,17 @@ impl<'a> Document<'a> {
 							// TODO read pending remote notifications
 							chn.send(notification).await?;
 						} else {
-							// TODO: Send to storage
+							tx.putc_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								lv.id.clone(),
+								ts,
+								not_id,
+								notification,
+								None,
+							)
+							.await?;
 						}
 					};
 				}
