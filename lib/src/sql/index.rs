@@ -28,7 +28,8 @@ pub enum Index {
 	MTree(MTreeParams),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -39,7 +40,8 @@ pub struct SearchParams {
 	pub terms_order: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -47,7 +49,8 @@ pub struct MTreeParams {
 	pub doc_ids_order: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
 pub enum Distance {
 	Euclidean,
 	Manhattan,

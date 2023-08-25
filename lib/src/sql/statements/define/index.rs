@@ -173,6 +173,7 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
+	use crate::sql::index::SearchParams;
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
 	use crate::sql::Idioms;
@@ -224,15 +225,18 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: true,
 					sc: Scoring::Bm {
 						k1: 1.2,
 						b: 0.75,
 					},
-					order: 1000
-				},
+					doc_ids_order: 1000,
+					doc_lengths_order: 1000,
+					postings_order: 1000,
+					terms_order: 1000,
+				}),
 				comment: None,
 			}
 		);
@@ -250,12 +254,15 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
-					order: 100
-				},
+					doc_ids_order: 100,
+					doc_lengths_order: 100,
+					postings_order: 100,
+					terms_order: 100,
+				}),
 				comment: None,
 			}
 		);
