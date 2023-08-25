@@ -550,9 +550,7 @@ impl Datastore {
 	}
 
 	// tick is called periodically to perform maintenance tasks.
-	// On a linux/windows/macos system, this is called every TICK_INTERVAL.
-	// On embedded scenarios like WASM where there is no background thread,
-	// this should be called by the application.
+	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
