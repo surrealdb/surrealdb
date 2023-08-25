@@ -17,8 +17,8 @@ use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::number::complete::double;
-use nom::sequence::delimited;
 use nom::sequence::preceded;
+use nom::sequence::{delimited, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -785,12 +785,14 @@ fn point_vals(i: &str) -> IResult<&str, Point<f64>> {
 }
 
 fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
-	let (i, v) = delimited_list0(openbracket, commas, coordinate, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(coordinate, mightbespace), char(']'))(i)?;
 	Ok((i, v.into()))
 }
 
 fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
-	let (i, mut e) = delimited_list1(openbracket, commas, line_vals, closebracket)(i)?;
+	let (i, mut e) =
+		delimited_list1(openbracket, commas, terminated(line_vals, mightbespace), char(']'))(i)?;
 	let v = e.split_off(1);
 	// delimited_list1 guarentees there is atleast one value.
 	let e = e.into_iter().next().unwrap();
@@ -798,22 +800,26 @@ fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
 }
 
 fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
-	let (i, v) = delimited_list0(openbracket, commas, point_vals, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(point_vals, mightbespace), char(']'))(i)?;
 	Ok((i, v))
 }
 
 fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
-	let (i, v) = delimited_list0(openbracket, commas, line_vals, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(line_vals, mightbespace), char(']'))(i)?;
 	Ok((i, v))
 }
 
 fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
-	let (i, v) = delimited_list0(openbracket, commas, polygon_vals, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(polygon_vals, mightbespace), char(']'))(i)?;
 	Ok((i, v))
 }
 
 fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
-	let (i, v) = delimited_list0(openbracket, commas, geometry, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(geometry, mightbespace), char(']'))(i)?;
 	Ok((i, v))
 }
 

@@ -2,12 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::common::{closebracket, openbracket};
+use crate::sql::common::openbracket;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::value::{value, Value};
+use nom::character::complete::char;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -16,6 +18,7 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use super::comment::mightbespace;
 use super::common::commas;
 use super::util::delimited_list0;
 
@@ -478,7 +481,8 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, v) = delimited_list0(openbracket, commas, value, closebracket)(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(value, mightbespace), char(']'))(i)?;
 	Ok((i, Array(v)))
 }
 

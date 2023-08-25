@@ -2704,7 +2704,7 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(_, w) if w == Number::Int(0) => Ok(Value::None),
+				(_, Number::Int(0)) => Ok(Value::None),
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
 					// Divided a large number by a small number, got an overflowing number
 					Err(Error::TryDiv(v.to_string(), w.to_string()))

@@ -3,19 +3,21 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
+use crate::sql::common::openbraces;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::Operation;
 use crate::sql::thing::Thing;
+use crate::sql::util::delimited_list0;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
 use nom::combinator::cut;
-use nom::sequence::delimited;
+use nom::sequence::{delimited, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -23,9 +25,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
-
-use super::common::{closebraces, openbraces};
-use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -332,7 +331,8 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		Ok((i, (String::from(k), v)))
 	}
 
-	let (i, v) = delimited_list0(openbraces, commas, entry, closebraces)(i)?;
+	let (i, v) =
+		delimited_list0(openbraces, commas, terminated(entry, mightbespace), char('}'))(i)?;
 	Ok((i, Object(v.into_iter().collect())))
 }
 
