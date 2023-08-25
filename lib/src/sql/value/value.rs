@@ -2840,6 +2840,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			into(idiom::multi_without_start),
 		)),
 		alt((
+			into(future),
 			into(cast),
 			into(function),
 			into(geometry),
@@ -2847,7 +2848,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			into(constant),
 			into(datetime),
 			into(duration),
-			into(future),
 			into(unique),
 			into(number),
 			into(object),
