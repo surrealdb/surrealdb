@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::index::Index;
+use crate::sql::index::{Index, SearchParams};
 use crate::sql::scoring::Scoring;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
@@ -82,7 +82,10 @@ pub(super) struct SerializeSearch {
 	az: Ident,
 	hl: bool,
 	sc: Option<Scoring>,
-	order: u32,
+	doc_ids_order: u32,
+	doc_lengths_order: u32,
+	postings_order: u32,
+	terms_order: u32,
 }
 
 impl serde::ser::SerializeStructVariant for SerializeSearch {
@@ -103,8 +106,17 @@ impl serde::ser::SerializeStructVariant for SerializeSearch {
 			"sc" => {
 				self.sc = Some(value.serialize(ser::scoring::Serializer.wrap())?);
 			}
-			"order" => {
-				self.order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			"doc_ids_order" => {
+				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"doc_lengths_order" => {
+				self.doc_lengths_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"postings_order" => {
+				self.postings_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"terms_order" => {
+				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `Index::Search {{ {key} }}`")));
@@ -115,12 +127,15 @@ impl serde::ser::SerializeStructVariant for SerializeSearch {
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		match self.sc {
-			Some(sc) => Ok(Index::Search {
+			Some(sc) => Ok(Index::Search(SearchParams {
 				az: self.az,
 				hl: self.hl,
 				sc,
-				order: self.order,
-			}),
+				doc_ids_order: self.doc_ids_order,
+				doc_lengths_order: self.doc_lengths_order,
+				postings_order: self.postings_order,
+				terms_order: self.terms_order,
+			})),
 			_ => Err(Error::custom("`Index::Search` missing required field(s)")),
 		}
 	}
@@ -146,15 +161,18 @@ mod tests {
 
 	#[test]
 	fn search() {
-		let idx = Index::Search {
+		let idx = Index::Search(SearchParams {
 			az: Default::default(),
 			hl: Default::default(),
-			order: Default::default(),
 			sc: Scoring::Bm {
 				k1: Default::default(),
 				b: Default::default(),
 			},
-		};
+			doc_ids_order: Default::default(),
+			doc_lengths_order: Default::default(),
+			postings_order: Default::default(),
+			terms_order: Default::default(),
+		});
 		let serialized = idx.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(idx, serialized);
 	}

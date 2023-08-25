@@ -3,7 +3,7 @@ use crate::idx::ft::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
