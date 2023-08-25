@@ -5,7 +5,7 @@ use crate::sql::table::{table, tables, Tables};
 use crate::sql::thing::{thing, Thing};
 use nom::branch::alt;
 use nom::character::complete::char;
-use nom::combinator::{cut, map};
+use nom::combinator::{cut, into, map};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -57,8 +57,7 @@ fn custom(i: &str) -> IResult<&str, Tables> {
 }
 
 fn one(i: &str) -> IResult<&str, Tables> {
-	let (i, v) = table(i)?;
-	Ok((i, Tables::from(v)))
+	into(table)(i)
 }
 
 fn any(i: &str) -> IResult<&str, Tables> {

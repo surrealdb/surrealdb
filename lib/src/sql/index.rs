@@ -76,7 +76,7 @@ pub fn order(i: &str) -> IResult<&str, u32> {
 
 pub fn highlights(i: &str) -> IResult<&str, bool> {
 	let (i, _) = mightbespace(i)?;
-	alt((map(tag("HIGHLIGHTS"), |_| true), map(tag(""), |_| false)))(i)
+	map(opt(tag("HIGHLIGHTS")), |x| x.is_some())(i)
 }
 
 pub fn search(i: &str) -> IResult<&str, Index> {

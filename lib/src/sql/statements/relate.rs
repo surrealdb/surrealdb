@@ -21,8 +21,9 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::cut;
-use nom::combinator::map;
+use nom::combinator::into;
 use nom::combinator::opt;
+use nom::combinator::value;
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -235,14 +236,9 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 }
 
 fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
-	let (i, prefix) = alt((
-		map(subquery, Value::from),
-		map(array, Value::from),
-		map(param, Value::from),
-		map(thing, Value::from),
-	))(i)?;
+	let (i, prefix) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, is_o) = alt((map(tag("->"), |_| true), map(tag("<-"), |_| false)))(i)?;
+	let (i, is_o) = alt((value(true, tag("->")), value(false, tag("<-"))))(i)?;
 
 	if is_o {
 		let (i, (kind, with)) = relate_o(i)?;
@@ -255,31 +251,21 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
+	let (i, kind) = alt((into(thing), into(table)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, with) = alt((
-		map(subquery, Value::from),
-		map(array, Value::from),
-		map(param, Value::from),
-		map(thing, Value::from),
-	))(i)?;
+	let (i, with) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	Ok((i, (kind, with)))
 }
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
+	let (i, kind) = alt((into(thing), into(table)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, from) = alt((
-		map(subquery, Value::from),
-		map(array, Value::from),
-		map(param, Value::from),
-		map(thing, Value::from),
-	))(i)?;
+	let (i, from) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	Ok((i, (kind, from)))
 }
 

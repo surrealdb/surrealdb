@@ -1,5 +1,5 @@
 use crate::sql::error::IResult;
-use nom::{branch::alt, bytes::complete::tag, combinator::map};
+use nom::{branch::alt, bytes::complete::tag, combinator::value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -29,9 +29,7 @@ impl fmt::Display for Dir {
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
-	alt((map(tag("<->"), |_| Dir::Both), map(tag("<-"), |_| Dir::In), map(tag("->"), |_| Dir::Out)))(
-		i,
-	)
+	alt((value(Dir::Both, tag("<->")), value(Dir::In, tag("<-")), value(Dir::Out, tag("->"))))(i)
 }
 
 #[cfg(test)]

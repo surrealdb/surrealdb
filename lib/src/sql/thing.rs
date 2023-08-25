@@ -12,7 +12,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
-use nom::combinator::map;
+use nom::combinator::value;
 use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -135,9 +135,9 @@ fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, v) = alt((
-		map(tag("rand()"), |_| Id::Generate(Gen::Rand)),
-		map(tag("ulid()"), |_| Id::Generate(Gen::Ulid)),
-		map(tag("uuid()"), |_| Id::Generate(Gen::Uuid)),
+		value(Id::Generate(Gen::Rand), tag("rand()")),
+		value(Id::Generate(Gen::Ulid), tag("ulid()")),
+		value(Id::Generate(Gen::Uuid), tag("uuid()")),
 		id,
 	))(i)?;
 	Ok((

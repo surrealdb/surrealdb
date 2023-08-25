@@ -20,6 +20,7 @@ use nom::character::complete::u32;
 use nom::combinator::cut;
 use nom::combinator::map;
 use nom::combinator::opt;
+use nom::combinator::value;
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -100,7 +101,7 @@ impl fmt::Display for ShowStatement {
 pub fn table_or_database(i: &str) -> IResult<&str, Option<Table>> {
 	let (i, v) = alt((
 		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), Some),
-		map(tag_no_case("database"), |_| None),
+		value(None, tag_no_case("database")),
 	))(i)?;
 	Ok((i, v))
 }

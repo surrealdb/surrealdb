@@ -3,7 +3,7 @@ use crate::sql::error::IResult;
 use crate::sql::field::{fields, Fields};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{cut, map};
+use nom::combinator::{cut, map, value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -44,11 +44,11 @@ pub fn output(i: &str) -> IResult<&str, Output> {
 	let (i, _) = shouldbespace(i)?;
 	cut(|i| {
 		let (i, v) = alt((
-			map(tag_no_case("NONE"), |_| Output::None),
-			map(tag_no_case("NULL"), |_| Output::Null),
-			map(tag_no_case("DIFF"), |_| Output::Diff),
-			map(tag_no_case("AFTER"), |_| Output::After),
-			map(tag_no_case("BEFORE"), |_| Output::Before),
+			value(Output::None, tag_no_case("NONE")),
+			value(Output::Null, tag_no_case("NULL")),
+			value(Output::Diff, tag_no_case("DIFF")),
+			value(Output::After, tag_no_case("AFTER")),
+			value(Output::Before, tag_no_case("BEFORE")),
 			map(fields, Output::Fields),
 		))(i)?;
 		Ok((i, v))

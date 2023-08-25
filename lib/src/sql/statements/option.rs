@@ -7,7 +7,8 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::cut;
-use nom::combinator::{map, opt};
+use nom::combinator::opt;
+use nom::combinator::value;
 use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -36,8 +37,8 @@ pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	cut(|i| {
 		let (i, n) = ident(i)?;
 		let (i, v) = opt(alt((
-			map(tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE"))), |_| true),
-			map(tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE"))), |_| false),
+			value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
+			value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
 		)))(i)?;
 		Ok((
 			i,

@@ -17,6 +17,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
+use nom::combinator::into;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -126,7 +127,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, _) = tag_no_case("FROM")(i)?;
 		let (i, _) = shouldbespace(i)?;
-		let (i, what) = alt((map(param, Value::from), map(table, Value::from)))(i)?;
+		let (i, what) = alt((into(param), into(table)))(i)?;
 		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
 		Ok((

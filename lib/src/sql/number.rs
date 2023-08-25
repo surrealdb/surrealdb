@@ -6,7 +6,7 @@ use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::i64;
-use nom::combinator::{map, opt};
+use nom::combinator::{opt, value};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
 use revision::revisioned;
@@ -664,10 +664,10 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(tag("NaN"), |_| Number::NAN), not_nan))(i)
+	alt((value(Number::NAN, tag("NaN")), not_nan))(i)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Suffix {
 	None,
 	Float,
@@ -676,7 +676,7 @@ enum Suffix {
 
 fn suffix(i: &str) -> IResult<&str, Suffix> {
 	let (i, opt_suffix) =
-		opt(alt((map(tag("f"), |_| Suffix::Float), map(tag("dec"), |_| Suffix::Decimal))))(i)?;
+		opt(alt((value(Suffix::Float, tag("f")), value(Suffix::Decimal, tag("dec")))))(i)?;
 	Ok((i, opt_suffix.unwrap_or(Suffix::None)))
 }
 

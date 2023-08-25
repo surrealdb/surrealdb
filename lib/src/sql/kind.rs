@@ -8,8 +8,8 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::u64;
-use nom::combinator::opt;
 use nom::combinator::{cut, map};
+use nom::combinator::{opt, value};
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -107,24 +107,24 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 }
 
 pub fn any(i: &str) -> IResult<&str, Kind> {
-	map(tag("any"), |_| Kind::Any)(i)
+	value(Kind::Any, tag("any"))(i)
 }
 
 pub fn simple(i: &str) -> IResult<&str, Kind> {
 	alt((
-		map(tag("bool"), |_| Kind::Bool),
-		map(tag("null"), |_| Kind::Null),
-		map(tag("bytes"), |_| Kind::Bytes),
-		map(tag("datetime"), |_| Kind::Datetime),
-		map(tag("decimal"), |_| Kind::Decimal),
-		map(tag("duration"), |_| Kind::Duration),
-		map(tag("float"), |_| Kind::Float),
-		map(tag("int"), |_| Kind::Int),
-		map(tag("number"), |_| Kind::Number),
-		map(tag("object"), |_| Kind::Object),
-		map(tag("point"), |_| Kind::Point),
-		map(tag("string"), |_| Kind::String),
-		map(tag("uuid"), |_| Kind::Uuid),
+		value(Kind::Bool, tag("bool")),
+		value(Kind::Null, tag("null")),
+		value(Kind::Bytes, tag("bytes")),
+		value(Kind::Datetime, tag("datetime")),
+		value(Kind::Decimal, tag("decimal")),
+		value(Kind::Duration, tag("duration")),
+		value(Kind::Float, tag("float")),
+		value(Kind::Int, tag("int")),
+		value(Kind::Number, tag("number")),
+		value(Kind::Object, tag("object")),
+		value(Kind::Point, tag("point")),
+		value(Kind::String, tag("string")),
+		value(Kind::Uuid, tag("uuid")),
 	))(i)
 }
 

@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{cut, map, opt};
+use nom::combinator::{cut, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -104,8 +104,8 @@ fn order_raw(i: &str) -> IResult<&str, Order> {
 	let (i, c) = opt(tuple((shouldbespace, tag_no_case("COLLATE"))))(i)?;
 	let (i, n) = opt(tuple((shouldbespace, tag_no_case("NUMERIC"))))(i)?;
 	let (i, d) = opt(alt((
-		map(tuple((shouldbespace, tag_no_case("ASC"))), |_| true),
-		map(tuple((shouldbespace, tag_no_case("DESC"))), |_| false),
+		value(true, tuple((shouldbespace, tag_no_case("ASC")))),
+		value(false, tuple((shouldbespace, tag_no_case("DESC")))),
 	)))(i)?;
 	Ok((
 		i,

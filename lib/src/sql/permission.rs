@@ -8,6 +8,7 @@ use crate::sql::fmt::pretty_sequence_item;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator;
 use nom::combinator::cut;
 use nom::combinator::map;
 use nom::multi::separated_list1;
@@ -215,16 +216,16 @@ fn permission(i: &str) -> IResult<&str, Vec<(char, Permission)>> {
 		let (i, kind) = separated_list0(
 			commas,
 			alt((
-				map(tag_no_case("SELECT"), |_| 's'),
-				map(tag_no_case("CREATE"), |_| 'c'),
-				map(tag_no_case("UPDATE"), |_| 'u'),
-				map(tag_no_case("DELETE"), |_| 'd'),
+				combinator::value('s', tag_no_case("SELECT")),
+				combinator::value('c', tag_no_case("CREATE")),
+				combinator::value('u', tag_no_case("UPDATE")),
+				combinator::value('d', tag_no_case("DELETE")),
 			)),
 		)(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, expr) = alt((
-			map(tag_no_case("NONE"), |_| Permission::None),
-			map(tag_no_case("FULL"), |_| Permission::Full),
+			combinator::value(Permission::None, tag_no_case("NONE")),
+			combinator::value(Permission::Full, tag_no_case("FULL")),
 			map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
 				Permission::Specific(v)
 			}),

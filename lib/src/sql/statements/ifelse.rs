@@ -9,8 +9,8 @@ use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
 use nom::combinator::{cut, map};
+use nom::combinator::{into, opt};
 use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -212,7 +212,7 @@ fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 	fn expr(i: &str) -> IResult<&str, (Value, Value)> {
 		let (i, cond) = value(i)?;
 		let (i, _) = shouldbespace(i)?;
-		let (i, then) = map(block, Value::from)(i)?;
+		let (i, then) = into(block)(i)?;
 		Ok((i, (cond, then)))
 	}
 	//
@@ -223,7 +223,7 @@ fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 		Ok((i, ()))
 	}
 
-	let (mut input, then) = map(block, Value::from)(i)?;
+	let (mut input, then) = into(block)(i)?;
 	let mut exprs = vec![(initial_cond, then)];
 	let mut close = None;
 

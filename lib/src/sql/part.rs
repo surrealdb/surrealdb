@@ -14,7 +14,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{cut, map, not, peek};
+use nom::combinator::{self, cut, map, not, peek};
 use nom::sequence::{preceded, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -159,7 +159,7 @@ pub fn graph(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn flatten(i: &str) -> IResult<&str, Part> {
-	alt((map(tag("..."), |_| Part::Flatten), map(tag("…"), |_| Part::Flatten)))(i)
+	combinator::value(Part::Flatten, alt((tag("..."), tag("…"))))(i)
 }
 
 pub fn local_part(i: &str) -> IResult<&str, Part> {
@@ -172,30 +172,33 @@ pub fn basic_part(i: &str) -> IResult<&str, Part> {
 }
 
 fn dot_part(i: &str) -> IResult<&str, Part> {
-	alt((map(tag("*"), |_| Part::All), map(terminated(ident::ident, ending), Part::Field)))(i)
+	alt((
+		combinator::value(Part::All, tag("*")),
+		map(terminated(ident::ident, ending), Part::Field),
+	))(i)
 }
 
 fn basic_bracketed_part(i: &str) -> IResult<&str, Part> {
 	alt((
-		map(terminated(tag("*"), cut(closebracket)), |_| Part::All),
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
 		// Can cut here since it can't be a parameter.
-		map(terminated(tag("$"), cut(closebracket)), |_| Part::All),
+		combinator::value(Part::All, terminated(tag("$"), cut(closebracket))),
 		map(terminated(number, cut(closebracket)), Part::Index),
 	))(i)
 }
 
 fn local_bracketed_part(i: &str) -> IResult<&str, Part> {
 	alt((
-		map(terminated(tag("*"), cut(closebracket)), |_| Part::All),
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
 		map(terminated(number, cut(closebracket)), Part::Index),
 	))(i)
 }
 
 fn bracketed_part(i: &str) -> IResult<&str, Part> {
 	alt((
-		map(terminated(tag("*"), cut(closebracket)), |_| Part::All),
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
 		// Don't cut here, the '$' could be part of a param.
-		map(terminated(tag("$"), closebracket), |_| Part::Last),
+		combinator::value(Part::Last, terminated(tag("$"), closebracket)),
 		map(terminated(number, cut(closebracket)), Part::Index),
 		bracketed_where,
 		bracketed_value,
