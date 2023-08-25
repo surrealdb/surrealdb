@@ -9,7 +9,7 @@ use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{cut, map};
+use nom::combinator::cut;
 use nom::combinator::{into, opt};
 use nom::sequence::terminated;
 use revision::revisioned;
@@ -232,7 +232,7 @@ fn bracketed(i: &str, initial_cond: Value) -> IResult<&str, IfelseStatement> {
 			break;
 		};
 		let (i, Some(_)) = opt(terminated(tag_no_case("IF"), shouldbespace))(i)? else {
-			let (i, c) = map(cut(block), Value::from)(i)?;
+			let (i, c) = into(cut(block))(i)?;
 			close = Some(c);
 			input = i;
 			break;

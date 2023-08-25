@@ -429,7 +429,7 @@ mod tests {
 		if excessive {
 			assert!(
 				matches!(res, Err(Error::ComputationDepthExceeded)),
-				"expected computation depthexceeded, got {:?}",
+				"expected computation depth exceeded, got {:?}",
 				res
 			);
 		} else {
