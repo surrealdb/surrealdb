@@ -19,6 +19,7 @@ use std::fmt::{self, Display, Formatter};
 #[revisioned(revision = 1)]
 pub enum Kind {
 	Any,
+	Null,
 	Bool,
 	Bytes,
 	Datetime,
@@ -62,6 +63,7 @@ impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
+			Kind::Null => f.write_str("null"),
 			Kind::Bool => f.write_str("bool"),
 			Kind::Bytes => f.write_str("bytes"),
 			Kind::Datetime => f.write_str("datetime"),
@@ -109,6 +111,7 @@ pub fn any(i: &str) -> IResult<&str, Kind> {
 pub fn simple(i: &str) -> IResult<&str, Kind> {
 	alt((
 		map(tag("bool"), |_| Kind::Bool),
+		map(tag("null"), |_| Kind::Null),
 		map(tag("bytes"), |_| Kind::Bytes),
 		map(tag("datetime"), |_| Kind::Datetime),
 		map(tag("decimal"), |_| Kind::Decimal),
@@ -264,6 +267,16 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("any", format!("{}", out));
 		assert_eq!(out, Kind::Any);
+	}
+
+	#[test]
+	fn kind_null() {
+		let sql = "null";
+		let res = kind(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("null", format!("{}", out));
+		assert_eq!(out, Kind::Null);
 	}
 
 	#[test]
