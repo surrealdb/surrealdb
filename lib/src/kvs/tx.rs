@@ -1744,34 +1744,6 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific function definition.
-	pub async fn get_db_function(
-		&mut self,
-		ns: &str,
-		db: &str,
-		fc: &str,
-	) -> Result<DefineFunctionStatement, Error> {
-		let key = crate::key::database::fc::new(ns, db, fc);
-		let val = self.get(key).await?.ok_or(Error::FcNotFound {
-			value: fc.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific param definition.
-	pub async fn get_db_param(
-		&mut self,
-		ns: &str,
-		db: &str,
-		pa: &str,
-	) -> Result<DefineParamStatement, Error> {
-		let key = crate::key::database::pa::new(ns, db, pa);
-		let val = self.get(key).await?.ok_or(Error::PaNotFound {
-			value: pa.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
 	/// Retrieve a specific scope definition.
 	pub async fn get_sc(
 		&mut self,
@@ -1843,21 +1815,6 @@ impl Transaction {
 		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific analyzer definition.
-	pub async fn get_tb_index(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		ix: &str,
-	) -> Result<DefineIndexStatement, Error> {
-		let key = crate::key::table::ix::new(ns, db, tb, ix);
-		let val = self.get(key).await?.ok_or(Error::IxNotFound {
-			value: ix.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -2049,6 +2006,79 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve a specific function definition.
+	pub async fn get_and_cache_db_function(
+		&mut self,
+		ns: &str,
+		db: &str,
+		fc: &str,
+	) -> Result<Arc<DefineFunctionStatement>, Error> {
+		let key = crate::key::database::fc::new(ns, db, fc).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Fc(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::FcNotFound {
+				value: fc.to_owned(),
+			})?;
+			let val: Arc<DefineFunctionStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Fc(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve a specific param definition.
+	pub async fn get_and_cache_db_param(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<Arc<DefineParamStatement>, Error> {
+		let key = crate::key::database::pa::new(ns, db, pa).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Pa(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::PaNotFound {
+				value: pa.to_owned(),
+			})?;
+			let val: Arc<DefineParamStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Pa(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve a specific table index definition.
+	pub async fn get_and_cache_tb_index(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<Arc<DefineIndexStatement>, Error> {
+		let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ix(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::IxNotFound {
+				value: ix.to_owned(),
+			})?;
+			let val: Arc<DefineIndexStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ix(Arc::clone(&val)));
+			val
+		})
+	}
+
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
 	pub async fn add_and_cache_ns(
 		&mut self,
@@ -2173,20 +2203,6 @@ impl Transaction {
 			chn.send(bytes!("OPTION IMPORT;")).await?;
 			chn.send(bytes!("")).await?;
 		}
-		// Output FUNCTIONS
-		{
-			let fcs = self.all_db_functions(ns, db).await?;
-			if !fcs.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- FUNCTIONS")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for fc in fcs.iter() {
-					chn.send(bytes!(format!("{fc};"))).await?;
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
 		// Output USERS
 		{
 			let dus = self.all_db_users(ns, db).await?;
@@ -2229,6 +2245,34 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
+		// Output FUNCTIONS
+		{
+			let fcs = self.all_db_functions(ns, db).await?;
+			if !fcs.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- FUNCTIONS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for fc in fcs.iter() {
+					chn.send(bytes!(format!("{fc};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output ANALYZERS
+		{
+			let azs = self.all_db_analyzers(ns, db).await?;
+			if !azs.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- ANALYZERS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for az in azs.iter() {
+					chn.send(bytes!(format!("{az};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
 		// Output SCOPES
 		{
 			let scs = self.all_sc(ns, db).await?;
@@ -2250,20 +2294,6 @@ impl Transaction {
 							chn.send(bytes!("")).await?;
 						}
 					}
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
-		// Output ANALYZERS
-		{
-			let azs = self.all_db_analyzers(ns, db).await?;
-			if !azs.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- ANALYZERS")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for az in azs.iter() {
-					chn.send(bytes!(format!("{az};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}

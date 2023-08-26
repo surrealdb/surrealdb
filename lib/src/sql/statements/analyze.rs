@@ -43,7 +43,9 @@ impl AnalyzeStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Read the index
-				let ix = run.get_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str()).await?;
+				let ix = run
+					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
+					.await?;
 				let ikb = IndexKeyBase::new(opt, &ix);
 
 				// Index operation dispatching
