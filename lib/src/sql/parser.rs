@@ -349,6 +349,18 @@ mod tests {
 	}
 
 	#[test]
+	fn parser_full() {
+		let sql = std::fs::read("test.surql").unwrap();
+		let sql = std::str::from_utf8(&sql).unwrap();
+		let res = parse(sql);
+		let tmp = res.unwrap();
+
+		let enc: Vec<u8> = Vec::from(&tmp);
+		let dec: Query = Query::from(enc);
+		assert_eq!(tmp, dec);
+	}
+
+	#[test]
 	#[cfg_attr(debug_assertions, ignore)]
 	fn json_benchmark() {
 		// From the top level of the repository,
