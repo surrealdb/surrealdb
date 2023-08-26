@@ -1,8 +1,11 @@
+// A raw mathematical expression at the base of the query
+3 * 5 = 15;
+
+// A raw record expression at the base of the query
+person:tobie->knows->?;
+
 -- CREATE a new table record with a random id
 CREATE person;
-
--- CREATE a new table record with a specific string id
-CREATE person:tobie;
 
 -- CREATE a new table record with a specific integer id
 CREATE person:13059;
@@ -27,6 +30,12 @@ CREATE person:ulid();
 
 -- CREATE a new table record with a randomly generated UUID
 CREATE person:uuid();
+
+-- CREATE a new table record with a random id, and set the record content
+CREATE person CONTENT { name: { first: 'Tobie', last: 'Morgan Hitchcock'} };
+
+-- CREATE a new table record with a specific string id, and set the record content
+CREATE person:tobie CONTENT { name: 'Tobie', siblings: [person:jaime] };
 
 -- Define a new custom namespaced function for lowercasing a string
 DEFINE FUNCTION fn::my::custom::namespaced::lowercase($name: string) {
