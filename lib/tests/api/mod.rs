@@ -571,6 +571,13 @@ async fn merge_record_id() {
 
 #[tokio::test]
 async fn patch_record_id() {
+	#[derive(Debug, Deserialize, Eq, PartialEq)]
+	struct Record {
+		id: Thing,
+		baz: String,
+		hello: Vec<String>,
+	}
+
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let id = "john";
@@ -582,21 +589,21 @@ async fn patch_record_id() {
 		}))
 		.await
 		.unwrap();
-	let _: Option<serde_json::Value> = db
+	let _: Option<Record> = db
 		.update(("user", id))
 		.patch(PatchOp::replace("/baz", "boo"))
 		.patch(PatchOp::add("/hello", ["world"]))
 		.patch(PatchOp::remove("/foo"))
 		.await
 		.unwrap();
-	let value: Option<serde_json::Value> = db.select(("user", id)).await.unwrap();
+	let value: Option<Record> = db.select(("user", id)).await.unwrap();
 	assert_eq!(
 		value,
-		Some(json!({
-			"id": thing(&format!("user:{id}")).unwrap(),
-			"baz": "boo",
-			"hello": ["world"]
-		}))
+		Some(Record {
+			id: thing(&format!("user:{id}")).unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
 	);
 }
 
