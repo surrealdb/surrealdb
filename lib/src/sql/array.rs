@@ -109,12 +109,17 @@ impl IntoIterator for Array {
 }
 
 impl Array {
+	// Create a new empty array
 	pub fn new() -> Self {
 		Self::default()
 	}
-
+	// Create a new array with capacity
 	pub fn with_capacity(len: usize) -> Self {
 		Self(Vec::with_capacity(len))
+	}
+	// Get the length of the array
+	pub fn len(&self) -> usize {
+		self.0.len()
 	}
 }
 
