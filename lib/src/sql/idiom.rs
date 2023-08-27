@@ -34,6 +34,14 @@ impl Deref for Idioms {
 	}
 }
 
+impl IntoIterator for Idioms {
+	type Item = Idiom;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
 impl Display for Idioms {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)

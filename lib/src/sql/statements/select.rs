@@ -13,7 +13,9 @@ use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
+use crate::sql::idiom::Idioms;
 use crate::sql::limit::{limit, Limit};
+use crate::sql::omit::omit;
 use crate::sql::order::{order, Orders};
 use crate::sql::special::check_group_by_fields;
 use crate::sql::special::check_order_by_fields;
@@ -36,6 +38,7 @@ use std::fmt;
 #[revisioned(revision = 1)]
 pub struct SelectStatement {
 	pub expr: Fields,
+	pub omit: Option<Idioms>,
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
@@ -90,7 +93,6 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
-
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
@@ -142,7 +144,11 @@ impl SelectStatement {
 
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
+		write!(f, "SELECT {}", self.expr)?;
+		if let Some(ref v) = self.omit {
+			write!(f, " OMIT {v}")?
+		}
+		write!(f, " FROM {}", self.what)?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -187,6 +193,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, expr) = fields(i)?;
+	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -210,6 +217,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		i,
 		SelectStatement {
 			expr,
+			omit,
 			what,
 			with,
 			cond,
@@ -244,6 +252,15 @@ mod tests {
 	#[test]
 	fn select_statement_table() {
 		let sql = "SELECT * FROM test";
+		let res = select(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+	}
+
+	#[test]
+	fn select_statement_omit() {
+		let sql = "SELECT * OMIT password FROM test";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;

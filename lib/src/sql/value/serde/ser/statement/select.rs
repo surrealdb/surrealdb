@@ -7,6 +7,7 @@ use crate::sql::Cond;
 use crate::sql::Fetchs;
 use crate::sql::Fields;
 use crate::sql::Groups;
+use crate::sql::Idioms;
 use crate::sql::Limit;
 use crate::sql::Orders;
 use crate::sql::Splits;
@@ -48,6 +49,7 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 pub struct SerializeSelectStatement {
 	expr: Option<Fields>,
+	omit: Option<Idioms>,
 	what: Option<Values>,
 	with: Option<With>,
 	cond: Option<Cond>,
@@ -74,6 +76,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 		match key {
 			"expr" => {
 				self.expr = Some(value.serialize(ser::fields::Serializer.wrap())?);
+			}
+			"omit" => {
+				self.omit = value.serialize(ser::idiom::vec::opt::Serializer.wrap())?.map(Idioms);
 			}
 			"what" => {
 				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
@@ -125,6 +130,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 		match (self.expr, self.what, self.parallel) {
 			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
 				expr,
+				omit: self.omit,
 				what,
 				with: self.with,
 				parallel,
