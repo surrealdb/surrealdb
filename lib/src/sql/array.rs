@@ -109,12 +109,21 @@ impl IntoIterator for Array {
 }
 
 impl Array {
+	// Create a new empty array
 	pub fn new() -> Self {
 		Self::default()
 	}
-
+	// Create a new array with capacity
 	pub fn with_capacity(len: usize) -> Self {
 		Self(Vec::with_capacity(len))
+	}
+	// Get the length of the array
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+	// Check if there array is empty
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
 	}
 }
 
@@ -404,7 +413,7 @@ pub(crate) trait Transpose<T> {
 
 impl Transpose<Array> for Array {
 	fn transpose(self) -> Array {
-		if self.len() == 0 {
+		if self.is_empty() {
 			return self;
 		}
 		// I'm sure there's a way more efficient way to do this that I don't know about.
