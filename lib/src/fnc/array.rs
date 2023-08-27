@@ -117,8 +117,8 @@ pub fn concat(mut arrays: Vec<Array>) -> Result<Value, Error> {
 		Some(l) => Ok(l),
 	}?;
 	let mut arr = Array::with_capacity(len);
-	arrays.iter_mut().for_each(|mut val| {
-		arr.append(&mut val);
+	arrays.iter_mut().for_each(|val| {
+		arr.append(val);
 	});
 	Ok(arr.into())
 }

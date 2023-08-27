@@ -121,6 +121,10 @@ impl Array {
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
+	// Check if there array is empty
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
 }
 
 impl Array {
@@ -409,7 +413,7 @@ pub(crate) trait Transpose<T> {
 
 impl Transpose<Array> for Array {
 	fn transpose(self) -> Array {
-		if self.len() == 0 {
+		if self.is_empty() {
 			return self;
 		}
 		// I'm sure there's a way more efficient way to do this that I don't know about.
