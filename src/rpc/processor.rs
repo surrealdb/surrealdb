@@ -441,7 +441,7 @@ impl Processor {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what PATCH $data RETURN DIFF";
+		let sql = "UPDATE $what PATCH $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
