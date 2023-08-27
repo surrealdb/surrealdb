@@ -19,17 +19,15 @@ mod tests {
 	fn omit_statement() {
 		let sql = "OMIT field";
 		let res = omit(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("OMIT field", format!("{}", out));
+		assert_eq!("field", format!("{}", out));
 	}
 
 	#[test]
 	fn omit_statement_multiple() {
 		let sql = "OMIT field, other.field";
 		let res = omit(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("OMIT field, other.field", format!("{}", out));
+		assert_eq!("field, other.field", format!("{}", out));
 	}
 }
