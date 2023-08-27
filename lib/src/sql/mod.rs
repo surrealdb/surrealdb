@@ -40,6 +40,7 @@ pub(crate) mod limit;
 pub(crate) mod model;
 pub(crate) mod number;
 pub(crate) mod object;
+pub(crate) mod omit;
 pub(crate) mod operation;
 pub(crate) mod operator;
 pub(crate) mod order;
