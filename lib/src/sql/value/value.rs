@@ -1149,6 +1149,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
+			Kind::Null => self.coerce_to_null(),
 			Kind::Bool => self.coerce_to_bool().map(Value::from),
 			Kind::Int => self.coerce_to_int().map(Value::from),
 			Kind::Float => self.coerce_to_float().map(Value::from),
@@ -1179,7 +1180,6 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				Self::Null => Ok(Self::None),
 				v => v.coerce_to(k),
 			},
 			Kind::Either(k) => {
@@ -1288,6 +1288,19 @@ impl Value {
 			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "f64".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `null`
+	pub(crate) fn coerce_to_null(self) -> Result<Value, Error> {
+		match self {
+			// Allow any null value
+			Value::Null => Ok(Value::Null),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "null".into(),
 			}),
 		}
 	}
@@ -1675,6 +1688,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
+			Kind::Null => self.convert_to_null(),
 			Kind::Bool => self.convert_to_bool().map(Value::from),
 			Kind::Int => self.convert_to_int().map(Value::from),
 			Kind::Float => self.convert_to_float().map(Value::from),
@@ -1705,7 +1719,6 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				Self::Null => Ok(Self::None),
 				v => v.convert_to(k),
 			},
 			Kind::Either(k) => {
@@ -1740,6 +1753,19 @@ impl Value {
 			Err(e) => Err(e),
 			// Everything converted ok
 			Ok(v) => Ok(v),
+		}
+	}
+
+	/// Try to convert this value to a `null`
+	pub(crate) fn convert_to_null(self) -> Result<Value, Error> {
+		match self {
+			// Allow any boolean value
+			Value::Null => Ok(Value::Null),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "null".into(),
+			}),
 		}
 	}
 
