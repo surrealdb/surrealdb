@@ -11,7 +11,6 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use nom::combinator::into;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -97,15 +96,13 @@ impl fmt::Display for KillStatement {
 pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 	let (i, _) = tag_no_case("KILL")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, v) = alt((into(uuid), into(param)))(i)?;
-		Ok((
-			i,
-			KillStatement {
-				id: v,
-			},
-		))
-	})(i)
+	let (i, v) = alt((into(uuid), into(param)))(i)?;
+	Ok((
+		i,
+		KillStatement {
+			id: v,
+		},
+	))
 }
 
 #[cfg(test)]

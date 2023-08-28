@@ -194,49 +194,47 @@ impl fmt::Display for SelectStatement {
 pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i|{
-		let (i, expr) = fields(i)?;
-		let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("FROM")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, what) = selects(i)?;
-		let (i, with) = opt(preceded(shouldbespace, with))(i)?;
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, split) = opt(preceded(shouldbespace, split))(i)?;
-		check_split_on_fields(i, &expr, &split)?;
-		let (i, group) = opt(preceded(shouldbespace, group))(i)?;
-		check_group_by_fields(i, &expr, &group)?;
-		let (i, order) = opt(preceded(shouldbespace, order))(i)?;
-		check_order_by_fields(i, &expr, &order)?;
-		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
-		let (i, start) = opt(preceded(shouldbespace, start))(i)?;
-		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-		let (i, version) = opt(preceded(shouldbespace, version))(i)?;
-		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
-		Ok((
-			i,
-			SelectStatement {
-				expr,
-				omit,
-				what,
-				with,
-				cond,
-				split,
-				group,
-				order,
-				limit,
-				start,
-				fetch,
-				version,
-				timeout,
-				parallel: parallel.is_some(),
-				explain,
-			},
-		))
-	})(i)
+	let (i, expr) = fields(i)?;
+	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, _) = cut(tag_no_case("FROM"))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, what) = cut(selects)(i)?;
+	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
+	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
+	check_split_on_fields(i, &expr, &split)?;
+	let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+	check_group_by_fields(i, &expr, &group)?;
+	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
+	check_order_by_fields(i, &expr, &order)?;
+	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
+	let (i, start) = opt(preceded(shouldbespace, start))(i)?;
+	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
+	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
+	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
+	Ok((
+		i,
+		SelectStatement {
+			expr,
+			omit,
+			what,
+			with,
+			cond,
+			split,
+			group,
+			order,
+			limit,
+			start,
+			fetch,
+			version,
+			timeout,
+			parallel: parallel.is_some(),
+			explain,
+		},
+	))
 }
 
 #[cfg(test)]

@@ -99,23 +99,24 @@ impl fmt::Display for CreateStatement {
 pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 	let (i, _) = tag_no_case("CREATE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, what) = whats(i)?;
+	let (i, what) = whats(i)?;
+	let (i, (data, output, timeout, parallel)) = cut(|i| {
 		let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((
-			i,
-			CreateStatement {
-				what,
-				data,
-				output,
-				timeout,
-				parallel: parallel.is_some(),
-			},
-		))
-	})(i)
+		Ok((i, (data, output, timeout, parallel)))
+	})(i)?;
+	Ok((
+		i,
+		CreateStatement {
+			what,
+			data,
+			output,
+			timeout,
+			parallel: parallel.is_some(),
+		},
+	))
 }
 
 #[cfg(test)]

@@ -34,20 +34,18 @@ impl fmt::Display for OptionStatement {
 pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = tag_no_case("OPTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, n) = ident(i)?;
-		let (i, v) = opt(alt((
-			value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
-			value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
-		)))(i)?;
-		Ok((
-			i,
-			OptionStatement {
-				name: n,
-				what: v.unwrap_or(true),
-			},
-		))
-	})(i)
+	let (i, n) = ident(i)?;
+	let (i, v) = cut(opt(alt((
+		value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
+		value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
+	))))(i)?;
+	Ok((
+		i,
+		OptionStatement {
+			name: n,
+			what: v.unwrap_or(true),
+		},
+	))
 }
 
 #[cfg(test)]

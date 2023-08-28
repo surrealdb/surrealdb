@@ -36,10 +36,10 @@ impl fmt::Display for UseStatement {
 pub fn r#use(i: &str) -> IResult<&str, UseStatement> {
 	let (i, _) = tag_no_case("USE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, (ns, db)) = cut(alt((
+	let (i, (ns, db)) = alt((
 		map(tuple((namespace, opt(preceded(shouldbespace, database)))), |x| (Some(x.0), x.1)),
 		map(database, |x| (None, Some(x))),
-	)))(i)?;
+	))(i)?;
 	Ok((
 		i,
 		UseStatement {

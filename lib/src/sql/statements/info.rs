@@ -235,8 +235,8 @@ impl fmt::Display for InfoStatement {
 pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = tag_no_case("INFO")(i)?;
 	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("FOR")(i)?;
 	cut(|i| {
-		let (i, _) = tag_no_case("FOR")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		alt((root, ns, db, sc, tb, user))(i)
 	})(i)

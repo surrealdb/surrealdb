@@ -102,23 +102,24 @@ impl Display for ForeachStatement {
 pub fn foreach(i: &str) -> IResult<&str, ForeachStatement> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, param) = param(i)?;
+	let (i, param) = param(i)?;
+	let (i, (range, block)) = cut(|i| {
 		let (i, _) = shouldbespace(i)?;
 		let (i, _) = tag_no_case("IN")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, range) = value(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, block) = block(i)?;
-		Ok((
-			i,
-			ForeachStatement {
-				param,
-				range,
-				block,
-			},
-		))
-	})(i)
+		Ok((i, (range, block)))
+	})(i)?;
+	Ok((
+		i,
+		ForeachStatement {
+			param,
+			range,
+			block,
+		},
+	))
 }
 
 #[cfg(test)]

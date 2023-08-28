@@ -99,24 +99,25 @@ impl fmt::Display for DeleteStatement {
 pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, _) = tag_no_case("DELETE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, _) = opt(terminated(tag_no_case("FROM"), shouldbespace))(i)?;
-		let (i, what) = whats(i)?;
+	let (i, _) = opt(terminated(tag_no_case("FROM"), shouldbespace))(i)?;
+	let (i, what) = whats(i)?;
+	let (i, (cond, output, timeout, parallel)) = cut(|i| {
 		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((
-			i,
-			DeleteStatement {
-				what,
-				cond,
-				output,
-				timeout,
-				parallel: parallel.is_some(),
-			},
-		))
-	})(i)
+		Ok((i, (cond, output, timeout, parallel)))
+	})(i)?;
+	Ok((
+		i,
+		DeleteStatement {
+			what,
+			cond,
+			output,
+			timeout,
+			parallel: parallel.is_some(),
+		},
+	))
 }
 
 #[cfg(test)]

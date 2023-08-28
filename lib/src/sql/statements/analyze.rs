@@ -83,8 +83,8 @@ impl AnalyzeStatement {
 pub fn analyze(i: &str) -> IResult<&str, AnalyzeStatement> {
 	let (i, _) = tag_no_case("ANALYZE")(i)?;
 	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("INDEX")(i)?;
 	cut(|i| {
-		let (i, _) = tag_no_case("INDEX")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, idx) = ident(i)?;
 		let (i, _) = shouldbespace(i)?;

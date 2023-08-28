@@ -8,7 +8,6 @@ use crate::sql::strand::{strand, Strand};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -45,15 +44,13 @@ impl fmt::Display for ThrowStatement {
 pub fn throw(i: &str) -> IResult<&str, ThrowStatement> {
 	let (i, _) = tag_no_case("THROW")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, e) = strand(i)?;
-		Ok((
-			i,
-			ThrowStatement {
-				error: e,
-			},
-		))
-	})(i)
+	let (i, e) = strand(i)?;
+	Ok((
+		i,
+		ThrowStatement {
+			error: e,
+		},
+	))
 }
 
 #[cfg(test)]
