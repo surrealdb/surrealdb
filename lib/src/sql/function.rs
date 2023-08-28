@@ -288,14 +288,18 @@ pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 			preceded(tag("geo::"), cut(function_geo)),
 			preceded(tag("http::"), cut(function_http)),
 			preceded(tag("is::"), cut(function_is)),
-			preceded(tag("math::"), cut(function_math)),
+			// Don't cut in time and math for now since there are also constant's with the same
+			// prefix.
+			preceded(tag("math::"), function_math),
 			preceded(tag("meta::"), cut(function_meta)),
 			preceded(tag("parse::"), cut(function_parse)),
 			preceded(tag("rand::"), cut(function_rand)),
 			preceded(tag("search::"), cut(function_search)),
 			preceded(tag("session::"), cut(function_session)),
 			preceded(tag("string::"), cut(function_string)),
-			preceded(tag("time::"), cut(function_time)),
+			// Don't cut in time and math for now since there are also constant's with the same
+			// prefix.
+			preceded(tag("time::"), function_time),
 			preceded(tag("type::"), cut(function_type)),
 			preceded(tag("vector::"), cut(function_vector)),
 		)),
