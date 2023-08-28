@@ -130,13 +130,11 @@ impl<'a> Document<'a> {
 			}) => {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-
 				// We can create the table automatically
 				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
 				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
 			}
-
 			// There was an error
 			Err(err) => Err(err),
 			// The table exists

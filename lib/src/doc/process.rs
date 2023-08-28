@@ -6,24 +6,18 @@ use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
-use channel::Sender;
 
 impl<'a> Document<'a> {
 	#[allow(dead_code)]
-	pub(crate) async fn compute(
+	pub(crate) async fn process(
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		chn: Sender<Result<Value, Error>>,
 		mut pro: Processed,
-	) -> Result<(), Error> {
+	) -> Result<Value, Error> {
 		// Loop over maximum two times
 		for _ in 0..2 {
-			// Check current context
-			if ctx.is_done() {
-				break;
-			}
 			// Setup a new workable
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),
@@ -76,11 +70,9 @@ impl<'a> Document<'a> {
 				Ok(v) => Ok(v),
 			};
 			// Send back the result
-			let _ = chn.send(res).await;
-			// Break the loop
-			break;
+			return res;
 		}
-		// Everything went ok
-		Ok(())
+		// We should never get here
+		unreachable!()
 	}
 }
