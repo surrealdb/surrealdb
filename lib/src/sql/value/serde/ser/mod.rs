@@ -9,6 +9,7 @@ mod data;
 mod datetime;
 mod decimal;
 mod dir;
+mod distance;
 mod duration;
 mod edges;
 mod explain;

@@ -87,7 +87,7 @@ impl serde::ser::SerializeStruct for SerializeSearch {
 				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			key => {
-				return Err(Error::custom(format!("unexpected field `Index::Search {{ {key} }}`")));
+				return Err(Error::custom(format!("unexpected field `SearchParams {{ {key} }}`")));
 			}
 		}
 		Ok(())
@@ -107,4 +107,19 @@ impl serde::ser::SerializeStruct for SerializeSearch {
 			_ => Err(Error::custom("`SearchParams` missing required field(s)")),
 		}
 	}
+}
+
+#[test]
+fn search_params() {
+	let params = SearchParams {
+		az: Default::default(),
+		hl: false,
+		sc: Scoring::Vs,
+		doc_ids_order: 0,
+		doc_lengths_order: 0,
+		postings_order: 0,
+		terms_order: 0,
+	};
+	let serialized = params.serialize(Serializer.wrap()).unwrap();
+	assert_eq!(params, serialized);
 }

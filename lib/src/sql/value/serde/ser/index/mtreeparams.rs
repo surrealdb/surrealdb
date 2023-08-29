@@ -63,14 +63,17 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			"dimension" => {
 				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
 			}
+			"distance" => {
+				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
+			}
 			"capacity" => {
-				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
+				self.capacity = value.serialize(ser::primitive::u16::Serializer.wrap())?;
 			}
 			"doc_ids_order" => {
 				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			key => {
-				return Err(Error::custom(format!("unexpected field `Index::MTree {{ {key} }}`")));
+				return Err(Error::custom(format!("unexpected field `MTreeParams {{ {key} }}`")));
 			}
 		}
 		Ok(())
@@ -84,4 +87,16 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			doc_ids_order: self.doc_ids_order,
 		})
 	}
+}
+
+#[test]
+fn mtree_params() {
+	let params = MTreeParams {
+		dimension: 1,
+		distance: Default::default(),
+		capacity: 2,
+		doc_ids_order: 3,
+	};
+	let serialized = params.serialize(Serializer.wrap()).unwrap();
+	assert_eq!(params, serialized);
 }
