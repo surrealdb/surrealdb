@@ -16,6 +16,7 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
+mod ml;
 
 use axum::response::Redirect;
 use axum::routing::get;
