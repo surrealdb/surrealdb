@@ -3,6 +3,7 @@ use crate::sql::data::Data;
 use crate::sql::fetch::Fetchs;
 use crate::sql::field::Fields;
 use crate::sql::group::Groups;
+use crate::sql::idiom::Idioms;
 use crate::sql::limit::Limit;
 use crate::sql::order::Orders;
 use crate::sql::output::Output;
@@ -111,6 +112,14 @@ impl<'a> Statement<'a> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
 			Statement::Live(v) => Some(&v.expr),
+			_ => None,
+		}
+	}
+	/// Returns any OMIT clause if specified
+	#[inline]
+	pub fn omit(&self) -> Option<&Idioms> {
+		match self {
+			Statement::Select(v) => v.omit.as_ref(),
 			_ => None,
 		}
 	}

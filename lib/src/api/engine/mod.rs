@@ -24,7 +24,19 @@ use crate::sql::Fields;
 use crate::sql::Output;
 use crate::sql::Value;
 use crate::sql::Values;
+use futures::Stream;
 use std::mem;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::Interval;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::Interval;
 
 #[allow(dead_code)] // used by the the embedded database and `http`
 fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
@@ -86,7 +98,7 @@ fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		UpdateStatement {
 			what,
 			data,
-			output: Some(Output::Diff),
+			output: Some(Output::After),
 			..Default::default()
 		},
 	)
@@ -134,4 +146,24 @@ fn delete_statement(params: &mut [Value]) -> (bool, DeleteStatement) {
 			..Default::default()
 		},
 	)
+}
+
+struct IntervalStream {
+	inner: Interval,
+}
+
+impl IntervalStream {
+	fn new(interval: Interval) -> Self {
+		Self {
+			inner: interval,
+		}
+	}
+}
+
+impl Stream for IntervalStream {
+	type Item = Instant;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Instant>> {
+		self.inner.poll_tick(cx).map(Some)
+	}
 }

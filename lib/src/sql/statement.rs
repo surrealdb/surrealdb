@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::{comment, mightbespace};
+use crate::sql::comment::mightbespace;
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -33,7 +33,7 @@ use crate::sql::statements::show::{show, ShowStatement};
 use crate::sql::statements::sleep::{sleep, SleepStatement};
 use crate::sql::statements::throw::{throw, ThrowStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::value::Value;
+use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -76,13 +76,14 @@ impl Display for Statements {
 
 pub fn statements(i: &str) -> IResult<&str, Statements> {
 	let (i, v) = separated_list1(colons, statement)(i)?;
-	let (i, _) = many0(alt((colons, comment)))(i)?;
+	let (i, _) = many0(colons)(i)?;
 	Ok((i, Statements(v)))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub enum Statement {
+	Value(Value),
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
 	Break(BreakStatement),
@@ -127,6 +128,7 @@ impl Statement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Self::Value(v) => v.writeable(),
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
 			Self::Continue(_) => false,
@@ -183,6 +185,12 @@ impl Statement {
 			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Throw(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Value(v) => {
+				// Ensure futures are processed
+				let opt = &opt.new_with_futures(true);
+				// Process the output value
+				v.compute(ctx, opt, txn, doc).await
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -191,6 +199,7 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
+			Self::Value(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Break(v) => write!(Pretty::from(f), "{v}"),
@@ -255,6 +264,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 				map(update, Statement::Update),
 				map(r#use, Statement::Use),
 			)),
+			map(value, Statement::Value),
 		)),
 		mightbespace,
 	)(i)
@@ -269,7 +279,6 @@ mod tests {
 	fn single_statement() {
 		let sql = "CREATE test";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test", format!("{}", out))
 	}
@@ -278,7 +287,6 @@ mod tests {
 	fn multiple_statements() {
 		let sql = "CREATE test; CREATE temp;";
 		let res = statements(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
 	}
@@ -287,7 +295,6 @@ mod tests {
 	fn multiple_statements_semicolons() {
 		let sql = "CREATE test;;;CREATE temp;;;";
 		let res = statements(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
 	}
@@ -296,7 +303,6 @@ mod tests {
 	fn show_table_changes() {
 		let sql = "SHOW CHANGES FOR TABLE test SINCE 123456";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SHOW CHANGES FOR TABLE test SINCE 123456", format!("{}", out))
 	}
@@ -305,7 +311,6 @@ mod tests {
 	fn show_database_changes() {
 		let sql = "SHOW CHANGES FOR DATABASE SINCE 123456";
 		let res = statement(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SHOW CHANGES FOR DATABASE SINCE 123456", format!("{}", out))
 	}

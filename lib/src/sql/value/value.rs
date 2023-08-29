@@ -48,7 +48,7 @@ use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{map, opt};
+use nom::combinator::{self, into, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
@@ -1149,6 +1149,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
+			Kind::Null => self.coerce_to_null(),
 			Kind::Bool => self.coerce_to_bool().map(Value::from),
 			Kind::Int => self.coerce_to_int().map(Value::from),
 			Kind::Float => self.coerce_to_float().map(Value::from),
@@ -1179,7 +1180,6 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				Self::Null => Ok(Self::None),
 				v => v.coerce_to(k),
 			},
 			Kind::Either(k) => {
@@ -1288,6 +1288,19 @@ impl Value {
 			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "f64".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `null`
+	pub(crate) fn coerce_to_null(self) -> Result<Value, Error> {
+		match self {
+			// Allow any null value
+			Value::Null => Ok(Value::Null),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "null".into(),
 			}),
 		}
 	}
@@ -1675,6 +1688,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
+			Kind::Null => self.convert_to_null(),
 			Kind::Bool => self.convert_to_bool().map(Value::from),
 			Kind::Int => self.convert_to_int().map(Value::from),
 			Kind::Float => self.convert_to_float().map(Value::from),
@@ -1705,7 +1719,6 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				Self::Null => Ok(Self::None),
 				v => v.convert_to(k),
 			},
 			Kind::Either(k) => {
@@ -1740,6 +1753,19 @@ impl Value {
 			Err(e) => Err(e),
 			// Everything converted ok
 			Ok(v) => Ok(v),
+		}
+	}
+
+	/// Try to convert this value to a `null`
+	pub(crate) fn convert_to_null(self) -> Result<Value, Error> {
+		match self {
+			// Allow any boolean value
+			Value::Null => Ok(Value::Null),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "null".into(),
+			}),
 		}
 	}
 
@@ -2678,7 +2704,7 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(_, w) if w == Number::Int(0) => Ok(Value::None),
+				(_, Number::Int(0)) => Ok(Value::None),
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
 					// Divided a large number by a small number, got an overflowing number
 					Err(Error::TryDiv(v.to_string(), w.to_string()))
@@ -2759,45 +2785,44 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
 	let _diving = crate::sql::parser::depth::dive()?;
-
 	let (i, v) = alt((
 		alt((
 			terminated(
 				alt((
-					map(tag_no_case("NONE"), |_| Value::None),
-					map(tag_no_case("NULL"), |_| Value::Null),
-					map(tag_no_case("true"), |_| Value::Bool(true)),
-					map(tag_no_case("false"), |_| Value::Bool(false)),
+					combinator::value(Value::None, tag_no_case("NONE")),
+					combinator::value(Value::Null, tag_no_case("NULL")),
+					combinator::value(Value::Bool(true), tag_no_case("true")),
+					combinator::value(Value::Bool(false), tag_no_case("false")),
 				)),
 				keyword,
 			),
-			map(idiom::multi_without_start, Value::from),
+			into(idiom::multi_without_start),
 		)),
 		alt((
-			map(cast, Value::from),
-			map(function, Value::from),
-			map(subquery, Value::from),
-			map(constant, Value::from),
-			map(datetime, Value::from),
-			map(duration, Value::from),
-			map(geometry, Value::from),
-			map(future, Value::from),
-			map(unique, Value::from),
-			map(number, Value::from),
-			map(unary, Value::from),
-			map(object, Value::from),
-			map(array, Value::from),
+			into(future),
+			into(cast),
+			into(function),
+			into(geometry),
+			into(subquery),
+			into(constant),
+			into(datetime),
+			into(duration),
+			into(unique),
+			into(number),
+			into(unary),
+			into(object),
+			into(array),
 		)),
 		alt((
-			map(block, Value::from),
-			map(param, Value::from),
-			map(regex, Value::from),
-			map(model, Value::from),
-			map(edges, Value::from),
-			map(range, Value::from),
-			map(thing, Value::from),
-			map(strand, Value::from),
-			map(idiom::path, Value::from),
+			into(block),
+			into(param),
+			into(regex),
+			into(model),
+			into(edges),
+			into(range),
+			into(thing),
+			into(strand),
+			into(idiom::path),
 		)),
 	))(i)?;
 	reparse_idiom_start(v, i)
@@ -2806,36 +2831,36 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 pub fn select(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		alt((
-			map(unary, Value::from),
-			map(binary, Value::from),
-			map(tag_no_case("NONE"), |_| Value::None),
-			map(tag_no_case("NULL"), |_| Value::Null),
-			map(tag_no_case("true"), |_| Value::Bool(true)),
-			map(tag_no_case("false"), |_| Value::Bool(false)),
-			map(idiom::multi_without_start, Value::from),
+			into(unary),
+			into(binary),
+			combinator::value(Value::None, tag_no_case("NONE")),
+			combinator::value(Value::Null, tag_no_case("NULL")),
+			combinator::value(Value::Bool(true), tag_no_case("true")),
+			combinator::value(Value::Bool(false), tag_no_case("false")),
+			into(idiom::multi_without_start),
 		)),
 		alt((
-			map(cast, Value::from),
-			map(function, Value::from),
-			map(subquery, Value::from),
-			map(constant, Value::from),
-			map(datetime, Value::from),
-			map(duration, Value::from),
-			map(geometry, Value::from),
-			map(future, Value::from),
-			map(unique, Value::from),
-			map(number, Value::from),
-			map(object, Value::from),
-			map(array, Value::from),
-			map(block, Value::from),
-			map(param, Value::from),
-			map(regex, Value::from),
-			map(model, Value::from),
-			map(edges, Value::from),
-			map(range, Value::from),
-			map(thing, Value::from),
-			map(table, Value::from),
-			map(strand, Value::from),
+			into(future),
+			into(cast),
+			into(function),
+			into(geometry),
+			into(subquery),
+			into(constant),
+			into(datetime),
+			into(duration),
+			into(unique),
+			into(number),
+			into(object),
+			into(array),
+			into(block),
+			into(param),
+			into(regex),
+			into(model),
+			into(edges),
+			into(range),
+			into(thing),
+			into(table),
+			into(strand),
 		)),
 	))(i)?;
 	reparse_idiom_start(v, i)
@@ -2844,20 +2869,20 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
-		map(idiom::multi_without_start, Value::from),
-		map(function, Value::from),
-		map(subquery, Value::from),
-		map(constant, Value::from),
-		map(datetime, Value::from),
-		map(duration, Value::from),
-		map(future, Value::from),
-		map(block, Value::from),
-		map(param, Value::from),
-		map(model, Value::from),
-		map(edges, Value::from),
-		map(range, Value::from),
-		map(thing, Value::from),
-		map(table, Value::from),
+		into(idiom::multi_without_start),
+		into(function),
+		into(subquery),
+		into(constant),
+		into(datetime),
+		into(duration),
+		into(future),
+		into(block),
+		into(param),
+		into(model),
+		into(edges),
+		into(range),
+		into(thing),
+		into(table),
 	))(i)?;
 	reparse_idiom_start(v, i)
 }
@@ -2896,17 +2921,17 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 	}
 	// Parse any simple JSON-like value
 	alt((
-		map(tag_no_case("null".as_bytes()), |_| Value::Null),
-		map(tag_no_case("true".as_bytes()), |_| Value::Bool(true)),
-		map(tag_no_case("false".as_bytes()), |_| Value::Bool(false)),
-		map(datetime, Value::from),
-		map(geometry, Value::from),
-		map(unique, Value::from),
-		map(number, Value::from),
-		map(object, Value::from),
-		map(array, Value::from),
-		map(thing, Value::from),
-		map(strand, Value::from),
+		combinator::value(Value::Null, tag_no_case("null".as_bytes())),
+		combinator::value(Value::Bool(true), tag_no_case("true".as_bytes())),
+		combinator::value(Value::Bool(false), tag_no_case("false".as_bytes())),
+		into(datetime),
+		into(geometry),
+		into(unique),
+		into(number),
+		into(object),
+		into(array),
+		into(thing),
+		into(strand),
 	))(i)
 }
 

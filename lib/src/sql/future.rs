@@ -8,6 +8,7 @@ use crate::sql::common::{closechevron, openchevron};
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -54,9 +55,11 @@ pub fn future(i: &str) -> IResult<&str, Future> {
 	let (i, _) = openchevron(i)?;
 	let (i, _) = tag("future")(i)?;
 	let (i, _) = closechevron(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = block(i)?;
-	Ok((i, Future(v)))
+	cut(|i| {
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = block(i)?;
+		Ok((i, Future(v)))
+	})(i)
 }
 #[cfg(test)]
 mod tests {
@@ -69,7 +72,6 @@ mod tests {
 	fn future_expression() {
 		let sql = "<future> { 5 + 10 }";
 		let res = future(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
 		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));

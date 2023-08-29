@@ -51,7 +51,6 @@ mod tests {
 	fn break_basic() {
 		let sql = "BREAK";
 		let res = r#break(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BREAK", format!("{}", out))
 	}

@@ -1,3 +1,5 @@
+pub mod opt;
+
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Idiom;

@@ -51,7 +51,6 @@ mod tests {
 	fn continue_basic() {
 		let sql = "CONTINUE";
 		let res = r#continue(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CONTINUE", format!("{}", out))
 	}

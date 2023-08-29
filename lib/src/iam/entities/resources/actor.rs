@@ -1,3 +1,4 @@
+use revision::revisioned;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -13,6 +14,7 @@ use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
 // User
 //
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Actor {
 	res: Resource,
 	roles: Vec<Role>,

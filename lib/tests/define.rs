@@ -827,7 +827,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:2`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:1`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -889,13 +889,13 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -908,7 +908,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -944,13 +944,13 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result?;
@@ -991,13 +991,13 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
 	));
 
 	let tmp = res.remove(0).result?;
@@ -1053,7 +1053,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 	if let Err(e) = tmp {
 		assert_eq!(
 			e.to_string(),
-			"Database index `test` already contains 'two', with record `user:2`"
+			"Database index `test` already contains 'two', with record `user:1`"
 		);
 	} else {
 		panic!("An error was expected.")
@@ -1107,7 +1107,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	if let Err(e) = tmp {
 		assert_eq!(
 			e.to_string(),
-			"Database index `test` already contains ['apple', 'two'], with record `user:3`"
+			"Database index `test` already contains ['apple', 'two'], with record `user:1`"
 		);
 	} else {
 		panic!("An error was expected.")
@@ -1117,7 +1117,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	if let Err(e) = tmp {
 		assert_eq!(
 			e.to_string(),
-			"Database index `test` already contains ['tesla', 'two'], with record `user:4`"
+			"Database index `test` already contains ['tesla', 'two'], with record `user:2`"
 		);
 	} else {
 		panic!("An error was expected.")

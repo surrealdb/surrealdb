@@ -74,6 +74,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		cond: None,
 		fetch: None,
 		archived: Some(crate::sql::uuid::Uuid::from(old_node)),
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let ctx = context::Context::background();
 	let (sender, _) = channel::unbounded();
@@ -147,6 +148,7 @@ async fn single_live_queries_are_garbage_collected() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)
@@ -162,6 +164,7 @@ async fn single_live_queries_are_garbage_collected() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)

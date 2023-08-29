@@ -4,9 +4,9 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::multi::separated_list1;
-use nom::sequence::tuple;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -56,10 +56,12 @@ impl Display for Split {
 
 pub fn split(i: &str) -> IResult<&str, Splits> {
 	let (i, _) = tag_no_case("SPLIT")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("ON"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_list1(commas, split_raw)(i)?;
-	Ok((i, Splits(v)))
+	cut(|i| {
+		let (i, _) = opt(terminated(tag_no_case("ON"), shouldbespace))(i)?;
+		let (i, v) = separated_list1(commas, split_raw)(i)?;
+		Ok((i, Splits(v)))
+	})(i)
 }
 
 fn split_raw(i: &str) -> IResult<&str, Split> {
@@ -77,7 +79,6 @@ mod tests {
 	fn split_statement() {
 		let sql = "SPLIT field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Splits(vec![Split(Idiom::parse("field"))]),);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -87,7 +88,6 @@ mod tests {
 	fn split_statement_on() {
 		let sql = "SPLIT ON field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Splits(vec![Split(Idiom::parse("field"))]),);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -97,7 +97,6 @@ mod tests {
 	fn split_statement_multiple() {
 		let sql = "SPLIT field, other.field";
 		let res = split(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

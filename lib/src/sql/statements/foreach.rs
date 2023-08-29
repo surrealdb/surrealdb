@@ -9,6 +9,7 @@ use crate::sql::param::{param, Param};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -102,12 +103,15 @@ pub fn foreach(i: &str) -> IResult<&str, ForeachStatement> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, param) = param(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IN")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, range) = value(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, block) = block(i)?;
+	let (i, (range, block)) = cut(|i| {
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("IN")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, range) = value(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, block) = block(i)?;
+		Ok((i, (range, block)))
+	})(i)?;
 	Ok((
 		i,
 		ForeachStatement {
@@ -127,7 +131,6 @@ mod tests {
 	fn foreach_statement_first() {
 		let sql = "FOR $test IN [1, 2, 3, 4, 5] { UPDATE person:test SET scores += $test; }";
 		let res = foreach(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

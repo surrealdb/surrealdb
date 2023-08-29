@@ -102,7 +102,6 @@ mod tests {
 	fn table_normal() {
 		let sql = "test";
 		let res = table(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Table(String::from("test")));
@@ -112,7 +111,6 @@ mod tests {
 	fn table_quoted_backtick() {
 		let sql = "`test`";
 		let res = table(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Table(String::from("test")));
@@ -122,7 +120,6 @@ mod tests {
 	fn table_quoted_brackets() {
 		let sql = "⟨test⟩";
 		let res = table(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Table(String::from("test")));

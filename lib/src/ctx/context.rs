@@ -1,6 +1,8 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::capabilities::{FuncTarget, NetTarget};
+use crate::dbs::capabilities::FuncTarget;
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
@@ -14,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use trice::Instant;
+#[cfg(feature = "http")]
 use url::Url;
 
 impl<'a> From<Value> for Cow<'a, Value> {
@@ -209,6 +212,7 @@ impl<'a> Context<'a> {
 	}
 
 	/// Get the capabilities for this context
+	#[allow(dead_code)]
 	pub fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
 	}
@@ -235,6 +239,7 @@ impl<'a> Context<'a> {
 	}
 
 	/// Check if a network target is allowed
+	#[cfg(feature = "http")]
 	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
 		match target.host() {
 			Some(host)

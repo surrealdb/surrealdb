@@ -11,6 +11,7 @@ use crate::sql::operator::{assigner, Operator};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -121,49 +122,52 @@ pub fn data(i: &str) -> IResult<&str, Data> {
 fn set(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("SET")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_list1(commas, |i| {
-		let (i, l) = idiom(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, o) = assigner(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, r) = value(i)?;
-		Ok((i, (l, o, r)))
-	})(i)?;
+	let (i, v) = cut(separated_list1(
+		commas,
+		cut(|i| {
+			let (i, l) = idiom(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, o) = assigner(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, r) = value(i)?;
+			Ok((i, (l, o, r)))
+		}),
+	))(i)?;
 	Ok((i, Data::SetExpression(v)))
 }
 
 fn unset(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("UNSET")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_list1(commas, idiom)(i)?;
+	let (i, v) = cut(separated_list1(commas, idiom))(i)?;
 	Ok((i, Data::UnsetExpression(v)))
 }
 
 fn patch(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("PATCH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, Data::PatchExpression(v)))
 }
 
 fn merge(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("MERGE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, Data::MergeExpression(v)))
 }
 
 fn replace(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("REPLACE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, Data::ReplaceExpression(v)))
 }
 
 fn content(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("CONTENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, Data::ContentExpression(v)))
 }
 
@@ -174,6 +178,7 @@ pub fn single(i: &str) -> IResult<&str, Data> {
 
 pub fn values(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("(")(i)?;
+	// TODO: look at call tree here.
 	let (i, fields) = separated_list1(commas, idiom)(i)?;
 	let (i, _) = tag_no_case(")")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -188,10 +193,7 @@ pub fn values(i: &str) -> IResult<&str, Data> {
 	Ok((
 		i,
 		Data::ValuesExpression(
-			values
-				.into_iter()
-				.map(|row| fields.iter().cloned().zip(row.into_iter()).collect())
-				.collect(),
+			values.into_iter().map(|row| fields.iter().cloned().zip(row).collect()).collect(),
 		),
 	))
 }
@@ -219,7 +221,6 @@ mod tests {
 	fn set_statement() {
 		let sql = "SET field = true";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true", format!("{}", out));
 	}
@@ -228,7 +229,6 @@ mod tests {
 	fn set_statement_multiple() {
 		let sql = "SET field = true, other.field = false";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true, other.field = false", format!("{}", out));
 	}
@@ -237,7 +237,6 @@ mod tests {
 	fn unset_statement() {
 		let sql = "UNSET field";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("UNSET field", format!("{}", out));
 	}
@@ -246,7 +245,6 @@ mod tests {
 	fn unset_statement_multiple_fields() {
 		let sql = "UNSET field, other.field";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("UNSET field, other.field", format!("{}", out));
 	}
@@ -255,7 +253,6 @@ mod tests {
 	fn patch_statement() {
 		let sql = "PATCH [{ field: true }]";
 		let res = patch(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("PATCH [{ field: true }]", format!("{}", out));
 	}
@@ -264,7 +261,6 @@ mod tests {
 	fn merge_statement() {
 		let sql = "MERGE { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("MERGE { field: true }", format!("{}", out));
 	}
@@ -273,7 +269,6 @@ mod tests {
 	fn content_statement() {
 		let sql = "CONTENT { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CONTENT { field: true }", format!("{}", out));
 	}
@@ -282,7 +277,6 @@ mod tests {
 	fn replace_statement() {
 		let sql = "REPLACE { field: true }";
 		let res = data(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("REPLACE { field: true }", format!("{}", out));
 	}
@@ -291,7 +285,6 @@ mod tests {
 	fn values_statement() {
 		let sql = "(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])";
 		let res = values(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])",
@@ -303,7 +296,6 @@ mod tests {
 	fn update_statement() {
 		let sql = "ON DUPLICATE KEY UPDATE field = true, other.field = false";
 		let res = update(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("ON DUPLICATE KEY UPDATE field = true, other.field = false", format!("{}", out));
 	}

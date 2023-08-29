@@ -1,6 +1,7 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::sql::idiom::Idiom;
+use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
@@ -33,6 +34,11 @@ pub enum Error {
 	#[doc(hidden)]
 	#[error("Continue statement has been reached")]
 	Continue,
+
+	/// This error is used for retrying document processing with a new id
+	#[doc(hidden)]
+	#[error("This document should be retried with a new ID")]
+	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic")]
@@ -105,6 +111,10 @@ pub enum Error {
 	/// There was an error with authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
+
+	/// Auth was expected to be set but was unknown
+	#[error("Auth was expected to be set but was unknown")]
+	UnknownAuth,
 
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
@@ -427,7 +437,7 @@ pub enum Error {
 	/// A database index entry for the specified record already exists
 	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
 	IndexExists {
-		thing: String,
+		thing: Thing,
 		index: String,
 		value: String,
 	},
@@ -641,6 +651,7 @@ impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
 			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
 	}
@@ -651,6 +662,7 @@ impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
 			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
 	}

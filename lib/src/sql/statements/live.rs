@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
@@ -15,6 +16,8 @@ use crate::sql::Uuid;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
+use nom::combinator::into;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -36,6 +39,10 @@ pub struct LiveStatement {
 
 	// When a live query is archived, this should be the node ID that archived the query.
 	pub archived: Option<Uuid>,
+	// A live query is run with permissions, and we must validate that during the run.
+	// It is optional, because the live query may be constructed without it being set.
+	// It is populated during compute.
+	pub auth: Option<Auth>,
 }
 
 impl LiveStatement {
@@ -51,23 +58,33 @@ impl LiveStatement {
 		opt.realtime()?;
 		// Valid options?
 		opt.valid_for_db()?;
+		// Check that auth has been set
+		let self_override = LiveStatement {
+			auth: match self.auth {
+				Some(ref auth) => Some(auth.clone()),
+				None => Some(opt.auth.as_ref().clone()),
+			},
+			..self.clone()
+		};
+		trace!("Evaluated live query auth to {:?}", self_override.auth);
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
-		match self.what.compute(ctx, opt, txn, doc).await? {
+		match self_override.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
 				// Clone the current statement
-				let mut stm = self.clone();
+				let mut stm = self_override.clone();
 				// Store the current Node ID
 				if let Err(e) = opt.id() {
 					trace!("No ID for live query {:?}, error={:?}", stm, e)
 				}
 				stm.node = Uuid(opt.id()?);
 				// Insert the node live query
-				let key = crate::key::node::lq::new(opt.id()?, self.id.0, opt.ns(), opt.db());
+				let key =
+					crate::key::node::lq::new(opt.id()?, self_override.id.0, opt.ns(), opt.db());
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self.id.0);
+				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self_override.id.0);
 				run.putc(key, stm, None).await?;
 			}
 			v => {
@@ -77,7 +94,8 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.clone().into())
+		trace!("Live query after processing: {:?}", self_override);
+		Ok(self_override.id.clone().into())
 	}
 
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
@@ -100,25 +118,30 @@ impl fmt::Display for LiveStatement {
 }
 
 pub fn live(i: &str) -> IResult<&str, LiveStatement> {
-	let (i, _) = tag_no_case("LIVE SELECT")(i)?;
+	let (i, _) = tag_no_case("LIVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
+	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = alt((map(param, Value::from), map(table, Value::from)))(i)?;
-	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-	Ok((
-		i,
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			expr,
-			what,
-			cond,
-			fetch,
-			archived: None,
-		},
-	))
+	cut(|i| {
+		let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("FROM")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = alt((into(param), into(table)))(i)?;
+		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
+		Ok((
+			i,
+			LiveStatement {
+				id: Uuid::new_v4(),
+				node: Uuid::new_v4(),
+				expr,
+				what,
+				cond,
+				fetch,
+				archived: None,
+				auth: None, // Auth is set via options in compute()
+			},
+		))
+	})(i)
 }
