@@ -4180,15 +4180,16 @@ checksum = "8c31b5c4033f8fdde8700e4657be2c497e7288f01515be52168c631e2e4d4086"
 
 [[package]]
 name = "revision"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20d0f37a3d9dc17b8bb06c277896acc3e06cbcb45ba009c4a931b9db1e35526e"
+checksum = "87eb86913082f8976b06d07a59f17df9120e6f38b882cf3fc5a45b4499e224b6"
 dependencies = [
  "bincode",
  "chrono",
  "geo 0.26.0",
  "regex",
  "revision-derive",
+ "roaring",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -4197,9 +4198,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c2baf0b4340639a19502bd2cbec8d6f45e9085d77281288a2e0b16a413c785"
+checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
 dependencies = [
  "darling",
  "proc-macro-error",

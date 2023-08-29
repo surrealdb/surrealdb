@@ -218,6 +218,7 @@ impl<'a> Context<'a> {
 	}
 
 	/// Check if scripting is allowed
+	#[allow(dead_code)]
 	pub fn check_allowed_scripting(&self) -> Result<(), Error> {
 		if !self.capabilities.is_allowed_scripting() {
 			return Err(Error::ScriptingNotAllowed);

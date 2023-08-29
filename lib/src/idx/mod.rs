@@ -173,7 +173,7 @@ impl IndexKeyBase {
 	}
 }
 
-/// This trait provides `bincode` based default implementations for serialization/deserialization
+/// This trait provides `Revision` based default implementations for serialization/deserialization
 trait VersionedSerdeState
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,
