@@ -20,11 +20,13 @@ use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::TreeStoreType;
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
+use revision::revisioned;
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -64,15 +66,15 @@ impl Default for Bm25Params {
 	}
 }
 
-pub(crate) struct Statistics {
+pub(crate) struct FtStatistics {
 	doc_ids: BStatistics,
 	terms: BStatistics,
 	doc_lengths: BStatistics,
 	postings: BStatistics,
 }
 
-impl From<Statistics> for Value {
-	fn from(stats: Statistics) -> Self {
+impl From<FtStatistics> for Value {
+	fn from(stats: FtStatistics) -> Self {
 		let mut res = Object::default();
 		res.insert("doc_ids".to_owned(), Value::from(stats.doc_ids));
 		res.insert("terms".to_owned(), Value::from(stats.terms));
@@ -83,21 +85,20 @@ impl From<Statistics> for Value {
 }
 
 #[derive(Default, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 struct State {
 	total_docs_lengths: u128,
 	doc_count: u64,
 }
 
-impl SerdeState for State {}
+impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
 		tx: &mut Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
-		order: u32,
-		scoring: &Scoring,
-		hl: bool,
+		p: &SearchParams,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
@@ -107,27 +108,28 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(tx, index_key_base.clone(), order, store_type).await?,
+			DocIds::new(tx, index_key_base.clone(), p.doc_ids_order, store_type).await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
-			DocLengths::new(tx, index_key_base.clone(), order, store_type).await?,
+			DocLengths::new(tx, index_key_base.clone(), p.doc_lengths_order, store_type).await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(tx, index_key_base.clone(), order, store_type).await?,
+			Postings::new(tx, index_key_base.clone(), p.postings_order, store_type).await?,
 		));
-		let terms =
-			Arc::new(RwLock::new(Terms::new(tx, index_key_base.clone(), order, store_type).await?));
+		let terms = Arc::new(RwLock::new(
+			Terms::new(tx, index_key_base.clone(), p.terms_order, store_type).await?,
+		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
 		let mut bm25 = None;
 		if let Scoring::Bm {
 			k1,
 			b,
-		} = scoring
+		} = p.sc
 		{
 			bm25 = Some(Bm25Params {
-				k1: *k1,
-				b: *b,
+				k1,
+				b,
 			});
 		}
 		Ok(Self {
@@ -135,7 +137,7 @@ impl FtIndex {
 			state_key,
 			index_key_base,
 			bm25,
-			highlighting: hl,
+			highlighting: p.hl,
 			analyzer: az.into(),
 			doc_ids,
 			doc_lengths,
@@ -168,7 +170,7 @@ impl FtIndex {
 
 			// Get the term list
 			if let Some(term_list_vec) = tx.get(self.index_key_base.new_bk_key(doc_id)).await? {
-				let term_list = RoaringTreemap::try_from_val(term_list_vec)?;
+				let term_list = RoaringTreemap::deserialize_from(&mut term_list_vec.as_slice())?;
 				// Remove the postings
 				let mut p = self.postings.write().await;
 				let mut t = self.terms.write().await;
@@ -228,7 +230,7 @@ impl FtIndex {
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
 		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone()).await? {
-			Some(RoaringTreemap::try_from_val(val)?)
+			Some(RoaringTreemap::deserialize_from(&mut val.as_slice())?)
 		} else {
 			None
 		};
@@ -275,7 +277,9 @@ impl FtIndex {
 		}
 
 		// Stores the term list for this doc_id
-		tx.set(term_ids_key, terms_ids.try_to_val()?).await?;
+		let mut val = Vec::new();
+		terms_ids.serialize_into(&mut val)?;
+		tx.set(term_ids_key, val).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
@@ -402,9 +406,9 @@ impl FtIndex {
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
-		Ok(Statistics {
+		Ok(FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(tx).await?,
 			terms: self.terms.read().await.statistics(tx).await?,
 			doc_lengths: self.doc_lengths.read().await.statistics(tx).await?,
@@ -454,6 +458,7 @@ mod tests {
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
+	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
 	use crate::sql::statements::DefineAnalyzerStatement;
@@ -508,9 +513,15 @@ mod tests {
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
-			order,
-			&Scoring::bm25(),
-			hl,
+			&SearchParams {
+				az: az.name.clone(),
+				doc_ids_order: order,
+				doc_lengths_order: order,
+				postings_order: order,
+				terms_order: order,
+				sc: Scoring::bm25(),
+				hl,
+			},
 			TreeStoreType::Write,
 		)
 		.await
