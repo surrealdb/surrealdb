@@ -42,3 +42,23 @@ impl Display for Notification {
 		write!(f, "{}", obj)
 	}
 }
+
+impl From<crate::dbs::Notification> for Notification {
+	fn from(n: crate::dbs::Notification) -> Self {
+		Self {
+			id: n.live_id,
+			action: Action::from(n.action),
+			result: n.result,
+		}
+	}
+}
+
+impl From<crate::dbs::Action> for Action {
+	fn from(value: crate::dbs::Action) -> Self {
+		match value {
+			crate::dbs::Action::Create => Self::Create,
+			crate::dbs::Action::Update => Self::Update,
+			crate::dbs::Action::Delete => Self::Delete,
+		}
+	}
+}

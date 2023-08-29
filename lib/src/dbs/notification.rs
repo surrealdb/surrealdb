@@ -1,10 +1,13 @@
 use crate::dbs::node::Timestamp;
 use crate::sql::{Object, Uuid, Value};
+use derive::Store;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]
+#[revisioned(revision = 1)]
 pub enum Action {
 	Create,
 	Update,
@@ -21,7 +24,8 @@ impl Display for Action {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct Notification {
 	pub live_id: Uuid,
 	pub node_id: Uuid,
