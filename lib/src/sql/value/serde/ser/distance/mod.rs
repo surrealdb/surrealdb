@@ -1,10 +1,8 @@
 use crate::err::Error;
 use crate::sql::index::Distance;
 use crate::sql::value::serde::ser;
-use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
-use serde::ser::Serialize;
 
 pub(super) struct Serializer;
 
@@ -39,6 +37,8 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::value::serde::ser::Serializer;
+	use serde::Serialize;
 
 	#[test]
 	fn euclidean() {
