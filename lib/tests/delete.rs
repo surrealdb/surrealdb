@@ -2,8 +2,9 @@ mod parse;
 
 use channel::{Receiver, TryRecvError};
 use parse::Parse;
-use surrealdb::api::model::{Action, Notification};
+use surrealdb::dbs::node::Timestamp;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::{Action, Notification};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
@@ -410,21 +411,22 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 
 	// Validate notification
-	let notifications = dbs.notifications();
-	let notifications = match notifications {
-		Some(notifications) => notifications,
-		None => panic!("expected notifications"),
-	};
+	let notifications = dbs.notifications().unwrap();
 	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
 	assert_eq!(
 		not,
 		Notification {
-			id: live_id,
+			live_id,
+			node_id: Default::default(),
 			action: Action::Delete,
 			result: Value::Thing(Thing {
 				tb: "person".to_string(),
 				id: Id::String("test_true".to_string()),
 			}),
+			notification_id: Default::default(),
+			timestamp: Timestamp {
+				value: 0
+			},
 		}
 	);
 	Ok(())

@@ -1,6 +1,3 @@
-use crate::dbs::Notification;
-use crate::sql::statements::CreateStatement;
-use crate::sql::table::table;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -44,6 +41,8 @@ async fn scan_node_lq() {
 #[tokio::test]
 #[serial]
 async fn live_creates_remote_notification() {
+	use crate::sql::statements::{CreateStatement, LiveStatement};
+
 	// Setup
 	let remote_node = Uuid::parse_str("30a9bea3-8430-42db-9524-3d4d5c41e3ea").unwrap();
 	let local_node = Uuid::parse_str("4aa13527-538c-40da-b903-2402f57c4e74").unwrap();
@@ -73,6 +72,7 @@ async fn live_creates_remote_notification() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let _ = live_stm.compute(&context, &options, &tx, None).await.unwrap();
 	tx.lock().await.commit().await.unwrap();
@@ -94,21 +94,15 @@ async fn live_creates_remote_notification() {
 	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Verify there is a remote node notification entry
-	let prefix = crate::key::table::nt::prefix(
-		namespace,
-		database,
-		table,
-		sql::uuid::Uuid::from(live_query_id),
-	);
-	let suffix = crate::key::table::nt::suffix(
-		namespace,
-		database,
-		table,
-		sql::uuid::Uuid::from(live_query_id),
-	);
-	let res: Vec<crate::key::table::nt::Nt> =
-		tx.lock().await.scan::<crate::key::table::nt::Nt>(prefix..suffix, 100).await.unwrap();
-	tx.commit().await.unwrap();
+	let res = tx
+		.lock()
+		.await
+		.scan_nt(namespace, database, table, sql::uuid::Uuid::from(live_query_id), 1000)
+		.await
+		.unwrap();
+	assert_eq!(res.len(), 1);
+	// TODO verify key and value
+	tx.lock().await.commit().await.unwrap();
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	let res = tx.scan_ndlq(&remote_node, 100).await.unwrap();

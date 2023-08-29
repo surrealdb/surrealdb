@@ -2,7 +2,6 @@
 use crate::dbs::node::Timestamp;
 use derive::Key;
 use serde::{Deserialize, Serialize};
-use uuid::serde::compact;
 
 /// Nt is used to track live query notifications for remote nodes (nodes, from which
 /// the notification wasn't generated, but which the notification belongs to).
@@ -51,7 +50,7 @@ pub fn prefix(ns: &str, db: &str, tb: &str, lq: crate::sql::Uuid) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b't']);
 	k.extend_from_slice(lq.0.as_bytes());
-	k.extend_from_slice(&[0x00]);
+	k.extend_from_slice(&[b'!', 0x00]);
 	k
 }
 
@@ -59,7 +58,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str, lq: crate::sql::Uuid) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b't']);
 	k.extend_from_slice(lq.0.as_bytes());
-	k.extend_from_slice(&[0xff]);
+	k.extend_from_slice(&[b'!', 0xff]);
 	k
 }
 
@@ -95,20 +94,19 @@ impl<'a> Nt<'a> {
 #[cfg(test)]
 mod tests {
 	use crate::key::debug;
-	use crate::sql::Value::Uuid;
 
 	#[test]
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-        let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let live_query_id = crate::sql::Uuid::from(uuid::Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
 		let ts: Timestamp = Timestamp {
 			value: 0x0102030405060708,
 		};
-		let id = Uuid::from_bytes([
+		let id = crate::sql::Uuid::from(uuid::Uuid::from_bytes([
 			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
 			0x1E, 0x1F,
-		]);
+		]));
 		let val = Nt::new("testns", "testdb", "testtb", live_query_id, ts, id);
 		let enc = Nt::encode(&val).unwrap();
 		println!("{:?}", debug::sprint_key(&enc));
@@ -145,8 +143,9 @@ mod tests {
 
 	#[test]
 	fn suffix() {
-		let live_query_id =
-			crate::sql::Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+		let live_query_id = crate::sql::Uuid::from(uuid::Uuid::from_bytes([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		]));
 		let val = super::suffix("testns", "testdb", "testtb", live_query_id);
 		assert_eq!(
 			val,
