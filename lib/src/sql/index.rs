@@ -49,9 +49,10 @@ pub struct MTreeParams {
 	pub doc_ids_order: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Default, Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Distance {
+	#[default]
 	Euclidean,
 	Manhattan,
 	Cosine,
@@ -126,7 +127,7 @@ fn order<'a>(label: &'static str, i: &'a str) -> IResult<&'a str, u32> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case(label)(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, order) = cut(u32)(i)?;
+	let (i, order) = cut(uint32)(i)?;
 	Ok((i, order))
 }
 
@@ -159,9 +160,9 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, sc) = scoring(i)?;
 		let (i, o1) = opt(doc_ids_order)(i)?;
-	let (i, o2) = opt(doc_lengths_order)(i)?;
-	let (i, o3) = opt(postings_order)(i)?;
-	let (i, o4) = opt(terms_order)(i)?;
+		let (i, o2) = opt(doc_lengths_order)(i)?;
+		let (i, o3) = opt(postings_order)(i)?;
+		let (i, o4) = opt(terms_order)(i)?;
 		let (i, hl) = highlights(i)?;
 		Ok((
 			i,
@@ -170,11 +171,12 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 				sc,
 				hl,
 				doc_ids_order: o1.unwrap_or(100),
-			doc_lengths_order: o2.unwrap_or(100),
-			postings_order: o3.unwrap_or(100),
-			terms_order: o4.unwrap_or(100),
-		}),
-	))
+				doc_lengths_order: o2.unwrap_or(100),
+				postings_order: o3.unwrap_or(100),
+				terms_order: o4.unwrap_or(100),
+			}),
+		))
+	})(i)
 }
 
 pub fn distance(i: &str) -> IResult<&str, Distance> {
@@ -215,17 +217,19 @@ pub fn capacity(i: &str) -> IResult<&str, u16> {
 
 pub fn mtree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("MTREE")(i)?;
-	let (i, dimension) = dimension(i)?;
-	let (i, distance) = opt(distance)(i)?;
-	let (i, capacity) = opt(capacity)(i)?;
-	let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
-	Ok((
-		i,
-		Index::MTree(MTreeParams {
-			dimension,
-			distance: distance.unwrap_or(Distance::Euclidean),
-			capacity: capacity.unwrap_or(40),
-			doc_ids_order: doc_ids_order.unwrap_or(100),
+	let (i, _) = shouldbespace(i)?;
+	cut(|i| {
+		let (i, dimension) = dimension(i)?;
+		let (i, distance) = opt(distance)(i)?;
+		let (i, capacity) = opt(capacity)(i)?;
+		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
+		Ok((
+			i,
+			Index::MTree(MTreeParams {
+				dimension,
+				distance: distance.unwrap_or(Distance::Euclidean),
+				capacity: capacity.unwrap_or(40),
+				doc_ids_order: doc_ids_order.unwrap_or(100),
 			}),
 		))
 	})(i)

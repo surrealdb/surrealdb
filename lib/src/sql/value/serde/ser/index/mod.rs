@@ -1,12 +1,12 @@
 use crate::err::Error;
-use crate::sql::index::{Index, SearchParams};
+use crate::sql::index::{Distance, Index, MTreeParams, SearchParams};
 use crate::sql::scoring::Scoring;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
 use ser::Serializer as _;
-use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
+use serde::ser::{Error as _, SerializeStructVariant};
 
 pub(super) struct Serializer;
 
@@ -48,6 +48,7 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::SerializeStructVariant, Self::Error> {
 		match (name, variant) {
 			("Index", "Search") => Ok(SerializeIndex::Search(Default::default())),
+			("Index", "MTree") => Ok(SerializeIndex::MTree(Default::default())),
 			_ => Err(Error::custom(format!("unexpected `{name}::{variant}`"))),
 		}
 	}
@@ -55,6 +56,26 @@ impl ser::Serializer for Serializer {
 
 pub(super) enum SerializeIndex {
 	Search(SerializeSearch),
+	MTree(SerializeMTree),
+}
+
+impl serde::ser::SerializeTupleVariant for SerializeIndex {
+	type Ok = Index;
+	type Error = Error;
+
+	fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
+	where
+		T: Serialize,
+	{
+		todo!()
+	}
+
+	fn end(self) -> Result<Self::Ok, Self::Error> {
+		match self {
+			Self::Search(search) => search.end(),
+			Self::MTree(mtree) => mtree.end(),
+		}
+	}
 }
 
 impl serde::ser::SerializeStructVariant for SerializeIndex {
@@ -67,12 +88,14 @@ impl serde::ser::SerializeStructVariant for SerializeIndex {
 	{
 		match self {
 			Self::Search(search) => search.serialize_field(key, value),
+			Self::MTree(mtree) => mtree.serialize_field(key, value),
 		}
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		match self {
 			Self::Search(search) => search.end(),
+			Self::MTree(mtree) => mtree.end(),
 		}
 	}
 }
@@ -138,6 +161,48 @@ impl serde::ser::SerializeStructVariant for SerializeSearch {
 			})),
 			_ => Err(Error::custom("`Index::Search` missing required field(s)")),
 		}
+	}
+}
+
+#[derive(Default)]
+pub(super) struct SerializeMTree {
+	dimension: u16,
+	distance: Distance,
+	capacity: u16,
+	doc_ids_order: u32,
+}
+impl serde::ser::SerializeStructVariant for SerializeMTree {
+	type Ok = Index;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		match key {
+			"dimension" => {
+				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
+			}
+			"capacity" => {
+				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
+			}
+			"doc_ids_order" => {
+				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			key => {
+				return Err(Error::custom(format!("unexpected field `Index::MTree {{ {key} }}`")));
+			}
+		}
+		Ok(())
+	}
+
+	fn end(self) -> Result<Self::Ok, Error> {
+		Ok(Index::MTree(MTreeParams {
+			dimension: self.dimension,
+			distance: self.distance,
+			capacity: self.capacity,
+			doc_ids_order: self.doc_ids_order,
+		}))
 	}
 }
 
