@@ -7,7 +7,9 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::character::complete::u8 as uint8;
-use nom::combinator::{map, opt};
+use nom::combinator::cut;
+use nom::combinator::opt;
+use nom::combinator::value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -145,10 +147,10 @@ impl fmt::Display for Operator {
 
 pub fn assigner(i: &str) -> IResult<&str, Operator> {
 	alt((
-		map(char('='), |_| Operator::Equal),
-		map(tag("+="), |_| Operator::Inc),
-		map(tag("-="), |_| Operator::Dec),
-		map(tag("+?="), |_| Operator::Ext),
+		value(Operator::Equal, char('=')),
+		value(Operator::Inc, tag("+=")),
+		value(Operator::Dec, tag("-=")),
+		value(Operator::Ext, tag("+?=")),
 	))(i)
 }
 
@@ -158,8 +160,7 @@ pub fn unary(i: &str) -> IResult<&str, Operator> {
 
 pub fn unary_symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
-	let (i, v) =
-		alt((alt((map(tag("-"), |_| Operator::Neg), map(tag("!"), |_| Operator::Not))),))(i)?;
+	let (i, v) = alt((value(Operator::Neg, tag("-")), value(Operator::Not, tag("!"))))(i)?;
 	let (i, _) = mightbespace(i)?;
 	Ok((i, v))
 }
@@ -172,52 +173,52 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		alt((
-			map(tag("||"), |_| Operator::Or),
-			map(tag("&&"), |_| Operator::And),
-			map(tag("?:"), |_| Operator::Tco),
-			map(tag("??"), |_| Operator::Nco),
+			value(Operator::Or, tag("||")),
+			value(Operator::And, tag("&&")),
+			value(Operator::Tco, tag("?:")),
+			value(Operator::Nco, tag("??")),
 		)),
 		alt((
-			map(tag("=="), |_| Operator::Exact),
-			map(tag("!="), |_| Operator::NotEqual),
-			map(tag("*="), |_| Operator::AllEqual),
-			map(tag("?="), |_| Operator::AnyEqual),
-			map(char('='), |_| Operator::Equal),
+			value(Operator::Exact, tag("==")),
+			value(Operator::NotEqual, tag("!=")),
+			value(Operator::AllEqual, tag("*=")),
+			value(Operator::AnyEqual, tag("?=")),
+			value(Operator::Equal, char('=')),
 		)),
 		alt((
-			map(tag("!~"), |_| Operator::NotLike),
-			map(tag("*~"), |_| Operator::AllLike),
-			map(tag("?~"), |_| Operator::AnyLike),
-			map(char('~'), |_| Operator::Like),
+			value(Operator::NotLike, tag("!~")),
+			value(Operator::AllLike, tag("*~")),
+			value(Operator::AnyLike, tag("?~")),
+			value(Operator::Like, char('~')),
 			matches,
 		)),
 		alt((
-			map(tag("<="), |_| Operator::LessThanOrEqual),
-			map(char('<'), |_| Operator::LessThan),
-			map(tag(">="), |_| Operator::MoreThanOrEqual),
-			map(char('>'), |_| Operator::MoreThan),
+			value(Operator::LessThanOrEqual, tag("<=")),
+			value(Operator::LessThan, char('<')),
+			value(Operator::MoreThanOrEqual, tag(">=")),
+			value(Operator::MoreThan, char('>')),
 		)),
 		alt((
-			map(tag("**"), |_| Operator::Pow),
-			map(char('+'), |_| Operator::Add),
-			map(char('-'), |_| Operator::Sub),
-			map(char('*'), |_| Operator::Mul),
-			map(char('×'), |_| Operator::Mul),
-			map(char('∙'), |_| Operator::Mul),
-			map(char('/'), |_| Operator::Div),
-			map(char('÷'), |_| Operator::Div),
+			value(Operator::Pow, tag("**")),
+			value(Operator::Add, char('+')),
+			value(Operator::Sub, char('-')),
+			value(Operator::Mul, char('*')),
+			value(Operator::Mul, char('×')),
+			value(Operator::Mul, char('∙')),
+			value(Operator::Div, char('/')),
+			value(Operator::Div, char('÷')),
 		)),
 		alt((
-			map(char('∋'), |_| Operator::Contain),
-			map(char('∌'), |_| Operator::NotContain),
-			map(char('∈'), |_| Operator::Inside),
-			map(char('∉'), |_| Operator::NotInside),
-			map(char('⊇'), |_| Operator::ContainAll),
-			map(char('⊃'), |_| Operator::ContainAny),
-			map(char('⊅'), |_| Operator::ContainNone),
-			map(char('⊆'), |_| Operator::AllInside),
-			map(char('⊂'), |_| Operator::AnyInside),
-			map(char('⊄'), |_| Operator::NoneInside),
+			value(Operator::Contain, char('∋')),
+			value(Operator::NotContain, char('∌')),
+			value(Operator::Inside, char('∈')),
+			value(Operator::NotInside, char('∉')),
+			value(Operator::ContainAll, char('⊇')),
+			value(Operator::ContainAny, char('⊃')),
+			value(Operator::ContainNone, char('⊅')),
+			value(Operator::AllInside, char('⊆')),
+			value(Operator::AnyInside, char('⊂')),
+			value(Operator::NoneInside, char('⊄')),
 		)),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -228,26 +229,26 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
 		alt((
-			map(tag_no_case("OR"), |_| Operator::Or),
-			map(tag_no_case("AND"), |_| Operator::And),
-			map(tag_no_case("IS NOT"), |_| Operator::NotEqual),
-			map(tag_no_case("IS"), |_| Operator::Equal),
+			value(Operator::Or, tag_no_case("OR")),
+			value(Operator::And, tag_no_case("AND")),
+			value(Operator::NotEqual, tag_no_case("IS NOT")),
+			value(Operator::Equal, tag_no_case("IS")),
 		)),
 		alt((
-			map(tag_no_case("CONTAINSALL"), |_| Operator::ContainAll),
-			map(tag_no_case("CONTAINSANY"), |_| Operator::ContainAny),
-			map(tag_no_case("CONTAINSNONE"), |_| Operator::ContainNone),
-			map(tag_no_case("CONTAINSNOT"), |_| Operator::NotContain),
-			map(tag_no_case("CONTAINS"), |_| Operator::Contain),
-			map(tag_no_case("ALLINSIDE"), |_| Operator::AllInside),
-			map(tag_no_case("ANYINSIDE"), |_| Operator::AnyInside),
-			map(tag_no_case("NONEINSIDE"), |_| Operator::NoneInside),
-			map(tag_no_case("NOTINSIDE"), |_| Operator::NotInside),
-			map(tag_no_case("INSIDE"), |_| Operator::Inside),
-			map(tag_no_case("OUTSIDE"), |_| Operator::Outside),
-			map(tag_no_case("INTERSECTS"), |_| Operator::Intersects),
-			map(tag_no_case("NOT IN"), |_| Operator::NotInside),
-			map(tag_no_case("IN"), |_| Operator::Inside),
+			value(Operator::ContainAll, tag_no_case("CONTAINSALL")),
+			value(Operator::ContainAny, tag_no_case("CONTAINSANY")),
+			value(Operator::ContainNone, tag_no_case("CONTAINSNONE")),
+			value(Operator::NotContain, tag_no_case("CONTAINSNOT")),
+			value(Operator::Contain, tag_no_case("CONTAINS")),
+			value(Operator::AllInside, tag_no_case("ALLINSIDE")),
+			value(Operator::AnyInside, tag_no_case("ANYINSIDE")),
+			value(Operator::NoneInside, tag_no_case("NONEINSIDE")),
+			value(Operator::NotInside, tag_no_case("NOTINSIDE")),
+			value(Operator::Inside, tag_no_case("INSIDE")),
+			value(Operator::Outside, tag_no_case("OUTSIDE")),
+			value(Operator::Intersects, tag_no_case("INTERSECTS")),
+			value(Operator::NotInside, tag_no_case("NOT IN")),
+			value(Operator::Inside, tag_no_case("IN")),
 		)),
 	))(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -257,9 +258,11 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 pub fn matches(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('@')(i)?;
 	// let (i, reference) = opt(|i| uint8(i))(i)?;
-	let (i, reference) = opt(uint8)(i)?;
-	let (i, _) = char('@')(i)?;
-	Ok((i, Operator::Matches(reference)))
+	cut(|i| {
+		let (i, reference) = opt(uint8)(i)?;
+		let (i, _) = char('@')(i)?;
+		Ok((i, Operator::Matches(reference)))
+	})(i)
 }
 
 #[cfg(test)]
@@ -269,7 +272,6 @@ mod tests {
 	#[test]
 	fn matches_without_reference() {
 		let res = matches("@@");
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("@@", format!("{}", out));
 		assert_eq!(out, Operator::Matches(None));
@@ -278,7 +280,6 @@ mod tests {
 	#[test]
 	fn matches_with_reference() {
 		let res = matches("@12@");
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("@12@", format!("{}", out));
 		assert_eq!(out, Operator::Matches(Some(12u8)));
@@ -287,6 +288,6 @@ mod tests {
 	#[test]
 	fn matches_with_invalid_reference() {
 		let res = matches("@256@");
-		assert!(res.is_err());
+		res.unwrap_err();
 	}
 }

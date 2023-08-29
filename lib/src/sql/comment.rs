@@ -1,5 +1,6 @@
 use crate::sql::error::IResult;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::take_until;
 use nom::character::complete::char;
 use nom::character::complete::multispace0;
@@ -27,27 +28,23 @@ pub fn comment(i: &str) -> IResult<&str, ()> {
 
 pub fn block(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = char('/')(i)?;
-	let (i, _) = char('*')(i)?;
+	let (i, _) = tag("/*")(i)?;
 	let (i, _) = take_until("*/")(i)?;
-	let (i, _) = char('*')(i)?;
-	let (i, _) = char('/')(i)?;
+	let (i, _) = tag("*/")(i)?;
 	let (i, _) = multispace0(i)?;
 	Ok((i, ()))
 }
 
 pub fn slash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = char('/')(i)?;
-	let (i, _) = char('/')(i)?;
+	let (i, _) = tag("//")(i)?;
 	let (i, _) = not_line_ending(i)?;
 	Ok((i, ()))
 }
 
 pub fn dash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = char('-')(i)?;
-	let (i, _) = char('-')(i)?;
+	let (i, _) = tag("--")(i)?;
 	let (i, _) = not_line_ending(i)?;
 	Ok((i, ()))
 }
@@ -71,6 +68,6 @@ mod test {
 	#[test]
 	fn any_whitespace() {
 		let sql = "USE /* white space and comment between */ NS test;";
-		assert!(parse(sql).is_ok());
+		parse(sql).unwrap();
 	}
 }

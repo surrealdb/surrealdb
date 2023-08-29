@@ -2,7 +2,7 @@ use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::value;
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -31,10 +31,10 @@ impl Display for Tokenizer {
 
 fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
 	let (i, t) = alt((
-		map(tag_no_case("BLANK"), |_| Tokenizer::Blank),
-		map(tag_no_case("CAMEL"), |_| Tokenizer::Camel),
-		map(tag_no_case("CLASS"), |_| Tokenizer::Class),
-		map(tag_no_case("PUNCT"), |_| Tokenizer::Punct),
+		value(Tokenizer::Blank, tag_no_case("BLANK")),
+		value(Tokenizer::Camel, tag_no_case("CAMEL")),
+		value(Tokenizer::Class, tag_no_case("CLASS")),
+		value(Tokenizer::Punct, tag_no_case("PUNCT")),
 	))(i)?;
 	Ok((i, t))
 }

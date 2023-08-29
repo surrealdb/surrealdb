@@ -238,8 +238,19 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+		crate::key::index::Index::new(
+			self.opt.ns(),
+			self.opt.db(),
+			&self.ix.what,
+			&self.ix.name,
+			v,
+			None,
+		)
+	}
+
 	fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
-		key::index::Index::new(
+		crate::key::index::Index::new(
 			self.opt.ns(),
 			self.opt.db(),
 			&self.ix.what,
@@ -249,39 +260,17 @@ impl<'a> IndexOperation<'a> {
 		)
 	}
 
-	async fn index_non_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			let i = Indexable::new(o, self.ix);
-			for o in i {
-				let key = self.get_non_unique_index_key(&o);
-				let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
-			}
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			let i = Indexable::new(n, self.ix);
-			for n in i {
-				let key = self.get_non_unique_index_key(&n);
-				if run.putc(key, self.rid, None).await.is_err() {
-					return self.err_index_exists(n);
-				}
-			}
-		}
-		Ok(())
-	}
-
-	fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
-		key::index::Index::new(self.opt.ns(), self.opt.db(), &self.ix.what, &self.ix.name, v, None)
-	}
-
 	async fn index_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_unique_index_key(&o);
-				let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
+				match run.delc(key, Some(self.rid)).await {
+					Err(Error::TxConditionNotMet) => Ok(()),
+					Err(e) => Err(e),
+					Ok(v) => Ok(v),
+				}?
 			}
 		}
 		// Create the new index data
@@ -291,7 +280,10 @@ impl<'a> IndexOperation<'a> {
 				if !n.is_all_none_or_null() {
 					let key = self.get_unique_index_key(&n);
 					if run.putc(key, self.rid, None).await.is_err() {
-						return self.err_index_exists(n);
+						let key = self.get_unique_index_key(&n);
+						let val = run.get(key).await?.unwrap();
+						let rid: Thing = val.into();
+						return self.err_index_exists(rid, n);
 					}
 				}
 			}
@@ -299,9 +291,38 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, n: Array) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
+		// Delete the old index data
+		if let Some(o) = self.o.take() {
+			let i = Indexable::new(o, self.ix);
+			for o in i {
+				let key = self.get_non_unique_index_key(&o);
+				match run.delc(key, Some(self.rid)).await {
+					Err(Error::TxConditionNotMet) => Ok(()),
+					Err(e) => Err(e),
+					Ok(v) => Ok(v),
+				}?
+			}
+		}
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			let i = Indexable::new(n, self.ix);
+			for n in i {
+				let key = self.get_non_unique_index_key(&n);
+				if run.putc(key, self.rid, None).await.is_err() {
+					let key = self.get_non_unique_index_key(&n);
+					let val = run.get(key).await?.unwrap();
+					let rid: Thing = val.into();
+					return self.err_index_exists(rid, n);
+				}
+			}
+		}
+		Ok(())
+	}
+
+	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<(), Error> {
 		Err(Error::IndexExists {
-			thing: self.rid.to_string(),
+			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.len() {
 				1 => n.first().unwrap().to_string(),

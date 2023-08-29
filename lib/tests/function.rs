@@ -12,7 +12,6 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			dbg!(desired_response);
 			let desired_value = Value::parse(*desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
@@ -380,14 +379,25 @@ async fn function_array_complement() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_concat() -> Result<(), Error> {
 	let sql = r#"
+		RETURN array::concat();
 		RETURN array::concat([], []);
 		RETURN array::concat(3, true);
 		RETURN array::concat([1,2,3,4], [3,4,5,6]);
+		RETURN array::concat([1,2,3,4], [3,4,5,6], [5,6,7,8], [7,8,9,0]);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Expected at least one argument"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
@@ -404,6 +414,10 @@ async fn function_array_concat() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,3,4,5,6]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,3,4,5,6,5,6,7,8,7,8,9,0]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

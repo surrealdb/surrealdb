@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::val_char;
-use crate::sql::common::{closeparentheses, commas, openparentheses};
+use crate::sql::common::{commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
@@ -17,14 +17,15 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
-use nom::combinator::recognize;
-use nom::multi::separated_list0;
+use nom::combinator::{cut, recognize};
 use nom::multi::separated_list1;
-use nom::sequence::preceded;
+use nom::sequence::{preceded, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -236,59 +237,71 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 
 pub fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
-	let (i, _) = openparentheses(i)?;
-	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = closeparentheses(i)?;
+	let (i, a) =
+		delimited_list0(openparentheses, commas, terminated(cut(value), mightbespace), char(')'))(
+			i,
+		)?;
 	Ok((i, Function::Normal(s.to_string(), a)))
 }
 
 pub fn custom(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::")(i)?;
-	let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
-	Ok((i, Function::Custom(s.to_string(), a)))
+	cut(|i| {
+		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, a) = delimited_list0(
+			openparentheses,
+			commas,
+			terminated(cut(value), mightbespace),
+			char(')'),
+		)(i)?;
+		Ok((i, Function::Custom(s.to_string(), a)))
+	})(i)
 }
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = openparentheses(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = closeparentheses(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, v) = func(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Script(v, a)))
+	cut(|i| {
+		let (i, _) = mightbespace(i)?;
+		let (i, a) = delimited_list0(
+			openparentheses,
+			commas,
+			terminated(cut(value), mightbespace),
+			char(')'),
+		)(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char('{')(i)?;
+		let (i, v) = func(i)?;
+		let (i, _) = char('}')(i)?;
+		Ok((i, Function::Script(v, a)))
+	})(i)
 }
 
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		alt((
-			preceded(tag("array::"), function_array),
-			preceded(tag("bytes::"), function_bytes),
-			preceded(tag("crypto::"), function_crypto),
-			preceded(tag("duration::"), function_duration),
-			preceded(tag("encoding::"), function_encoding),
-			preceded(tag("geo::"), function_geo),
-			preceded(tag("http::"), function_http),
-			preceded(tag("is::"), function_is),
+			preceded(tag("array::"), cut(function_array)),
+			preceded(tag("bytes::"), cut(function_bytes)),
+			preceded(tag("crypto::"), cut(function_crypto)),
+			preceded(tag("duration::"), cut(function_duration)),
+			preceded(tag("encoding::"), cut(function_encoding)),
+			preceded(tag("geo::"), cut(function_geo)),
+			preceded(tag("http::"), cut(function_http)),
+			preceded(tag("is::"), cut(function_is)),
+			// Don't cut in time and math for now since there are also constant's with the same
+			// prefix.
 			preceded(tag("math::"), function_math),
-			preceded(tag("meta::"), function_meta),
-			preceded(tag("parse::"), function_parse),
-			preceded(tag("rand::"), function_rand),
-			preceded(tag("search::"), function_search),
-			preceded(tag("session::"), function_session),
-			preceded(tag("string::"), function_string),
+			preceded(tag("meta::"), cut(function_meta)),
+			preceded(tag("parse::"), cut(function_parse)),
+			preceded(tag("rand::"), cut(function_rand)),
+			preceded(tag("search::"), cut(function_search)),
+			preceded(tag("session::"), cut(function_session)),
+			preceded(tag("string::"), cut(function_string)),
+			// Don't cut in time and math for now since there are also constant's with the same
+			// prefix.
 			preceded(tag("time::"), function_time),
-			preceded(tag("type::"), function_type),
-			preceded(tag("vector::"), function_vector),
+			preceded(tag("type::"), cut(function_type)),
+			preceded(tag("vector::"), cut(function_vector)),
 		)),
 		alt((tag("count"), tag("not"), tag("rand"), tag("sleep"))),
 	)))(i)
@@ -620,7 +633,6 @@ mod tests {
 	fn function_single() {
 		let sql = "count()";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("count()", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("count"), vec![]));
@@ -630,7 +642,6 @@ mod tests {
 	fn function_single_not() {
 		let sql = "not(10)";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("not(10)", format!("{}", out));
 		assert_eq!(out, Function::Normal("not".to_owned(), vec![10.into()]));
@@ -640,7 +651,6 @@ mod tests {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("rand::uuid()", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("rand::uuid"), vec![]));
@@ -650,7 +660,6 @@ mod tests {
 	fn function_arguments() {
 		let sql = "is::numeric(null)";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("is::numeric(NULL)", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("is::numeric"), vec![Value::Null]));
@@ -660,7 +669,6 @@ mod tests {
 	fn function_simple_together() {
 		let sql = "function() { return 'test'; }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
 		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
@@ -670,7 +678,6 @@ mod tests {
 	fn function_simple_whitespace() {
 		let sql = "function () { return 'test'; }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
 		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
@@ -680,7 +687,6 @@ mod tests {
 	fn function_script_expression() {
 		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
 		let res = function(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"function() { return this.tags.filter(t => { return t.length > 3; }); }",

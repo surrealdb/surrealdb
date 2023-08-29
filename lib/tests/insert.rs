@@ -4,6 +4,7 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::kvs::Datastore;
+use surrealdb::sql::Part;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -156,6 +157,37 @@ async fn insert_statement_output() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ something: 'other' }]");
 	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_statement_duplicate_key_update() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-10') ON DUPLICATE KEY UPDATE founded = $input.founded;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded PARALLEL;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-10"));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-11"));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-12"));
 	//
 	Ok(())
 }

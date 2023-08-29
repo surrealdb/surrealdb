@@ -252,7 +252,6 @@ mod tests {
 	fn define_table_with_changefeed() {
 		let sql = "DEFINE TABLE mytable SCHEMALESS CHANGEFEED 1h";
 		let res = table(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 

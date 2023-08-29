@@ -98,7 +98,7 @@ fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		UpdateStatement {
 			what,
 			data,
-			output: Some(Output::Diff),
+			output: Some(Output::After),
 			..Default::default()
 		},
 	)

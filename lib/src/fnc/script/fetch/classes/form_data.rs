@@ -88,7 +88,7 @@ impl<'js> FormData<'js> {
 			"Can't call `append` on `FormData` with a filename when value isn't of type `Blob`",
 		)?;
 
-		self.values.entry(name.0).or_insert_with(Vec::new).push(value);
+		self.values.entry(name.0).or_default().push(value);
 
 		Ok(())
 	}
