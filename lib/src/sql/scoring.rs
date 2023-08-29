@@ -3,7 +3,7 @@ use crate::sql::error::IResult;
 use crate::sql::Error::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::{cut, value};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
 use revision::revisioned;
@@ -80,25 +80,27 @@ impl fmt::Display for Scoring {
 
 pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 	alt((
-		map(tag_no_case("VS"), |_| Scoring::Vs),
+		value(Scoring::Vs, tag_no_case("VS")),
 		|i| {
 			let (i, _) = tag_no_case("BM25")(i)?;
 			let (i, _) = openparentheses(i)?;
-			let (i, k1) = recognize_float(i)?;
-			let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-			let (i, _) = commas(i)?;
-			let (i, b) = recognize_float(i)?;
-			let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
-			let (i, _) = closeparentheses(i)?;
-			Ok((
-				i,
-				Scoring::Bm {
-					k1,
-					b,
-				},
-			))
+			cut(|i| {
+				let (i, k1): (&str, &str) = recognize_float(i)?;
+				let k1 = k1.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+				let (i, _) = commas(i)?;
+				let (i, b) = recognize_float(i)?;
+				let b = b.parse::<f32>().map_err(|_| Failure(Parser(i)))?;
+				let (i, _) = closeparentheses(i)?;
+				Ok((
+					i,
+					Scoring::Bm {
+						k1,
+						b,
+					},
+				))
+			})(i)
 		},
-		map(tag_no_case("BM25"), |_| Scoring::bm25()),
+		value(Scoring::bm25(), tag_no_case("BM25")),
 	))(i)
 }
 
@@ -110,7 +112,6 @@ mod tests {
 	fn scoring_bm_25_with_parameters() {
 		let sql = "BM25(1.0,0.6)";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BM25(1,0.6)", format!("{}", out))
 	}
@@ -119,7 +120,6 @@ mod tests {
 	fn scoring_bm_25_without_parameters() {
 		let sql = "BM25";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("BM25(1.2,0.75)", format!("{}", out))
 	}
@@ -128,7 +128,6 @@ mod tests {
 	fn scoring_vs() {
 		let sql = "VS";
 		let res = scoring(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("VS", format!("{}", out))
 	}

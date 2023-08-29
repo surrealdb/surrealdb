@@ -28,6 +28,7 @@ use crate::sql::version::{version, Version};
 use crate::sql::with::{with, With};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -93,6 +94,7 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
@@ -194,10 +196,10 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, expr) = fields(i)?;
 	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = selects(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, _) = cut(tag_no_case("FROM"))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, what) = cut(selects)(i)?;
 	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
@@ -244,7 +246,6 @@ mod tests {
 	fn select_statement_param() {
 		let sql = "SELECT * FROM $test";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -253,7 +254,6 @@ mod tests {
 	fn select_statement_table() {
 		let sql = "SELECT * FROM test";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 	}
@@ -271,7 +271,6 @@ mod tests {
 	fn select_statement_thing() {
 		let sql = "SELECT * FROM test:thingy ORDER BY name";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -280,7 +279,6 @@ mod tests {
 	fn select_statement_clash() {
 		let sql = "SELECT * FROM order ORDER BY order";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -289,7 +287,6 @@ mod tests {
 	fn select_statement_table_thing() {
 		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

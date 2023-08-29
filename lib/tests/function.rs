@@ -12,7 +12,6 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			dbg!(desired_response);
 			let desired_value = Value::parse(*desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {

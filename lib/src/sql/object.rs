@@ -3,20 +3,21 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
+use crate::sql::common::openbraces;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::Operation;
 use crate::sql::thing::Thing;
+use crate::sql::util::delimited_list0;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
-use nom::combinator::opt;
-use nom::multi::separated_list0;
-use nom::sequence::delimited;
+use nom::combinator::cut;
+use nom::sequence::{delimited, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -321,20 +322,17 @@ mod no_nul_bytes_in_keys {
 }
 
 pub fn object(i: &str) -> IResult<&str, Object> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, |i| {
+	fn entry(i: &str) -> IResult<&str, (String, Value)> {
 		let (i, k) = key(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char(':')(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, v) = value(i)?;
+		let (i, v) = cut(value)(i)?;
 		Ok((i, (String::from(k), v)))
-	})(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	}
+
+	let (i, v) =
+		delimited_list0(openbraces, commas, terminated(entry, mightbespace), char('}'))(i)?;
 	Ok((i, Object(v.into_iter().collect())))
 }
 
@@ -363,7 +361,6 @@ mod tests {
 	fn object_normal() {
 		let sql = "{one:1,two:2,tre:3}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -373,7 +370,6 @@ mod tests {
 	fn object_commas() {
 		let sql = "{one:1,two:2,tre:3,}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -383,7 +379,6 @@ mod tests {
 	fn object_expression() {
 		let sql = "{one:1,two:2,tre:3+1}";
 		let res = object(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3 + 1, two: 2 }", format!("{}", out));
 		assert_eq!(out.0.len(), 3);

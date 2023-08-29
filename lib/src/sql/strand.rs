@@ -275,7 +275,6 @@ mod tests {
 	fn strand_empty() {
 		let sql = r#""""#;
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r#"''"#, format!("{}", out));
 		assert_eq!(out, Strand::from(""));
@@ -285,7 +284,6 @@ mod tests {
 	fn strand_single() {
 		let sql = r#"'test'"#;
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
@@ -295,7 +293,6 @@ mod tests {
 	fn strand_double() {
 		let sql = r#""test""#;
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
@@ -303,9 +300,8 @@ mod tests {
 
 	#[test]
 	fn strand_quoted_single() {
-		let sql = r#"'te\'st'"#;
+		let sql = r"'te\'st'";
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r#""te'st""#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te'st"#));
@@ -315,7 +311,6 @@ mod tests {
 	fn strand_quoted_double() {
 		let sql = r#""te\"st""#;
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r#"'te"st'"#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te"st"#));
@@ -325,7 +320,6 @@ mod tests {
 	fn strand_quoted_escaped() {
 		let sql = r#""te\"st\n\tand\bsome\u05d9""#;
 		let res = strand(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));

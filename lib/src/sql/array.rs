@@ -2,16 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebracket, commas, openbracket};
+use crate::sql::common::openbracket;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
-use nom::combinator::opt;
-use nom::multi::separated_list0;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,6 +17,10 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use super::comment::mightbespace;
+use super::common::commas;
+use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
@@ -479,11 +481,8 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, v) =
+		delimited_list0(openbracket, commas, terminated(value, mightbespace), char(']'))(i)?;
 	Ok((i, Array(v)))
 }
 
@@ -496,7 +495,6 @@ mod tests {
 	fn array_empty() {
 		let sql = "[]";
 		let res = array(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[]", format!("{}", out));
 		assert_eq!(out.0.len(), 0);
@@ -506,7 +504,6 @@ mod tests {
 	fn array_normal() {
 		let sql = "[1,2,3]";
 		let res = array(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -516,7 +513,6 @@ mod tests {
 	fn array_commas() {
 		let sql = "[1,2,3,]";
 		let res = array(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -526,7 +522,6 @@ mod tests {
 	fn array_expression() {
 		let sql = "[1,2,3+1]";
 		let res = array(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
@@ -536,7 +531,6 @@ mod tests {
 	fn array_fnc_clump() {
 		fn test(input_sql: &str, clump_size: usize, expected_result: &str) {
 			let arr_result = array(input_sql);
-			assert!(arr_result.is_ok());
 			let arr = arr_result.unwrap().1;
 			let clumped_arr = arr.clump(clump_size);
 			assert_eq!(format!("{}", clumped_arr), expected_result);
@@ -552,7 +546,6 @@ mod tests {
 	fn array_fnc_transpose() {
 		fn test(input_sql: &str, expected_result: &str) {
 			let arr_result = array(input_sql);
-			assert!(arr_result.is_ok());
 			let arr = arr_result.unwrap().1;
 			let transposed_arr = arr.transpose();
 			assert_eq!(format!("{}", transposed_arr), expected_result);
@@ -568,7 +561,6 @@ mod tests {
 	fn array_fnc_uniq_normal() {
 		let sql = "[1,2,1,3,3,4]";
 		let res = array(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1.uniq();
 		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
 		assert_eq!(out.0.len(), 4);
