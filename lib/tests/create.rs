@@ -304,14 +304,14 @@ async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Erro
 	//
 	let tmp = res.remove(0).result;
 	if let Err(e) = tmp {
-		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['one', 'two'], ['a@example.com', 'b@example.com']], with record `user:3`");
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['one', 'two'], ['a@example.com', 'b@example.com']], with record `user:1`");
 	} else {
 		panic!("An error was expected.")
 	}
 	//
 	let tmp = res.remove(0).result;
 	if let Err(e) = tmp {
-		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['two', 'three'], ['a@example.com', 'b@example.com']], with record `user:4`");
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', ['two', 'three'], ['a@example.com', 'b@example.com']], with record `user:2`");
 	} else {
 		panic!("An error was expected.")
 	}
@@ -337,7 +337,7 @@ async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error
 	//
 	let tmp = res.remove(0).result;
 	if let Err(e) = tmp {
-		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:2`");
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:1`");
 	} else {
 		panic!("An error was expected.")
 	}
@@ -363,7 +363,7 @@ async fn create_with_unique_index_on_one_field_with_flattened_sub_values() -> Re
 	//
 	let tmp = res.remove(0).result;
 	if let Err(e) = tmp {
-		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:2`");
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', ['a@example.com', 'b@example.com']], with record `user:1`");
 	} else {
 		panic!("An error was expected.")
 	}
@@ -389,7 +389,7 @@ async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	//
 	if let Err(e) = tmp {
-		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', 'b@example.com'], with record `user:2`");
+		assert_eq!(e.to_string(), "Database index `test` already contains ['Apple', 'two', 'b@example.com'], with record `user:1`");
 	} else {
 		panic!("An error was expected.")
 	}
