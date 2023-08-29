@@ -3,12 +3,12 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
-use tracing::Span;
-use tracing_futures::Instrument;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::Span;
+use tracing_futures::Instrument;
 
 use surrealdb::dbs::Session;
 use tokio::task::JoinSet;
@@ -286,7 +286,7 @@ impl Connection {
 					if let Some(_out_fmt) = req.out_fmt {
 						out_fmt = _out_fmt;
 					}
-	
+
 					// Now that we know the method, we can update the span and create otel context
 					span.record("rpc.method", &req.method);
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
@@ -297,11 +297,11 @@ impl Connection {
 					let otel_cx = TelemetryContext::current_with_value(
 						req_cx.with_method(&req.method).with_size(req.size),
 					);
-	
+
 					// Process the request
 					let res =
 						rpc.write().await.processor.process_request(&req.method, req.params).await;
-	
+
 					// Process the response
 					res.into_response(req.id).send(out_fmt, chn).with_context(otel_cx).await
 				}
@@ -310,6 +310,8 @@ impl Connection {
 					failure(None, err).send(out_fmt, chn).with_context(otel_cx.clone()).await
 				}
 			}
-		}.instrument(span).await;
+		}
+		.instrument(span)
+		.await;
 	}
 }
