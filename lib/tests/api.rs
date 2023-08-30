@@ -231,7 +231,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -258,7 +258,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -285,7 +285,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -311,7 +311,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -337,7 +337,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
