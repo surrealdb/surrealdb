@@ -1,9 +1,10 @@
 mod parse;
 use chrono::DateTime;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -33,7 +34,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
@@ -179,7 +180,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
-	let db = Datastore::new("memory").await?;
+	let db = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Enable change feeds
 	let sql = "

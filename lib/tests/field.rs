@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
@@ -19,7 +20,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 0;
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 13;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -102,7 +103,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -151,7 +152,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -205,7 +206,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -257,7 +258,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -322,7 +323,7 @@ async fn field_definition_default_value() -> Result<(), Error> {
 		UPDATE product:test SET secondary = false;
 		UPDATE product:test SET tertiary = 'something';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
@@ -435,7 +436,7 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -536,7 +537,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -638,7 +639,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
-	let dbs = Datastore::new("memory").await?.with_auth_enabled(true);
+	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);

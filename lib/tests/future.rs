@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -12,7 +13,7 @@ async fn future_function_simple() -> Result<(), Error> {
 		UPDATE person:test SET birthday = <datetime> '2007-06-22';
 		UPDATE person:test SET birthday = <datetime> '2001-06-22';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -44,7 +45,7 @@ async fn future_function_arguments() -> Result<(), Error> {
 			y = 'b-' + parse::email::user(b)
 		;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -91,7 +92,7 @@ async fn concurrency() -> Result<(), Error> {
 	/// Returns `true` iif `limit` futures are concurrently executed.
 	async fn test_limit(limit: usize) -> Result<bool, Error> {
 		let sql = query(limit, MILLIS);
-		let dbs = Datastore::new("memory").await?;
+		let dbs = new_ds().await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
 		let res = dbs.execute(&sql, &ses, None).await;
 

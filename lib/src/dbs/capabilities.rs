@@ -484,6 +484,18 @@ mod tests {
 			assert!(!caps.is_allowed_scripting());
 		}
 
+		// When anonymous access is allowed
+		{
+			let caps = Capabilities::default().with_anon_access(true);
+			assert!(caps.is_allowed_anon_access());
+		}
+
+		// When anonymous access is denied
+		{
+			let caps = Capabilities::default().with_anon_access(false);
+			assert!(!caps.is_allowed_anon_access());
+		}
+
 		// When all nets are allowed
 		{
 			let caps = Capabilities::default()

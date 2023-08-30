@@ -333,12 +333,8 @@ mod tests {
 			let get = Mock::given(method("GET"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
-			let head =
-				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(1);
 
 			s.register(get).await;
-			s.register(head).await;
-
 			s
 		};
 
@@ -356,13 +352,18 @@ mod tests {
 			s
 		};
 
-		// (Capabilities, Query, Succeeds, Response Contains)
+		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
 			// Functions and Networking are allowed
 			//
 			(
-				Capabilities::default(),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::All)
+						.with_allow_net(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				true,
 				"SUCCESS".to_string(),
@@ -371,7 +372,11 @@ mod tests {
 			// Scripting is allowed
 			//
 			(
-				Capabilities::default(),
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_capabilities(Capabilities::default().with_scripting(true)),
+				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				true,
 				"1".to_string(),
@@ -380,108 +385,198 @@ mod tests {
 			// Scripting is not allowed
 			//
 			(
-				Capabilities::default().with_scripting(false),
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_capabilities(Capabilities::default().with_scripting(false)),
+				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				false,
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
+			// Anonymous actor when anonymous access is allowed, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_anon_access(true)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
+			// Anonymous actor when anonymous access is not allowed, throws error
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_anon_access(false)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				false,
+				"Not enough permissions to perform this action".to_string(),
+			),
+			//
+			// Anonymous actor when anonymous access is not allowed and auth is disabled, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(false)
+					.with_capabilities(Capabilities::default().with_anon_access(false)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
+			// Non-anonymous actor when anonymous access is not allowed, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_anon_access(false)),
+				Session::viewer(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
 			// Some functions are not allowed
 			//
 			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
-				format!("RETURN http::get('{}')", server1.uri()),
-				false,
-				"Function 'http::get' is not allowed".to_string(),
-			),
-			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
-				format!("RETURN http::head('{}')", server1.uri()),
-				true,
-				"NONE".to_string(),
-			),
-			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.with_deny_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				"RETURN string::len('a')".to_string(),
 				false,
 				"Function 'string::len' is not allowed".to_string(),
+			),
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.with_deny_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN string::lowercase('A')".to_string(),
+				true,
+				"a".to_string(),
+			),
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.with_deny_funcs(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN time::now()".to_string(),
+				false,
+				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
 			// Some net targets are not allowed
 			//
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::All)
+						.with_allow_net(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.with_deny_net(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
 				format!("Access to network target '{}/' is not allowed", server1.uri()),
 			),
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::All)
+						.with_allow_net(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.with_deny_net(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
 				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
 			),
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_allow_funcs(Targets::<FuncTarget>::All)
+						.with_allow_net(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.with_deny_net(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
 				true,
 				"SUCCESS".to_string(),
 			),
 		];
 
-		for (idx, (caps, query, succeeds, contains)) in cases.into_iter().enumerate() {
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(caps);
-
-			let sess = Session::owner();
+		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
+			info!("Test case {idx}: query={query}, succeeds={succeeds}");
 			let res = ds.execute(&query, &sess, None).await;
+
+			if !succeeds && res.is_err() {
+				let res = res.unwrap_err();
+				assert!(
+					res.to_string().contains(&contains),
+					"Unexpected error for test case {}: {:?}",
+					idx,
+					res.to_string()
+				);
+				continue;
+			}
 
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {

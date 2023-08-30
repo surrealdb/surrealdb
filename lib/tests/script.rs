@@ -2,9 +2,10 @@
 
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -17,7 +18,7 @@ async fn script_function_error() -> Result<(), Error> {
 			throw new Error('error');
 		};
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -46,7 +47,7 @@ async fn script_function_simple() -> Result<(), Error> {
 			return "Line 1\nLine 2";
 		};
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -75,7 +76,7 @@ async fn script_function_context() -> Result<(), Error> {
 			}
 		;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -109,7 +110,7 @@ async fn script_function_arguments() -> Result<(), Error> {
 			return `${arguments[0]} is ${arguments[1].join(', ')}`;
 		};
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -152,7 +153,7 @@ async fn script_function_types() -> Result<(), Error> {
 			}
 		;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -182,7 +183,7 @@ async fn script_function_module_os() -> Result<(), Error> {
 			return platform();
 		};
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -200,7 +201,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 		CREATE test SET name = "b", number = 1;
 		CREATE test SET name = "c", number = 2;
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// direct query
@@ -254,7 +255,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 			return await surrealdb.query(`CREATE article:test SET name = "The daily news", issue_number = 3`)
 		}
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -293,7 +294,7 @@ async fn script_value_function_params() -> Result<(), Error> {
 			return await surrealdb.value(`$test.name`)
 		}
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -318,7 +319,7 @@ async fn script_value_function_inline_values() -> Result<(), Error> {
 			}
 		}
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);

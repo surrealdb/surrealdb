@@ -2,11 +2,12 @@
 
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use std::future::Future;
 use std::thread::Builder;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[test]
@@ -204,7 +205,7 @@ async fn run_queries(
 	impl Iterator<Item = Result<Value, Error>> + ExactSizeIterator + DoubleEndedIterator + 'static,
 	Error,
 > {
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
 }
