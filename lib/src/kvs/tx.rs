@@ -10,6 +10,7 @@ use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::clock::Clock;
 use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
@@ -43,7 +44,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// A set of undoable updates and requests against a dataset.
@@ -54,6 +55,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) write_buffer: HashMap<Key, ()>,
 	pub(super) vso: Arc<Mutex<Oracle>>,
+	pub(super) clock: Arc<RwLock<dyn Clock + Send + Sync>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -983,7 +985,7 @@ impl Transaction {
 			None => {
 				let value = ClusterMembership {
 					name: id.to_string(),
-					heartbeat: self.clock(),
+					heartbeat: self.clock().await,
 				};
 				self.put(key, value).await?;
 				Ok(())
@@ -1001,12 +1003,13 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) fn clock(&self) -> Timestamp {
+	/// Clock retrieves the current timestamp which is fallible
+	/// It is used for unreliable ordering of events as well as
+	/// handling of timeouts. Operations that are not guaranteed to be correct.
+	/// But also allows for lexicographical ordering.
+	pub(crate) async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
-		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-		Timestamp {
-			value: now as u64,
-		}
+		self.clock.read().await.now()
 	}
 
 	// Set heartbeat

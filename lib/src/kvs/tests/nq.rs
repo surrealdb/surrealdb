@@ -4,7 +4,7 @@ use crate::sql::statements::live::live;
 #[serial]
 async fn archive_lv_for_node_archives() {
 	let node_id = Uuid::parse_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
-	let test = init(node_id).await.unwrap();
+	let test = init(node_id, Timestamp::default()).await.unwrap();
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";

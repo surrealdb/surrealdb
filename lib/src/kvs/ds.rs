@@ -14,6 +14,7 @@ use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Role};
 use crate::key::root::hb::Hb;
+use crate::kvs::clock::{Clock, SystemClock};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -29,6 +30,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 
@@ -65,6 +67,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
+	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	clock: Arc<RwLock<Box<dyn Clock + Send + Sync>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -145,20 +149,28 @@ impl Datastore {
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		let id = Uuid::new_v4();
-		Self::new_full(path, id).await
+		Self::new_full(path, id, None).await
 	}
 
 	// For testing
-	pub async fn new_full(path: &str, node_id: Uuid) -> Result<Datastore, Error> {
+	pub async fn new_full(
+		path: &str,
+		node_id: Uuid,
+		clock_override: Option<Box<dyn Clock>>,
+	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
-		let inner = match path {
+		let (inner, clock) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
 					info!("Started kvs store in {}", path);
-					v
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -171,8 +183,12 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
 					info!("Started kvs store at {}", path);
-					v
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -186,7 +202,11 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
-					v
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -200,7 +220,11 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
-					v
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-speedb"))]
 				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -214,7 +238,11 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
-					v
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -228,7 +256,11 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
-					v
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -242,7 +274,11 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
-					v
+					let clock = match clock_override {
+						None => Box::new(SystemClock::new()),
+						Some(c) => c,
+					};
+					(v, clock)
 				}
 				#[cfg(not(feature = "kv-fdb"))]
 				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -264,6 +300,7 @@ impl Datastore {
 			notification_channel: None,
 			auth_enabled: false,
 			capabilities: Capabilities::default(),
+			clock: Arc::new(RwLock::new(clock)),
 		})
 	}
 
@@ -354,8 +391,7 @@ impl Datastore {
 	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
-		let now = tx.clock();
-		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
+		let archived = self.register_remove_and_archive(&mut tx, node_id).await?;
 		tx.commit().await?;
 
 		let mut tx = self.transaction(true, false).await?;
@@ -368,9 +404,9 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		timestamp: Timestamp,
 	) -> Result<Vec<LqValue>, Error> {
 		trace!("Registering node {}", node_id);
+		let timestamp = tx.clock().await;
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
 		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
@@ -605,7 +641,7 @@ impl Datastore {
 	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		let timestamp = tx.clock();
+		let timestamp = tx.clock().await;
 		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
 		tx.commit().await
 	}
@@ -693,6 +729,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			write_buffer: HashMap::new(),
 			vso: self.vso.clone(),
+			clock: self.clock.clone(),
 		})
 	}
 

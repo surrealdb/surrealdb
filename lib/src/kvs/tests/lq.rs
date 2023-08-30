@@ -4,7 +4,7 @@ use uuid::Uuid;
 #[serial]
 async fn scan_node_lq() {
 	let node_id = Uuid::parse_str("63bb5c1a-b14e-4075-a7f8-680267fbe136").unwrap();
-	let test = init(node_id).await.unwrap();
+	let test = init(node_id, Timestamp::default()).await.unwrap();
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
@@ -41,26 +41,36 @@ async fn scan_node_lq() {
 #[tokio::test]
 #[serial]
 async fn live_creates_remote_notification() {
+	println!("STARTED");
 	use crate::sql::statements::{CreateStatement, LiveStatement};
 
 	// Setup
 	let remote_node = Uuid::parse_str("30a9bea3-8430-42db-9524-3d4d5c41e3ea").unwrap();
 	let local_node = Uuid::parse_str("4aa13527-538c-40da-b903-2402f57c4e74").unwrap();
 	let context = context::Context::background();
-	let options = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-	let namespace = "test_namespace";
-	let database = "test_database";
+	let options = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)))
+		// .with_live(true)
+		;
+	let _namespace = "test_namespace";
+	let _database = "test_database";
 	let table = "f3d4a40b50ba4221ab02fa406edb58cc";
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
+	let now = Timestamp {
+		value: 0x010203040506070809,
+	};
 
 	// Init as local node, so we do not receive the notification
-	let test = init(local_node).await.unwrap();
+	println!("First init");
+	let test = init(local_node, now).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
 	let mut tx = test.db.transaction(true, false).await.unwrap();
-	test.bootstrap_at_time(sql::uuid::Uuid::from(local_node), tx.clock()).await.unwrap();
+	println!("Second init");
+	test.db.bootstrap_full(&sql::uuid::Uuid::from(local_node)).await.unwrap();
+	println!("Init complete");
 	tx.commit().await.unwrap();
 
+	println!("Before starting live query statement");
 	// Register a live query on the remote node
 	let tx = test.db.transaction(true, false).await.unwrap();
 	let tx = Arc::new(Mutex::new(tx));
@@ -94,25 +104,27 @@ async fn live_creates_remote_notification() {
 	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Verify there is a remote node notification entry
+	let tx = test.db.transaction(true, false).await.unwrap();
+	let tx = Arc::new(Mutex::new(tx));
 	let res = tx
 		.lock()
 		.await
-		.scan_nt(namespace, database, table, sql::uuid::Uuid::from(live_query_id), 1000)
+		.scan_nt(_namespace, _database, table, sql::uuid::Uuid::from(live_query_id), 1000)
 		.await
 		.unwrap();
+	tx.lock().await.commit().await.unwrap();
 	assert_eq!(res.len(), 1);
 	// TODO verify key and value
-	tx.lock().await.commit().await.unwrap();
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 
 	let res = tx.scan_ndlq(&remote_node, 100).await.unwrap();
-	assert_eq!(res.len(), 1);
-	for val in res {
-		assert_eq!(val.nd.0, remote_node.clone());
-		assert_eq!(val.ns, namespace);
-		assert_eq!(val.db, database);
-		assert_eq!(val.lq.0, live_query_id.clone());
-	}
-
 	tx.commit().await.unwrap();
+	assert_eq!(res.len(), 1);
+	let val = res.get(0).unwrap();
+	// for val in res {
+	assert_eq!(val.nd.0, remote_node.clone());
+	assert_eq!(val.ns, _namespace);
+	assert_eq!(val.db, _database);
+	assert_eq!(val.lq.0, live_query_id.clone());
+	// }
 }

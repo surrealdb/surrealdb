@@ -53,7 +53,7 @@ impl<'a> Document<'a> {
 				// Check what type of data change this is
 				{
 					let mut tx = txn.lock().await;
-					let ts = tx.clock();
+					let ts = tx.clock().await;
 					let not_id = sql::Uuid::new_v4();
 					if stm.is_delete() {
 						// Send a DELETE notification

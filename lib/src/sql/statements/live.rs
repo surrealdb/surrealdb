@@ -52,8 +52,10 @@ impl LiveStatement {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		println!("Entering live");
 		// Is realtime enabled?
 		opt.realtime()?;
+		println!("After realtime check in live");
 		// Valid options?
 		opt.valid_for_db()?;
 		// Check that auth has been set

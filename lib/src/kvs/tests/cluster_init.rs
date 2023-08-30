@@ -17,19 +17,20 @@ use uuid;
 async fn expired_nodes_are_garbage_collected() {
 	let old_node = Uuid::parse_str("2ea6d33f-4c0a-417a-ab04-1fa9869f9a65").unwrap();
 	let new_node = Uuid::parse_str("fbfb3487-71fe-4749-b3aa-1cc0a5380cdd").unwrap();
-	let test = init(new_node).await.unwrap();
-
-	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
+	let test = init(new_node, old_time).await.unwrap();
+
+	// Set up the first node at an early timestamp
+	test.db.bootstrap_full(&sql::Uuid::from(old_node)).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
 		value: 567,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
+	test.clock.write().await.set(new_time.clone());
+	test.db.bootstrap_full(&sql::Uuid::from(new_node)).await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -53,13 +54,13 @@ async fn expired_nodes_are_garbage_collected() {
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
 	let old_node = Uuid::parse_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
-	let test = init(old_node).await.unwrap();
-
-	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
+	let test = init(old_node, old_time).await.unwrap();
+
+	// Set up the first node at an early timestamp
+	test.db.bootstrap_full(&sql::Uuid::from(old_node)).await.unwrap();
 
 	// Set up live query
 	let ses = Session::owner()
@@ -100,7 +101,8 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
-	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
+	test.clock.write().await.set(new_time.clone());
+	test.db.bootstrap_full(&sql::Uuid::from(new_node)).await.unwrap();
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -116,10 +118,10 @@ async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
 	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
-	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
 		value: 123,
 	};
+	let test = init(node_id, time).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
@@ -134,7 +136,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
-	test.bootstrap_at_time(crate::sql::uuid::Uuid::from(node_id), time).await.unwrap();
+	test.db.bootstrap_full(&crate::sql::uuid::Uuid::from(node_id)).await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
