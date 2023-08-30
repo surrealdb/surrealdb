@@ -47,11 +47,17 @@ struct DbsCapabilities {
 	#[arg(help = "Allow execution of scripting functions")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
 	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
-	#[arg(default_value_t = true, hide_default_value = true)]
+	#[arg(default_value_t = false, hide_default_value = true)]
 	allow_scripting: bool,
 
+	#[arg(help = "Allow anonymous queries when authentication is enabled")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_ANON_ACCESS", long, conflicts_with = "allow_all")]
+	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
+	#[arg(default_value_t = false, hide_default_value = true)]
+	allow_anon_access: bool,
+
 	#[arg(
-		help = "Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow",
+		help = "Allow execution of all functions. Optionally, you can provide a comma-separated list of function names to allow",
 		long_help = r#"Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
@@ -60,7 +66,7 @@ Function names must be in the form <family>[::<name>]. For example:
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
-	#[arg(default_value_os = "", default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
@@ -75,7 +81,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
-	#[arg(default_value_os = "", default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	allow_net: Option<Targets<NetTarget>>,
 
@@ -95,8 +101,14 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_value_t = false, hide_default_value = true)]
 	deny_scripting: bool,
 
+	#[arg(help = "Deny anonymous queries when authentication is enabled")]
+	#[arg(env = "SURREAL_CAPS_DENY_ANON_ACCESS", long, conflicts_with = "deny_all")]
+	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
+	#[arg(default_value_t = false, hide_default_value = true)]
+	deny_anon_access: bool,
+
 	#[arg(
-		help = "Deny execution of functions. Optionally, you can provide a comma-separated list of function names to deny",
+		help = "Deny execution of all functions. Optionally, you can provide a comma-separated list of function names to deny",
 		long_help = r#"Deny execution of functions. Optionally, you can provide a comma-separated list of function names to deny.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
@@ -121,8 +133,6 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long, conflicts_with = "deny_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	// If deny_all is true, disable this arg and assume a default of Targets::All
-	#[arg(conflicts_with = "deny_all", default_value_if("deny_all", "true", ""))]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	deny_net: Option<Targets<NetTarget>>,
 }
@@ -136,6 +146,10 @@ impl DbsCapabilities {
 	#[cfg(not(feature = "scripting"))]
 	fn get_scripting(&self) -> bool {
 		false
+	}
+
+	fn get_allow_anon_access(&self) -> bool {
+		(self.allow_all || self.allow_anon_access) && !(self.deny_all || self.deny_anon_access)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
@@ -187,6 +201,7 @@ impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
 		Capabilities::default()
 			.with_scripting(caps.get_scripting())
+			.with_anon_access(caps.get_allow_anon_access())
 			.with_allow_funcs(caps.get_allow_funcs())
 			.with_deny_funcs(caps.get_deny_funcs())
 			.with_allow_net(caps.get_allow_net())
@@ -221,6 +236,10 @@ pub async fn init(
 	} else {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
+
+	let caps = caps.into();
+	debug!("Server capabilities: {caps}");
+
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path)
 		.await?
@@ -229,7 +248,7 @@ pub async fn init(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(auth_enabled)
-		.with_capabilities(caps.into());
+		.with_capabilities(caps);
 
 	dbs.bootstrap().await?;
 

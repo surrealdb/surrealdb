@@ -12,6 +12,15 @@ pub trait Target {
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct FuncTarget(pub String, pub Option<String>);
 
+impl std::fmt::Display for FuncTarget {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match &self.1 {
+			Some(name) => write!(f, "{}:{}", self.0, name),
+			None => write!(f, "{}::*", self.0),
+		}
+	}
+}
+
 impl Target for FuncTarget {
 	fn matches(&self, elem: &Self) -> bool {
 		match self {
@@ -42,6 +51,17 @@ impl std::str::FromStr for FuncTarget {
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(ipnet::IpNet),
+}
+
+// impl display
+impl std::fmt::Display for NetTarget {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Host(host, Some(port)) => write!(f, "{}:{}", host, port),
+			Self::Host(host, None) => write!(f, "{}", host),
+			Self::IPNet(ipnet) => write!(f, "{}", ipnet),
+		}
+	}
 }
 
 impl Target for NetTarget {
@@ -109,7 +129,7 @@ pub enum Targets<T: Target + Hash + Eq + PartialEq> {
 	All,
 }
 
-impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug> Targets<T> {
+impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug + std::fmt::Display> Targets<T> {
 	fn matches(&self, elem: &T) -> bool {
 		match self {
 			Self::None => false,
@@ -119,17 +139,33 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug> Targets<T> {
 	}
 }
 
+impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display for Targets<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::None => write!(f, "none"),
+			Self::All => write!(f, "all"),
+			Self::Some(targets) => {
+				let targets =
+					targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ");
+				write!(f, "{}", targets)
+			}
+		}
+	}
+}
+
 /// Capabilities are used to limit what a user can do to the system.
 ///
-/// Capabilities are split into 3 categories:
+/// Capabilities are split into 4 categories:
 /// - Scripting: Whether or not the user can execute scripts
+/// - Anonymous access: Whether or not an anonymous user can execute queries on the system when authentication is enabled.
 /// - Functions: Whether or not the user can execute certain functions
 /// - Network: Whether or not the user can access certain network addresses
 ///
 /// Capabilities are configured globally. By default, capabilities are configured as:
-/// - Scripting: true
-/// - Functions: All functions are allowed
-/// - Network: All network addresses are allowed
+/// - Scripting: false
+/// - Anonymous access: false
+/// - Functions: No function is allowed nor denied, hence all functions are denied unless explicitly allowed
+/// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
 ///
 /// The capabilities are defined using allow/deny lists for fine-grained control.
 ///
@@ -141,6 +177,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug> Targets<T> {
 #[derive(Debug, Clone)]
 pub struct Capabilities {
 	scripting: bool,
+	anon_access: bool,
 
 	allow_funcs: Arc<Targets<FuncTarget>>,
 	deny_funcs: Arc<Targets<FuncTarget>>,
@@ -148,11 +185,39 @@ pub struct Capabilities {
 	deny_net: Arc<Targets<NetTarget>>,
 }
 
+impl std::fmt::Display for Capabilities {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"scripting={}, anon_access={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+			self.scripting, self.anon_access, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+		)
+	}
+}
+
 impl Default for Capabilities {
-	// By default, enable all capabilities
 	fn default() -> Self {
+		Self::new_allow_none()
+	}
+}
+
+impl Capabilities {
+	fn new_allow_none() -> Self {
+		Self {
+			scripting: false,
+			anon_access: false,
+
+			allow_funcs: Arc::new(Targets::None),
+			deny_funcs: Arc::new(Targets::None),
+			allow_net: Arc::new(Targets::None),
+			deny_net: Arc::new(Targets::None),
+		}
+	}
+
+	pub fn new_allow_all() -> Self {
 		Self {
 			scripting: true,
+			anon_access: true,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -160,11 +225,14 @@ impl Default for Capabilities {
 			deny_net: Arc::new(Targets::None),
 		}
 	}
-}
 
-impl Capabilities {
 	pub fn with_scripting(mut self, scripting: bool) -> Self {
 		self.scripting = scripting;
+		self
+	}
+
+	pub fn with_anon_access(mut self, anon_access: bool) -> Self {
+		self.anon_access = anon_access;
 		self
 	}
 
@@ -190,6 +258,10 @@ impl Capabilities {
 
 	pub fn is_allowed_scripting(&self) -> bool {
 		self.scripting
+	}
+
+	pub fn is_allowed_anon_access(&self) -> bool {
+		self.anon_access
 	}
 
 	pub fn is_allowed_func(&self, target: &FuncTarget) -> bool {
