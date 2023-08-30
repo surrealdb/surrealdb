@@ -44,7 +44,7 @@ struct DbsCapabilities {
 	allow_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Allow execution of scripting functions")]
+	#[arg(help = "Allow execution of embedded scripting functions")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
 	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
 	#[arg(default_value_t = false, hide_default_value = true)]
@@ -95,7 +95,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	deny_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Deny execution of scripting functions")]
+	#[arg(help = "Deny execution of embedded scripting functions")]
 	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with = "deny_all")]
 	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
 	#[arg(default_value_t = false, hide_default_value = true)]
