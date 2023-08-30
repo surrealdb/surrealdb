@@ -12,7 +12,7 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Role};
+use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
@@ -751,6 +751,17 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authoritzation layer
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			}
+			.into());
+		}
+
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -806,6 +817,17 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if anonymous actors can compute values when auth is enabled
+		// TODO(sgirones): Check this as part of the authoritzation layer
+		if self.auth_enabled && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "compute".to_string(),
+				resource: "value".to_string(),
+			}
+			.into());
+		}
+
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)

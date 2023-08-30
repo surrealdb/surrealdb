@@ -1,10 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
+use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 
+pub async fn new_ds() -> Result<Datastore, Error> {
+	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
+}
+
+#[allow(dead_code)]
 pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
@@ -86,6 +93,7 @@ pub async fn iam_run_case(
 	Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn iam_check_cases(
 	cases: std::slice::Iter<'_, ((Level, Role), (&str, &str), bool)>,
 	scenario: &HashMap<&str, &str>,
@@ -105,14 +113,14 @@ pub async fn iam_check_cases(
 		};
 		// Auth enabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+			let ds = new_ds().await.unwrap().with_auth_enabled(true);
 			iam_run_case(prepare, test, check, &expected_result, &ds, &sess, *should_succeed)
 				.await?;
 		}
 
 		// Auth disabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
+			let ds = new_ds().await.unwrap().with_auth_enabled(false);
 			iam_run_case(prepare, test, check, &expected_result, &ds, &sess, *should_succeed)
 				.await?;
 		}
@@ -128,7 +136,7 @@ pub async fn iam_check_cases(
 				auth_enabled =
 					auth_enabled.then(|| "auth enabled").unwrap_or_else(|| "auth disabled")
 			);
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
 				check_results.get(1).unwrap()
 			} else {

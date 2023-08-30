@@ -140,7 +140,8 @@ pub(crate) fn router(
 		let kvs = kvs
 			.with_strict_mode(address.config.strict)
 			.with_query_timeout(address.config.query_timeout)
-			.with_transaction_timeout(address.config.transaction_timeout);
+			.with_transaction_timeout(address.config.transaction_timeout)
+			.with_capabilities(address.config.capabilities);
 
 		let kvs = match address.config.notifications {
 			true => kvs.with_notifications(),

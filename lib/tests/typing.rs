@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -18,7 +19,7 @@ async fn strict_typing_inline() -> Result<(), Error> {
 		UPDATE person:test SET scores = <set<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 		UPDATE person:test SET scores = <array<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -134,7 +135,7 @@ async fn strict_typing_defined() -> Result<(), Error> {
 		UPDATE person:test SET age = 18, enabled = true, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
 		UPDATE person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = [1,1,2,2,3,3,4,4,5,5];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -207,7 +208,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		UPDATE person:test SET name = NULL;
 		UPDATE person:test SET name = NONE;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 15);

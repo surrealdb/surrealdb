@@ -10,6 +10,7 @@ mod api_integration {
 	use std::sync::Arc;
 	use std::sync::Mutex;
 	use std::time::Duration;
+	use surrealdb::dbs::capabilities::Capabilities;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
@@ -134,7 +135,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -224,7 +228,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -248,7 +255,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -272,7 +282,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -295,7 +308,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -318,7 +334,10 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new().user(root).tick_interval(TICK_INTERVAL);
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
