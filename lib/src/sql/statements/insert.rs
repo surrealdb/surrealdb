@@ -62,7 +62,7 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
+		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Parse the expression
 		match self.into.compute(ctx, opt, txn, doc).await? {
 			Value::Table(into) => match &self.data {

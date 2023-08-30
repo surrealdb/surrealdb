@@ -91,6 +91,12 @@ impl FromArg for usize {
 	}
 }
 
+impl FromArg for Vec<String> {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_array_type(&Kind::String)?.into_iter().map(Value::try_into).collect()
+	}
+}
+
 impl FromArg for Vec<Number> {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		arg.coerce_to_array_type(&Kind::Number)?.into_iter().map(Value::try_into).collect()
