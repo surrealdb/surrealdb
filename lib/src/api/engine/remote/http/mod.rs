@@ -49,8 +49,6 @@ use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWrite;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -221,19 +219,24 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let mut response = request
-		.send()
-		.await?
-		.error_for_status()?
-		.bytes_stream()
-		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-		.into_async_read()
-		.compat();
-	let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
-		"-" => Box::new(io::stdout()),
-		_ => {
-			let file = match OpenOptions::new()
+type BackupSender = channel::Sender<Result<Vec<u8>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn export(
+	request: RequestBuilder,
+	(file, sender): (Option<PathBuf>, Option<BackupSender>),
+) -> Result<Value> {
+	match (file, sender) {
+		(Some(path), None) => {
+			let mut response = request
+				.send()
+				.await?
+				.error_for_status()?
+				.bytes_stream()
+				.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+				.into_async_read()
+				.compat();
+			let mut file = match OpenOptions::new()
 				.write(true)
 				.create(true)
 				.truncate(true)
@@ -249,17 +252,28 @@ async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 					.into());
 				}
 			};
-			Box::new(file)
+			if let Err(error) = io::copy(&mut response, &mut file).await {
+				return Err(Error::FileRead {
+					path,
+					error,
+				}
+				.into());
+			}
 		}
-	};
+		(None, Some(tx)) => {
+			let mut response = request.send().await?.error_for_status()?.bytes_stream();
 
-	if let Err(error) = io::copy(&mut response, &mut writer).await {
-		return Err(Error::FileRead {
-			path,
-			error,
+			tokio::spawn(async move {
+				while let Ok(Some(bytes)) = response.try_next().await {
+					if tx.send(Ok(bytes.to_vec())).await.is_err() {
+						break;
+					}
+				}
+			});
 		}
-		.into());
+		_ => unreachable!(),
 	}
+
 	Ok(Value::None)
 }
 
@@ -490,13 +504,12 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
 			let path = base_url.join(Method::Export.as_str())?;
-			let file = param.file.expect("file to export into");
 			let request = client
 				.get(path)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
-			let value = export(request, file).await?;
+			let value = export(request, (param.file, param.sender)).await?;
 			Ok(DbResponse::Other(value))
 		}
 		#[cfg(not(target_arch = "wasm32"))]

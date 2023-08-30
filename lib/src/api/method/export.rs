@@ -5,27 +5,28 @@ use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
-use channel::Sender;
-use std::borrow::Cow;
-use std::ffi::OsStr;
-use std::ffi::OsString;
+use crate::opt::ExportDestination;
+use channel::Receiver;
+use futures::Stream;
+use futures::StreamExt;
 use std::future::Future;
 use std::future::IntoFuture;
-use std::path::Component;
-use std::path::Components;
-use std::path::Path;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 /// A database export future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Export<'r, C: Connection> {
+pub struct Export<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
-	pub(super) target: Exportable,
+	pub(super) target: ExportDestination,
+	pub(super) response: PhantomData<R>,
 }
 
-impl<'r, Client> IntoFuture for Export<'r, Client>
+impl<'r, Client> IntoFuture for Export<'r, Client, PathBuf>
 where
 	Client: Connection,
 {
@@ -40,86 +41,50 @@ where
 			}
 			let mut conn = Client::new(Method::Export);
 			match self.target {
-				Exportable::File(f) => conn.execute_unit(router, Param::file(f)).await,
-				Exportable::Send(s) => conn.execute_unit(router, Param::send(s)).await,
+				ExportDestination::File(path) => conn.execute_unit(router, Param::file(path)).await,
+				ExportDestination::Memory => unreachable!(),
 			}
 		})
 	}
 }
 
-#[derive(Debug)]
-pub enum Exportable {
-	File(PathBuf),
-	Send(Sender<Vec<u8>>),
-}
+impl<'r, Client> IntoFuture for Export<'r, Client, ()>
+where
+	Client: Connection,
+{
+	type Output = Result<Backup>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-pub trait IntoExportable {
-	fn into_exportable(self) -> Exportable;
-}
-
-impl IntoExportable for &str {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File(<str as AsRef<Path>>::as_ref(self).to_owned())
-	}
-}
-
-impl IntoExportable for String {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File(<str as AsRef<Path>>::as_ref(&self).to_owned())
-	}
-}
-
-impl IntoExportable for &String {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File(<str as AsRef<Path>>::as_ref(self).to_owned())
+	fn into_future(self) -> Self::IntoFuture {
+		Box::pin(async move {
+			let router = self.router?;
+			if !router.features.contains(&ExtraFeatures::Backup) {
+				return Err(Error::BackupsNotSupported.into());
+			}
+			let (tx, rx) = crate::channel::new(1);
+			let mut conn = Client::new(Method::Export);
+			let ExportDestination::Memory = self.target else {
+				unreachable!();
+			};
+			conn.execute_unit(router, Param::sender(tx)).await?;
+			Ok(Backup {
+				rx,
+			})
+		})
 	}
 }
 
-impl IntoExportable for &Path {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File((*self).to_owned())
-	}
+/// A stream of exported data
+#[derive(Debug, Clone)]
+#[must_use = "streams do nothing unless you poll them"]
+pub struct Backup {
+	rx: Receiver<Result<Vec<u8>>>,
 }
 
-impl IntoExportable for &PathBuf {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File((*self).to_owned())
-	}
-}
+impl Stream for Backup {
+	type Item = Result<Vec<u8>>;
 
-impl IntoExportable for PathBuf {
-	fn into_exportable(self) -> Exportable {
-		Exportable::File(self.to_owned())
-	}
-}
-
-impl IntoExportable for Component<'_> {
-	fn into_exportable(self) -> Exportable {
-		<Component as AsRef<Path>>::as_ref(&self).into_exportable()
-	}
-}
-impl IntoExportable for Components<'_> {
-	fn into_exportable(self) -> Exportable {
-		<Components<'_> as AsRef<Path>>::as_ref(&self).into_exportable()
-	}
-}
-impl IntoExportable for Cow<'_, OsStr> {
-	fn into_exportable(self) -> Exportable {
-		<Cow<'_, OsStr> as AsRef<Path>>::as_ref(&self).into_exportable()
-	}
-}
-impl IntoExportable for std::path::Iter<'_> {
-	fn into_exportable(self) -> Exportable {
-		self.as_path().into_exportable()
-	}
-}
-impl IntoExportable for OsString {
-	fn into_exportable(self) -> Exportable {
-		<OsString as AsRef<Path>>::as_ref(&self).into_exportable()
-	}
-}
-impl IntoExportable for Sender<Vec<u8>> {
-	fn into_exportable(self) -> Exportable {
-		Exportable::Send(self)
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.as_mut().rx.poll_next_unpin(cx)
 	}
 }

@@ -119,7 +119,7 @@ pub struct Param {
 	pub(crate) query: Option<(Query, BTreeMap<String, Value>)>,
 	pub(crate) other: Vec<Value>,
 	pub(crate) file: Option<PathBuf>,
-	pub(crate) send: Option<channel::Sender<Vec<u8>>>,
+	pub(crate) sender: Option<channel::Sender<Result<Vec<u8>>>>,
 }
 
 impl Param {
@@ -128,7 +128,7 @@ impl Param {
 			query: None,
 			other,
 			file: None,
-			send: None,
+			sender: None,
 		}
 	}
 
@@ -137,7 +137,7 @@ impl Param {
 			query: Some((query, bindings)),
 			other: Vec::new(),
 			file: None,
-			send: None,
+			sender: None,
 		}
 	}
 
@@ -146,16 +146,16 @@ impl Param {
 			query: None,
 			other: Vec::new(),
 			file: Some(file),
-			send: None,
+			sender: None,
 		}
 	}
 
-	pub(crate) fn send(send: channel::Sender<Vec<u8>>) -> Self {
+	pub(crate) fn sender(send: channel::Sender<Result<Vec<u8>>>) -> Self {
 		Self {
 			query: None,
 			other: Vec::new(),
 			file: None,
-			send: Some(send),
+			sender: Some(send),
 		}
 	}
 }
