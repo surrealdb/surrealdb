@@ -236,12 +236,12 @@ impl Capabilities {
 		self
 	}
 
-	pub fn with_allow_funcs(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
+	pub fn with_allow_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
 		self.allow_funcs = Arc::new(allow_funcs);
 		self
 	}
 
-	pub fn with_deny_funcs(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
+	pub fn with_deny_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
 		self.deny_funcs = Arc::new(deny_funcs);
 		self
 	}
@@ -264,7 +264,7 @@ impl Capabilities {
 		self.guest_access
 	}
 
-	pub fn allows_func(&self, target: &FuncTarget) -> bool {
+	pub fn allows_function(&self, target: &FuncTarget) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
@@ -531,33 +531,33 @@ mod tests {
 		// When all funcs are allowed
 		{
 			let caps = Capabilities::default()
-				.with_allow_funcs(Targets::<FuncTarget>::All)
-				.with_deny_funcs(Targets::<FuncTarget>::None);
-			assert!(caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
+				.with_allow_functions(Targets::<FuncTarget>::All)
+				.with_deny_functions(Targets::<FuncTarget>::None);
+			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
 
 		// When all funcs are allowed and denied at the same time
 		{
 			let caps = Capabilities::default()
-				.with_allow_funcs(Targets::<FuncTarget>::All)
-				.with_deny_funcs(Targets::<FuncTarget>::All);
-			assert!(!caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(!caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
+				.with_allow_functions(Targets::<FuncTarget>::All)
+				.with_deny_functions(Targets::<FuncTarget>::All);
+			assert!(!caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
 
 		// When some funcs are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
-				.with_allow_funcs(Targets::<FuncTarget>::Some(
+				.with_allow_functions(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::*").unwrap()].into(),
 				))
-				.with_deny_funcs(Targets::<FuncTarget>::Some(
+				.with_deny_functions(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::post").unwrap()].into(),
 				));
-			assert!(caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.allows_func(&FuncTarget::from_str("http::put").unwrap()));
-			assert!(!caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(caps.allows_function(&FuncTarget::from_str("http::put").unwrap()));
+			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
 	}
 }

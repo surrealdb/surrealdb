@@ -232,7 +232,7 @@ impl<'a> Context<'a> {
 			message: "Invalid function name".to_string(),
 		})?;
 
-		if !self.capabilities.allows_func(&func_target) {
+		if !self.capabilities.allows_function(&func_target) {
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
 		Ok(())
