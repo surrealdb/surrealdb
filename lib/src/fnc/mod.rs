@@ -405,7 +405,7 @@ mod tests {
 				let dbs = crate::kvs::Datastore::new("memory")
 					.await
 					.unwrap()
-					.with_capabilities(Capabilities::new_allow_all());
+					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();

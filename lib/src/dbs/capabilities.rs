@@ -157,13 +157,13 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 ///
 /// Capabilities are split into 4 categories:
 /// - Scripting: Whether or not the user can execute scripts
-/// - Anonymous access: Whether or not an anonymous user can execute queries on the system when authentication is enabled.
+/// - Guest access: Whether or not a non-authenticated user can execute queries on the system when authentication is enabled.
 /// - Functions: Whether or not the user can execute certain functions
 /// - Network: Whether or not the user can access certain network addresses
 ///
 /// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: false
-/// - Anonymous access: false
+/// - Guest access: false
 /// - Functions: No function is allowed nor denied, hence all functions are denied unless explicitly allowed
 /// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
 ///
@@ -177,7 +177,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 #[derive(Debug, Clone)]
 pub struct Capabilities {
 	scripting: bool,
-	anon_access: bool,
+	guest_access: bool,
 
 	allow_funcs: Arc<Targets<FuncTarget>>,
 	deny_funcs: Arc<Targets<FuncTarget>>,
@@ -189,23 +189,23 @@ impl std::fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"scripting={}, anon_access={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-			self.scripting, self.anon_access, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+			"scripting={}, guest_access={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+			self.scripting, self.guest_access, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
 		)
 	}
 }
 
 impl Default for Capabilities {
 	fn default() -> Self {
-		Self::new_allow_none()
+		Self::none()
 	}
 }
 
 impl Capabilities {
-	fn new_allow_none() -> Self {
+	fn none() -> Self {
 		Self {
 			scripting: false,
-			anon_access: false,
+			guest_access: false,
 
 			allow_funcs: Arc::new(Targets::None),
 			deny_funcs: Arc::new(Targets::None),
@@ -214,10 +214,10 @@ impl Capabilities {
 		}
 	}
 
-	pub fn new_allow_all() -> Self {
+	pub fn all() -> Self {
 		Self {
 			scripting: true,
-			anon_access: true,
+			guest_access: true,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -231,8 +231,8 @@ impl Capabilities {
 		self
 	}
 
-	pub fn with_anon_access(mut self, anon_access: bool) -> Self {
-		self.anon_access = anon_access;
+	pub fn with_guest_access(mut self, guest_access: bool) -> Self {
+		self.guest_access = guest_access;
 		self
 	}
 
@@ -256,19 +256,19 @@ impl Capabilities {
 		self
 	}
 
-	pub fn is_allowed_scripting(&self) -> bool {
+	pub fn allows_scripting(&self) -> bool {
 		self.scripting
 	}
 
-	pub fn is_allowed_anon_access(&self) -> bool {
-		self.anon_access
+	pub fn allows_guest_access(&self) -> bool {
+		self.guest_access
 	}
 
-	pub fn is_allowed_func(&self, target: &FuncTarget) -> bool {
+	pub fn allows_func(&self, target: &FuncTarget) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
-	pub fn is_allowed_net(&self, target: &NetTarget) -> bool {
+	pub fn allows_net(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
 }
@@ -475,25 +475,25 @@ mod tests {
 		// When scripting is allowed
 		{
 			let caps = Capabilities::default().with_scripting(true);
-			assert!(caps.is_allowed_scripting());
+			assert!(caps.allows_scripting());
 		}
 
 		// When scripting is denied
 		{
 			let caps = Capabilities::default().with_scripting(false);
-			assert!(!caps.is_allowed_scripting());
+			assert!(!caps.allows_scripting());
 		}
 
-		// When anonymous access is allowed
+		// When guest access is allowed
 		{
-			let caps = Capabilities::default().with_anon_access(true);
-			assert!(caps.is_allowed_anon_access());
+			let caps = Capabilities::default().with_guest_access(true);
+			assert!(caps.allows_guest_access());
 		}
 
-		// When anonymous access is denied
+		// When guest access is denied
 		{
-			let caps = Capabilities::default().with_anon_access(false);
-			assert!(!caps.is_allowed_anon_access());
+			let caps = Capabilities::default().with_guest_access(false);
+			assert!(!caps.allows_guest_access());
 		}
 
 		// When all nets are allowed
@@ -501,8 +501,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_allow_net(Targets::<NetTarget>::All)
 				.with_deny_net(Targets::<NetTarget>::None);
-			assert!(caps.is_allowed_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(caps.is_allowed_net(&NetTarget::from_str("example.com:80").unwrap()));
+			assert!(caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When all nets are allowed and denied at the same time
@@ -510,8 +510,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_allow_net(Targets::<NetTarget>::All)
 				.with_deny_net(Targets::<NetTarget>::All);
-			assert!(!caps.is_allowed_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(!caps.is_allowed_net(&NetTarget::from_str("example.com:80").unwrap()));
+			assert!(!caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
+			assert!(!caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When some nets are allowed and some are denied, deny overrides the allow rules
@@ -523,9 +523,9 @@ mod tests {
 				.with_deny_net(Targets::<NetTarget>::Some(
 					[NetTarget::from_str("example.com:80").unwrap()].into(),
 				));
-			assert!(caps.is_allowed_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(caps.is_allowed_net(&NetTarget::from_str("example.com:443").unwrap()));
-			assert!(!caps.is_allowed_net(&NetTarget::from_str("example.com:80").unwrap()));
+			assert!(caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_net(&NetTarget::from_str("example.com:443").unwrap()));
+			assert!(!caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When all funcs are allowed
@@ -533,8 +533,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_allow_funcs(Targets::<FuncTarget>::All)
 				.with_deny_funcs(Targets::<FuncTarget>::None);
-			assert!(caps.is_allowed_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.is_allowed_func(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
 		}
 
 		// When all funcs are allowed and denied at the same time
@@ -542,8 +542,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_allow_funcs(Targets::<FuncTarget>::All)
 				.with_deny_funcs(Targets::<FuncTarget>::All);
-			assert!(!caps.is_allowed_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(!caps.is_allowed_func(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(!caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(!caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
 		}
 
 		// When some funcs are allowed and some are denied, deny overrides the allow rules
@@ -555,9 +555,9 @@ mod tests {
 				.with_deny_funcs(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::post").unwrap()].into(),
 				));
-			assert!(caps.is_allowed_func(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.is_allowed_func(&FuncTarget::from_str("http::put").unwrap()));
-			assert!(!caps.is_allowed_func(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(caps.allows_func(&FuncTarget::from_str("http::get").unwrap()));
+			assert!(caps.allows_func(&FuncTarget::from_str("http::put").unwrap()));
+			assert!(!caps.allows_func(&FuncTarget::from_str("http::post").unwrap()));
 		}
 	}
 }

@@ -50,11 +50,11 @@ struct DbsCapabilities {
 	#[arg(default_value_t = false, hide_default_value = true)]
 	allow_scripting: bool,
 
-	#[arg(help = "Allow anonymous queries when authentication is enabled")]
-	#[arg(env = "SURREAL_CAPS_ALLOW_ANON_ACCESS", long, conflicts_with = "allow_all")]
+	#[arg(help = "Allow guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with = "allow_all")]
 	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
 	#[arg(default_value_t = false, hide_default_value = true)]
-	allow_anon_access: bool,
+	allow_guests: bool,
 
 	#[arg(
 		help = "Allow execution of all functions. Optionally, you can provide a comma-separated list of function names to allow",
@@ -101,11 +101,11 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_value_t = false, hide_default_value = true)]
 	deny_scripting: bool,
 
-	#[arg(help = "Deny anonymous queries when authentication is enabled")]
-	#[arg(env = "SURREAL_CAPS_DENY_ANON_ACCESS", long, conflicts_with = "deny_all")]
+	#[arg(help = "Deny guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with = "deny_all")]
 	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
 	#[arg(default_value_t = false, hide_default_value = true)]
-	deny_anon_access: bool,
+	deny_guests: bool,
 
 	#[arg(
 		help = "Deny execution of all functions. Optionally, you can provide a comma-separated list of function names to deny",
@@ -148,8 +148,8 @@ impl DbsCapabilities {
 		false
 	}
 
-	fn get_allow_anon_access(&self) -> bool {
-		(self.allow_all || self.allow_anon_access) && !(self.deny_all || self.deny_anon_access)
+	fn get_allow_guests(&self) -> bool {
+		(self.allow_all || self.allow_guests) && !(self.deny_all || self.deny_guests)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
@@ -201,7 +201,7 @@ impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
 		Capabilities::default()
 			.with_scripting(caps.get_scripting())
-			.with_anon_access(caps.get_allow_anon_access())
+			.with_guest_access(caps.get_allow_guests())
 			.with_allow_funcs(caps.get_allow_funcs())
 			.with_deny_funcs(caps.get_deny_funcs())
 			.with_allow_net(caps.get_allow_net())
@@ -395,56 +395,56 @@ mod tests {
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
-			// Anonymous actor when anonymous access is allowed, succeeds
+			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_anon_access(true)),
+					.with_capabilities(Capabilities::default().with_guest_access(true)),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
 				"1".to_string(),
 			),
 			//
-			// Anonymous actor when anonymous access is not allowed, throws error
+			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
 				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_anon_access(false)),
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
 				Session::default(),
 				"RETURN 1".to_string(),
 				false,
 				"Not enough permissions to perform this action".to_string(),
 			),
 			//
-			// Anonymous actor when anonymous access is not allowed and auth is disabled, succeeds
+			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
 				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(false)
-					.with_capabilities(Capabilities::default().with_anon_access(false)),
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
 				"1".to_string(),
 			),
 			//
-			// Non-anonymous actor when anonymous access is not allowed, succeeds
+			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_anon_access(false)),
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
 				Session::viewer(),
 				"RETURN 1".to_string(),
 				true,

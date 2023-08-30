@@ -749,7 +749,7 @@ impl Datastore {
 	) -> Result<Vec<Response>, Error> {
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authoritzation layer
-		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.is_allowed_anon_access() {
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "process".to_string(),
@@ -815,7 +815,7 @@ impl Datastore {
 	) -> Result<Value, Error> {
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authoritzation layer
-		if self.auth_enabled && !self.capabilities.is_allowed_anon_access() {
+		if self.auth_enabled && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "compute".to_string(),

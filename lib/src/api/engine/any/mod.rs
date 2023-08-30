@@ -265,12 +265,9 @@ mod tests {
 			username: "root",
 			password: "root",
 		};
-		let db = connect((
-			"memory",
-			Config::new().user(creds).capabilities(Capabilities::new_allow_all()),
-		))
-		.await
-		.unwrap();
+		let db = connect(("memory", Config::new().user(creds).capabilities(Capabilities::all())))
+			.await
+			.unwrap();
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything

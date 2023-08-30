@@ -531,7 +531,7 @@ mod cli_integration {
 			);
 		}
 
-		// When all capabilities are allowed, anyone (including anon users) can execute functions and access any network address
+		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
@@ -629,11 +629,11 @@ mod cli_integration {
 			);
 		}
 
-		info!("* When auth is enabled and anonymous access is allowed");
+		info!("* When auth is enabled and guest access is allowed");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
 				auth: true,
-				args: "--allow-anon-access".to_owned(),
+				args: "--allow-guests".to_owned(),
 				..Default::default()
 			})
 			.await
@@ -646,11 +646,11 @@ mod cli_integration {
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 		}
 
-		info!("* When auth is enabled and anonymous access is denied");
+		info!("* When auth is enabled and guest access is denied");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
 				auth: true,
-				args: "--deny-anon-access".to_owned(),
+				args: "--deny-guests".to_owned(),
 				..Default::default()
 			})
 			.await
@@ -666,11 +666,11 @@ mod cli_integration {
 			);
 		}
 
-		info!("* When auth is disabled, anonymous access is always allowed");
+		info!("* When auth is disabled, guest access is always allowed");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
 				auth: false,
-				args: "--deny-anon-access".to_owned(),
+				args: "--deny-guests".to_owned(),
 				..Default::default()
 			})
 			.await

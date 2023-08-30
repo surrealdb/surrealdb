@@ -219,7 +219,7 @@ impl<'a> Context<'a> {
 
 	/// Check if scripting is allowed
 	pub fn check_allowed_scripting(&self) -> Result<(), Error> {
-		if !self.capabilities.is_allowed_scripting() {
+		if !self.capabilities.allows_scripting() {
 			return Err(Error::ScriptingNotAllowed);
 		}
 		Ok(())
@@ -232,7 +232,7 @@ impl<'a> Context<'a> {
 			message: "Invalid function name".to_string(),
 		})?;
 
-		if !self.capabilities.is_allowed_func(&func_target) {
+		if !self.capabilities.allows_func(&func_target) {
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
 		Ok(())
@@ -243,7 +243,7 @@ impl<'a> Context<'a> {
 	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
 		match target.host() {
 			Some(host)
-				if self.capabilities.is_allowed_net(&NetTarget::Host(
+				if self.capabilities.allows_net(&NetTarget::Host(
 					host.to_owned(),
 					target.port_or_known_default(),
 				)) =>

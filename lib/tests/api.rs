@@ -138,7 +138,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::new_allow_all());
+				.capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
