@@ -243,7 +243,7 @@ impl<'a> Context<'a> {
 	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
 		match target.host() {
 			Some(host)
-				if self.capabilities.allows_net(&NetTarget::Host(
+				if self.capabilities.allows_network_target(&NetTarget::Host(
 					host.to_owned(),
 					target.port_or_known_default(),
 				)) =>

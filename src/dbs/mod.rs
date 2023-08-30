@@ -202,10 +202,10 @@ impl From<DbsCapabilities> for Capabilities {
 		Capabilities::default()
 			.with_scripting(caps.get_scripting())
 			.with_guest_access(caps.get_allow_guests())
-			.with_allow_functions(caps.get_allow_funcs())
-			.with_deny_functions(caps.get_deny_funcs())
-			.with_allow_net(caps.get_allow_net())
-			.with_deny_net(caps.get_deny_net())
+			.with_functions(caps.get_allow_funcs())
+			.without_functions(caps.get_deny_funcs())
+			.with_network_targets(caps.get_allow_net())
+			.without_network_targets(caps.get_deny_net())
 	}
 }
 
@@ -360,8 +360,8 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::All)
-						.with_allow_net(Targets::<NetTarget>::All),
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
 				),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
@@ -456,10 +456,10 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
 						))
-						.with_deny_functions(Targets::<FuncTarget>::Some(
+						.without_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::len").unwrap()].into(),
 						)),
 				),
@@ -471,10 +471,10 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
 						))
-						.with_deny_functions(Targets::<FuncTarget>::Some(
+						.without_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::len").unwrap()].into(),
 						)),
 				),
@@ -486,10 +486,10 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
 						))
-						.with_deny_functions(Targets::<FuncTarget>::Some(
+						.without_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::len").unwrap()].into(),
 						)),
 				),
@@ -504,15 +504,15 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::All)
-						.with_allow_net(Targets::<NetTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
 							[
 								NetTarget::from_str(&server1.address().to_string()).unwrap(),
 								NetTarget::from_str(&server2.address().to_string()).unwrap(),
 							]
 							.into(),
 						))
-						.with_deny_net(Targets::<NetTarget>::Some(
+						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
 				),
@@ -524,15 +524,15 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::All)
-						.with_allow_net(Targets::<NetTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
 							[
 								NetTarget::from_str(&server1.address().to_string()).unwrap(),
 								NetTarget::from_str(&server2.address().to_string()).unwrap(),
 							]
 							.into(),
 						))
-						.with_deny_net(Targets::<NetTarget>::Some(
+						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
 				),
@@ -544,15 +544,15 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_allow_functions(Targets::<FuncTarget>::All)
-						.with_allow_net(Targets::<NetTarget>::Some(
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
 							[
 								NetTarget::from_str(&server1.address().to_string()).unwrap(),
 								NetTarget::from_str(&server2.address().to_string()).unwrap(),
 							]
 							.into(),
 						))
-						.with_deny_net(Targets::<NetTarget>::Some(
+						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
 				),

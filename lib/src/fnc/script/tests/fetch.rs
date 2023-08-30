@@ -168,7 +168,7 @@ async fn test_fetch_denied() {
 
 	// Execute test
 	let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-		Capabilities::all().with_deny_net(Targets::Some(
+		Capabilities::all().without_network_targets(Targets::Some(
 			[NetTarget::from_str(&server.address().to_string()).unwrap()].into(),
 		)),
 	);

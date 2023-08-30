@@ -236,22 +236,22 @@ impl Capabilities {
 		self
 	}
 
-	pub fn with_allow_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
+	pub fn with_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
 		self.allow_funcs = Arc::new(allow_funcs);
 		self
 	}
 
-	pub fn with_deny_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
+	pub fn without_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
 		self.deny_funcs = Arc::new(deny_funcs);
 		self
 	}
 
-	pub fn with_allow_net(mut self, allow_net: Targets<NetTarget>) -> Self {
+	pub fn with_network_targets(mut self, allow_net: Targets<NetTarget>) -> Self {
 		self.allow_net = Arc::new(allow_net);
 		self
 	}
 
-	pub fn with_deny_net(mut self, deny_net: Targets<NetTarget>) -> Self {
+	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
 		self.deny_net = Arc::new(deny_net);
 		self
 	}
@@ -268,7 +268,7 @@ impl Capabilities {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
-	pub fn allows_net(&self, target: &NetTarget) -> bool {
+	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
 }
@@ -499,40 +499,40 @@ mod tests {
 		// When all nets are allowed
 		{
 			let caps = Capabilities::default()
-				.with_allow_net(Targets::<NetTarget>::All)
-				.with_deny_net(Targets::<NetTarget>::None);
-			assert!(caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
+				.with_network_targets(Targets::<NetTarget>::All)
+				.without_network_targets(Targets::<NetTarget>::None);
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When all nets are allowed and denied at the same time
 		{
 			let caps = Capabilities::default()
-				.with_allow_net(Targets::<NetTarget>::All)
-				.with_deny_net(Targets::<NetTarget>::All);
-			assert!(!caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(!caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
+				.with_network_targets(Targets::<NetTarget>::All)
+				.without_network_targets(Targets::<NetTarget>::All);
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When some nets are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
-				.with_allow_net(Targets::<NetTarget>::Some(
+				.with_network_targets(Targets::<NetTarget>::Some(
 					[NetTarget::from_str("example.com").unwrap()].into(),
 				))
-				.with_deny_net(Targets::<NetTarget>::Some(
+				.without_network_targets(Targets::<NetTarget>::Some(
 					[NetTarget::from_str("example.com:80").unwrap()].into(),
 				));
-			assert!(caps.allows_net(&NetTarget::from_str("example.com").unwrap()));
-			assert!(caps.allows_net(&NetTarget::from_str("example.com:443").unwrap()));
-			assert!(!caps.allows_net(&NetTarget::from_str("example.com:80").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com:443").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
 		// When all funcs are allowed
 		{
 			let caps = Capabilities::default()
-				.with_allow_functions(Targets::<FuncTarget>::All)
-				.with_deny_functions(Targets::<FuncTarget>::None);
+				.with_functions(Targets::<FuncTarget>::All)
+				.without_functions(Targets::<FuncTarget>::None);
 			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
 			assert!(caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
@@ -540,8 +540,8 @@ mod tests {
 		// When all funcs are allowed and denied at the same time
 		{
 			let caps = Capabilities::default()
-				.with_allow_functions(Targets::<FuncTarget>::All)
-				.with_deny_functions(Targets::<FuncTarget>::All);
+				.with_functions(Targets::<FuncTarget>::All)
+				.without_functions(Targets::<FuncTarget>::All);
 			assert!(!caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
 			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
@@ -549,10 +549,10 @@ mod tests {
 		// When some funcs are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
-				.with_allow_functions(Targets::<FuncTarget>::Some(
+				.with_functions(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::*").unwrap()].into(),
 				))
-				.with_deny_functions(Targets::<FuncTarget>::Some(
+				.without_functions(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::post").unwrap()].into(),
 				));
 			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
