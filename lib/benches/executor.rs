@@ -15,7 +15,7 @@ macro_rules! query {
 				let dbs = Datastore::new("memory")
 					.await
 					.unwrap()
-					.with_capabilities(Capabilities::new_allow_all());
+					.with_capabilities(Capabilities::all());
 				let ses = Session::owner().with_ns("test").with_db("test");
 				let setup = $setup;
 				if !setup.is_empty() {
