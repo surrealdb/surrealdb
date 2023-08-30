@@ -91,6 +91,12 @@ impl<'a> Document<'a> {
 				}
 			}
 		}
+		// Remove any omitted fields from output
+		if let Some(v) = stm.omit() {
+			for v in v.iter() {
+				out.del(ctx, opt, txn, v).await?;
+			}
+		}
 		// Remove metadata fields on output
 		out.del(ctx, opt, txn, &*META).await?;
 		// Output result

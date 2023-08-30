@@ -1,9 +1,9 @@
+mod mtreeparams;
+mod searchparams;
+
 use crate::err::Error;
-use crate::sql::index::{Index, SearchParams};
-use crate::sql::scoring::Scoring;
+use crate::sql::index::Index;
 use crate::sql::value::serde::ser;
-use crate::sql::Ident;
-use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
@@ -20,7 +20,7 @@ impl ser::Serializer for Serializer {
 	type SerializeTupleVariant = Impossible<Index, Error>;
 	type SerializeMap = Impossible<Index, Error>;
 	type SerializeStruct = Impossible<Index, Error>;
-	type SerializeStructVariant = SerializeIndex;
+	type SerializeStructVariant = Impossible<Index, Error>;
 
 	const EXPECTED: &'static str = "an enum `Index`";
 
@@ -39,104 +39,22 @@ impl ser::Serializer for Serializer {
 	}
 
 	#[inline]
-	fn serialize_struct_variant(
+	fn serialize_newtype_variant<T>(
 		self,
 		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		match (name, variant) {
-			("Index", "Search") => Ok(SerializeIndex::Search(Default::default())),
-			_ => Err(Error::custom(format!("unexpected `{name}::{variant}`"))),
-		}
-	}
-}
-
-pub(super) enum SerializeIndex {
-	Search(SerializeSearch),
-}
-
-impl serde::ser::SerializeStructVariant for SerializeIndex {
-	type Ok = Index;
-	type Error = Error;
-
-	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
+		value: &T,
+	) -> Result<Self::Ok, Error>
 	where
 		T: ?Sized + Serialize,
 	{
-		match self {
-			Self::Search(search) => search.serialize_field(key, value),
-		}
-	}
-
-	fn end(self) -> Result<Self::Ok, Error> {
-		match self {
-			Self::Search(search) => search.end(),
-		}
-	}
-}
-
-#[derive(Default)]
-pub(super) struct SerializeSearch {
-	az: Ident,
-	hl: bool,
-	sc: Option<Scoring>,
-	doc_ids_order: u32,
-	doc_lengths_order: u32,
-	postings_order: u32,
-	terms_order: u32,
-}
-
-impl serde::ser::SerializeStructVariant for SerializeSearch {
-	type Ok = Index;
-	type Error = Error;
-
-	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		match key {
-			"az" => {
-				self.az = Ident(value.serialize(ser::string::Serializer.wrap())?);
+		match variant {
+			"Search" => Ok(Index::Search(value.serialize(searchparams::Serializer.wrap())?)),
+			"MTree" => Ok(Index::MTree(value.serialize(mtreeparams::Serializer.wrap())?)),
+			variant => {
+				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
-			"hl" => {
-				self.hl = value.serialize(ser::primitive::bool::Serializer.wrap())?;
-			}
-			"sc" => {
-				self.sc = Some(value.serialize(ser::scoring::Serializer.wrap())?);
-			}
-			"doc_ids_order" => {
-				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
-			}
-			"doc_lengths_order" => {
-				self.doc_lengths_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
-			}
-			"postings_order" => {
-				self.postings_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
-			}
-			"terms_order" => {
-				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
-			}
-			key => {
-				return Err(Error::custom(format!("unexpected field `Index::Search {{ {key} }}`")));
-			}
-		}
-		Ok(())
-	}
-
-	fn end(self) -> Result<Self::Ok, Error> {
-		match self.sc {
-			Some(sc) => Ok(Index::Search(SearchParams {
-				az: self.az,
-				hl: self.hl,
-				sc,
-				doc_ids_order: self.doc_ids_order,
-				doc_lengths_order: self.doc_lengths_order,
-				postings_order: self.postings_order,
-				terms_order: self.terms_order,
-			})),
-			_ => Err(Error::custom("`Index::Search` missing required field(s)")),
 		}
 	}
 }
@@ -144,6 +62,9 @@ impl serde::ser::SerializeStructVariant for SerializeSearch {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::index::SearchParams;
+	use crate::sql::value::serde::ser::Serializer;
+	use crate::sql::Scoring;
 
 	#[test]
 	fn idx() {

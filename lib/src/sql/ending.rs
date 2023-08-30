@@ -7,84 +7,82 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::character::complete::multispace1;
-use nom::combinator::eof;
-use nom::combinator::map;
 use nom::combinator::peek;
+use nom::combinator::{eof, value};
 use nom::sequence::preceded;
 
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		map(multispace1, |_| ()), // 1 + 1
-		map(binary, |_| ()),      // 1+1
-		map(assigner, |_| ()),    // 1=1
-		map(comment, |_| ()),     // 1/*comment*/
-		map(char(')'), |_| ()),   // (1)
-		map(char(']'), |_| ()),   // a[1]
-		map(char('}'), |_| ()),   // {k: 1}
-		map(char('"'), |_| ()),
-		map(char('\''), |_| ()),
-		map(char(';'), |_| ()), // SET a = 1;
-		map(char(','), |_| ()), // [1, 2]
-		map(tag(".."), |_| ()), // thing:1..2
-		map(eof, |_| ()),       // SET a = 1
+		value((), multispace1), // 1 + 1
+		value((), binary),      // 1+1
+		value((), assigner),    // 1=1
+		value((), comment),     // 1/*comment*/
+		value((), char(')')),   // (1)
+		value((), char(']')),   // a[1]
+		value((), char('}')),   // {k: 1}
+		value((), char('"')),
+		value((), char('\'')),
+		value((), char(';')), // SET a = 1;
+		value((), char(',')), // [1, 2]
+		value((), tag("..")), // thing:1..2
+		value((), eof),       // SET a = 1
 	)))(i)
 }
 
 pub fn ident(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		map(multispace1, |_| ()), // a + 1
-		map(binary, |_| ()),      // a+1
-		map(assigner, |_| ()),    // a+=1
-		map(comment, |_| ()),     // a/*comment*/
-		map(char(')'), |_| ()),   // (a)
-		map(char(']'), |_| ()),   // foo[a]
-		map(char('}'), |_| ()),   // {k: a}
-		map(char(';'), |_| ()),   // SET k = a;
-		map(char(','), |_| ()),   // [a, b]
-		map(char('.'), |_| ()),   // a.k
-		map(char('…'), |_| ()),   // a…
-		map(char('['), |_| ()),   // a[0]
-		map(eof, |_| ()),         // SET k = a
+		value((), multispace1), // a + 1
+		value((), binary),      // a+1
+		value((), assigner),    // a+=1
+		value((), comment),     // a/*comment*/
+		value((), char(')')),   // (a)
+		value((), char(']')),   // foo[a]
+		value((), char('}')),   // {k: a}
+		value((), char(';')),   // SET k = a;
+		value((), char(',')),   // [a, b]
+		value((), char('.')),   // a.k
+		value((), char('…')),   // a…
+		value((), char('[')),   // a[0]
+		value((), eof),         // SET k = a
 	)))(i)
 }
 
 /// none, false, etc.
 pub fn keyword(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		map(multispace1, |_| ()), // false || true
-		map(binary, |_| ()),      // false||true
-		map(comment, |_| ()),     // false/*comment*/
-		map(char(')'), |_| ()),   // (false)
-		map(char(']'), |_| ()),   // [WHERE k = false]
-		map(char('}'), |_| ()),   // {k: false}
-		map(char(';'), |_| ()),   // SET a = false;
-		map(char(','), |_| ()),   // [false, true]
-		map(eof, |_| ()),         // SET a = false
+		value((), multispace1), // false || true
+		value((), binary),      // false||true
+		value((), comment),     // false/*comment*/
+		value((), char(')')),   // (false)
+		value((), char(']')),   // [WHERE k = false]
+		value((), char('}')),   // {k: false}
+		value((), char(';')),   // SET a = false;
+		value((), char(',')),   // [false, true]
+		value((), eof),         // SET a = false
 	)))(i)
 }
 
 pub fn duration(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		map(multispace1, |_| ()),
-		map(binary, |_| ()),
-		map(assigner, |_| ()),
-		map(comment, |_| ()),
-		map(char(')'), |_| ()),
-		map(char(']'), |_| ()),
-		map(char('}'), |_| ()),
-		map(char(';'), |_| ()),
-		map(char(','), |_| ()),
-		map(char('.'), |_| ()),
-		map(eof, |_| ()),
+		value((), multispace1),
+		value((), binary),
+		value((), assigner),
+		value((), comment),
+		value((), char(')')),
+		value((), char(']')),
+		value((), char('}')),
+		value((), char(';')),
+		value((), char(',')),
+		value((), char('.')),
+		value((), eof),
 	)))(i)
 }
 
 pub fn field(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		map(preceded(shouldbespace, tag_no_case("FROM")), |_| ()),
-		map(preceded(comment, tag_no_case("FROM")), |_| ()),
-		map(char(';'), |_| ()),
-		map(eof, |_| ()),
+		value((), preceded(shouldbespace, tag_no_case("FROM"))),
+		value((), char(';')),
+		value((), eof),
 	)))(i)
 }
 
@@ -101,15 +99,15 @@ pub fn subquery(i: &str) -> IResult<&str, ()> {
 			Ok((i, ()))
 		},
 		peek(alt((
-			map(preceded(shouldbespace, tag_no_case("THEN")), |_| ()),
-			map(preceded(shouldbespace, tag_no_case("ELSE")), |_| ()),
-			map(preceded(shouldbespace, tag_no_case("END")), |_| ()),
-			map(comment, |_| ()),
-			map(char(']'), |_| ()),
-			map(char('}'), |_| ()),
-			map(char(';'), |_| ()),
-			map(char(','), |_| ()),
-			map(eof, |_| ()),
+			value((), preceded(shouldbespace, tag_no_case("THEN"))),
+			value((), preceded(shouldbespace, tag_no_case("ELSE"))),
+			value((), preceded(shouldbespace, tag_no_case("END"))),
+			value((), comment),
+			value((), char(']')),
+			value((), char('}')),
+			value((), char(';')),
+			value((), char(',')),
+			value((), eof),
 		))),
 	))(i)
 }

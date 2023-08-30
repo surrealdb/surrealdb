@@ -7,13 +7,14 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::{
 	NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 };
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Number, Object, Thing, Value};
 use async_recursion::async_recursion;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
+use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -782,6 +783,7 @@ impl From<MtStatistics> for Value {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
@@ -832,7 +834,7 @@ impl ObjectProperties {
 	}
 }
 
-impl SerdeState for MState {}
+impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {

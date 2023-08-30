@@ -19,12 +19,13 @@ use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::TreeStoreType;
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
+use revision::revisioned;
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -83,12 +84,13 @@ impl From<FtStatistics> for Value {
 }
 
 #[derive(Default, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 struct State {
 	total_docs_lengths: u128,
 	doc_count: u64,
 }
 
-impl SerdeState for State {}
+impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
@@ -167,7 +169,7 @@ impl FtIndex {
 
 			// Get the term list
 			if let Some(term_list_vec) = tx.get(self.index_key_base.new_bk_key(doc_id)).await? {
-				let term_list = RoaringTreemap::try_from_val(term_list_vec)?;
+				let term_list = RoaringTreemap::deserialize_from(&mut term_list_vec.as_slice())?;
 				// Remove the postings
 				let mut p = self.postings.write().await;
 				let mut t = self.terms.write().await;
@@ -227,7 +229,7 @@ impl FtIndex {
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
 		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone()).await? {
-			Some(RoaringTreemap::try_from_val(val)?)
+			Some(RoaringTreemap::deserialize_from(&mut val.as_slice())?)
 		} else {
 			None
 		};
@@ -274,7 +276,9 @@ impl FtIndex {
 		}
 
 		// Stores the term list for this doc_id
-		tx.set(term_ids_key, terms_ids.try_to_val()?).await?;
+		let mut val = Vec::new();
+		terms_ids.serialize_into(&mut val)?;
+		tx.set(term_ids_key, val).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;

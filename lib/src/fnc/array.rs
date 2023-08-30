@@ -3,7 +3,6 @@ use crate::sql::array::Array;
 use crate::sql::array::Clump;
 use crate::sql::array::Combine;
 use crate::sql::array::Complement;
-use crate::sql::array::Concat;
 use crate::sql::array::Difference;
 use crate::sql::array::Flatten;
 use crate::sql::array::Intersect;
@@ -109,8 +108,19 @@ pub fn complement((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.complement(other).into())
 }
 
-pub fn concat((array, other): (Array, Array)) -> Result<Value, Error> {
-	Ok(array.concat(other).into())
+pub fn concat(mut arrays: Vec<Array>) -> Result<Value, Error> {
+	let len = match arrays.iter().map(Array::len).reduce(|c, v| c + v) {
+		None => Err(Error::InvalidArguments {
+			name: String::from("array::concat"),
+			message: String::from("Expected at least one argument"),
+		}),
+		Some(l) => Ok(l),
+	}?;
+	let mut arr = Array::with_capacity(len);
+	arrays.iter_mut().for_each(|val| {
+		arr.append(val);
+	});
+	Ok(arr.into())
 }
 
 pub fn difference((array, other): (Array, Array)) -> Result<Value, Error> {

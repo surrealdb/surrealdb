@@ -12,7 +12,10 @@ use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::{cut, opt};
+// use nom::combinator::cut;
 use nom::multi::separated_list1;
+use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -194,9 +197,11 @@ pub fn fields(i: &str) -> IResult<&str, Fields> {
 fn field_one(i: &str) -> IResult<&str, Fields> {
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, f) = alt((alias, alone))(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Fields(vec![f], true)))
+	cut(|i| {
+		let (i, f) = alone(i)?;
+		let (i, _) = ending(i)?;
+		Ok((i, Fields(vec![f], true)))
+	})(i)
 }
 
 fn field_many(i: &str) -> IResult<&str, Fields> {
@@ -239,7 +244,7 @@ impl Display for Field {
 }
 
 pub fn field(i: &str) -> IResult<&str, Field> {
-	alt((all, alias, alone))(i)
+	alt((all, alone))(i)
 }
 
 pub fn all(i: &str) -> IResult<&str, Field> {
@@ -249,26 +254,18 @@ pub fn all(i: &str) -> IResult<&str, Field> {
 
 pub fn alone(i: &str) -> IResult<&str, Field> {
 	let (i, expr) = value(i)?;
+	let (i, alias) =
+		if let (i, Some(_)) = opt(delimited(shouldbespace, tag_no_case("AS"), shouldbespace))(i)? {
+			let (i, alias) = cut(idiom)(i)?;
+			(i, Some(alias))
+		} else {
+			(i, None)
+		};
 	Ok((
 		i,
 		Field::Single {
 			expr,
-			alias: None,
-		},
-	))
-}
-
-pub fn alias(i: &str) -> IResult<&str, Field> {
-	let (i, expr) = value(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("AS")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, alias) = idiom(i)?;
-	Ok((
-		i,
-		Field::Single {
-			expr,
-			alias: Some(alias),
+			alias,
 		},
 	))
 }
@@ -282,7 +279,6 @@ mod tests {
 	fn field_all() {
 		let sql = "*";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("*", format!("{}", out));
 	}
@@ -291,7 +287,6 @@ mod tests {
 	fn field_one() {
 		let sql = "field";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field", format!("{}", out));
 	}
@@ -300,7 +295,6 @@ mod tests {
 	fn field_value() {
 		let sql = "VALUE field";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("VALUE field", format!("{}", out));
 	}
@@ -309,7 +303,6 @@ mod tests {
 	fn field_alias() {
 		let sql = "field AS one";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field AS one", format!("{}", out));
 	}
@@ -318,7 +311,6 @@ mod tests {
 	fn field_value_alias() {
 		let sql = "VALUE field AS one";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("VALUE field AS one", format!("{}", out));
 	}
@@ -327,7 +319,6 @@ mod tests {
 	fn field_multiple() {
 		let sql = "field, other.field";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field, other.field", format!("{}", out));
 	}
@@ -336,7 +327,6 @@ mod tests {
 	fn field_aliases() {
 		let sql = "field AS one, other.field AS two";
 		let res = fields(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field AS one, other.field AS two", format!("{}", out));
 	}
@@ -344,7 +334,6 @@ mod tests {
 	#[test]
 	fn field_value_only_one() {
 		let sql = "VALUE field, other.field";
-		let res = fields(sql);
-		assert!(res.is_ok());
+		fields(sql).unwrap_err();
 	}
 }

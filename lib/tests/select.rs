@@ -67,6 +67,92 @@ async fn select_field_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_field_and_omit() -> Result<(), Error> {
+	let sql = "
+		CREATE person:tobie SET name = 'Tobie', password = '123456', opts.security = 'secure';
+		CREATE person:jaime SET name = 'Jaime', password = 'asdfgh', opts.security = 'secure';
+		SELECT * OMIT password, opts.security FROM person;
+		SELECT * FROM person;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:tobie,
+				name: 'Tobie',
+				password: '123456',
+				opts: {
+					security: 'secure',
+				},
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:jaime,
+				name: 'Jaime',
+				password: 'asdfgh',
+				opts: {
+					security: 'secure',
+				},
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:jaime,
+				name: 'Jaime',
+				opts: {},
+			},
+			{
+				id: person:tobie,
+				name: 'Tobie',
+				opts: {},
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:jaime,
+				name: 'Jaime',
+				password: 'asdfgh',
+				opts: {
+					security: 'secure',
+				},
+			},
+			{
+				id: person:tobie,
+				name: 'Tobie',
+				password: '123456',
+				opts: {
+					security: 'secure',
+				},
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_expression_value() -> Result<(), Error> {
 	let sql = "
 		CREATE thing:a SET number = 5, boolean = true;

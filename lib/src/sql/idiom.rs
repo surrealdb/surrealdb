@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, Fmt};
-use crate::sql::part::{all, field, first, graph, index, last, part, Part};
+use crate::sql::part::{basic_part, first, graph, local_part, part, Part};
 use crate::sql::part::{flatten, Next};
 use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::value::Value;
@@ -31,6 +31,14 @@ impl Deref for Idioms {
 	type Target = Vec<Idiom>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl IntoIterator for Idioms {
+	type Item = Idiom;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
 }
 
@@ -184,7 +192,7 @@ impl Display for Idiom {
 /// Used in DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
-	let (i, mut v) = many0(alt((all, index, field)))(i)?;
+	let (i, mut v) = many0(local_part)(i)?;
 	// Flatten is only allowed at the end
 	let (i, flat) = opt(flatten)(i)?;
 	if let Some(p) = flat {
@@ -197,7 +205,7 @@ pub fn local(i: &str) -> IResult<&str, Idiom> {
 /// Used in a SPLIT, ORDER, and GROUP clauses
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
-	let (i, mut v) = many0(alt((all, last, index, field)))(i)?;
+	let (i, mut v) = many0(basic_part)(i)?;
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }
@@ -294,7 +302,6 @@ mod tests {
 	fn idiom_normal() {
 		let sql = "test";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test")]));
@@ -304,7 +311,6 @@ mod tests {
 	fn idiom_quoted_backtick() {
 		let sql = "`test`";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test")]));
@@ -314,7 +320,6 @@ mod tests {
 	fn idiom_quoted_brackets() {
 		let sql = "⟨test⟩";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test")]));
@@ -324,7 +329,6 @@ mod tests {
 	fn idiom_nested() {
 		let sql = "test.temp";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp")]));
@@ -334,7 +338,6 @@ mod tests {
 	fn idiom_nested_quoted() {
 		let sql = "test.`some key`";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.`some key`", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("some key")]));
@@ -344,7 +347,6 @@ mod tests {
 	fn idiom_nested_array_all() {
 		let sql = "test.temp[*]";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[*]", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::All]));
@@ -354,7 +356,6 @@ mod tests {
 	fn idiom_nested_array_last() {
 		let sql = "test.temp[$]";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[$]", format!("{}", out));
 		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last]));
@@ -364,7 +365,6 @@ mod tests {
 	fn idiom_nested_array_value() {
 		let sql = "test.temp[*].text";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[*].text", format!("{}", out));
 		assert_eq!(
@@ -377,7 +377,6 @@ mod tests {
 	fn idiom_nested_array_question() {
 		let sql = "test.temp[? test = true].text";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
@@ -395,7 +394,6 @@ mod tests {
 	fn idiom_nested_array_condition() {
 		let sql = "test.temp[WHERE test = true].text";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
@@ -413,7 +411,6 @@ mod tests {
 	fn idiom_start_param_local_field() {
 		let sql = "$test.temporary[0].embedded…";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test.temporary[0].embedded…", format!("{}", out));
 		assert_eq!(
@@ -432,7 +429,6 @@ mod tests {
 	fn idiom_start_thing_remote_traversal() {
 		let sql = "person:test.friend->like->person";
 		let res = idiom(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("person:test.friend->like->person", format!("{}", out));
 		assert_eq!(

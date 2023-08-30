@@ -185,3 +185,137 @@ async fn strict_typing_defined() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn strict_typing_none_null() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON TABLE person TYPE option<string>;
+		UPDATE person:test SET name = 'Tobie';
+		UPDATE person:test SET name = NULL;
+		UPDATE person:test SET name = NONE;
+		--
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON TABLE person TYPE option<string | null>;
+		UPDATE person:test SET name = 'Tobie';
+		UPDATE person:test SET name = NULL;
+		UPDATE person:test SET name = NONE;
+		--
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON TABLE person TYPE string | null;
+		UPDATE person:test SET name = 'Tobie';
+		UPDATE person:test SET name = NULL;
+		UPDATE person:test SET name = NONE;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 15);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Found NULL for field `name`, with record `person:test`, but expected a option<string>"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: NULL,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: NULL,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Found NONE for field `name`, with record `person:test`, but expected a string | null"
+	));
+	//
+	Ok(())
+}

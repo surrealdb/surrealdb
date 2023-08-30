@@ -62,7 +62,6 @@ mod tests {
 	fn throw_basic() {
 		let sql = "THROW 'Record does not exist'";
 		let res = throw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("THROW 'Record does not exist'", format!("{}", out))
 	}

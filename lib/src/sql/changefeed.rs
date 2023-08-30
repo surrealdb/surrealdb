@@ -2,6 +2,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -24,7 +25,7 @@ impl Display for ChangeFeed {
 pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, _) = tag_no_case("CHANGEFEED")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = duration(i)?;
+	let (i, v) = cut(duration)(i)?;
 	Ok((
 		i,
 		ChangeFeed {
@@ -56,7 +57,6 @@ mod tests {
 	fn changefeed_enabled() {
 		let sql = "CHANGEFEED 1h";
 		let res = changefeed(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CHANGEFEED 1h", format!("{}", out));
 		assert_eq!(

@@ -29,8 +29,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 use tracing::trace;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -552,9 +556,9 @@ impl Datastore {
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
-		let now = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
 		Ok(())

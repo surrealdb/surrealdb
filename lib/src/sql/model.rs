@@ -4,8 +4,9 @@ use crate::sql::escape::escape_ident;
 use crate::sql::id::Id;
 use crate::sql::ident::ident_raw;
 use crate::sql::thing::Thing;
-use nom::branch::alt;
 use nom::character::complete::char;
+use nom::combinator::map;
+use nom::{branch::alt, combinator::value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -84,28 +85,25 @@ impl fmt::Display for Model {
 }
 
 pub fn model(i: &str) -> IResult<&str, Model> {
-	alt((model_count, model_range))(i)
-}
-
-fn model_count(i: &str) -> IResult<&str, Model> {
 	let (i, _) = char('|')(i)?;
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, c) = take_u64(i)?;
-	let (i, _) = char('|')(i)?;
-	Ok((i, Model::Count(t, c)))
+	let (i, e) = alt((value(None, char('|')), map(model_range, Some)))(i)?;
+	if let Some(e) = e {
+		Ok((i, Model::Range(t, c, e)))
+	} else {
+		Ok((i, Model::Count(t, c)))
+	}
 }
 
-fn model_range(i: &str) -> IResult<&str, Model> {
-	let (i, _) = char('|')(i)?;
-	let (i, t) = ident_raw(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, b) = take_u64(i)?;
+fn model_range(i: &str) -> IResult<&str, u64> {
 	let (i, _) = char('.')(i)?;
 	let (i, _) = char('.')(i)?;
 	let (i, e) = take_u64(i)?;
 	let (i, _) = char('|')(i)?;
-	Ok((i, Model::Range(t, b, e)))
+	//Ok((i, Model::Range(t, b, e)))
+	Ok((i, e))
 }
 
 #[cfg(test)]
@@ -117,7 +115,6 @@ mod tests {
 	fn model_count() {
 		let sql = "|test:1000|";
 		let res = model(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("|test:1000|", format!("{}", out));
 		assert_eq!(out, Model::Count(String::from("test"), 1000));
@@ -127,7 +124,6 @@ mod tests {
 	fn model_range() {
 		let sql = "|test:1..1000|";
 		let res = model(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("|test:1..1000|", format!("{}", out));
 		assert_eq!(out, Model::Range(String::from("test"), 1, 1000));

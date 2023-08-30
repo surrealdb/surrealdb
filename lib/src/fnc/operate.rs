@@ -234,7 +234,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(2);
 		let res = or(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -244,7 +243,6 @@ mod tests {
 		let one = Value::from(0);
 		let two = Value::from(1);
 		let res = or(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -254,7 +252,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(0);
 		let res = or(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -264,7 +261,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(2);
 		let res = and(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("2", format!("{}", out));
 	}
@@ -274,7 +270,6 @@ mod tests {
 		let one = Value::from(0);
 		let two = Value::from(1);
 		let res = and(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("0", format!("{}", out));
 	}
@@ -284,7 +279,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(0);
 		let res = and(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("0", format!("{}", out));
 	}
@@ -294,7 +288,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(2);
 		let res = tco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -304,7 +297,6 @@ mod tests {
 		let one = Value::from(0);
 		let two = Value::from(1);
 		let res = tco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -314,7 +306,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(0);
 		let res = tco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -324,7 +315,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::from(2);
 		let res = nco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -334,7 +324,6 @@ mod tests {
 		let one = Value::None;
 		let two = Value::from(1);
 		let res = nco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -344,7 +333,6 @@ mod tests {
 		let one = Value::from(1);
 		let two = Value::None;
 		let res = nco(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -354,7 +342,6 @@ mod tests {
 		let one = Value::from(5);
 		let two = Value::from(4);
 		let res = add(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("9", format!("{}", out));
 	}
@@ -364,7 +351,6 @@ mod tests {
 		let one = Value::from(5);
 		let two = Value::from(4);
 		let res = sub(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -374,7 +360,6 @@ mod tests {
 		let one = Value::from(5);
 		let two = Value::from(4);
 		let res = mul(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("20", format!("{}", out));
 	}
@@ -384,7 +369,6 @@ mod tests {
 		let one = Value::from(5);
 		let two = Value::from(4);
 		let res = div(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1", format!("{}", out));
 	}
@@ -394,7 +378,6 @@ mod tests {
 		let one = Value::from(5.0);
 		let two = Value::from(4.0);
 		let res = div(one, two);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("1.25f", format!("{}", out));
 	}
