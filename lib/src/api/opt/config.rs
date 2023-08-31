@@ -1,4 +1,4 @@
-use crate::iam::Level;
+use crate::{dbs::Capabilities, iam::Level};
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
@@ -16,6 +16,7 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) tick_interval: Option<Duration>,
+	pub(crate) capabilities: Capabilities,
 }
 
 impl Config {
@@ -87,6 +88,12 @@ impl Config {
 	/// Set the interval at which the database should run node maintenance tasks
 	pub fn tick_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
 		self.tick_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the capabilities for the database
+	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
+		self.capabilities = capabilities;
 		self
 	}
 }

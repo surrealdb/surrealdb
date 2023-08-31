@@ -155,7 +155,7 @@ impl Default for StartServerArguments {
 			tls: false,
 			wait_is_ready: true,
 			tick_interval: time::Duration::new(1, 0),
-			args: String::default(),
+			args: "--allow-all".to_string(),
 		}
 	}
 }

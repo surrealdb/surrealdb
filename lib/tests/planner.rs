@@ -1,9 +1,9 @@
 mod parse;
-
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::{Response, Session};
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -118,7 +118,7 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 }
 
 async fn execute_test(sql: &str, expected_result: usize) -> Result<Vec<Response>, Error> {
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);

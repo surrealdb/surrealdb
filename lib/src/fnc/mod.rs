@@ -370,6 +370,9 @@ pub async fn asynchronous(
 
 #[cfg(test)]
 mod tests {
+	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
+	use crate::dbs::Capabilities;
+
 	#[test]
 	fn implementations_are_present() {
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
@@ -399,7 +402,10 @@ mod tests {
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
-				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
+				let dbs = crate::kvs::Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();

@@ -26,7 +26,7 @@ async fn test_fetch_get() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -71,7 +71,7 @@ async fn test_fetch_put() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -121,7 +121,7 @@ async fn test_fetch_error() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -168,7 +168,7 @@ async fn test_fetch_denied() {
 
 	// Execute test
 	let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-		Capabilities::default().with_deny_net(Targets::Some(
+		Capabilities::all().without_network_targets(Targets::Some(
 			[NetTarget::from_str(&server.address().to_string()).unwrap()].into(),
 		)),
 	);
