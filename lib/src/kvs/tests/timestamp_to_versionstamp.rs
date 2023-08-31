@@ -17,26 +17,32 @@ async fn timestamp_to_versionstamp() {
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(0, "myns", "mydb", true).await.unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 0
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs1 = tx.get_versionstamp_from_timestamp(0, "myns", "mydb", true).await.unwrap().unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(1, "myns", "mydb", true).await.unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 1
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs2 = tx.get_versionstamp_from_timestamp(1, "myns", "mydb", true).await.unwrap().unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set_timestamp_for_versionstamp(2, "myns", "mydb", true).await.unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 2
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	let vs3 = tx.get_versionstamp_from_timestamp(2, "myns", "mydb", true).await.unwrap().unwrap();
+	tx.complete_changes(false).await.unwrap();
 	tx.commit().await.unwrap();
 	assert!(vs1 < vs2);
 	assert!(vs2 < vs3);
