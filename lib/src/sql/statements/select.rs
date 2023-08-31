@@ -93,8 +93,7 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
-
+		let opt = &opt.new_with_futures(false).with_projections(true);
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
@@ -115,6 +114,9 @@ impl SelectStatement {
 				Value::Array(v) => {
 					for v in v {
 						match v {
+							Value::Table(t) => {
+								planner.add_iterables(ctx, txn, t, &mut i).await?;
+							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 							Value::Model(v) => {

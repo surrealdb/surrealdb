@@ -166,7 +166,7 @@ impl Function {
 				// Compute the function arguments
 				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 				// Run the normal function
-				fnc::run(ctx, txn, doc, s, a).await
+				fnc::run(ctx, opt, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Check this function is allowed
@@ -583,6 +583,8 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("datetime"),
 		tag("decimal"),
 		tag("duration"),
+		tag("fields"),
+		tag("field"),
 		tag("float"),
 		tag("int"),
 		tag("number"),
