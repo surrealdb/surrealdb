@@ -65,7 +65,10 @@ pub struct SystemClock {}
 impl Clock for SystemClock {
 	fn now(&self) -> Timestamp {
 		// Use a timestamp oracle if available
-		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
+			Ok(duration) => duration.as_millis(),
+			Err(error) => panic!("Clock may have gone backwards: {:?}", error.duration()),
+		};
 		Timestamp {
 			value: now as u64,
 		}
