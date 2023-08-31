@@ -288,19 +288,17 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		}
 	};
 
-	let res = request
-		.header(ACCEPT, "application/octet-stream")
-		.body(file)
-		.send()
-		.await?;
+	let res = request.header(ACCEPT, "application/octet-stream").body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
 
 		match res.parse::<serde_json::Value>() {
 			Ok(body) => {
-				let error_msg =
-					format!("\n{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into()));
+				let error_msg = format!(
+					"\n{}",
+					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
+				);
 				return Err(Error::Http(error_msg).into());
 			}
 			Err(_) => {
