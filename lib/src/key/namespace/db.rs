@@ -50,7 +50,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
-			123,
+			1,
 			"testdb",
 		);
 		let enc = Db::encode(&val).unwrap();
@@ -62,13 +62,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(123);
+		let val = super::prefix(1);
 		assert_eq!(val, b"/*\x00\x00\x00\x01!db\0")
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix(123);
-		assert_eq!(val, b"/*testns\0!db\xff")
+		let val = super::suffix(1);
+		assert_eq!(val, b"/*\0\0\0\x01!db\xff")
 	}
 }

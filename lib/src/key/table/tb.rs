@@ -49,7 +49,7 @@ mod tests {
 			3,
 		);
 		let enc = Tb::encode(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tb\x00\x00\x00\x03");
+		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02*\0\0\0\x03!tb");
 
 		let dec = Tb::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -64,7 +64,7 @@ mod tests {
 			"testix",
 		);
 		let enc = Ix::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!ixtestix\0");
+		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02*\0\0\0\x03!ixtestix\0");
 
 		let dec = Ix::decode(&enc).unwrap();
 		assert_eq!(val, dec);

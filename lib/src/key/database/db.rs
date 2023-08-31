@@ -44,7 +44,7 @@ mod tests {
 			2,
 		);
 		let enc = Db::encode(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01!db\x00\x00\x00\x02");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!db");
 
 		let dec = Db::decode(&enc).unwrap();
 		assert_eq!(val, dec);
