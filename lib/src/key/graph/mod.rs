@@ -192,7 +192,7 @@ mod tests {
 		let enc = Graph::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
 		);
 
 		let dec = Graph::decode(&enc).unwrap();

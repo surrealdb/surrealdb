@@ -71,7 +71,7 @@ mod tests {
 		println!("{:?}", debug::sprint_key(&enc));
 		assert_eq!(
 			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
 		);
 
 		let dec = Lq::decode(&enc).unwrap();
@@ -81,12 +81,12 @@ mod tests {
 	#[test]
 	fn prefix() {
 		let val = super::prefix(1, 2, 3);
-		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\x00")
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!lq\x00")
 	}
 
 	#[test]
 	fn suffix() {
 		let val = super::suffix(1, 2, 3);
-		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff")
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!lq\xff")
 	}
 }

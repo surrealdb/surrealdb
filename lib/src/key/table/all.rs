@@ -43,7 +43,7 @@ mod tests {
 			3,
 		);
 		let enc = Table::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03");
 
 		let dec = Table::decode(&enc).unwrap();
 		assert_eq!(val, dec);

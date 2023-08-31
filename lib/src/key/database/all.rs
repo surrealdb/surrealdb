@@ -38,7 +38,7 @@ mod tests {
 			2,
 		);
 		let enc = All::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02");
 
 		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -59,7 +59,7 @@ mod tests {
             "test",
         );
 		let enc = Az::encode(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0!aztest\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aztest\x00");
 		let dec = Az::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
@@ -67,12 +67,12 @@ mod tests {
 	#[test]
 	fn prefix() {
 		let val = super::prefix(1, 2);
-		assert_eq!(val, b"/*namespace\0*database\0!az\0");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!az\x00");
 	}
 
 	#[test]
 	fn suffix() {
 		let val = super::suffix(1, 2);
-		assert_eq!(val, b"/*namespace\0*database\0!az\xff");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!az\xff");
 	}
 }

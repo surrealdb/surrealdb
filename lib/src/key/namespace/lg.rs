@@ -50,11 +50,11 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Lg::new(
-			123,
+			1,
 			"testus",
 		);
 		let enc = Lg::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0!lgtestus\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!lgtestus\0");
 
 		let dec = Lg::decode(&enc).unwrap();
 		assert_eq!(val, dec);

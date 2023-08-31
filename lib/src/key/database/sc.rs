@@ -59,7 +59,7 @@ mod tests {
 			"testsc",
 		);
 		let enc = Sc::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0!sctestsc\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sctestsc\0");
 
 		let dec = Sc::decode(&enc).unwrap();
 		assert_eq!(val, dec);

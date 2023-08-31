@@ -59,7 +59,7 @@ mod tests {
 			"testtk",
 		);
 		let enc = Tk::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!tktesttk\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tktesttk\x00");
 
 		let dec = Tk::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -68,12 +68,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix(1, 2);
-		assert_eq!(val, b"/*testns\0*testdb\0!tk\0");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tk\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix(1, 2);
-		assert_eq!(val, b"/*testns\0*testdb\0!tk\xff");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tk\xff");
 	}
 }

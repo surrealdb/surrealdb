@@ -49,24 +49,24 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Us::new(
-			123,
+			1,
 			"testuser",
 		);
 		let enc = Us::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00!ustestuser\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!ustestuser\x00");
 		let dec = Us::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(123);
-		assert_eq!(val, b"/*testns\0!us\0");
+		let val = super::prefix(1);
+		assert_eq!(val, b"/*\x00\x00\x00\x01!us\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix(123);
-		assert_eq!(val, b"/*testns\0!us\xff");
+		let val = super::suffix(1);
+		assert_eq!(val, b"/*\x00\x00\x00\x01!us\xff");
 	}
 }

@@ -50,11 +50,11 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tk::new(
-			123,
+			1,
 			"testtk",
 		);
 		let enc = Tk::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0!tktesttk\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!tktesttk\0");
 		let dec = Tk::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
