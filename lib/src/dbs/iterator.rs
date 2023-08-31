@@ -269,6 +269,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
+		trace!("Iterating: {}", stm);
 		// Enable context override
 		let mut cancel_ctx = Context::new(ctx);
 		self.run = cancel_ctx.add_cancel();
