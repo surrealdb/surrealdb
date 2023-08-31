@@ -368,10 +368,10 @@ impl Datastore {
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
 				match tx.cancel().await {
-					Ok(_) => return Err(e),
+					Ok(_) => Err(e),
 					Err(e) => {
 						// We have a nested error
-						return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)));
+						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
 					}
 				}
 			}
