@@ -42,6 +42,7 @@ pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
 pub use delete::Delete;
+pub use export::Backup;
 pub use export::Export;
 pub use health::Health;
 pub use import::Import;
@@ -64,7 +65,6 @@ pub use use_ns::UseNs;
 pub use version::Version;
 
 use crate::api::conn::Method;
-use crate::api::method::export::IntoExportable;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -74,6 +74,7 @@ use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
+use crate::opt::IntoExportDestination;
 use crate::sql::to_value;
 use crate::sql::Uuid;
 use crate::sql::Value;
@@ -965,23 +966,36 @@ where
 	/// # Examples
 	///
 	/// ```no_run
+	/// # use futures::StreamExt;
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
+	/// // Export to a file
 	/// db.export("backup.sql").await?;
+	///
+	/// // Export to a stream of bytes
+	/// let mut backup = db.export(()).await?;
+	/// while let Some(result) = backup.next().await {
+	///     match result {
+	///         Ok(bytes) => {
+	///             // Do something with the bytes received...
+	///         }
+	///         Err(error) => {
+	///             // Handle the export error
+	///         }
+	///     }
+	/// }
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn export<E>(&self, target: E) -> Export<C>
-	where
-		E: IntoExportable,
-	{
+	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
 		Export {
 			router: self.router.extract(),
-			target: target.into_exportable(),
+			target: target.into_export_destination(),
+			response: PhantomData,
 		}
 	}
 

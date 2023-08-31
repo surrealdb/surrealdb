@@ -4,6 +4,7 @@ pub mod auth;
 
 mod config;
 mod endpoint;
+mod export;
 mod query;
 mod resource;
 mod tls;
@@ -23,6 +24,7 @@ use serde_json::Value as JsonValue;
 
 pub use config::*;
 pub use endpoint::*;
+pub use export::*;
 pub use query::*;
 pub use resource::*;
 pub use tls::*;
