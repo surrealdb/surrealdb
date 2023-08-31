@@ -367,7 +367,13 @@ impl Datastore {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
-				tx.cancel().await
+				match tx.cancel().await {
+					Ok(_) => return Err(e),
+					Err(e) => {
+						// We have a nested error
+						return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)));
+					}
+				}
 			}
 		}
 	}
