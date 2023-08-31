@@ -277,7 +277,6 @@ impl Iterator {
 		self.setup_limit(&cancel_ctx, opt, txn, stm).await?;
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
-
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let (do_iterate, mut explanation) = Explanation::new(stm.explain(), &self.entries);
 
@@ -673,28 +672,8 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) {
-		// Check current context
-		if ctx.is_done() {
-			return;
-		}
-		// Setup a new workable
-		let (val, ext) = match pro.val {
-			Operable::Value(v) => (v, Workable::Normal),
-			Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
-			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
-		};
-		// Setup a new document
-		let mut doc = Document::new(pro.ir, pro.rid.as_ref(), pro.doc_id, &val, ext);
 		// Process the document
-		let res = match stm {
-			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
-			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
-			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
-			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
-			Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
-			Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
-			_ => unreachable!(),
-		};
+		let res = Document::process(ctx, opt, txn, stm, pro).await;
 		// Process the result
 		self.result(res, stm);
 	}

@@ -147,7 +147,6 @@ mod tests {
 	fn regex_simple() {
 		let sql = "/test/";
 		let res = regex(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("/test/", format!("{}", out));
 		assert_eq!(out, "test".parse().unwrap());
@@ -157,7 +156,6 @@ mod tests {
 	fn regex_complex() {
 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
 		let res = regex(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
 		assert_eq!(out, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());

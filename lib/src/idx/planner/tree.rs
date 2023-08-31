@@ -154,6 +154,7 @@ impl<'a> TreeBuilder<'a> {
 						(false, None, None)
 					}
 				}
+				Index::MTree(_) => (false, None, None),
 			};
 			if found {
 				let io = IndexOption::new(

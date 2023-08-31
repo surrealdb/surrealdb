@@ -16,6 +16,8 @@ use crate::sql::Uuid;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
+use nom::combinator::into;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -118,26 +120,30 @@ impl fmt::Display for LiveStatement {
 }
 
 pub fn live(i: &str) -> IResult<&str, LiveStatement> {
-	let (i, _) = tag_no_case("LIVE SELECT")(i)?;
+	let (i, _) = tag_no_case("LIVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
+	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = alt((map(param, Value::from), map(table, Value::from)))(i)?;
-	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-	Ok((
-		i,
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			expr,
-			what,
-			cond,
-			fetch,
-			archived: None,
-			auth: None, // Auth is set via options in compute()
-		},
-	))
+	cut(|i| {
+		let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("FROM")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = alt((into(param), into(table)))(i)?;
+		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
+		Ok((
+			i,
+			LiveStatement {
+				id: Uuid::new_v4(),
+				node: Uuid::new_v4(),
+				expr,
+				what,
+				cond,
+				fetch,
+				archived: None,
+				auth: None, // Auth is set via options in compute()
+			},
+		))
+	})(i)
 }

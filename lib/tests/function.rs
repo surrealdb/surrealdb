@@ -1,18 +1,18 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::{Number, Value};
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
-	let db = Datastore::new("memory").await?;
+	let db = new_ds().await?;
 	let session = Session::owner().with_ns("test").with_db("test");
 	let response = db.execute(sql, &session, None).await?;
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			dbg!(desired_response);
 			let desired_value = Value::parse(*desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
@@ -35,7 +35,7 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 }
 
 async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), Error> {
-	let db = Datastore::new("memory").await?;
+	let db = new_ds().await?;
 	let session = Session::owner().with_ns("test").with_db("test");
 	let response = db.execute(sql, &session, None).await?;
 	if response.len() != expected_errors.len() {
@@ -72,7 +72,7 @@ async fn function_array_add() -> Result<(), Error> {
 		RETURN array::add([1,2], 3);
 		RETURN array::add([1,2], [2,3]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -112,7 +112,7 @@ async fn function_array_all() -> Result<(), Error> {
 		RETURN array::all("some text");
 		RETURN array::all([1,2,"text",3,NONE,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -144,7 +144,7 @@ async fn function_array_any() -> Result<(), Error> {
 		RETURN array::any("some text");
 		RETURN array::any([1,2,"text",3,NONE,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -176,7 +176,7 @@ async fn function_array_append() -> Result<(), Error> {
 		RETURN array::append(3, true);
 		RETURN array::append([1,2], [2,3]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -212,7 +212,7 @@ async fn function_array_at() -> Result<(), Error> {
 		RETURN array::at([], 3);
 		RETURN array::at([], -3);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -306,7 +306,7 @@ async fn function_array_combine() -> Result<(), Error> {
 		RETURN array::combine(3, true);
 		RETURN array::combine([1,2], [2,3]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -352,7 +352,7 @@ async fn function_array_complement() -> Result<(), Error> {
 		RETURN array::complement(3, true);
 		RETURN array::complement([1,2,3,4], [3,4,5,6]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -380,14 +380,25 @@ async fn function_array_complement() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_concat() -> Result<(), Error> {
 	let sql = r#"
+		RETURN array::concat();
 		RETURN array::concat([], []);
 		RETURN array::concat(3, true);
 		RETURN array::concat([1,2,3,4], [3,4,5,6]);
+		RETURN array::concat([1,2,3,4], [3,4,5,6], [5,6,7,8], [7,8,9,0]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Expected at least one argument"
+		),
+		"{tmp:?}"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
@@ -406,6 +417,10 @@ async fn function_array_concat() -> Result<(), Error> {
 	let val = Value::parse("[1,2,3,4,3,4,5,6]");
 	assert_eq!(tmp, val);
 	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,3,4,5,6,5,6,7,8,7,8,9,0]");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 
@@ -416,7 +431,7 @@ async fn function_array_difference() -> Result<(), Error> {
 		RETURN array::difference(3, true);
 		RETURN array::difference([1,2,3,4], [3,4,5,6]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -447,7 +462,7 @@ async fn function_array_distinct() -> Result<(), Error> {
 		RETURN array::distinct("some text");
 		RETURN array::distinct([1,2,1,3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -500,7 +515,7 @@ async fn function_array_first() -> Result<(), Error> {
 		RETURN array::first([["hello", "world"], 10]);
 		RETURN array::first([]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -528,7 +543,7 @@ async fn function_array_flatten() -> Result<(), Error> {
 		RETURN array::flatten([[1,2], [3,4]]);
 		RETURN array::flatten([[1,2], [3, 4], 'SurrealDB', [5, 6, [7, 8]]]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -564,7 +579,7 @@ async fn function_array_group() -> Result<(), Error> {
 		RETURN array::group(3);
 		RETURN array::group([ [1,2,3,4], [3,4,5,6] ]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -597,7 +612,7 @@ async fn function_array_insert() -> Result<(), Error> {
 		RETURN array::insert([3], 1, 1);
 		RETURN array::insert([1,2,3,4], 5, -1);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -628,7 +643,7 @@ async fn function_array_intersect() -> Result<(), Error> {
 		RETURN array::intersect(3, true);
 		RETURN array::intersect([1,2,3,4], [3,4,5,6]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -661,7 +676,7 @@ async fn function_string_join_arr() -> Result<(), Error> {
 		RETURN array::join(["again", "again", "again"], " and ");
 		RETURN array::join([42, true, "1.61"], " and ");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -692,7 +707,7 @@ async fn function_array_last() -> Result<(), Error> {
 		RETURN array::last([["hello", "world"], 10]);
 		RETURN array::last([]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -719,7 +734,7 @@ async fn function_array_len() -> Result<(), Error> {
 		RETURN array::len("some text");
 		RETURN array::len([1,2,"text",3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -799,7 +814,7 @@ async fn function_array_max() -> Result<(), Error> {
 		RETURN array::max("some text");
 		RETURN array::max([1,2,"text",3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -831,7 +846,7 @@ async fn function_array_min() -> Result<(), Error> {
 		RETURN array::min("some text");
 		RETURN array::min([1,2,"text",3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -863,7 +878,7 @@ async fn function_array_pop() -> Result<(), Error> {
 		RETURN array::pop("some text");
 		RETURN array::pop([1,2,"text",3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -895,7 +910,7 @@ async fn function_array_prepend() -> Result<(), Error> {
 		RETURN array::prepend(3, true);
 		RETURN array::prepend([1,2], [2,3]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -927,7 +942,7 @@ async fn function_array_push() -> Result<(), Error> {
 		RETURN array::push(3, true);
 		RETURN array::push([1,2], [2,3]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -960,7 +975,7 @@ async fn function_array_remove() -> Result<(), Error> {
 		RETURN array::remove([3,4,5], 1);
 		RETURN array::remove([1,2,3,4], -1);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -991,7 +1006,7 @@ async fn function_array_reverse() -> Result<(), Error> {
 		RETURN array::reverse(3);
 		RETURN array::reverse([1,2,"text",3,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1027,7 +1042,7 @@ async fn function_array_slice() -> Result<(), Error> {
 		RETURN array::slice([1,2,"text",3,3,4], 3, -1);
 		RETURN array::slice([1,2,"text",3,3,4], -1);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -1079,7 +1094,7 @@ async fn function_array_sort() -> Result<(), Error> {
 		RETURN array::sort([4,2,"text",1,3,4], "asc");
 		RETURN array::sort([4,2,"text",1,3,4], "desc");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -1127,7 +1142,7 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 		RETURN array::sort::asc(3);
 		RETURN array::sort::asc([4,2,"text",1,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1159,7 +1174,7 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 		RETURN array::sort::desc(3);
 		RETURN array::sort::desc([4,2,"text",1,3,4]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1211,7 +1226,7 @@ async fn function_array_union() -> Result<(), Error> {
 		RETURN array::union(3, true);
 		RETURN array::union([1,2,1,6], [1,3,4,5,6]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1248,7 +1263,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 		RETURN bytes::len(<bytes>"π");
 		RETURN bytes::len(<bytes>"ππ");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -1290,7 +1305,7 @@ async fn function_count() -> Result<(), Error> {
 		RETURN count(15 > 10);
 		RETURN count(15 < 10);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -1327,7 +1342,7 @@ async fn function_crypto_md5() -> Result<(), Error> {
 	let sql = r#"
 		RETURN crypto::md5('tobie');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1344,7 +1359,7 @@ async fn function_crypto_sha1() -> Result<(), Error> {
 	let sql = r#"
 		RETURN crypto::sha1('tobie');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1361,7 +1376,7 @@ async fn function_crypto_sha256() -> Result<(), Error> {
 	let sql = r#"
 		RETURN crypto::sha256('tobie');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1378,7 +1393,7 @@ async fn function_crypto_sha512() -> Result<(), Error> {
 	let sql = r#"
 		RETURN crypto::sha512('tobie');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1401,7 +1416,7 @@ async fn function_duration_days() -> Result<(), Error> {
 		RETURN duration::days(4w3d);
 		RETURN duration::days(4h);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1428,7 +1443,7 @@ async fn function_duration_hours() -> Result<(), Error> {
 		RETURN duration::hours(4d3h);
 		RETURN duration::hours(30m);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1455,7 +1470,7 @@ async fn function_duration_micros() -> Result<(), Error> {
 		RETURN duration::micros(1m100µs);
 		RETURN duration::micros(100ns);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1482,7 +1497,7 @@ async fn function_duration_millis() -> Result<(), Error> {
 		RETURN duration::millis(1m100ms);
 		RETURN duration::millis(100µs);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1509,7 +1524,7 @@ async fn function_duration_mins() -> Result<(), Error> {
 		RETURN duration::mins(1h30m);
 		RETURN duration::mins(45s);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1536,7 +1551,7 @@ async fn function_duration_nanos() -> Result<(), Error> {
 		RETURN duration::nanos(30ms100ns);
 		RETURN duration::nanos(0ns);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1563,7 +1578,7 @@ async fn function_duration_secs() -> Result<(), Error> {
 		RETURN duration::secs(1m25s);
 		RETURN duration::secs(350ms);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1590,7 +1605,7 @@ async fn function_duration_weeks() -> Result<(), Error> {
 		RETURN duration::weeks(1y3w);
 		RETURN duration::weeks(4d);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1617,7 +1632,7 @@ async fn function_duration_years() -> Result<(), Error> {
 		RETURN duration::years(7y4w30d);
 		RETURN duration::years(4w);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1643,7 +1658,7 @@ async fn function_duration_from_days() -> Result<(), Error> {
 		RETURN duration::from::days(3);
 		RETURN duration::from::days(50);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1665,7 +1680,7 @@ async fn function_duration_from_hours() -> Result<(), Error> {
 		RETURN duration::from::hours(3);
 		RETURN duration::from::hours(30);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1687,7 +1702,7 @@ async fn function_duration_from_micros() -> Result<(), Error> {
 		RETURN duration::from::micros(300);
 		RETURN duration::from::micros(50500);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1709,7 +1724,7 @@ async fn function_duration_from_millis() -> Result<(), Error> {
 		RETURN duration::from::millis(30);
 		RETURN duration::from::millis(1500);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1731,7 +1746,7 @@ async fn function_duration_from_mins() -> Result<(), Error> {
 		RETURN duration::from::mins(3);
 		RETURN duration::from::mins(100);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1753,7 +1768,7 @@ async fn function_duration_from_nanos() -> Result<(), Error> {
 		RETURN duration::from::nanos(30);
 		RETURN duration::from::nanos(5005000);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1775,7 +1790,7 @@ async fn function_duration_from_secs() -> Result<(), Error> {
 		RETURN duration::from::secs(3);
 		RETURN duration::from::secs(100);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1797,7 +1812,7 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 		RETURN duration::from::weeks(3);
 		RETURN duration::from::weeks(60);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1823,7 +1838,7 @@ async fn function_encoding_base64_decode() -> Result<(), Error> {
 		RETURN encoding::base64::decode("");
 		RETURN encoding::base64::decode("aGVsbG8") = <bytes>"hello";
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1845,7 +1860,7 @@ async fn function_encoding_base64_encode() -> Result<(), Error> {
 		RETURN encoding::base64::encode(<bytes>"");
 		RETURN encoding::base64::encode(<bytes>"hello");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -1877,7 +1892,7 @@ async fn function_parse_geo_area() -> Result<(), Error> {
 			]]
 		});
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1903,7 +1918,7 @@ async fn function_parse_geo_bearing() -> Result<(), Error> {
 			}
 		);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1927,7 +1942,7 @@ async fn function_parse_geo_centroid() -> Result<(), Error> {
 			]]
 		});
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1961,7 +1976,7 @@ async fn function_parse_geo_distance() -> Result<(), Error> {
 			}
 		);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1981,7 +1996,7 @@ async fn function_parse_geo_hash_encode() -> Result<(), Error> {
 			coordinates: [-0.136439, 51.509865]
 		});
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -1998,7 +2013,7 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 	let sql = r#"
 		RETURN geo::hash::decode('gcpvhchdswz9');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -2028,7 +2043,7 @@ async fn function_parse_is_alphanum() -> Result<(), Error> {
 		RETURN is::alphanum("abcdefg123");
 		RETURN is::alphanum("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2050,7 +2065,7 @@ async fn function_parse_is_alpha() -> Result<(), Error> {
 		RETURN is::alpha("abcdefg");
 		RETURN is::alpha("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2072,7 +2087,7 @@ async fn function_parse_is_ascii() -> Result<(), Error> {
 		RETURN is::ascii("abcdefg123");
 		RETURN is::ascii("this is a test 😀");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2094,7 +2109,7 @@ async fn function_parse_is_datetime() -> Result<(), Error> {
 		RETURN is::datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
 		RETURN is::datetime("2012-06-22 23:56:04", "%T");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2116,7 +2131,7 @@ async fn function_parse_is_domain() -> Result<(), Error> {
 		RETURN is::domain("surrealdb.com");
 		RETURN is::domain("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2138,7 +2153,7 @@ async fn function_parse_is_email() -> Result<(), Error> {
 		RETURN is::email("info@surrealdb.com");
 		RETURN is::email("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2160,7 +2175,7 @@ async fn function_parse_is_hexadecimal() -> Result<(), Error> {
 		RETURN is::hexadecimal("ff009e");
 		RETURN is::hexadecimal("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2182,7 +2197,7 @@ async fn function_parse_is_latitude() -> Result<(), Error> {
 		RETURN is::latitude("51.509865");
 		RETURN is::latitude("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2204,7 +2219,7 @@ async fn function_parse_is_longitude() -> Result<(), Error> {
 		RETURN is::longitude("-0.136439");
 		RETURN is::longitude("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2226,7 +2241,7 @@ async fn function_parse_is_numeric() -> Result<(), Error> {
 		RETURN is::numeric("13136439");
 		RETURN is::numeric("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2248,7 +2263,7 @@ async fn function_parse_is_semver() -> Result<(), Error> {
 		RETURN is::semver("1.0.0-rc.1");
 		RETURN is::semver("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2270,7 +2285,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 		RETURN is::url("https://surrealdb.com/docs");
 		RETURN is::url("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2292,7 +2307,7 @@ async fn function_parse_is_uuid() -> Result<(), Error> {
 		RETURN is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN is::uuid("this is a test!");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2319,7 +2334,7 @@ async fn function_math_abs() -> Result<(), Error> {
 		RETURN math::abs(100);
 		RETURN math::abs(-100);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2346,7 +2361,7 @@ async fn function_math_bottom() -> Result<(), Error> {
 		RETURN math::bottom([1,2,3], 1);
 		RETURN math::bottom([1,2,3], 2);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2377,7 +2392,7 @@ async fn function_math_ceil() -> Result<(), Error> {
 		RETURN math::ceil(101);
 		RETURN math::ceil(101.5);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2400,7 +2415,7 @@ async fn function_math_fixed() -> Result<(), Error> {
 		RETURN math::fixed(101, 2);
 		RETURN math::fixed(101.5, 2);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2431,7 +2446,7 @@ async fn function_math_floor() -> Result<(), Error> {
 		RETURN math::floor(101);
 		RETURN math::floor(101.5);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2454,7 +2469,7 @@ async fn function_math_interquartile() -> Result<(), Error> {
 		RETURN math::interquartile([101, 213, 202]);
 		RETURN math::interquartile([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2480,7 +2495,7 @@ async fn function_math_max() -> Result<(), Error> {
 		RETURN math::max([101, 213, 202]);
 		RETURN math::max([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2507,7 +2522,7 @@ async fn function_math_mean() -> Result<(), Error> {
 		RETURN math::mean([101, 213, 202]);
 		RETURN math::mean([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2533,7 +2548,7 @@ async fn function_math_median() -> Result<(), Error> {
 		RETURN math::median([101, 213, 202]);
 		RETURN math::median([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2560,7 +2575,7 @@ async fn function_math_midhinge() -> Result<(), Error> {
 		RETURN math::midhinge([101, 213, 202]);
 		RETURN math::midhinge([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2586,7 +2601,7 @@ async fn function_math_min() -> Result<(), Error> {
 		RETURN math::min([101, 213, 202]);
 		RETURN math::min([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2613,7 +2628,7 @@ async fn function_math_mode() -> Result<(), Error> {
 		RETURN math::mode([101, 213, 202]);
 		RETURN math::mode([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2639,7 +2654,7 @@ async fn function_math_nearestrank() -> Result<(), Error> {
 		RETURN math::nearestrank([101, 213, 202], 75);
 		RETURN math::nearestrank([101.5, 213.5, 202.5], 75);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2665,7 +2680,7 @@ async fn function_math_percentile() -> Result<(), Error> {
 		RETURN math::percentile([101, 213, 202], 99);
 		RETURN math::percentile([101.5, 213.5, 202.5], 99);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2690,7 +2705,7 @@ async fn function_math_pow() -> Result<(), Error> {
 		RETURN math::pow(101, 3);
 		RETURN math::pow(101.5, 3);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2713,7 +2728,7 @@ async fn function_math_product() -> Result<(), Error> {
 		RETURN math::product([101, 213, 202]);
 		RETURN math::product([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2739,7 +2754,7 @@ async fn function_math_round() -> Result<(), Error> {
 		RETURN math::round(101);
 		RETURN math::round(101.5);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2762,7 +2777,7 @@ async fn function_math_spread() -> Result<(), Error> {
 		RETURN math::spread([101, 213, 202]);
 		RETURN math::spread([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2787,7 +2802,7 @@ async fn function_math_sqrt() -> Result<(), Error> {
 		RETURN math::sqrt(101);
 		RETURN math::sqrt(101.5);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -2810,7 +2825,7 @@ async fn function_math_stddev() -> Result<(), Error> {
 		RETURN math::stddev([101, 213, 202]);
 		RETURN math::stddev([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2836,7 +2851,7 @@ async fn function_math_sum() -> Result<(), Error> {
 		RETURN math::sum([101, 213, 202]);
 		RETURN math::sum([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2863,7 +2878,7 @@ async fn function_math_top() -> Result<(), Error> {
 		RETURN math::top([1,2,3], 1);
 		RETURN math::top([1,2,3], 2);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2895,7 +2910,7 @@ async fn function_math_trimean() -> Result<(), Error> {
 		RETURN math::trimean([101, 213, 202]);
 		RETURN math::trimean([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2921,7 +2936,7 @@ async fn function_math_variance() -> Result<(), Error> {
 		RETURN math::variance([101, 213, 202]);
 		RETURN math::variance([101.5, 213.5, 202.5]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -2949,7 +2964,7 @@ async fn function_parse_meta_id() -> Result<(), Error> {
 	let sql = r#"
 		RETURN meta::id("person:tobie");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -2966,7 +2981,7 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 	let sql = r#"
 		RETURN meta::table("person:tobie");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -2983,7 +2998,7 @@ async fn function_parse_meta_tb() -> Result<(), Error> {
 	let sql = r#"
 		RETURN meta::tb("person:tobie");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3010,7 +3025,7 @@ async fn function_not() -> Result<(), Error> {
 		RETURN not(1);
 		RETURN not("hello");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -3055,7 +3070,7 @@ async fn function_parse_email_host() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::email::host("john.doe@example.com");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3072,7 +3087,7 @@ async fn function_parse_email_user() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::email::user("john.doe@example.com");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3089,7 +3104,7 @@ async fn function_parse_url_domain() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::domain("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3106,7 +3121,7 @@ async fn function_parse_url_fragment() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::fragment("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3123,7 +3138,7 @@ async fn function_parse_url_host() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::host("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3140,7 +3155,7 @@ async fn function_parse_url_path() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::path("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3157,7 +3172,7 @@ async fn function_parse_url_port() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::port("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3174,7 +3189,7 @@ async fn function_parse_url_query() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::query("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3191,7 +3206,7 @@ async fn function_parse_url_scheme() -> Result<(), Error> {
 	let sql = r#"
 		RETURN parse::url::scheme("https://user:pass@www.surrealdb.com:80/path/to/page?query=param#somefragment");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3212,7 +3227,7 @@ async fn function_rand() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3228,7 +3243,7 @@ async fn function_rand_bool() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::bool();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3244,7 +3259,7 @@ async fn function_rand_enum() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::enum(["one", "two", "three"]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3261,7 +3276,7 @@ async fn function_rand_float() -> Result<(), Error> {
 		RETURN rand::float();
 		RETURN rand::float(5, 10);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -3282,7 +3297,7 @@ async fn function_rand_guid() -> Result<(), Error> {
 		RETURN rand::guid(10);
 		RETURN rand::guid(10, 15);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3305,7 +3320,7 @@ async fn function_rand_int() -> Result<(), Error> {
 		RETURN rand::int();
 		RETURN rand::int(5, 10);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -3326,7 +3341,7 @@ async fn function_rand_string() -> Result<(), Error> {
 		RETURN rand::string(10);
 		RETURN rand::string(10, 15);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3349,7 +3364,7 @@ async fn function_rand_time() -> Result<(), Error> {
 		RETURN rand::time();
 		RETURN rand::time(1577836800, 1893456000);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -3368,7 +3383,7 @@ async fn function_rand_ulid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::ulid();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3384,7 +3399,7 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3400,7 +3415,7 @@ async fn function_rand_uuid_v4() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid::v4();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3416,7 +3431,7 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid::v7();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -3438,7 +3453,7 @@ async fn function_string_concat() -> Result<(), Error> {
 		RETURN string::concat("test");
 		RETURN string::concat("this", " ", "is", " ", "a", " ", "test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3477,7 +3492,7 @@ async fn function_string_contains() -> Result<(), Error> {
 		RETURN string::contains("* \t", " ");
 		RETURN string::contains("* \t", "?");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 15);
@@ -3552,7 +3567,7 @@ async fn function_string_ends_with() -> Result<(), Error> {
 		RETURN string::endsWith("", "test");
 		RETURN string::endsWith("this is a test", "test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3579,7 +3594,7 @@ async fn function_string_join() -> Result<(), Error> {
 		RETURN string::join("test");
 		RETURN string::join(" ", "this", "is", "a", "test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3606,7 +3621,7 @@ async fn function_string_len() -> Result<(), Error> {
 		RETURN string::len("test");
 		RETURN string::len("test this string");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3633,7 +3648,7 @@ async fn function_string_lowercase() -> Result<(), Error> {
 		RETURN string::lowercase("TeSt");
 		RETURN string::lowercase("THIS IS A TEST");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3660,7 +3675,7 @@ async fn function_string_repeat() -> Result<(), Error> {
 		RETURN string::repeat("test", 3);
 		RETURN string::repeat("test this", 3);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3687,7 +3702,7 @@ async fn function_string_replace() -> Result<(), Error> {
 		RETURN string::replace('this is a test', 'a test', 'awesome');
 		RETURN string::replace("this is an 😀 emoji test", "😀", "awesome 👍");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3714,7 +3729,7 @@ async fn function_string_reverse() -> Result<(), Error> {
 		RETURN string::reverse("test");
 		RETURN string::reverse("test this string");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3743,7 +3758,7 @@ async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 		RETURN string::similarity::fuzzy("TEXT", "TEXT");
 		RETURN string::similarity::fuzzy("this could be a tricky test", "this test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -3775,7 +3790,7 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 		RETURN string::similarity::smithwaterman("TEXT", "TEXT");
 		RETURN string::similarity::smithwaterman("this could be a tricky test", "this test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -3809,7 +3824,7 @@ async fn function_string_slice() -> Result<(), Error> {
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -9, -1);
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -100, -100);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -3852,7 +3867,7 @@ async fn function_string_slug() -> Result<(), Error> {
 		RETURN string::slug("this is a test");
 		RETURN string::slug("blog - this is a test with 😀 emojis");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3879,7 +3894,7 @@ async fn function_string_split() -> Result<(), Error> {
 		RETURN string::split("this, is, a, list", ", ");
 		RETURN string::split("this - is - another - test", " - ");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3906,7 +3921,7 @@ async fn function_string_starts_with() -> Result<(), Error> {
 		RETURN string::startsWith("", "test");
 		RETURN string::startsWith("test this string", "test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3933,7 +3948,7 @@ async fn function_string_trim() -> Result<(), Error> {
 		RETURN string::trim("test");
 		RETURN string::trim("   this is a test with text   ");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3960,7 +3975,7 @@ async fn function_string_uppercase() -> Result<(), Error> {
 		RETURN string::uppercase("tEsT");
 		RETURN string::uppercase("this is a test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -3987,7 +4002,7 @@ async fn function_string_words() -> Result<(), Error> {
 		RETURN string::words("test");
 		RETURN string::words("this is a test");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -4018,7 +4033,7 @@ async fn function_time_ceil() -> Result<(), Error> {
 		RETURN time::ceil("1987-06-22T08:30:45Z", 1y);
 		RETURN time::ceil("2023-05-11T03:09:00Z", 1s);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -4044,7 +4059,7 @@ async fn function_time_day() -> Result<(), Error> {
 		RETURN time::day();
 		RETURN time::day("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4066,7 +4081,7 @@ async fn function_time_floor() -> Result<(), Error> {
 		RETURN time::floor("1987-06-22T08:30:45Z", 1y);
 		RETURN time::floor("2023-05-11T03:09:00Z", 1s);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -4092,7 +4107,7 @@ async fn function_time_format() -> Result<(), Error> {
 		RETURN time::format("1987-06-22T08:30:45Z", "%Y-%m-%d");
 		RETURN time::format("1987-06-22T08:30:45Z", "%T");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4114,7 +4129,7 @@ async fn function_time_group() -> Result<(), Error> {
 		RETURN time::group("1987-06-22T08:30:45Z", 'hour');
 		RETURN time::group("1987-06-22T08:30:45Z", 'month');
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4136,7 +4151,7 @@ async fn function_time_hour() -> Result<(), Error> {
 		RETURN time::hour();
 		RETURN time::hour("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4156,7 +4171,7 @@ async fn function_time_min() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::min(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -4173,7 +4188,7 @@ async fn function_time_max() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::max(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -4191,7 +4206,7 @@ async fn function_time_minute() -> Result<(), Error> {
 		RETURN time::minute();
 		RETURN time::minute("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4212,7 +4227,7 @@ async fn function_time_month() -> Result<(), Error> {
 		RETURN time::month();
 		RETURN time::month("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4233,7 +4248,7 @@ async fn function_time_nano() -> Result<(), Error> {
 		RETURN time::nano();
 		RETURN time::nano("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4253,7 +4268,7 @@ async fn function_time_now() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::now();
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -4270,7 +4285,7 @@ async fn function_time_round() -> Result<(), Error> {
 		RETURN time::round("1987-06-22T08:30:45Z", 1w);
 		RETURN time::round("1987-06-22T08:30:45Z", 1y);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4292,7 +4307,7 @@ async fn function_time_second() -> Result<(), Error> {
 		RETURN time::second();
 		RETURN time::second("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4313,7 +4328,7 @@ async fn function_time_unix() -> Result<(), Error> {
 		RETURN time::unix();
 		RETURN time::unix("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4334,7 +4349,7 @@ async fn function_time_wday() -> Result<(), Error> {
 		RETURN time::wday();
 		RETURN time::wday("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4355,7 +4370,7 @@ async fn function_time_week() -> Result<(), Error> {
 		RETURN time::week();
 		RETURN time::week("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4376,7 +4391,7 @@ async fn function_time_yday() -> Result<(), Error> {
 		RETURN time::yday();
 		RETURN time::yday("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4397,7 +4412,7 @@ async fn function_time_year() -> Result<(), Error> {
 		RETURN time::year();
 		RETURN time::year("1987-06-22T08:30:45Z");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4418,7 +4433,7 @@ async fn function_time_from_micros() -> Result<(), Error> {
 		RETURN time::from::micros(384025770384840);
 		RETURN time::from::micros(2840257704384440);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4440,7 +4455,7 @@ async fn function_time_from_millis() -> Result<(), Error> {
 		RETURN time::from::millis(384025773840);
 		RETURN time::from::millis(2840257704440);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4462,7 +4477,7 @@ async fn function_time_from_secs() -> Result<(), Error> {
 		RETURN time::from::secs(384053840);
 		RETURN time::from::secs(2845704440);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4484,7 +4499,7 @@ async fn function_time_from_unix() -> Result<(), Error> {
 		RETURN time::from::unix(384053840);
 		RETURN time::from::unix(2845704440);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4510,7 +4525,7 @@ async fn function_type_bool() -> Result<(), Error> {
 		RETURN type::bool("true");
 		RETURN type::bool("false");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4532,7 +4547,7 @@ async fn function_type_datetime() -> Result<(), Error> {
 		RETURN type::datetime("1987-06-22");
 		RETURN type::datetime("2022-08-01");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4554,7 +4569,7 @@ async fn function_type_decimal() -> Result<(), Error> {
 		RETURN type::decimal("13.1043784018");
 		RETURN type::decimal("13.5719384719384719385639856394139476937756394756");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4578,7 +4593,7 @@ async fn function_type_duration() -> Result<(), Error> {
 		RETURN type::duration("1h30m");
 		RETURN type::duration("1h30m30s50ms");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4600,7 +4615,7 @@ async fn function_type_float() -> Result<(), Error> {
 		RETURN type::float("13.1043784018");
 		RETURN type::float("13.5719384719384719385639856394139476937756394756");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4622,7 +4637,7 @@ async fn function_type_int() -> Result<(), Error> {
 		RETURN type::int("194719");
 		RETURN type::int("1457105732053058");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4644,7 +4659,7 @@ async fn function_type_number() -> Result<(), Error> {
 		RETURN type::number("194719.1947104740");
 		RETURN type::number("1457105732053058.3957394823281756381849375");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4666,7 +4681,7 @@ async fn function_type_point() -> Result<(), Error> {
 		RETURN type::point([1.345, 6.789]);
 		RETURN type::point([-0.136439, 51.509865]);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4704,7 +4719,7 @@ async fn function_type_string() -> Result<(), Error> {
 		RETURN type::string(30s);
 		RETURN type::string(13);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4726,7 +4741,7 @@ async fn function_type_table() -> Result<(), Error> {
 		RETURN type::table("person");
 		RETURN type::table("animal");
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -4750,7 +4765,7 @@ async fn function_type_thing() -> Result<(), Error> {
 		CREATE type::thing('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
 		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);

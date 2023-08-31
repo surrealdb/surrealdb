@@ -3,7 +3,7 @@ use nom::error::ParseError;
 use nom::Err;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum Error<I> {
 	Parser(I),
 	ExcessiveDepth,

@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::combinator::{cut, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -77,10 +77,12 @@ impl fmt::Display for Order {
 
 pub fn order(i: &str) -> IResult<&str, Orders> {
 	let (i, _) = tag_no_case("ORDER")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = alt((order_rand, separated_list1(commas, order_raw)))(i)?;
-	Ok((i, Orders(v)))
+	cut(|i| {
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, v) = alt((order_rand, separated_list1(commas, order_raw)))(i)?;
+		Ok((i, Orders(v)))
+	})(i)
 }
 
 fn order_rand(i: &str) -> IResult<&str, Vec<Order>> {
@@ -102,8 +104,8 @@ fn order_raw(i: &str) -> IResult<&str, Order> {
 	let (i, c) = opt(tuple((shouldbespace, tag_no_case("COLLATE"))))(i)?;
 	let (i, n) = opt(tuple((shouldbespace, tag_no_case("NUMERIC"))))(i)?;
 	let (i, d) = opt(alt((
-		map(tuple((shouldbespace, tag_no_case("ASC"))), |_| true),
-		map(tuple((shouldbespace, tag_no_case("DESC"))), |_| false),
+		value(true, tuple((shouldbespace, tag_no_case("ASC")))),
+		value(false, tuple((shouldbespace, tag_no_case("DESC")))),
 	)))(i)?;
 	Ok((
 		i,
@@ -127,7 +129,6 @@ mod tests {
 	fn order_statement() {
 		let sql = "ORDER field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -146,7 +147,6 @@ mod tests {
 	fn order_statement_by() {
 		let sql = "ORDER BY field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -165,7 +165,6 @@ mod tests {
 	fn order_statement_random() {
 		let sql = "ORDER RAND()";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -184,7 +183,6 @@ mod tests {
 	fn order_statement_multiple() {
 		let sql = "ORDER field, other.field";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -212,7 +210,6 @@ mod tests {
 	fn order_statement_collate() {
 		let sql = "ORDER field COLLATE";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -231,7 +228,6 @@ mod tests {
 	fn order_statement_numeric() {
 		let sql = "ORDER field NUMERIC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -250,7 +246,6 @@ mod tests {
 	fn order_statement_direction() {
 		let sql = "ORDER field DESC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
@@ -269,7 +264,6 @@ mod tests {
 	fn order_statement_all() {
 		let sql = "ORDER field COLLATE NUMERIC DESC";
 		let res = order(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

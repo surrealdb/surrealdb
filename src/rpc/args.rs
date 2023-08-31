@@ -10,7 +10,7 @@ pub trait Take {
 impl Take for Array {
 	/// Convert the array to one argument
 	fn needs_one(self) -> Result<Value, ()> {
-		if self.len() < 1 {
+		if self.is_empty() {
 			return Err(());
 		}
 		let mut x = self.into_iter();
@@ -33,7 +33,7 @@ impl Take for Array {
 	}
 	/// Convert the array to two arguments
 	fn needs_one_or_two(self) -> Result<(Value, Value), ()> {
-		if self.len() < 1 {
+		if self.is_empty() {
 			return Err(());
 		}
 		let mut x = self.into_iter();

@@ -10,7 +10,7 @@ use chrono::Utc;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::value;
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -130,32 +130,32 @@ fn constant_math(i: &str) -> IResult<&str, Constant> {
 	preceded(
 		tag_no_case("math::"),
 		alt((
-			map(tag_no_case("E"), |_| Constant::MathE),
-			map(tag_no_case("FRAC_1_PI"), |_| Constant::MathFrac1Pi),
-			map(tag_no_case("FRAC_1_SQRT_2"), |_| Constant::MathFrac1Sqrt2),
-			map(tag_no_case("FRAC_2_PI"), |_| Constant::MathFrac2Pi),
-			map(tag_no_case("FRAC_2_SQRT_PI"), |_| Constant::MathFrac2SqrtPi),
-			map(tag_no_case("FRAC_PI_2"), |_| Constant::MathFracPi2),
-			map(tag_no_case("FRAC_PI_3"), |_| Constant::MathFracPi3),
-			map(tag_no_case("FRAC_PI_4"), |_| Constant::MathFracPi4),
-			map(tag_no_case("FRAC_PI_6"), |_| Constant::MathFracPi6),
-			map(tag_no_case("FRAC_PI_8"), |_| Constant::MathFracPi8),
-			map(tag_no_case("INF"), |_| Constant::MathInf),
-			map(tag_no_case("LN_10"), |_| Constant::MathLn10),
-			map(tag_no_case("LN_2"), |_| Constant::MathLn2),
-			map(tag_no_case("LOG10_2"), |_| Constant::MathLog102),
-			map(tag_no_case("LOG10_E"), |_| Constant::MathLog10E),
-			map(tag_no_case("LOG2_10"), |_| Constant::MathLog210),
-			map(tag_no_case("LOG2_E"), |_| Constant::MathLog2E),
-			map(tag_no_case("PI"), |_| Constant::MathPi),
-			map(tag_no_case("SQRT_2"), |_| Constant::MathSqrt2),
-			map(tag_no_case("TAU"), |_| Constant::MathTau),
+			value(Constant::MathE, tag_no_case("E")),
+			value(Constant::MathFrac1Pi, tag_no_case("FRAC_1_PI")),
+			value(Constant::MathFrac1Sqrt2, tag_no_case("FRAC_1_SQRT_2")),
+			value(Constant::MathFrac2Pi, tag_no_case("FRAC_2_PI")),
+			value(Constant::MathFrac2SqrtPi, tag_no_case("FRAC_2_SQRT_PI")),
+			value(Constant::MathFracPi2, tag_no_case("FRAC_PI_2")),
+			value(Constant::MathFracPi3, tag_no_case("FRAC_PI_3")),
+			value(Constant::MathFracPi4, tag_no_case("FRAC_PI_4")),
+			value(Constant::MathFracPi6, tag_no_case("FRAC_PI_6")),
+			value(Constant::MathFracPi8, tag_no_case("FRAC_PI_8")),
+			value(Constant::MathInf, tag_no_case("INF")),
+			value(Constant::MathLn10, tag_no_case("LN_10")),
+			value(Constant::MathLn2, tag_no_case("LN_2")),
+			value(Constant::MathLog102, tag_no_case("LOG10_2")),
+			value(Constant::MathLog10E, tag_no_case("LOG10_E")),
+			value(Constant::MathLog210, tag_no_case("LOG2_10")),
+			value(Constant::MathLog2E, tag_no_case("LOG2_E")),
+			value(Constant::MathPi, tag_no_case("PI")),
+			value(Constant::MathSqrt2, tag_no_case("SQRT_2")),
+			value(Constant::MathTau, tag_no_case("TAU")),
 		)),
 	)(i)
 }
 
 fn constant_time(i: &str) -> IResult<&str, Constant> {
-	preceded(tag_no_case("time::"), alt((map(tag_no_case("EPOCH"), |_| Constant::TimeEpoch),)))(i)
+	preceded(tag_no_case("time::"), alt((value(Constant::TimeEpoch, tag_no_case("EPOCH")),)))(i)
 }
 
 #[cfg(test)]

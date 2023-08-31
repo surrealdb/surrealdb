@@ -117,6 +117,20 @@ impl FromArgs for Vec<Value> {
 	}
 }
 
+impl FromArgs for Vec<Array> {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		args.into_iter()
+			.enumerate()
+			.map(|(i, arg)| {
+				arg.coerce_to_array_type(&Kind::Any).map_err(|e| Error::InvalidArguments {
+					name: name.to_owned(),
+					message: format!("Argument {} was the wrong type. {e}", i + 1),
+				})
+			})
+			.collect()
+	}
+}
+
 /// Some functions take a fixed number of arguments.
 /// The len must match the number of type idents that follow.
 macro_rules! impl_tuple {

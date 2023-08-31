@@ -38,7 +38,13 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
-		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			auth: false,
+			args: "--allow-all".to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
 		let creds = ""; // Anonymous user
 
 		info!("* Create a record");
@@ -98,11 +104,11 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} {creds} --ns N3 --db D3 --multi --pretty");
 			let output = common::run(&args)
 				.input(
-					r#"CREATE thing:success; \
+					"CREATE thing:success; \
 				CREATE thing:fail SET bad=rand('evil'); \
 				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
 				CREATE thing:also_success;
-				"#,
+				",
 				)
 				.output()
 				.unwrap();
@@ -121,13 +127,13 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} {creds} --ns N4 --db D4 --multi --pretty");
 			let output = common::run(&args)
 				.input(
-					r#"BEGIN; \
+					"BEGIN; \
 				CREATE thing:success; \
 				CREATE thing:fail SET bad=rand('evil'); \
 				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
 				CREATE thing:also_success; \
 				COMMIT;
-				"#,
+				",
 				)
 				.output()
 				.unwrap();
@@ -498,31 +504,17 @@ mod cli_integration {
 
 	#[test(tokio::test)]
 	async fn test_capabilities() {
-		info!("* When all capabilities are enabled by default");
-		{
-			let (addr, _server) = common::start_server_without_auth().await.unwrap();
-
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
-
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
-			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
-
-			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
-			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
-		}
-
-		info!("* When all capabilities are denied");
+		// Deny all, denies all users to execute functions and access any network address
+		info!("* When all capabilities are denied by default");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-all".to_owned(),
+				args: "".to_owned(),
 				..Default::default()
 			})
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -539,6 +531,27 @@ mod cli_integration {
 			);
 		}
 
+		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
+		info!("* When all capabilities are allowed");
+		{
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--allow-all".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+
+			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+
+			let query = "RETURN function() { return '1' };";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+		}
+
 		info!("* When scripting is denied");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
@@ -548,7 +561,7 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -567,7 +580,7 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -583,13 +596,14 @@ mod cli_integration {
 		info!("* When net is enabled for an IP and also denied for a specific port that doesn't match");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80".to_owned(),
+				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80 --allow-funcs http::get"
+					.to_owned(),
 				..Default::default()
 			})
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -605,7 +619,7 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
 			let query = "RETURN http::get('https://surrealdb.com');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -613,6 +627,60 @@ mod cli_integration {
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
+		}
+
+		info!("* When auth is enabled and guest access is allowed");
+		{
+			let (addr, _server) = common::start_server(StartServerArguments {
+				auth: true,
+				args: "--allow-guests".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+
+			let query = "RETURN 1;\n\n";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+		}
+
+		info!("* When auth is enabled and guest access is denied");
+		{
+			let (addr, _server) = common::start_server(StartServerArguments {
+				auth: true,
+				args: "--deny-guests".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+
+			let query = "RETURN 1;\n\n";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(
+				output.contains("Not enough permissions to perform this action"),
+				"unexpected output: {output:?}"
+			);
+		}
+
+		info!("* When auth is disabled, guest access is always allowed");
+		{
+			let (addr, _server) = common::start_server(StartServerArguments {
+				auth: false,
+				args: "--deny-guests".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+
+			let query = "RETURN 1;\n\n";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 		}
 	}
 }

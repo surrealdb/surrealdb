@@ -1,13 +1,13 @@
 mod parse;
+use parse::Parse;
 
 use channel::{Receiver, TryRecvError};
-use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::node::Timestamp;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::{Action, Notification};
+use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::{Id, Thing, Value};
 
 #[tokio::test]
@@ -17,7 +17,7 @@ async fn delete() -> Result<(), Error> {
 		DELETE person:test;
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -81,7 +81,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
 				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
@@ -193,7 +193,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -235,7 +235,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -292,7 +292,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -333,7 +333,7 @@ async fn check_permissions_auth_disabled() {
 	}
 
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		// When the table exists and grants full permissions
 		let mut resp = ds
@@ -377,7 +377,7 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
-	let dbs = Datastore::new("memory").await?.with_notifications();
+	let dbs = new_ds().await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);

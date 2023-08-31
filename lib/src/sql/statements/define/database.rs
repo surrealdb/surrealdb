@@ -134,7 +134,6 @@ mod tests {
 	fn define_database_with_changefeed() {
 		let sql = "DEFINE DATABASE mydatabase CHANGEFEED 1h";
 		let res = database(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 

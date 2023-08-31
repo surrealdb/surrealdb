@@ -93,8 +93,6 @@ pub enum Method {
 	Signin,
 	/// Signs up on the server
 	Signup,
-	/// Runs a series of node maintenance operations
-	Tick,
 	/// Removes a parameter from a connection
 	Unset,
 	/// Perfoms an update operation

@@ -232,7 +232,6 @@ mod tests {
 	fn id_int() {
 		let sql = "001";
 		let res = id(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from(1), out);
 		assert_eq!("1", format!("{}", out));
@@ -242,7 +241,6 @@ mod tests {
 	fn id_number() {
 		let sql = "100";
 		let res = id(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from(100), out);
 		assert_eq!("100", format!("{}", out));
@@ -252,7 +250,6 @@ mod tests {
 	fn id_string() {
 		let sql = "test";
 		let res = id(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("test"), out);
 		assert_eq!("test", format!("{}", out));
@@ -262,7 +259,6 @@ mod tests {
 	fn id_numeric() {
 		let sql = "⟨100⟩";
 		let res = id(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100"), out);
 		assert_eq!("⟨100⟩", format!("{}", out));
@@ -272,7 +268,6 @@ mod tests {
 	fn id_either() {
 		let sql = "100test";
 		let res = id(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
 		assert_eq!("100test", format!("{}", out));

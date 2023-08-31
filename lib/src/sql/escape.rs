@@ -6,13 +6,13 @@ const SINGLE: char = '\'';
 
 const BRACKETL: char = '⟨';
 const BRACKETR: char = '⟩';
-const BRACKET_ESC: &str = r#"\⟩"#;
+const BRACKET_ESC: &str = r"\⟩";
 
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
 
 const BACKTICK: char = '`';
-const BACKTICK_ESC: &str = r#"\`"#;
+const BACKTICK_ESC: &str = r"\`";
 
 /// Quotes a string with single or double quotes:
 /// - cat -> 'cat'

@@ -19,7 +19,6 @@ pub use self::options::*;
 pub use self::response::*;
 pub use self::session::*;
 
-pub(crate) use self::capabilities::Capabilities;
 pub(crate) use self::executor::*;
 pub(crate) use self::iterator::*;
 pub(crate) use self::statement::*;
@@ -27,6 +26,7 @@ pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;
 
 pub mod capabilities;
+pub use self::capabilities::Capabilities;
 pub mod node;
 
 mod processor;

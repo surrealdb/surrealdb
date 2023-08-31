@@ -6,10 +6,11 @@
 //! - `id`: traditionally an integer but can be an object or collection such as an array
 pub(crate) use self::document::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod compute;
-
 mod document; // The entry point for a document to be processed
+
+#[cfg(not(target_arch = "wasm32"))]
+mod compute; // The point at which a document is processed
+mod process; // The point at which a document is processed
 
 mod create; // Processes a CREATE statement for this document
 mod delete; // Processes a DELETE statement for this document

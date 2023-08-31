@@ -68,10 +68,6 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					}
 					_ => unreachable!(),
 				},
-				Method::Tick => match &params[..] {
-					[Value::Number(..)] => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
 				Method::Update | Method::Merge | Method::Patch => match &params[..] {
 					[Value::Thing(..)] | [Value::Thing(..), _] => {
 						Ok(DbResponse::Other(to_value(User::default()).unwrap()))

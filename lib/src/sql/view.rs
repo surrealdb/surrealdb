@@ -6,7 +6,7 @@ use crate::sql::group::{group, Groups};
 use crate::sql::table::{tables, Tables};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::opt;
+use nom::combinator::{cut, opt};
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -37,22 +37,26 @@ impl fmt::Display for View {
 pub fn view(i: &str) -> IResult<&str, View> {
 	let select_view = |i| {
 		let (i, _) = tag_no_case("SELECT")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, expr) = fields(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("FROM")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, what) = tables(i)?;
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, group) = opt(preceded(shouldbespace, group))(i)?;
-		Ok((i, (expr, what, cond, group)))
+		cut(|i| {
+			let (i, _) = shouldbespace(i)?;
+			let (i, expr) = fields(i)?;
+			let (i, _) = shouldbespace(i)?;
+			let (i, _) = tag_no_case("FROM")(i)?;
+			let (i, _) = shouldbespace(i)?;
+			let (i, what) = tables(i)?;
+			let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+			let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+			Ok((i, (expr, what, cond, group)))
+		})(i)
 	};
 
 	let select_view_delimited = |i| {
 		let (i, _) = tag("(")(i)?;
-		let (i, res) = select_view(i)?;
-		let (i, _) = tag(")")(i)?;
-		Ok((i, res))
+		cut(|i| {
+			let (i, res) = select_view(i)?;
+			let (i, _) = tag(")")(i)?;
+			Ok((i, res))
+		})(i)
 	};
 
 	let (i, _) = tag_no_case("AS")(i)?;
@@ -78,7 +82,6 @@ mod tests {
 	fn view_simple() {
 		let sql = "AS SELECT * FROM test";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT * FROM test", format!("{}", out))
 	}
@@ -87,7 +90,6 @@ mod tests {
 	fn view_brackets() {
 		let sql = "AS (SELECT * FROM test)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT * FROM test", format!("{}", out))
 	}
@@ -96,7 +98,6 @@ mod tests {
 	fn view_brackets_where() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE", format!("{}", out))
 	}
@@ -105,7 +106,6 @@ mod tests {
 	fn view_brackets_group() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
 		let res = view(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE GROUP BY temp", format!("{}", out))
 	}
@@ -113,17 +113,11 @@ mod tests {
 	#[test]
 	fn view_disallow_unbalanced_brackets() {
 		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp";
-		let res = view(sql);
-		assert!(res.is_err());
+		view(sql).unwrap_err();
 		let sql = "AS SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
-		let res = view(sql);
+		let (i, _) = view(sql).unwrap();
 		// The above test won't return an error since the trailing ) might be part of a another
 		// pair.
-		if let Ok((i, _)) = res {
-			// but it should not be parsed.
-			assert_eq!(i, ")")
-		} else {
-			panic!()
-		}
+		assert_eq!(i, ")");
 	}
 }

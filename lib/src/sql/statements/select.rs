@@ -13,7 +13,9 @@ use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
+use crate::sql::idiom::Idioms;
 use crate::sql::limit::{limit, Limit};
+use crate::sql::omit::omit;
 use crate::sql::order::{order, Orders};
 use crate::sql::special::check_group_by_fields;
 use crate::sql::special::check_order_by_fields;
@@ -26,6 +28,7 @@ use crate::sql::version::{version, Version};
 use crate::sql::with::{with, With};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -36,6 +39,7 @@ use std::fmt;
 #[revisioned(revision = 1)]
 pub struct SelectStatement {
 	pub expr: Fields,
+	pub omit: Option<Idioms>,
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
@@ -142,7 +146,11 @@ impl SelectStatement {
 
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
+		write!(f, "SELECT {}", self.expr)?;
+		if let Some(ref v) = self.omit {
+			write!(f, " OMIT {v}")?
+		}
+		write!(f, " FROM {}", self.what)?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -187,10 +195,11 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = tag_no_case("SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, expr) = fields(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = selects(i)?;
+	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, _) = cut(tag_no_case("FROM"))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, what) = cut(selects)(i)?;
 	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
@@ -210,6 +219,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		i,
 		SelectStatement {
 			expr,
+			omit,
 			what,
 			with,
 			cond,
@@ -236,7 +246,6 @@ mod tests {
 	fn select_statement_param() {
 		let sql = "SELECT * FROM $test";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -244,6 +253,14 @@ mod tests {
 	#[test]
 	fn select_statement_table() {
 		let sql = "SELECT * FROM test";
+		let res = select(sql);
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out));
+	}
+
+	#[test]
+	fn select_statement_omit() {
+		let sql = "SELECT * OMIT password FROM test";
 		let res = select(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
@@ -254,7 +271,6 @@ mod tests {
 	fn select_statement_thing() {
 		let sql = "SELECT * FROM test:thingy ORDER BY name";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -263,7 +279,6 @@ mod tests {
 	fn select_statement_clash() {
 		let sql = "SELECT * FROM order ORDER BY order";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
@@ -272,7 +287,6 @@ mod tests {
 	fn select_statement_table_thing() {
 		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
 		let res = select(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}

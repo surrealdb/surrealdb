@@ -128,7 +128,6 @@ mod tests {
 	fn script_basic() {
 		let sql = "return true;";
 		let res = script(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("return true;", format!("{}", out));
 		assert_eq!(out, Script::from("return true;"));
@@ -138,7 +137,6 @@ mod tests {
 	fn script_object() {
 		let sql = "return { test: true, something: { other: true } };";
 		let res = script(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("return { test: true, something: { other: true } };", format!("{}", out));
 		assert_eq!(out, Script::from("return { test: true, something: { other: true } };"));
@@ -148,7 +146,6 @@ mod tests {
 	fn script_closure() {
 		let sql = "return this.values.map(v => `This value is ${Number(v * 3)}`);";
 		let res = script(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			"return this.values.map(v => `This value is ${Number(v * 3)}`);",
@@ -164,7 +161,6 @@ mod tests {
 	fn script_complex() {
 		let sql = r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#;
 		let res = script(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#,
@@ -202,7 +198,6 @@ mod tests {
 			let x = /* something */ 45 + 2;
 		"#;
 		let res = script(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Script::from(sql));

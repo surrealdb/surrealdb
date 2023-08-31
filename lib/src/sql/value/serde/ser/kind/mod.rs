@@ -34,6 +34,7 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::Ok, Error> {
 		match variant {
 			"Any" => Ok(Kind::Any),
+			"Null" => Ok(Kind::Null),
 			"Bool" => Ok(Kind::Bool),
 			"Bytes" => Ok(Kind::Bytes),
 			"Datetime" => Ok(Kind::Datetime),

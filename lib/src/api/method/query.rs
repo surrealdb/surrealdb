@@ -394,16 +394,16 @@ mod tests {
 			Ok(vec![7.into()]),
 		]));
 		let Some(four): Option<i32> = response.take(4).unwrap() else {
-            panic!("query not found");
-        };
+			panic!("query not found");
+		};
 		assert_eq!(four, 4);
 		let Some(six): Option<i32> = response.take(6).unwrap() else {
-            panic!("query not found");
-        };
+			panic!("query not found");
+		};
 		assert_eq!(six, 6);
 		let Some(zero): Option<i32> = response.take(0).unwrap() else {
-            panic!("query not found");
-        };
+			panic!("query not found");
+		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
 		assert_eq!(one, vec![Value::from(1)].into());
@@ -422,8 +422,8 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
-            panic!("title not found");
-        };
+			panic!("title not found");
+		};
 		assert_eq!(title, summary.title);
 
 		let mut response = Response(to_map(vec![Ok(vec![value])]));
@@ -438,12 +438,12 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
-            panic!("title not found");
-        };
+			panic!("title not found");
+		};
 		assert_eq!(title, article.title);
 		let Some(body): Option<String> = response.take("body").unwrap() else {
-            panic!("body not found");
-        };
+			panic!("body not found");
+		};
 		assert_eq!(body, article.body);
 
 		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
@@ -466,9 +466,10 @@ mod tests {
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = Response(to_map(vec![Ok(vec![true.into(), false.into()])]));
-		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0) else {
-            panic!("silently dropping records not allowed");
-        };
+		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0)
+		else {
+			panic!("silently dropping records not allowed");
+		};
 		let records = map.remove(&0).unwrap().unwrap();
 		assert_eq!(records, vec![true.into(), false.into()]);
 	}
@@ -489,9 +490,10 @@ mod tests {
 			Err(Error::DuplicateRequestId(0).into()),
 		];
 		let response = Response(to_map(response));
-		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err() else {
-            panic!("check did not return the first error");
-        };
+		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
+		else {
+			panic!("check did not return the first error");
+		};
 	}
 
 	#[test]
@@ -514,17 +516,17 @@ mod tests {
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
 		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
-            panic!("index `10` is not `DuplicateRequestId`");
-        };
+			panic!("index `10` is not `DuplicateRequestId`");
+		};
 		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
-            panic!("index `7` is not `BackupsNotSupported`");
-        };
+			panic!("index `7` is not `BackupsNotSupported`");
+		};
 		let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
-            panic!("index `3` is not `ConnectionUninitialised`");
-        };
+			panic!("index `3` is not `ConnectionUninitialised`");
+		};
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
-            panic!("statement not found");
-        };
+			panic!("statement not found");
+		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
 		assert_eq!(value, vec![Value::from(3)].into());

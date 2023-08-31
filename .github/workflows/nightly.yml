@@ -17,7 +17,9 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.1
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -86,8 +88,9 @@ jobs:
           sudo apt-get -y update
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.71.1
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -183,8 +186,9 @@ jobs:
           rm -rf foundationdb-clients_6.3.23-1_amd64.deb
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.71.1
           targets: ${{ matrix.arch }}
 
       - name: Output package versions

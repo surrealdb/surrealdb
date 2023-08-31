@@ -7,8 +7,8 @@ use crate::sql::error::IResult;
 use crate::sql::number::Number;
 use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::tuple;
+use nom::combinator::{cut, opt};
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -46,10 +46,12 @@ impl fmt::Display for Start {
 
 pub fn start(i: &str) -> IResult<&str, Start> {
 	let (i, _) = tag_no_case("START")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("AT"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, Start(v)))
+	cut(|i| {
+		let (i, _) = opt(terminated(tag_no_case("AT"), shouldbespace))(i)?;
+		let (i, v) = value(i)?;
+		Ok((i, Start(v)))
+	})(i)
 }
 
 #[cfg(test)]
@@ -61,7 +63,6 @@ mod tests {
 	fn start_statement() {
 		let sql = "START 100";
 		let res = start(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Start(Value::from(100)));
 		assert_eq!("START 100", format!("{}", out));
@@ -71,7 +72,6 @@ mod tests {
 	fn start_statement_at() {
 		let sql = "START AT 100";
 		let res = start(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Start(Value::from(100)));
 		assert_eq!("START 100", format!("{}", out));

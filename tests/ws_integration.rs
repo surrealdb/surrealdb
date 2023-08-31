@@ -1156,9 +1156,14 @@ mod ws_integration {
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
-		assert!(res["result"].is_array(), "result: {:?}", res);
-		let res = res["result"].as_array().unwrap();
-		assert_eq!(res.len(), ops.as_array().unwrap().len(), "result: {:?}", res);
+		assert!(res["result"].is_object(), "result: {:?}", res);
+		let res = res["result"].as_object().unwrap();
+		assert_eq!(
+			res.get("modify_name"),
+			Some(json!("modify_value")).as_ref(),
+			"result: {:?}",
+			res
+		);
 
 		//
 		// Patch data
@@ -1185,9 +1190,9 @@ mod ws_integration {
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
-		assert!(res["result"].is_array(), "result: {:?}", res);
-		let res = res["result"].as_array().unwrap();
-		assert_eq!(res.len(), ops.as_array().unwrap().len(), "result: {:?}", res);
+		assert!(res["result"].is_object(), "result: {:?}", res);
+		let res = res["result"].as_object().unwrap();
+		assert_eq!(res.get("patch_name"), Some(json!("patch_value")).as_ref(), "result: {:?}", res);
 
 		//
 		// Get the data and verify the output

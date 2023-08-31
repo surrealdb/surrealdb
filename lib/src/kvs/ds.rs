@@ -12,7 +12,7 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Role};
+use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{Clock, SystemClock};
 use crate::opt::auth::Root;
@@ -30,9 +30,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -373,15 +377,6 @@ impl Datastore {
 		self
 	}
 
-	/// Creates a new datastore instance
-	///
-	/// Use this for clustered environments.
-	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
-		let ds = Datastore::new(path).await?;
-		ds.bootstrap().await?;
-		Ok(ds)
-	}
-
 	// Initialise bootstrap with implicit values intended for runtime
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		self.bootstrap_full(&self.id).await
@@ -391,12 +386,26 @@ impl Datastore {
 	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
-		let archived = self.register_remove_and_archive(&mut tx, node_id).await?;
-		tx.commit().await?;
+		let archived = match self.register_remove_and_archive(&mut tx, node_id).await {
+			Ok(archived) => {
+				tx.commit().await?;
+				archived
+			}
+			Err(e) => {
+				error!("Error bootstrapping mark phase: {:?}", e);
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
 
 		let mut tx = self.transaction(true, false).await?;
-		self.remove_archived(&mut tx, archived).await?;
-		tx.commit().await
+		match self.remove_archived(&mut tx, archived).await {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error bootstrapping sweep phase: {:?}", e);
+				tx.cancel().await
+			}
+		}
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -437,6 +446,7 @@ impl Datastore {
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
+			// TODO should be delr in case of nested entries
 			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
@@ -578,6 +588,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(ts, limit).await?;
+		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
@@ -586,13 +597,11 @@ impl Datastore {
 	}
 
 	// tick is called periodically to perform maintenance tasks.
-	// On a linux/windows/macos system, this is called every TICK_INTERVAL.
-	// On embedded scenarios like WASM where there is no background thread,
-	// this should be called by the application.
+	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
-		let now = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
 		Ok(())
@@ -786,6 +795,17 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authoritzation layer
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			}
+			.into());
+		}
+
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -841,6 +861,17 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if anonymous actors can compute values when auth is enabled
+		// TODO(sgirones): Check this as part of the authoritzation layer
+		if self.auth_enabled && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "compute".to_string(),
+				resource: "value".to_string(),
+			}
+			.into());
+		}
+
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)

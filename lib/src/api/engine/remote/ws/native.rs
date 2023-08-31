@@ -16,7 +16,7 @@ use crate::api::opt::Tls;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::remote::ws::IntervalStream;
+use crate::engine::IntervalStream;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -229,10 +229,6 @@ pub(crate) fn router(
 									if let [Value::Strand(Strand(key))] = &params[..1] {
 										vars.remove(key);
 									}
-								}
-								Method::Tick => {
-									// Remote backend doesn't support tick
-									return;
 								}
 								_ => {}
 							}

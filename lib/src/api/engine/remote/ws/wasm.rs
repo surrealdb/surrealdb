@@ -14,7 +14,7 @@ use crate::api::opt::Endpoint;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::remote::ws::IntervalStream;
+use crate::engine::IntervalStream;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;

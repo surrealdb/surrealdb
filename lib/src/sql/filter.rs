@@ -4,6 +4,7 @@ use crate::sql::language::{language, Language};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::u16;
+use nom::combinator::cut;
 use nom::multi::separated_list1;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -41,22 +42,26 @@ fn ascii(i: &str) -> IResult<&str, Filter> {
 
 fn edgengram(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("EDGENGRAM")(i)?;
-	let (i, _) = openparentheses(i)?;
-	let (i, min) = u16(i)?;
-	let (i, _) = commas(i)?;
-	let (i, max) = u16(i)?;
-	let (i, _) = closeparentheses(i)?;
-	Ok((i, Filter::EdgeNgram(min, max)))
+	cut(|i| {
+		let (i, _) = openparentheses(i)?;
+		let (i, min) = u16(i)?;
+		let (i, _) = commas(i)?;
+		let (i, max) = u16(i)?;
+		let (i, _) = closeparentheses(i)?;
+		Ok((i, Filter::EdgeNgram(min, max)))
+	})(i)
 }
 
 fn ngram(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("NGRAM")(i)?;
-	let (i, _) = openparentheses(i)?;
-	let (i, min) = u16(i)?;
-	let (i, _) = commas(i)?;
-	let (i, max) = u16(i)?;
-	let (i, _) = closeparentheses(i)?;
-	Ok((i, Filter::Ngram(min, max)))
+	cut(|i| {
+		let (i, _) = openparentheses(i)?;
+		let (i, min) = u16(i)?;
+		let (i, _) = commas(i)?;
+		let (i, max) = u16(i)?;
+		let (i, _) = closeparentheses(i)?;
+		Ok((i, Filter::Ngram(min, max)))
+	})(i)
 }
 
 fn lowercase(i: &str) -> IResult<&str, Filter> {
@@ -66,10 +71,12 @@ fn lowercase(i: &str) -> IResult<&str, Filter> {
 
 fn snowball(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("SNOWBALL")(i)?;
-	let (i, _) = openparentheses(i)?;
-	let (i, language) = language(i)?;
-	let (i, _) = closeparentheses(i)?;
-	Ok((i, Filter::Snowball(language)))
+	cut(|i| {
+		let (i, _) = openparentheses(i)?;
+		let (i, language) = language(i)?;
+		let (i, _) = closeparentheses(i)?;
+		Ok((i, Filter::Snowball(language)))
+	})(i)
 }
 
 fn uppercase(i: &str) -> IResult<&str, Filter> {

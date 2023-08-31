@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -13,7 +14,7 @@ async fn transaction_basic() -> Result<(), Error> {
 		CREATE person:jaime;
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -50,7 +51,7 @@ async fn transaction_with_return() -> Result<(), Error> {
 		RETURN { tobie: person:tobie, jaime: person:jaime };
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -76,7 +77,7 @@ async fn transaction_with_failure() -> Result<(), Error> {
 		CREATE person:tobie;
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -112,7 +113,7 @@ async fn transaction_with_failure_and_return() -> Result<(), Error> {
 		RETURN { tobie: person:tobie, jaime: person:jaime };
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -135,7 +136,7 @@ async fn transaction_with_throw() -> Result<(), Error> {
 		THROW 'there was an error';
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -171,7 +172,7 @@ async fn transaction_with_throw_and_return() -> Result<(), Error> {
 		RETURN { tobie: person:tobie, jaime: person:jaime };
 		COMMIT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);

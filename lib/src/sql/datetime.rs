@@ -336,7 +336,6 @@ mod tests {
 	fn date_zone() {
 		let sql = "2020-01-01T00:00:00Z";
 		let res = datetime_all_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2020-01-01T00:00:00Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2020-01-01T00:00:00Z").unwrap());
@@ -346,7 +345,6 @@ mod tests {
 	fn date_time() {
 		let sql = "2012-04-23T18:25:43Z";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43Z").unwrap());
@@ -356,7 +354,6 @@ mod tests {
 	fn date_time_nanos() {
 		let sql = "2012-04-23T18:25:43.5631Z";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.563100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.563100Z").unwrap());
@@ -366,7 +363,6 @@ mod tests {
 	fn date_time_timezone_utc() {
 		let sql = "2012-04-23T18:25:43.0000511Z";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
@@ -376,7 +372,6 @@ mod tests {
 	fn date_time_timezone_pacific() {
 		let sql = "2012-04-23T18:25:43.511-08:00";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:25:43.511Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-24T02:25:43.511Z").unwrap());
@@ -386,7 +381,6 @@ mod tests {
 	fn date_time_timezone_pacific_partial() {
 		let sql = "2012-04-23T18:25:43.511-08:30";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:55:43.511Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-24T02:55:43.511Z").unwrap());
@@ -396,7 +390,6 @@ mod tests {
 	fn date_time_timezone_utc_nanoseconds() {
 		let sql = "2012-04-23T18:25:43.5110000Z";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.511Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.511Z").unwrap());
@@ -406,7 +399,6 @@ mod tests {
 	fn date_time_timezone_utc_sub_nanoseconds() {
 		let sql = "2012-04-23T18:25:43.0000511Z";
 		let res = datetime_raw(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
@@ -416,7 +408,6 @@ mod tests {
 	fn date_time_illegal_date() {
 		// Hey! There's not a 31st of November!
 		let sql = "2022-11-31T12:00:00.000Z";
-		let res = datetime_raw(sql);
-		assert!(res.is_err());
+		datetime_raw(sql).unwrap_err();
 	}
 }

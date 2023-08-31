@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::{comment, mightbespace};
+use crate::sql::comment::mightbespace;
 use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
@@ -181,7 +181,7 @@ impl Display for Block {
 pub fn block(i: &str) -> IResult<&str, Block> {
 	let (i, _) = openbraces(i)?;
 	let (i, v) = separated_list0(colons, entry)(i)?;
-	let (i, _) = many0(alt((colons, comment)))(i)?;
+	let (i, _) = many0(colons)(i)?;
 	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
 }

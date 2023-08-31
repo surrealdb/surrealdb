@@ -6,7 +6,7 @@ use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::i64;
-use nom::combinator::{map, opt};
+use nom::combinator::{opt, value};
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
 use revision::revisioned;
@@ -664,10 +664,10 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(tag("NaN"), |_| Number::NAN), not_nan))(i)
+	alt((value(Number::NAN, tag("NaN")), not_nan))(i)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Suffix {
 	None,
 	Float,
@@ -676,7 +676,7 @@ enum Suffix {
 
 fn suffix(i: &str) -> IResult<&str, Suffix> {
 	let (i, opt_suffix) =
-		opt(alt((map(tag("f"), |_| Suffix::Float), map(tag("dec"), |_| Suffix::Decimal))))(i)?;
+		opt(alt((value(Suffix::Float, tag("f")), value(Suffix::Decimal, tag("dec")))))(i)?;
 	Ok((i, opt_suffix.unwrap_or(Suffix::None)))
 }
 
@@ -713,7 +713,6 @@ mod tests {
 	fn number_nan() {
 		let sql = "NaN";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("NaN", format!("{}", out));
 	}
@@ -722,7 +721,6 @@ mod tests {
 	fn number_int() {
 		let sql = "123";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("123", format!("{}", out));
 		assert_eq!(out, Number::Int(123));
@@ -732,7 +730,6 @@ mod tests {
 	fn number_int_neg() {
 		let sql = "-123";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-123", format!("{}", out));
 		assert_eq!(out, Number::Int(-123));
@@ -742,7 +739,6 @@ mod tests {
 	fn number_float() {
 		let sql = "123.45f";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Number::Float(123.45));
@@ -752,7 +748,6 @@ mod tests {
 	fn number_float_neg() {
 		let sql = "-123.45f";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Number::Float(-123.45));
@@ -762,7 +757,6 @@ mod tests {
 	fn number_scientific_lower() {
 		let sql = "12345e-1";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("1234.5f", format!("{}", out));
 		assert_eq!(out, Number::Float(1234.5));
@@ -772,7 +766,6 @@ mod tests {
 	fn number_scientific_lower_neg() {
 		let sql = "-12345e-1";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-1234.5f", format!("{}", out));
 		assert_eq!(out, Number::Float(-1234.5));
@@ -782,7 +775,6 @@ mod tests {
 	fn number_scientific_upper() {
 		let sql = "12345E-02";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("123.45f", format!("{}", out));
 		assert_eq!(out, Number::Float(123.45));
@@ -792,7 +784,6 @@ mod tests {
 	fn number_scientific_upper_neg() {
 		let sql = "-12345E-02";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-123.45f", format!("{}", out));
 		assert_eq!(out, Number::Float(-123.45));
@@ -802,7 +793,6 @@ mod tests {
 	fn number_float_keeps_precision() {
 		let sql = "13.571938471938472f";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 	}
@@ -811,7 +801,6 @@ mod tests {
 	fn number_decimal_keeps_precision() {
 		let sql = "0.0000000000000000000000000321dec";
 		let res = number(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 	}

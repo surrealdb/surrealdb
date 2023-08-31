@@ -13,6 +13,7 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -99,10 +100,13 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 	let (i, _) = tag_no_case("CREATE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
-	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
-	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+	let (i, (data, output, timeout, parallel)) = cut(|i| {
+		let (i, data) = opt(preceded(shouldbespace, data))(i)?;
+		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+		Ok((i, (data, output, timeout, parallel)))
+	})(i)?;
 	Ok((
 		i,
 		CreateStatement {
@@ -124,7 +128,6 @@ mod tests {
 	fn create_statement() {
 		let sql = "CREATE test";
 		let res = create(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test", format!("{}", out))
 	}

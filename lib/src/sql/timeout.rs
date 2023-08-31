@@ -2,6 +2,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -27,7 +28,7 @@ impl fmt::Display for Timeout {
 pub fn timeout(i: &str) -> IResult<&str, Timeout> {
 	let (i, _) = tag_no_case("TIMEOUT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = duration(i)?;
+	let (i, v) = cut(duration)(i)?;
 	Ok((i, Timeout(v)))
 }
 
@@ -40,7 +41,6 @@ mod tests {
 	fn timeout_statement() {
 		let sql = "TIMEOUT 5s";
 		let res = timeout(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("TIMEOUT 5s", format!("{}", out));
 		assert_eq!(out, Timeout(Duration::try_from("5s").unwrap()));

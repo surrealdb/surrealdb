@@ -131,7 +131,6 @@ mod tests {
 	fn check_remove_serialize() {
 		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident::from("test"),
-			..Default::default()
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
 		assert_eq!(9, enc.len());

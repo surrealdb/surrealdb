@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::terms::TermId;
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use roaring::RoaringTreemap;
 use std::sync::Arc;
@@ -29,7 +29,9 @@ impl TermDocs {
 		let mut docs = self.get_docs(tx, term_id).await?.unwrap_or_else(RoaringTreemap::new);
 		if docs.insert(doc_id) {
 			let key = self.index_key_base.new_bc_key(term_id);
-			tx.set(key, docs.try_to_val()?).await?;
+			let mut val = Vec::new();
+			docs.serialize_into(&mut val)?;
+			tx.set(key, val).await?;
 		}
 		Ok(())
 	}
@@ -41,7 +43,7 @@ impl TermDocs {
 	) -> Result<Option<RoaringTreemap>, Error> {
 		let key = self.index_key_base.new_bc_key(term_id);
 		if let Some(val) = tx.get(key).await? {
-			let docs = RoaringTreemap::try_from_val(val)?;
+			let docs = RoaringTreemap::deserialize_from(&mut val.as_slice())?;
 			Ok(Some(docs))
 		} else {
 			Ok(None)
@@ -61,7 +63,9 @@ impl TermDocs {
 				if docs.is_empty() {
 					tx.del(key).await?;
 				} else {
-					tx.set(key, docs.try_to_val()?).await?;
+					let mut val = Vec::new();
+					docs.serialize_into(&mut val)?;
+					tx.set(key, val).await?;
 				}
 			}
 			Ok(docs.len())

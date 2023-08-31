@@ -5,6 +5,7 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
@@ -12,12 +13,14 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
+use crate::engine::IntervalStream;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
+use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -26,6 +29,9 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
+use tokio::time;
+use tokio::time::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
@@ -134,16 +140,22 @@ pub(crate) fn router(
 		let kvs = kvs
 			.with_strict_mode(address.config.strict)
 			.with_query_timeout(address.config.query_timeout)
-			.with_transaction_timeout(address.config.transaction_timeout);
+			.with_transaction_timeout(address.config.transaction_timeout)
+			.with_capabilities(address.config.capabilities);
 
 		let kvs = match address.config.notifications {
 			true => kvs.with_notifications(),
 			false => kvs,
 		};
 
+		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
 		let mut session = Session::default();
+
+		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
+		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
+		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
 
 		while let Some(Some(route)) = stream.next().await {
 			match super::router(route.request, &kvs, &mut session, &mut vars).await {
@@ -153,6 +165,32 @@ pub(crate) fn router(
 				Err(error) => {
 					let _ = route.response.into_send_async(Err(error)).await;
 				}
+			}
+		}
+
+		// Stop maintenance tasks
+		let _ = maintenance_tx.into_send_async(()).await;
+	});
+}
+
+fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
+	tokio::spawn(async move {
+		let mut interval = time::interval(tick_interval);
+		// Don't bombard the database if we miss some ticks
+		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+		// Delay sending the first tick
+		interval.tick().await;
+
+		let ticker = IntervalStream::new(interval);
+
+		let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
+
+		let mut stream = streams.merge();
+
+		while let Some(Some(_)) = stream.next().await {
+			match kvs.tick().await {
+				Ok(()) => trace!("Node agent tick ran successfully"),
+				Err(error) => error!("Error running node agent tick: {error}"),
 			}
 		}
 	});

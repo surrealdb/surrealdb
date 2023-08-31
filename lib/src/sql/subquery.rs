@@ -17,7 +17,7 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::combinator::map;
+use nom::combinator::{cut, map};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -250,7 +250,7 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = openparentheses(i)?;
 	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = closeparentheses(i)?;
+	let (i, _) = cut(closeparentheses)(i)?;
 	Ok((i, v))
 }
 
@@ -259,7 +259,7 @@ fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 		|i| {
 			let (i, _) = openparentheses(i)?;
 			let (i, v) = subquery_inner(i)?;
-			let (i, _) = closeparentheses(i)?;
+			let (i, _) = cut(closeparentheses)(i)?;
 			Ok((i, v))
 		},
 		|i| {
@@ -293,7 +293,6 @@ mod tests {
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
 	}
@@ -302,7 +301,6 @@ mod tests {
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("IF true THEN false END", format!("{}", out))
 	}
@@ -311,7 +309,6 @@ mod tests {
 	fn subquery_select_statement() {
 		let sql = "(SELECT * FROM test)";
 		let res = subquery(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(SELECT * FROM test)", format!("{}", out))
 	}

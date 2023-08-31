@@ -1,5 +1,5 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::{closebracket, openbracket};
+use crate::sql::common::closebracket;
 use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -14,11 +14,14 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{map, not, peek};
+use nom::combinator::{self, cut, map, not, peek};
+use nom::sequence::{preceded, terminated};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
+
+use super::comment::mightbespace;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
@@ -143,7 +146,63 @@ impl<'a> Next<'a> for &'a [Part] {
 // ------------------------------
 
 pub fn part(i: &str) -> IResult<&str, Part> {
-	alt((all, flatten, last, index, field, value, graph, filter))(i)
+	alt((
+		flatten,
+		preceded(tag("."), cut(dot_part)),
+		preceded(char('['), cut(bracketed_part)),
+		graph,
+	))(i)
+}
+
+pub fn graph(i: &str) -> IResult<&str, Part> {
+	map(graph::graph, Part::Graph)(i)
+}
+
+pub fn flatten(i: &str) -> IResult<&str, Part> {
+	combinator::value(Part::Flatten, alt((tag("..."), tag("…"))))(i)
+}
+
+pub fn local_part(i: &str) -> IResult<&str, Part> {
+	// Cant cut dot part since it might be part of the flatten at the end.
+	alt((preceded(tag("."), dot_part), preceded(tag("["), cut(local_bracketed_part))))(i)
+}
+
+pub fn basic_part(i: &str) -> IResult<&str, Part> {
+	alt((preceded(tag("."), cut(dot_part)), preceded(tag("["), cut(basic_bracketed_part))))(i)
+}
+
+fn dot_part(i: &str) -> IResult<&str, Part> {
+	alt((
+		combinator::value(Part::All, tag("*")),
+		map(terminated(ident::ident, ending), Part::Field),
+	))(i)
+}
+
+fn basic_bracketed_part(i: &str) -> IResult<&str, Part> {
+	alt((
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
+		// Can cut here since it can't be a parameter.
+		combinator::value(Part::All, terminated(tag("$"), cut(closebracket))),
+		map(terminated(number, cut(closebracket)), Part::Index),
+	))(i)
+}
+
+fn local_bracketed_part(i: &str) -> IResult<&str, Part> {
+	alt((
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
+		map(terminated(number, cut(closebracket)), Part::Index),
+	))(i)
+}
+
+fn bracketed_part(i: &str) -> IResult<&str, Part> {
+	alt((
+		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
+		// Don't cut here, the '$' could be part of a param.
+		combinator::value(Part::Last, terminated(tag("$"), closebracket)),
+		map(terminated(number, cut(closebracket)), Part::Index),
+		bracketed_where,
+		bracketed_value,
+	))(i)
 }
 
 pub fn first(i: &str) -> IResult<&str, Part> {
@@ -153,77 +212,32 @@ pub fn first(i: &str) -> IResult<&str, Part> {
 	Ok((i, Part::Field(v)))
 }
 
-pub fn all(i: &str) -> IResult<&str, Part> {
+pub fn bracketed_where(i: &str) -> IResult<&str, Part> {
 	let (i, _) = alt((
-		|i| {
-			let (i, _) = char('.')(i)?;
-			let (i, _) = char('*')(i)?;
-			Ok((i, ()))
-		},
-		|i| {
-			let (i, _) = openbracket(i)?;
-			let (i, _) = char('*')(i)?;
-			let (i, _) = closebracket(i)?;
-			Ok((i, ()))
-		},
+		terminated(tag("?"), mightbespace),
+		terminated(tag_no_case("WHERE"), shouldbespace),
 	))(i)?;
-	Ok((i, Part::All))
-}
 
-pub fn last(i: &str) -> IResult<&str, Part> {
-	let (i, _) = openbracket(i)?;
-	let (i, _) = char('$')(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, Part::Last))
-}
-
-pub fn index(i: &str) -> IResult<&str, Part> {
-	let (i, _) = openbracket(i)?;
-	let (i, v) = number(i)?;
-	let (i, _) = closebracket(i)?;
-	Ok((i, Part::Index(v)))
-}
-
-pub fn flatten(i: &str) -> IResult<&str, Part> {
-	let (i, _) = alt((tag("…"), tag("...")))(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Part::Flatten))
-}
-
-pub fn field(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('.')(i)?;
-	let (i, v) = ident::ident(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, Part::Field(v)))
-}
-
-pub fn filter(i: &str) -> IResult<&str, Part> {
-	let (i, _) = openbracket(i)?;
-	let (i, _) = alt((tag_no_case("WHERE"), tag("?")))(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value::value(i)?;
-	let (i, _) = closebracket(i)?;
+
+	let (i, _) = cut(closebracket)(i)?;
 	Ok((i, Part::Where(v)))
 }
 
-pub fn value(i: &str) -> IResult<&str, Part> {
-	let (i, _) = openbracket(i)?;
+pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
 	let (i, v) = alt((
 		map(strand::strand, Value::Strand),
 		map(param::param, Value::Param),
 		map(idiom::basic, Value::Idiom),
 	))(i)?;
-	let (i, _) = closebracket(i)?;
+	let (i, _) = cut(closebracket)(i)?;
 	Ok((i, Part::Value(v)))
-}
-
-pub fn graph(i: &str) -> IResult<&str, Part> {
-	let (i, v) = graph::graph(i)?;
-	Ok((i, Part::Graph(v)))
 }
 
 #[cfg(test)]
 mod tests {
+
+	use param::Param;
 
 	use super::*;
 	use crate::sql::expression::Expression;
@@ -233,7 +247,6 @@ mod tests {
 	fn part_all() {
 		let sql = "[*]";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[*]", format!("{}", out));
 		assert_eq!(out, Part::All);
@@ -243,17 +256,24 @@ mod tests {
 	fn part_last() {
 		let sql = "[$]";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[$]", format!("{}", out));
 		assert_eq!(out, Part::Last);
 	}
 
 	#[test]
+	fn part_param() {
+		let sql = "[$param]";
+		let res = part(sql);
+		let out = res.unwrap().1;
+		assert_eq!("[$param]", format!("{}", out));
+		assert_eq!(out, Part::Value(Value::Param(Param::from("param"))));
+	}
+
+	#[test]
 	fn part_flatten() {
 		let sql = "...";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("…", format!("{}", out));
 		assert_eq!(out, Part::Flatten);
@@ -263,7 +283,6 @@ mod tests {
 	fn part_flatten_ellipsis() {
 		let sql = "…";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("…", format!("{}", out));
 		assert_eq!(out, Part::Flatten);
@@ -273,7 +292,6 @@ mod tests {
 	fn part_number() {
 		let sql = "[0]";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[0]", format!("{}", out));
 		assert_eq!(out, Part::Index(Number::from(0)));
@@ -281,9 +299,8 @@ mod tests {
 
 	#[test]
 	fn part_expression_question() {
-		let sql = "[? test = true]";
+		let sql = "[?test = true]";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[WHERE test = true]", format!("{}", out));
 		assert_eq!(out, Part::Where(Value::from(Expression::parse("test = true"))));
@@ -293,7 +310,6 @@ mod tests {
 	fn part_expression_condition() {
 		let sql = "[WHERE test = true]";
 		let res = part(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[WHERE test = true]", format!("{}", out));
 		assert_eq!(out, Part::Where(Value::from(Expression::parse("test = true"))));

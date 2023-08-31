@@ -1,4 +1,4 @@
-use crate::iam::Level;
+use crate::{dbs::Capabilities, iam::Level};
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
@@ -15,6 +15,8 @@ pub struct Config {
 	pub(crate) auth: Level,
 	pub(crate) username: String,
 	pub(crate) password: String,
+	pub(crate) tick_interval: Option<Duration>,
+	pub(crate) capabilities: Capabilities,
 }
 
 impl Config {
@@ -24,13 +26,11 @@ impl Config {
 	}
 
 	/// Set the strict value of the config to the supplied value
-	/// Enables `strict` server mode
 	pub fn set_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
 		self
 	}
 
-	/// Set the config to use strict mode
 	/// Enables `strict` server mode
 	pub fn strict(mut self) -> Self {
 		self.strict = true;
@@ -82,6 +82,18 @@ impl Config {
 	#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
 	pub fn native_tls(mut self, config: native_tls::TlsConnector) -> Self {
 		self.tls_config = Some(super::Tls::Native(config));
+		self
+	}
+
+	/// Set the interval at which the database should run node maintenance tasks
+	pub fn tick_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
+		self.tick_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the capabilities for the database
+	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
+		self.capabilities = capabilities;
 		self
 	}
 }

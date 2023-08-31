@@ -11,7 +11,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::into;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -96,7 +96,7 @@ impl fmt::Display for KillStatement {
 pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 	let (i, _) = tag_no_case("KILL")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = alt((map(uuid, Value::from), map(param, Value::from)))(i)?;
+	let (i, v) = alt((into(uuid), into(param)))(i)?;
 	Ok((
 		i,
 		KillStatement {
@@ -131,7 +131,6 @@ mod tests {
 	fn kill_param() {
 		let sql = "kill $id";
 		let res = kill(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,

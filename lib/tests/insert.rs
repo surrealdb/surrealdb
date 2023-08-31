@@ -1,9 +1,11 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
+use surrealdb::sql::Part;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -15,7 +17,7 @@ async fn insert_statement_object_single() -> Result<(), Error> {
 			something: 'other',
 		};
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -43,7 +45,7 @@ async fn insert_statement_object_multiple() -> Result<(), Error> {
 			},
 		];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -65,7 +67,7 @@ async fn insert_statement_values_single() -> Result<(), Error> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -82,7 +84,7 @@ async fn insert_statement_values_multiple() -> Result<(), Error> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (1, true, 'other'), (2, false, 'else');
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -104,7 +106,7 @@ async fn insert_statement_values_retable_id() -> Result<(), Error> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (person:1, true, 'other'), (person:2, false, 'else');
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -127,7 +129,7 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') ON DUPLICATE KEY UPDATE something = 'else';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -148,7 +150,7 @@ async fn insert_statement_output() -> Result<(), Error> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') RETURN something;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -156,6 +158,37 @@ async fn insert_statement_output() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ something: 'other' }]");
 	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_statement_duplicate_key_update() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-10') ON DUPLICATE KEY UPDATE founded = $input.founded;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded PARALLEL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-10"));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-11"));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
+	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-12"));
 	//
 	Ok(())
 }
@@ -197,7 +230,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table has to be created
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
@@ -220,7 +253,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table already exists
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
 				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
@@ -289,7 +322,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -311,7 +344,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -339,7 +372,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -380,7 +413,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -401,7 +434,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -429,7 +462,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(

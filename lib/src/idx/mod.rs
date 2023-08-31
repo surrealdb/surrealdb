@@ -20,7 +20,7 @@ use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
-use roaring::RoaringTreemap;
+use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::sync::Arc;
@@ -173,18 +173,18 @@ impl IndexKeyBase {
 	}
 }
 
-/// This trait provides `bincode` based default implementations for serialization/deserialization
-trait SerdeState
+/// This trait provides `Revision` based default implementations for serialization/deserialization
+trait VersionedSerdeState
 where
-	Self: Sized + Serialize + DeserializeOwned,
+	Self: Sized + Serialize + DeserializeOwned + Revisioned,
 {
 	fn try_to_val(&self) -> Result<Val, Error> {
-		Ok(bincode::serialize(self)?)
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	fn try_from_val(val: Val) -> Result<Self, Error> {
-		Ok(bincode::deserialize(&val)?)
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
-
-impl SerdeState for RoaringTreemap {}

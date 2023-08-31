@@ -15,6 +15,7 @@ use crate::sql::Base;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -235,8 +236,10 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = tag_no_case("INFO")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	alt((root, ns, db, sc, tb, user))(i)
+	cut(|i| {
+		let (i, _) = shouldbespace(i)?;
+		alt((root, ns, db, sc, tb, user))(i)
+	})(i)
 }
 
 fn root(i: &str) -> IResult<&str, InfoStatement> {
@@ -257,30 +260,38 @@ fn db(i: &str) -> IResult<&str, InfoStatement> {
 fn sc(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, scope) = ident(i)?;
-	Ok((i, InfoStatement::Sc(scope)))
+	cut(|i| {
+		let (i, scope) = ident(i)?;
+		Ok((i, InfoStatement::Sc(scope)))
+	})(i)
 }
 
 fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, table) = ident(i)?;
-	Ok((i, InfoStatement::Tb(table)))
+	cut(|i| {
+		let (i, table) = ident(i)?;
+		Ok((i, InfoStatement::Tb(table)))
+	})(i)
 }
 
 fn user(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("USER"), tag_no_case("US")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, user) = ident(i)?;
-	let (i, base) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("ON")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, base) = base(i)?;
-		Ok((i, base))
-	})(i)?;
+	cut(|i| {
+		let (i, user) = ident(i)?;
+		let (i, base) = opt(|i| {
+			let (i, _) = shouldbespace(i)?;
+			let (i, _) = tag_no_case("ON")(i)?;
+			cut(|i| {
+				let (i, _) = shouldbespace(i)?;
+				let (i, base) = base(i)?;
+				Ok((i, base))
+			})(i)
+		})(i)?;
 
-	Ok((i, InfoStatement::User(user, base)))
+		Ok((i, InfoStatement::User(user, base)))
+	})(i)
 }
 
 #[cfg(test)]
@@ -292,7 +303,6 @@ mod tests {
 	fn info_query_root() {
 		let sql = "INFO FOR ROOT";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Root);
 		assert_eq!("INFO FOR ROOT", format!("{}", out));
@@ -302,7 +312,6 @@ mod tests {
 	fn info_query_ns() {
 		let sql = "INFO FOR NAMESPACE";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Ns);
 		assert_eq!("INFO FOR NAMESPACE", format!("{}", out));
@@ -312,7 +321,6 @@ mod tests {
 	fn info_query_db() {
 		let sql = "INFO FOR DATABASE";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Db);
 		assert_eq!("INFO FOR DATABASE", format!("{}", out));
@@ -322,7 +330,6 @@ mod tests {
 	fn info_query_sc() {
 		let sql = "INFO FOR SCOPE test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Sc(Ident::from("test")));
 		assert_eq!("INFO FOR SCOPE test", format!("{}", out));
@@ -332,7 +339,6 @@ mod tests {
 	fn info_query_tb() {
 		let sql = "INFO FOR TABLE test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Tb(Ident::from("test")));
 		assert_eq!("INFO FOR TABLE test", format!("{}", out));
@@ -342,28 +348,24 @@ mod tests {
 	fn info_query_user() {
 		let sql = "INFO FOR USER test ON ROOT";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Root)));
 		assert_eq!("INFO FOR USER test ON ROOT", format!("{}", out));
 
 		let sql = "INFO FOR USER test ON NS";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Ns)));
 		assert_eq!("INFO FOR USER test ON NAMESPACE", format!("{}", out));
 
 		let sql = "INFO FOR USER test ON DB";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Db)));
 		assert_eq!("INFO FOR USER test ON DATABASE", format!("{}", out));
 
 		let sql = "INFO FOR USER test";
 		let res = info(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::User(Ident::from("test"), None));
 		assert_eq!("INFO FOR USER test", format!("{}", out));

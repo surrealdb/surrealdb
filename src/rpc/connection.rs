@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::Span;
+use tracing_futures::Instrument;
 
 use surrealdb::dbs::Session;
 use tokio::task::JoinSet;
@@ -274,39 +276,44 @@ impl Connection {
 		let mut out_fmt = rpc.read().await.processor.format.clone();
 		// Prepare Span and Otel context
 		let span = span_for_request(&rpc.read().await.ws_id);
-		let _enter = span.enter();
-		let req_cx = RequestContext::default();
-		let otel_cx = TelemetryContext::current_with_value(req_cx.clone());
 
 		// Parse the request
-		match parse_request(msg).await {
-			Ok(req) => {
-				if let Some(_out_fmt) = req.out_fmt {
-					out_fmt = _out_fmt;
+		async move {
+			let span = Span::current();
+			let req_cx = RequestContext::default();
+			let otel_cx = TelemetryContext::new().with_value(req_cx.clone());
+
+			match parse_request(msg).await {
+				Ok(req) => {
+					if let Some(_out_fmt) = req.out_fmt {
+						out_fmt = _out_fmt;
+					}
+
+					// Now that we know the method, we can update the span and create otel context
+					span.record("rpc.method", &req.method);
+					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
+					span.record(
+						"rpc.jsonrpc.request_id",
+						req.id.clone().map(|v| v.as_string()).unwrap_or(String::new()),
+					);
+					let otel_cx = TelemetryContext::current_with_value(
+						req_cx.with_method(&req.method).with_size(req.size),
+					);
+
+					// Process the request
+					let res =
+						rpc.write().await.processor.process_request(&req.method, req.params).await;
+
+					// Process the response
+					res.into_response(req.id).send(out_fmt, chn).with_context(otel_cx).await
 				}
-
-				// Now that we know the method, we can update the span and create otel context
-				span.record("rpc.method", &req.method);
-				span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
-				span.record(
-					"rpc.jsonrpc.request_id",
-					req.id.clone().map(|v| v.as_string()).unwrap_or(String::new()),
-				);
-				let otel_cx = TelemetryContext::current_with_value(
-					req_cx.with_method(&req.method).with_size(req.size),
-				);
-
-				// Process the request
-				let res =
-					rpc.write().await.processor.process_request(&req.method, req.params).await;
-
-				// Process the response
-				res.into_response(req.id).send(out_fmt, chn).with_context(otel_cx).await
-			}
-			Err(err) => {
-				// Process the response
-				failure(None, err).send(out_fmt, chn).with_context(otel_cx.clone()).await
+				Err(err) => {
+					// Process the response
+					failure(None, err).send(out_fmt, chn).with_context(otel_cx.clone()).await
+				}
 			}
 		}
+		.instrument(span)
+		.await;
 	}
 }

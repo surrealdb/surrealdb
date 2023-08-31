@@ -16,8 +16,10 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::{map, opt};
 use nom::sequence::preceded;
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -145,13 +147,13 @@ impl fmt::Display for InsertStatement {
 
 pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, _) = tag_no_case("INSERT")(i)?;
-	let (i, ignore) = opt(preceded(shouldbespace, tag_no_case("IGNORE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
+	let (i, ignore) = opt(terminated(tag_no_case("IGNORE"), shouldbespace))(i)?;
 	let (i, _) = tag_no_case("INTO")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, into) = alt((map(table, Value::Table), map(param, Value::Param)))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, data) = alt((values, single))(i)?;
+	let (i, into) = cut(alt((map(table, Value::Table), map(param, Value::Param))))(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, data) = cut(alt((values, single)))(i)?;
 	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
@@ -179,7 +181,6 @@ mod tests {
 	fn insert_statement_basic() {
 		let sql = "INSERT INTO test (field) VALUES ($value)";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT INTO test (field) VALUES ($value)", format!("{}", out))
 	}
@@ -188,7 +189,6 @@ mod tests {
 	fn insert_statement_ignore() {
 		let sql = "INSERT IGNORE INTO test (field) VALUES ($value)";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value)", format!("{}", out))
 	}
@@ -197,7 +197,6 @@ mod tests {
 	fn insert_statement_ignore_update() {
 		let sql = "INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value";
 		let res = insert(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value) ON DUPLICATE KEY UPDATE field = $value", format!("{}", out))
 	}
