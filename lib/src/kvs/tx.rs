@@ -10,7 +10,7 @@ use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
-use crate::kvs::clock::Clock;
+use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
@@ -42,7 +42,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
@@ -58,7 +58,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) write_buffer: HashMap<Key, ()>,
 	pub(super) vso: Arc<Mutex<Oracle>>,
-	pub(super) clock: Arc<RwLock<dyn Clock + Send + Sync>>,
+	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1012,7 +1012,12 @@ impl Transaction {
 	/// But also allows for lexicographical ordering.
 	pub(crate) async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
-		self.clock.read().await.now()
+		// Match, because we cannot have sized traits or async traits
+		match self.clock.read().await.deref() {
+			SizedClock::Fake(fake) => fake.now(),
+			SizedClock::Inc(inc) => inc.now().await,
+			SizedClock::System(system) => system.now(),
+		}
 	}
 
 	// Set heartbeat

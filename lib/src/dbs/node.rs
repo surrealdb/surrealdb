@@ -5,7 +5,6 @@ use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
-use std::time::Duration;
 
 // NOTE: This is not a statement, but as per layering, keeping it here till we
 // have a better structure.
@@ -41,9 +40,9 @@ impl From<&Timestamp> for KeyTimestamp {
 	}
 }
 
-impl Add<Duration> for Timestamp {
+impl Add<Duration> for &Timestamp {
 	type Output = Timestamp;
-	fn add(&self, rhs: Duration) -> Timestamp {
+	fn add(self, rhs: Duration) -> Timestamp {
 		Timestamp {
 			value: self.value + rhs.as_secs(),
 		}

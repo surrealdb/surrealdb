@@ -1,10 +1,15 @@
 use crate::dbs::node::Timestamp;
+use crate::sql;
+use sql::Duration;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
-pub trait Clock: Clone {
-	fn now(&self) -> Timestamp;
+// Traits cannot have async and we need sized structs for Clone + Send + Sync
+pub enum SizedClock {
+	Fake(FakeClock),
+	Inc(IncFakeClock),
+	System(SystemClock),
 }
 
 /// FakeClock is a clock that is fully controlled externally.
@@ -14,17 +19,15 @@ pub struct FakeClock {
 	now: Timestamp,
 }
 
-impl Clock for FakeClock {
-	fn now(&self) -> Timestamp {
-		self.now.clone()
-	}
-}
-
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
 			now,
 		}
+	}
+
+	pub fn now(&self) -> Timestamp {
+		self.now.clone()
 	}
 
 	pub fn set(&mut self, timestamp: Timestamp) {
@@ -42,18 +45,16 @@ pub struct IncFakeClock {
 	increment: Duration,
 }
 
-impl Clock for IncFakeClock {
-	fn now(&self) -> Timestamp {
-		self.now.try_lock().unwrap().get_and_inc(self.increment)
-	}
-}
-
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
 			now: Arc::new(Mutex::new(now)),
 			increment,
 		}
+	}
+
+	pub async fn now(&self) -> Timestamp {
+		self.now.lock().await.get_and_inc(self.increment.clone())
 	}
 }
 
@@ -62,8 +63,11 @@ impl IncFakeClock {
 #[derive(Clone)]
 pub struct SystemClock {}
 
-impl Clock for SystemClock {
-	fn now(&self) -> Timestamp {
+impl SystemClock {
+	pub fn new() -> Self {
+		SystemClock {}
+	}
+	pub fn now(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
 			Ok(duration) => duration.as_millis(),
@@ -72,11 +76,5 @@ impl Clock for SystemClock {
 		Timestamp {
 			value: now as u64,
 		}
-	}
-}
-
-impl SystemClock {
-	pub fn new() -> Self {
-		SystemClock {}
 	}
 }

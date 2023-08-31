@@ -14,7 +14,7 @@ use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
-use crate::kvs::clock::{Clock, SystemClock};
+use crate::kvs::clock::{SizedClock, SystemClock};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -72,7 +72,7 @@ pub struct Datastore {
 	// Capabilities for this datastore
 	capabilities: Capabilities,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: Arc<RwLock<Box<dyn Clock + Send + Sync>>>,
+	clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -160,7 +160,7 @@ impl Datastore {
 	pub async fn new_full(
 		path: &str,
 		node_id: Uuid,
-		clock_override: Option<Box<dyn Clock>>,
+		clock_override: Option<SizedClock>,
 	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
 		let (inner, clock) = match path {
@@ -170,11 +170,11 @@ impl Datastore {
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
 					info!("Started kvs store in {}", path);
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -188,11 +188,11 @@ impl Datastore {
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
 					info!("Started kvs store at {}", path);
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -207,10 +207,10 @@ impl Datastore {
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -225,10 +225,10 @@ impl Datastore {
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-speedb"))]
 				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -243,10 +243,10 @@ impl Datastore {
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -261,10 +261,10 @@ impl Datastore {
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -279,10 +279,10 @@ impl Datastore {
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
 					let clock = match clock_override {
-						None => Box::new(SystemClock::new()),
+						None => SizedClock::System(SystemClock::new()),
 						Some(c) => c,
 					};
-					(v, clock)
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
 				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -292,7 +292,7 @@ impl Datastore {
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		};
+		}?;
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
 			id: node_id,
@@ -418,7 +418,7 @@ impl Datastore {
 		let timestamp = tx.clock().await;
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
-		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
+		let ts_expired = (timestamp.clone() - sql::duration::Duration::from_secs(5))?;
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
 		self.archive_dead_lqs(tx, &dead, node_id).await
 	}
