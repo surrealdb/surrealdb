@@ -340,15 +340,6 @@ impl Datastore {
 		self
 	}
 
-	/// Creates a new datastore instance
-	///
-	/// Use this for clustered environments.
-	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
-		let ds = Datastore::new(path).await?;
-		ds.bootstrap().await?;
-		Ok(ds)
-	}
-
 	// Initialise bootstrap with implicit values intended for runtime
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		self.bootstrap_full(&self.id).await
@@ -359,12 +350,22 @@ impl Datastore {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
-		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
-		tx.commit().await?;
+		let archived = match self.register_remove_and_archive(&mut tx, node_id, now).await {
+			Ok(archived) => {
+				tx.commit().await?;
+				archived
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
 
 		let mut tx = self.transaction(true, false).await?;
-		self.remove_archived(&mut tx, archived).await?;
-		tx.commit().await
+		match self.remove_archived(&mut tx, archived).await {
+			Ok(_) => tx.commit().await,
+			Err(_) => tx.cancel().await,
+		}
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -405,6 +406,7 @@ impl Datastore {
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
+			// TODO should be delr in case of nested entries
 			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
@@ -546,6 +548,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(ts, limit).await?;
+		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
