@@ -56,7 +56,7 @@ async fn live_creates_remote_notification() {
 	let table = "f3d4a40b50ba4221ab02fa406edb58cc";
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
 	let now = Timestamp {
-		value: 0x010203040506070809,
+		value: 0x0102030405060708u64,
 	};
 
 	// Init as local node, so we do not receive the notification

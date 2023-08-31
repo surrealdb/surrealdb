@@ -1,7 +1,6 @@
 #[cfg(feature = "kv-mem")]
 mod mem {
 
-	use crate::kvs::clock::IncFakeClock;
 	use crate::kvs::Datastore;
 	use crate::kvs::Transaction;
 	use serial_test::serial;
