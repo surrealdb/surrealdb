@@ -3,12 +3,17 @@ use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn merge(&mut self, val: Value) -> Result<(), Error> {
-		if val.is_object() {
-			for k in val.every(None, false, false).iter() {
-				match val.pick(k) {
-					Value::None => self.cut(k),
-					v => self.put(k, v),
-				}
+		// If this value is not an object, then error
+		if !val.is_object() {
+			return Err(Error::InvalidMerge {
+				value: val,
+			});
+		}
+		// Otherwise loop through every object field
+		for k in val.every(None, false, false).iter() {
+			match val.pick(k) {
+				Value::None => self.cut(k),
+				v => self.put(k, v),
 			}
 		}
 		Ok(())
