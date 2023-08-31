@@ -356,6 +356,7 @@ impl Datastore {
 				archived
 			}
 			Err(e) => {
+				error!("Error bootstrapping mark phase: {:?}", e);
 				tx.cancel().await?;
 				return Err(e);
 			}
@@ -364,7 +365,10 @@ impl Datastore {
 		let mut tx = self.transaction(true, false).await?;
 		match self.remove_archived(&mut tx, archived).await {
 			Ok(_) => tx.commit().await,
-			Err(_) => tx.cancel().await,
+			Err(e) => {
+				error!("Error bootstrapping sweep phase: {:?}", e);
+				tx.cancel().await
+			}
 		}
 	}
 
