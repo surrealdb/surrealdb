@@ -298,6 +298,7 @@ mod api_integration {
 	#[cfg(feature = "kv-tikv")]
 	mod tikv {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::TiKv;
 
@@ -324,6 +325,7 @@ mod api_integration {
 	#[cfg(feature = "kv-fdb")]
 	mod fdb {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::FDb;
 
