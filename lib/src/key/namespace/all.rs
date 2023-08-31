@@ -30,10 +30,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = All::new(
-			123,
+			1,
 		);
 		let enc = All::encode(&val).unwrap();
-		assert_eq!(enc, vec![b'/', b'*', 0, 0, 0, 123u8]);
+		assert_eq!(enc, b"/*\x00\x00\x00\x01");
 
 		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -39,7 +39,7 @@ mod tests {
 			1,
 		);
 		let enc = Ns::encode(&val).unwrap();
-		assert_eq!(enc, vec![b'/', b'*', 0, 0, 0, 0, 0, 0, 0, 0x1, b'!', b'n', b's']);
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!ns");
 
 		let dec = Ns::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -64,13 +64,7 @@ mod tests {
 			"testft",
 		);
 		let enc = Ft::encode(&val).unwrap();
-		assert_eq!(
-			enc,
-			vec![
-				b'/', b'*', 0, 0, 0, 1, b'*', 0, 0, 0, 2, b'*', 0, 0, 0, 3, b'!', b'f', b't', b't',
-				b'e', b's', b't', b'f', b't', 0
-			]
-		);
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!fttestft\x00");
 
 		let dec = Ft::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -79,20 +73,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix(1, 2, 3);
-		assert_eq!(
-			val,
-			vec![b'/', b'*', 0, 0, 0, 1, b'*', 0, 0, 0, 2, b'*', 0, 0, 0, 3, b'!', b'f', b't', 0]
-		);
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!ft\x00");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix(1, 2, 3);
-		assert_eq!(
-			val,
-			vec![
-				b'/', b'*', 0, 0, 0, 1, b'*', 0, 0, 0, 2, b'*', 0, 0, 0, 3, b'!', b'f', b't', 0xff
-			]
-		);
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03!ft\xff");
 	}
 }
