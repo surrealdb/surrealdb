@@ -5,6 +5,7 @@
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
 /// crate::key::root::ns                 /!ns{ns}
+/// crate::key::root::us                 /!us
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
@@ -60,8 +61,10 @@
 pub mod change;
 pub mod database;
 pub mod debug;
+pub(crate) mod error;
 pub mod graph;
 pub mod index;
+mod key_req;
 pub mod namespace;
 pub mod node;
 pub mod root;

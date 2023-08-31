@@ -1,5 +1,7 @@
 //! Stores a heartbeat per registered cluster node
 use crate::dbs::node::{KeyTimestamp, Timestamp};
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,6 +16,12 @@ pub struct Hb {
 	_d: u8,
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
+}
+
+impl KeyRequirements for Hb {
+	fn key_category() -> KeyError {
+		KeyError::Heartbeat
+	}
 }
 
 impl Hb {

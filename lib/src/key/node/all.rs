@@ -1,4 +1,6 @@
 //! Stores the key prefix for all nodes
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,6 +15,12 @@ pub struct All {
 
 pub fn new(nd: Uuid) -> All {
 	All::new(nd)
+}
+
+impl KeyRequirements for All {
+	fn key_category() -> KeyError {
+		KeyError::NodeRoot
+	}
 }
 
 impl All {

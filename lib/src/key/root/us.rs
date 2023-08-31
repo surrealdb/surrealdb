@@ -1,3 +1,5 @@
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +26,12 @@ pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'u', b's', 0xff]);
 	k
+}
+
+impl KeyRequirements for Us<'_> {
+	fn key_category() -> KeyError {
+		KeyError::User
+	}
 }
 
 impl<'a> Us<'a> {

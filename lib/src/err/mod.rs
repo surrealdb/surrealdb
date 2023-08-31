@@ -78,7 +78,7 @@ pub enum Error {
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
-	TxKeyAlreadyExists,
+	TxKeyAlreadyExists(KeyType),
 
 	/// The key exceeds a limit set by the KV store
 	#[error("Record id or key is too large")]
