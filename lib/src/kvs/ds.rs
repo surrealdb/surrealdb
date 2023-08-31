@@ -586,19 +586,43 @@ impl Datastore {
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
-		let nses = tx.all_ns().await?;
+		let nses = {
+			let mut tx = self.transaction(true, false).await?;
+			match tx.all_ns().await {
+				Err(e) => {
+					tx.cancel().await?;
+					return Err(e);
+				}
+				Ok(nses) => {
+					tx.cancel().await?;
+					nses
+				}
+			}
+		};
 		let nses = nses.as_ref();
 		for ns in nses {
 			let ns = ns.name.as_str();
-			let dbs = tx.all_db(ns).await?;
+			let dbs = {
+				let mut tx = self.transaction(true, false).await?;
+				match tx.all_db(ns).await {
+					Err(e) => {
+						tx.cancel().await?;
+						return Err(e);
+					}
+					Ok(dbs) => {
+						tx.cancel().await?;
+						dbs
+					}
+				}
+			};
 			let dbs = dbs.as_ref();
 			for db in dbs {
 				let db = db.name.as_str();
+				let mut tx = self.transaction(true, false).await?;
 				tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?;
+				tx.commit().await?;
 			}
 		}
-		tx.commit().await?;
 		Ok(())
 	}
 
