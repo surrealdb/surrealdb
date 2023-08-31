@@ -74,7 +74,10 @@ mod tests {
 		let (_, id1) = crate::sql::id::id(id1).expect("Failed to parse the ID");
 		let val = Thing::new(1, 2, 3, id1);
 		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03*\0\0\0\x02\0\0\0\x04test\0\x01");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*\x00\x00\x00\x03*\0\0\0\x02\0\0\0\x04test\0\x01"
+		);
 
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
