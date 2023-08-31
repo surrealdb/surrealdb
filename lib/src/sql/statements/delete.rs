@@ -59,7 +59,7 @@ impl DeleteStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
+		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;

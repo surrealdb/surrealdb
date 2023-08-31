@@ -307,6 +307,140 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_selection_variable_field_projection() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET title = 'Mr', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
+		LET $param = 'name.first';
+		SELECT type::field($param), type::field('name.last') FROM person;
+		SELECT VALUE { 'firstname': type::field($param), lastname: type::field('name.last') } FROM person;
+		SELECT VALUE [type::field($param), type::field('name.last')] FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				firstname: 'Tobie',
+				lastname: 'Morgan Hitchcock',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			['Tobie', 'Morgan Hitchcock']
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_selection_variable_fields_projection() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET title = 'Mr', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
+		LET $param = ['name.first', 'name.last'];
+		SELECT type::fields($param), type::fields(['title']) FROM person;
+		SELECT VALUE { 'names': type::fields($param) } FROM person;
+		SELECT VALUE type::fields($param) FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				names: ['Tobie', 'Morgan Hitchcock']
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			['Tobie', 'Morgan Hitchcock']
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_default_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE product SCHEMAFULL;

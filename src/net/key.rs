@@ -3,10 +3,11 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
-use axum::extract::{DefaultBodyLimit, Path, Query};
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::{Extension, Router, TypedHeader};
+use axum_extra::extract::Query;
 use bytes::Bytes;
 use http_body::Body as HttpBody;
 use serde::Deserialize;
@@ -21,8 +22,9 @@ const MAX: usize = 1024 * 16; // 16 KiB
 
 #[derive(Default, Deserialize, Debug, Clone)]
 struct QueryOptions {
-	pub limit: Option<String>,
-	pub start: Option<String>,
+	pub limit: Option<i64>,
+	pub start: Option<i64>,
+	pub fields: Option<Vec<String>>,
 }
 
 pub(super) fn router<S, B>() -> Router<S, B>
@@ -73,17 +75,19 @@ async fn select_all(
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Specify the request statement
-	let sql = format!(
-		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
-		l = query.limit.unwrap_or_else(|| String::from("100")),
-		s = query.start.unwrap_or_else(|| String::from("0")),
-	);
+	let sql = match query.fields {
+		None => "SELECT * FROM type::table($table) LIMIT $limit START $start",
+		_ => "SELECT type::fields($fields) FROM type::table($table) LIMIT $limit START $start",
+	};
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
+		String::from("start") => Value::from(query.start.unwrap_or(0)),
+		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
+		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
 	};
 	// Execute the query and return the result
-	match db.execute(sql.as_str(), &session, Some(vars)).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(ref res) => match maybe_output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -265,11 +269,15 @@ async fn select_one(
 	Extension(session): Extension<Session>,
 	maybe_output: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
+	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Specify the request statement
-	let sql = "SELECT * FROM type::thing($table, $id)";
+	let sql = match query.fields {
+		None => "SELECT * FROM type::thing($table, $id)",
+		_ => "SELECT type::fields($fields) FROM type::thing($table, $id)",
+	};
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -279,6 +287,7 @@ async fn select_one(
 	let vars = map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
+		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {

@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::iam::Error as IamError;
 use crate::sql::error::Error::{ExcessiveDepth, Field, Group, Order, Parser, Role, Split};
 use crate::sql::error::IResult;
+use crate::sql::idiom::Idiom;
 use crate::sql::query::{query, Query};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
@@ -29,6 +30,12 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
+}
+
+/// Parses a SurrealQL [`Idiom`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn idiom(input: &str) -> Result<Idiom, Error> {
+	parse_impl(input, super::idiom::plain)
 }
 
 /// Parses a SurrealQL [`Value`].
