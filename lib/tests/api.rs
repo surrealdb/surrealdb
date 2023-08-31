@@ -79,6 +79,7 @@ mod api_integration {
 	#[cfg(feature = "protocol-ws")]
 	mod ws {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
@@ -101,6 +102,7 @@ mod api_integration {
 	#[cfg(feature = "protocol-http")]
 	mod http {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::remote::http::Client;
 		use surrealdb::engine::remote::http::Http;
 
@@ -124,6 +126,7 @@ mod api_integration {
 	#[cfg(feature = "kv-mem")]
 	mod mem {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::any;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::Mem;
@@ -217,6 +220,7 @@ mod api_integration {
 	#[cfg(feature = "kv-rocksdb")]
 	mod file {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::File;
 
@@ -244,6 +248,7 @@ mod api_integration {
 	#[cfg(feature = "kv-rocksdb")]
 	mod rocksdb {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::RocksDb;
 
@@ -271,6 +276,7 @@ mod api_integration {
 	#[cfg(feature = "kv-speedb")]
 	mod speedb {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::SpeeDb;
 
@@ -352,6 +358,7 @@ mod api_integration {
 	#[cfg(feature = "protocol-http")]
 	mod any {
 		use super::*;
+		use serial_test::serial;
 		use surrealdb::engine::any::Any;
 
 		async fn new_db() -> Surreal<Any> {

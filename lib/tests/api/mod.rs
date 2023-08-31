@@ -1,12 +1,14 @@
 // Tests common to all protocols and storage engines
 
 #[tokio::test]
+#[serial]
 async fn connect() {
 	let db = new_db().await;
 	db.health().await.unwrap();
 }
 
 #[tokio::test]
+#[serial]
 async fn yuse() {
 	let db = new_db().await;
 	let item = Ulid::new().to_string();
@@ -30,6 +32,7 @@ async fn yuse() {
 }
 
 #[tokio::test]
+#[serial]
 async fn invalidate() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -43,6 +46,7 @@ async fn invalidate() {
 }
 
 #[tokio::test]
+#[serial]
 async fn signup_scope() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -71,6 +75,7 @@ async fn signup_scope() {
 }
 
 #[tokio::test]
+#[serial]
 async fn signin_ns() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -89,6 +94,7 @@ async fn signin_ns() {
 }
 
 #[tokio::test]
+#[serial]
 async fn signin_db() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -109,6 +115,7 @@ async fn signin_db() {
 }
 
 #[tokio::test]
+#[serial]
 async fn signin_scope() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -150,6 +157,7 @@ async fn signin_scope() {
 }
 
 #[tokio::test]
+#[serial]
 async fn authenticate() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -170,6 +178,7 @@ async fn authenticate() {
 }
 
 #[tokio::test]
+#[serial]
 async fn query() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -192,6 +201,7 @@ async fn query() {
 }
 
 #[tokio::test]
+#[serial]
 async fn query_binds() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -224,9 +234,10 @@ async fn query_binds() {
 }
 
 #[tokio::test]
+#[serial]
 async fn query_chaining() {
 	let db = new_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	let response = db
 		.query(BeginStatement)
 		.query("CREATE account:one SET balance = 135605.16")
@@ -240,6 +251,7 @@ async fn query_chaining() {
 }
 
 #[tokio::test]
+#[serial]
 async fn mixed_results_query() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -250,6 +262,7 @@ async fn mixed_results_query() {
 }
 
 #[tokio::test]
+#[serial]
 async fn create_record_no_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -258,6 +271,7 @@ async fn create_record_no_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn create_record_with_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -267,6 +281,7 @@ async fn create_record_with_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn create_record_no_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -287,6 +302,7 @@ async fn create_record_no_id_with_content() {
 }
 
 #[tokio::test]
+#[serial]
 async fn create_record_with_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -309,6 +325,7 @@ async fn create_record_with_id_with_content() {
 }
 
 #[tokio::test]
+#[serial]
 async fn select_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -321,6 +338,7 @@ async fn select_table() {
 }
 
 #[tokio::test]
+#[serial]
 async fn select_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -335,6 +353,7 @@ async fn select_record_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn select_record_ranges() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -370,6 +389,7 @@ async fn select_record_ranges() {
 }
 
 #[tokio::test]
+#[serial]
 async fn update_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -382,6 +402,7 @@ async fn update_table() {
 }
 
 #[tokio::test]
+#[serial]
 async fn update_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -393,6 +414,7 @@ async fn update_record_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn update_table_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -436,6 +458,7 @@ async fn update_table_with_content() {
 }
 
 #[tokio::test]
+#[serial]
 async fn update_record_range_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -494,6 +517,7 @@ async fn update_record_range_with_content() {
 }
 
 #[tokio::test]
+#[serial]
 async fn update_record_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -534,6 +558,7 @@ struct Person {
 }
 
 #[tokio::test]
+#[serial]
 async fn merge_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -570,6 +595,7 @@ async fn merge_record_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn patch_record_id() {
 	#[derive(Debug, Deserialize, Eq, PartialEq)]
 	struct Record {
@@ -608,6 +634,7 @@ async fn patch_record_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn delete_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -624,6 +651,7 @@ async fn delete_table() {
 }
 
 #[tokio::test]
+#[serial]
 async fn delete_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -642,6 +670,7 @@ async fn delete_record_id() {
 }
 
 #[tokio::test]
+#[serial]
 async fn delete_record_range() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -685,6 +714,7 @@ async fn delete_record_range() {
 }
 
 #[tokio::test]
+#[serial]
 async fn changefeed() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -836,12 +866,14 @@ async fn changefeed() {
 }
 
 #[tokio::test]
+#[serial]
 async fn version() {
 	let db = new_db().await;
 	db.version().await.unwrap();
 }
 
 #[tokio::test]
+#[serial]
 async fn set_unset() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -860,6 +892,7 @@ async fn set_unset() {
 }
 
 #[tokio::test]
+#[serial]
 async fn return_bool() {
 	let db = new_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();
