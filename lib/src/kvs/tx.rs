@@ -1232,7 +1232,14 @@ impl Transaction {
 		live_stm: LiveStatement,
 		expected: Option<LiveStatement>,
 	) -> Result<(), Error> {
-		let (ns, db, tb) = self.get_ns_db_tb_ids(ns, db, tb).await?;
+		// We assume non-strict mode here
+		let tb = self.add_and_cache_tb(ns, db, tb, false).await?;
+		let tb = tb.id.unwrap();
+		let db = self.add_and_cache_db(ns, db, false).await?;
+		let db = db.id.unwrap();
+		let ns = self.add_and_cache_ns(ns, false).await?;
+		let ns = ns.id.unwrap();
+		// Write the table lq
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
@@ -3109,7 +3116,10 @@ impl Transaction {
 		db: &str,
 		lock: bool,
 	) -> Result<(), Error> {
-		let (ns, db) = self.get_ns_db_ids(ns, db).await?;
+		let db = self.add_and_cache_db(ns, db, false).await?;
+		let db = db.id.unwrap();
+		let ns = self.add_and_cache_ns(ns, false).await?;
+		let ns = ns.id.unwrap();
 
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
