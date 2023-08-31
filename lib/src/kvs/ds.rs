@@ -630,9 +630,18 @@ impl Datastore {
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		// TODO Make gc batch size/limit configurable?
-		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
-		tx.commit().await?;
-		Ok(())
+		match crate::cf::gc_all_at(&mut tx, ts, Some(100)).await {
+			Err(e) => {
+				trace!("Error garbage collecting change feeds: {:?}", e);
+				tx.cancel().await?;
+				Err(e)
+			}
+			Ok(_) => {
+				trace!("Garbage collected change feeds");
+				tx.commit().await?;
+				Ok(())
+			}
+		}
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
