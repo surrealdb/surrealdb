@@ -79,7 +79,6 @@ async fn select_all(
 		None => "SELECT * FROM type::table($table) LIMIT $limit START $start",
 		_ => "SELECT type::fields($fields) FROM type::table($table) LIMIT $limit START $start",
 	};
-	println!("{:?}", query.fields);
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
