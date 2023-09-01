@@ -285,15 +285,6 @@ impl<'a> Processor<'a> {
 		let tb_name: &str = &v;
 		let chk = txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), tb_name, opt.strict).await;
 		let (ns, db, tb) = match chk {
-			Err(Error::DbNotFound {
-				..
-			})
-			| Err(Error::TbNotFound {
-				..
-			})
-			| Err(Error::NsNotFound {
-				..
-			}) => return Ok(()),
 			Err(e) => return Err(e),
 			Ok(Some(v)) => v,
 			Ok(None) => return Ok(()),
