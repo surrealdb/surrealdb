@@ -2,7 +2,6 @@
 
 use crate::err::Error;
 use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
