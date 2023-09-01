@@ -112,3 +112,21 @@ pub fn subquery(i: &str) -> IResult<&str, ()> {
 		))),
 	))(i)
 }
+
+pub fn query(i: &str) -> IResult<&str, ()> {
+	peek(|i| {
+		let (i, _) = mightbespace(i)?;
+		alt((
+			value((), preceded(shouldbespace, tag_no_case("THEN"))),
+			value((), preceded(shouldbespace, tag_no_case("ELSE"))),
+			value((), preceded(shouldbespace, tag_no_case("END"))),
+			value((), comment),
+			value((), char(']')),
+			value((), char('}')),
+			value((), char(')')),
+			value((), char(';')),
+			value((), char(',')),
+			value((), eof),
+		))(i)
+	})(i)
+}

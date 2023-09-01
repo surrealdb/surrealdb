@@ -234,7 +234,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
 	let (i, _) = expected(
 		"one of WITH, WHERE, SPLIT, GROUP, ORDER, LIMIT, START, FETCH, VERSION, TIMEOUT, PARELLEL, or EXPLAIN",
-		cut(peek(preceded(mightbespace,ending::subquery)))
+		cut(peek(ending::query))
 	)(i)?;
 
 	Ok((

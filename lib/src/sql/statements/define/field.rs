@@ -121,7 +121,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, opts) = many0(field_opts)(i)?;
 	let (i, _) = expected(
 		"one of FLEXIBLE, TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
-		cut(peek(ending::subquery)),
+		cut(ending::query),
 	)(i)?;
 	// Create the base statement
 	let mut res = DefineFieldStatement {

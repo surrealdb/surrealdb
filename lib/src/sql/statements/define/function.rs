@@ -8,7 +8,9 @@ use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::block::{block, Block};
 use crate::sql::comment::{mightbespace, shouldbespace};
+use crate::sql::common::closeparentheses;
 use crate::sql::common::commas;
+use crate::sql::common::openparentheses;
 use crate::sql::error::IResult;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -17,6 +19,8 @@ use crate::sql::ident::{ident, Ident};
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permission, Permission};
 use crate::sql::strand::{strand, Strand};
+use crate::sql::util::delimited_list0;
+use crate::sql::util::expect_delimited;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -99,19 +103,20 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag("fn::")(i)?;
 	let (i, name) = ident::multi(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, args) = separated_list0(commas, |i| {
-		let (i, _) = char('$')(i)?;
-		let (i, name) = ident(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(':')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, kind) = kind(i)?;
-		Ok((i, (name, kind)))
-	})(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, args) = delimited_list0(
+		openparentheses,
+		commas,
+		|i| {
+			let (i, _) = char('$')(i)?;
+			let (i, name) = ident(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char(':')(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, kind) = kind(i)?;
+			Ok((i, (name, kind)))
+		},
+		closeparentheses,
+	)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, block) = block(i)?;
 	let (i, opts) = many0(function_opts)(i)?;
