@@ -46,7 +46,7 @@ async fn archive_lv_for_node_archives() {
 	tx.commit().await.unwrap();
 
 	let mut tx = test.db.transaction(true, false).await.unwrap();
-	let lv = tx.all_lv(namespace, database, table).await.unwrap();
+	let lv = tx.all_tb_lives(namespace, database, table).await.unwrap();
 	assert_eq!(lv.len(), 1, "{:?}", lv);
 	assert_eq!(lv[0].archived, Some(this_node_id));
 	tx.commit().await.unwrap();

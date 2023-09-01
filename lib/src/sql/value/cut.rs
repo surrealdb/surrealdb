@@ -71,7 +71,7 @@ impl Value {
 					},
 					Part::Index(i) => match path.len() {
 						1 => {
-							if v.len().gt(&i.to_usize()) {
+							if v.len() > i.to_usize() {
 								v.remove(i.to_usize());
 							}
 						}

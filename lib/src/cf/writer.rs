@@ -1,6 +1,5 @@
 use crate::cf::{TableMutation, TableMutations};
 use crate::kvs::Key;
-use crate::sql::ident::Ident;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
@@ -59,16 +58,16 @@ impl Writer {
 		}
 	}
 
-	pub(crate) fn update(&mut self, ns: &str, db: &str, tb: Ident, id: Thing, v: Cow<'_, Value>) {
+	pub(crate) fn update(&mut self, ns: &str, db: &str, tb: &str, id: Thing, v: Cow<'_, Value>) {
 		if v.is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
-				tb.0,
+				tb.to_string(),
 				TableMutation::Set(id, v.into_owned()),
 			);
 		} else {
-			self.buf.push(ns.to_string(), db.to_string(), tb.0, TableMutation::Del(id));
+			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}
 
@@ -118,16 +117,16 @@ mod tests {
 		let ts = crate::sql::Datetime::default();
 		let ns = "myns";
 		let db = "mydb";
-		let tb = super::Ident("mytb".to_string());
+		let tb = "mytb";
 		let mut dns = DefineNamespaceStatement::default();
-		dns.name = super::Ident(ns.to_string());
+		dns.name = crate::sql::Ident(ns.to_string());
 		let mut ddb = DefineDatabaseStatement::default();
-		ddb.name = super::Ident(db.to_string());
+		ddb.name = crate::sql::Ident(db.to_string());
 		ddb.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10),
 		});
 		let mut dtb = DefineTableStatement::default();
-		dtb.name = tb.clone();
+		dtb.name = tb.into();
 		dtb.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10),
 		});
@@ -156,38 +155,38 @@ mod tests {
 
 		let mut tx1 = ds.transaction(true, false).await.unwrap();
 		let thing_a = Thing {
-			tb: tb.clone().0,
+			tb: tb.to_owned(),
 			id: Id::String("A".to_string()),
 		};
 		let value_a: super::Value = "a".into();
-		tx1.record_change(ns, db, &dtb, &thing_a, Cow::Borrowed(&value_a));
+		tx1.record_change(ns, db, tb, &thing_a, Cow::Borrowed(&value_a));
 		tx1.complete_changes(true).await.unwrap();
 		let _r1 = tx1.commit().await.unwrap();
 
 		let mut tx2 = ds.transaction(true, false).await.unwrap();
 		let thing_c = Thing {
-			tb: tb.clone().0,
+			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(ns, db, &dtb, &thing_c, Cow::Borrowed(&value_c));
+		tx2.record_change(ns, db, tb, &thing_c, Cow::Borrowed(&value_c));
 		tx2.complete_changes(true).await.unwrap();
 		let _r2 = tx2.commit().await.unwrap();
 
 		let x = ds.transaction(true, false).await;
 		let mut tx3 = x.unwrap();
 		let thing_b = Thing {
-			tb: tb.clone().0,
+			tb: tb.to_owned(),
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(ns, db, &dtb, &thing_b, Cow::Borrowed(&value_b));
+		tx3.record_change(ns, db, tb, &thing_b, Cow::Borrowed(&value_b));
 		let thing_c2 = Thing {
-			tb: tb.clone().0,
+			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(ns, db, &dtb, &thing_c2, Cow::Borrowed(&value_c2));
+		tx3.record_change(ns, db, tb, &thing_c2, Cow::Borrowed(&value_c2));
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();
 
@@ -199,16 +198,10 @@ mod tests {
 
 		let mut tx4 = ds.transaction(true, false).await.unwrap();
 		let tb = tb.clone();
-		let r = crate::cf::read(
-			&mut tx4,
-			ns,
-			db,
-			Some(tb.0.as_ref()),
-			ShowSince::Versionstamp(start),
-			Some(10),
-		)
-		.await
-		.unwrap();
+		let r =
+			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
+				.await
+				.unwrap();
 		tx4.commit().await.unwrap();
 
 		let mut want: Vec<ChangeSet> = Vec::new();
@@ -260,16 +253,10 @@ mod tests {
 		// Now we should see the gc_all results
 		let mut tx6 = ds.transaction(true, false).await.unwrap();
 		let tb = tb.clone();
-		let r = crate::cf::read(
-			&mut tx6,
-			ns,
-			db,
-			Some(tb.0.as_ref()),
-			ShowSince::Versionstamp(start),
-			Some(10),
-		)
-		.await
-		.unwrap();
+		let r =
+			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
+				.await
+				.unwrap();
 		tx6.commit().await.unwrap();
 
 		let mut want: Vec<ChangeSet> = Vec::new();
@@ -295,16 +282,9 @@ mod tests {
 		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
 		let mut tx7 = ds.transaction(true, false).await.unwrap();
-		let r = crate::cf::read(
-			&mut tx7,
-			ns,
-			db,
-			Some(tb.0.as_ref()),
-			ShowSince::Timestamp(ts),
-			Some(10),
-		)
-		.await
-		.unwrap();
+		let r = crate::cf::read(&mut tx7, ns, db, Some(tb), ShowSince::Timestamp(ts), Some(10))
+			.await
+			.unwrap();
 		tx7.commit().await.unwrap();
 		assert_eq!(r, want);
 	}

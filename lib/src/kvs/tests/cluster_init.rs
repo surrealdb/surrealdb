@@ -104,8 +104,10 @@ async fn expired_nodes_get_live_queries_archived() {
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(true, false).await.unwrap();
-	let scanned =
-		tx.all_lv(ses.ns().unwrap().as_ref(), ses.db().unwrap().as_ref(), table).await.unwrap();
+	let scanned = tx
+		.all_tb_lives(ses.ns().unwrap().as_ref(), ses.db().unwrap().as_ref(), table)
+		.await
+		.unwrap();
 	assert_eq!(scanned.len(), 0);
 	tx.commit().await.unwrap();
 }
@@ -180,7 +182,7 @@ async fn single_live_queries_are_garbage_collected() {
 	// Validate
 	trace!("Validating live queries");
 	let mut tx = test.db.transaction(true, false).await.unwrap();
-	let scanned = tx.all_lv(namespace, database, table).await.unwrap();
+	let scanned = tx.all_tb_lives(namespace, database, table).await.unwrap();
 	assert_eq!(scanned.len(), 1, "The scanned values are {:?}", scanned);
 	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
 	let scanned = tx.all_lq(&node_id).await.unwrap();

@@ -75,7 +75,7 @@ impl Param {
 						// Claim transaction
 						let mut run = txn.lock().await;
 						// Get the param definition
-						run.get_pa(opt.ns(), opt.db(), v).await
+						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
 					};
 					// Check if the param has been set globally
 					match val {
@@ -83,7 +83,7 @@ impl Param {
 						Ok(val) => {
 							// Check permissions
 							if opt.check_perms(Action::View) {
-								match val.permissions {
+								match &val.permissions {
 									Permission::Full => (),
 									Permission::None => {
 										return Err(Error::ParamPermissions {
@@ -103,7 +103,7 @@ impl Param {
 								}
 							}
 							// Return the value
-							Ok(val.value)
+							Ok(val.value.to_owned())
 						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),

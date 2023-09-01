@@ -337,7 +337,7 @@ impl<'a> IndexOperation<'a> {
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let az = run.get_az(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
+		let az = run.get_db_analyzer(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
 		let mut ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Write).await?;
 		if let Some(n) = &self.n {
 			ft.index_document(run, self.rid, n).await?;

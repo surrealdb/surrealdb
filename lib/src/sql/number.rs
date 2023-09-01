@@ -208,7 +208,7 @@ impl Number {
 		match self {
 			Number::Int(_) => true,
 			Number::Float(v) => v.fract() == 0.0,
-			Number::Decimal(v) => decimal_is_integer(v),
+			Number::Decimal(v) => v.is_integer(),
 		}
 	}
 
@@ -686,28 +686,11 @@ pub fn integer(i: &str) -> IResult<&str, i64> {
 	Ok((i, v))
 }
 
-/// TODO: This slow but temporary (awaiting https://docs.rs/rust_decimal/latest/rust_decimal/ version >1.29.1)
-pub(crate) fn decimal_is_integer(decimal: &Decimal) -> bool {
-	decimal.fract().is_zero()
-}
-
 #[cfg(test)]
 mod tests {
 
 	use super::*;
 	use std::ops::Div;
-
-	#[test]
-	fn dec_is_integer() {
-		assert!(decimal_is_integer(&Decimal::MAX));
-		assert!(decimal_is_integer(&Decimal::MIN));
-		for n in -10..10 {
-			assert!(decimal_is_integer(&Decimal::from(n)));
-			assert!(!decimal_is_integer(&(Decimal::from(n) + Decimal::from_f32(0.1).unwrap())));
-		}
-
-		assert!(!decimal_is_integer(&Decimal::HALF_PI));
-	}
 
 	#[test]
 	fn number_nan() {

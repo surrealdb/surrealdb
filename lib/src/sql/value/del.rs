@@ -102,7 +102,7 @@ impl Value {
 					},
 					Part::Index(i) => match path.len() {
 						1 => {
-							if v.len().gt(&i.to_usize()) {
+							if v.len() > i.to_usize() {
 								v.remove(i.to_usize());
 							}
 							Ok(())
@@ -168,7 +168,7 @@ impl Value {
 					Part::Value(x) => match x.compute(ctx, opt, txn, None).await? {
 						Value::Number(i) => match path.len() {
 							1 => {
-								if v.len().gt(&i.to_usize()) {
+								if v.len() > i.to_usize() {
 									v.remove(i.to_usize());
 								}
 								Ok(())

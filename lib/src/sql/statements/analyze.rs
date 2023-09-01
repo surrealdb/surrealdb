@@ -43,13 +43,15 @@ impl AnalyzeStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Read the index
-				let ix = run.get_ix(opt.ns(), opt.db(), tb.as_str(), idx.as_str()).await?;
+				let ix = run
+					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
+					.await?;
 				let ikb = IndexKeyBase::new(opt, &ix);
 
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let az = run.get_az(opt.ns(), opt.db(), p.az.as_str()).await?;
+						let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
 						let ft =
 							FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Traversal).await?;
 						ft.statistics(&mut run).await?.into()

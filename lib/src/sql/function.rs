@@ -178,11 +178,11 @@ impl Function {
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
-					run.get_fc(opt.ns(), opt.db(), s).await?
+					run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?
 				};
 				// Check permissions
 				if opt.check_perms(Action::View) {
-					match val.permissions {
+					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
 							return Err(Error::FunctionPermissions {
@@ -217,8 +217,8 @@ impl Function {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
-				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(&kind)?);
+				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
+					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
 				val.block.compute(&ctx, opt, txn, doc).await
