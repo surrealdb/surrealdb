@@ -1,4 +1,6 @@
 //! Stores a record document
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -30,6 +32,12 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'*', 0xff]);
 	k
+}
+
+impl KeyRequirements for Thing<'_> {
+	fn key_category() -> KeyError {
+		KeyError::Thing
+	}
 }
 
 impl<'a> Thing<'a> {

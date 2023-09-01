@@ -101,7 +101,7 @@ pub(crate) enum KeyError {
 	Index,
 	///
 	/// crate::key::change                   /*{ns}*{db}#{ts}
-	Change,
+	ChangeFeed,
 	///
 	/// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 	Thing,
