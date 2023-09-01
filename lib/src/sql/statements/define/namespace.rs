@@ -46,8 +46,14 @@ impl DefineNamespaceStatement {
 		run.clear_cache();
 		// Set the id
 		let (id, ns) = if self.id.is_none() {
+			let id = match run.get_ns_id(self.name.as_str()).await {
+				Ok(id) => id,
+				Err(Error::NsNotFound {
+					value: _,
+				}) => run.get_next_ns_id().await?,
+				Err(err) => return Err(err),
+			};
 			let mut ns = self.clone();
-			let id = run.get_next_ns_id().await?;
 			ns.id = Some(id);
 			let ns2 = ns.clone();
 			run.set(key, ns).await?;

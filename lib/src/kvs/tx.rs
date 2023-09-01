@@ -1650,15 +1650,22 @@ impl Transaction {
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		let (ns, db, tb) = match self.get_ns_db_tb_ids(ns, db, tb).await {
 			Ok(v) => v,
-			Err(Error::NsNotFound {
-				..
-			})
-			| Err(Error::DbNotFound {
-				..
-			})
-			| Err(Error::TbNotFound {
-				..
-			}) => {
+			Err(
+				e @ Error::NsNotFound {
+					..
+				},
+			)
+			| Err(
+				e @ Error::DbNotFound {
+					..
+				},
+			)
+			| Err(
+				e @ Error::TbNotFound {
+					..
+				},
+			) => {
+				trace!("Failed to find fields for table {:?}: {:?}", tb, e);
 				return Ok(Arc::new([]));
 			}
 			Err(e) => return Err(e),

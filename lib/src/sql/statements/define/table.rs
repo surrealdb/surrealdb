@@ -59,8 +59,14 @@ impl DefineTableStatement {
 		let db = db.id.unwrap();
 		let key = crate::key::database::tb::new(ns, db, &self.name);
 		let (id, tb) = if self.id.is_none() {
+			let id = match run.get_tb_id_by_name(ns, db, self.name.as_str()).await {
+				Ok(id) => id,
+				Err(Error::TbNotFound {
+					value: _,
+				}) => run.get_next_tb_id(ns, db).await?,
+				Err(err) => return Err(err),
+			};
 			let mut tb = self.clone();
-			let id = run.get_next_tb_id(ns, db).await?;
 			tb.id = Some(id);
 			let tb2 = tb.clone();
 			run.set(key, tb).await?;

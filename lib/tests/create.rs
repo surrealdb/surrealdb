@@ -184,7 +184,7 @@ async fn create_with_custom_function() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	assert!(tmp.is_ok(), "failed to create function: {:?}", tmp);
 	//
 	let tmp = res.remove(0).result?.pick(&[Part::from("data")]);
 	let val = Value::parse(
