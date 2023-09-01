@@ -47,8 +47,6 @@ use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncReadExt;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -279,7 +277,7 @@ async fn export(
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let mut file = match OpenOptions::new().read(true).open(&path).await {
+	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
 			return Err(Error::FileOpen {
@@ -289,29 +287,24 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 			.into());
 		}
 	};
-	let mut contents = vec![];
-	if let Err(error) = file.read_to_end(&mut contents).await {
-		return Err(Error::FileRead {
-			path,
-			error,
-		}
-		.into());
-	}
-	let res = request
-		.header(ACCEPT, "application/octet-stream")
-		// ideally we should pass `file` directly into the body
-		// but currently that results in
-		// "HTTP status client error (405 Method Not Allowed) for url"
-		.body(contents)
-		.send()
-		.await?;
+
+	let res = request.header(ACCEPT, "application/octet-stream").body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
-		let body: serde_json::Value = res.json().await?;
-		let error_msg =
-			format!("\n{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into()));
+		let res = res.text().await?;
 
-		return Err(Error::Http(error_msg).into());
+		match res.parse::<serde_json::Value>() {
+			Ok(body) => {
+				let error_msg = format!(
+					"\n{}",
+					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
+				);
+				return Err(Error::Http(error_msg).into());
+			}
+			Err(_) => {
+				return Err(Error::Http(res).into());
+			}
+		}
 	}
 	Ok(Value::None)
 }
