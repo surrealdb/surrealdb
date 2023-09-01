@@ -22,7 +22,7 @@ use std::str;
 use super::comment::mightbespace;
 use super::common::{closebracket, openbracket};
 use super::error::{expected, ExplainResultExt};
-use super::util::{expect_delimited, expect_terminator};
+use super::util::expect_delimited;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]

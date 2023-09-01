@@ -2,7 +2,6 @@ use nom::error::ErrorKind;
 use nom::error::FromExternalError;
 use nom::error::ParseError as NomParseError;
 use nom::Err;
-use std::fmt;
 use std::fmt::Write;
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
@@ -405,7 +404,7 @@ impl ParseError<&str> {
 				tried,
 			} => {
 				let location = Location::of_in(tried, input);
-				let text = format!("Invalid unicode escape code.");
+				let text = "Invalid unicode escape code.".to_string();
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,

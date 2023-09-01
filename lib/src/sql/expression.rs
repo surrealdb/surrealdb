@@ -6,7 +6,7 @@ use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
 use crate::sql::operator::{self, Operator};
-use crate::sql::value::{single, value, Value};
+use crate::sql::value::{single, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -225,12 +225,13 @@ pub fn unary(i: &str) -> IResult<&str, Expression> {
 	))
 }
 
+#[cfg(test)]
 pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = single(i)?;
 	let (i, o) = operator::binary(i)?;
 	// Make sure to dive if the query is a right-deep binary tree.
 	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, r) = value(i)?;
+	let (i, r) = crate::sql::value::value(i)?;
 	let v = match r {
 		Value::Expression(r) => r.augment(l, o),
 		_ => Expression::new(l, o, r),
