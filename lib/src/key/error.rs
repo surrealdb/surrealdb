@@ -33,13 +33,13 @@ pub(crate) enum KeyError {
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
-	DatabaseAuthorization,
+	DatabaseAnalyzer,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 	DatabaseFunction,
 	/// crate::key::database::lg             /*{ns}*{db}!lg{lg}
 	DatabaseLog,
 	/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
-	DatabasePartition,
+	DatabaseParameter,
 	/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
 	DatabaseScope,
 	/// crate::key::database::tb             /*{ns}*{db}!tb{tb}
@@ -50,6 +50,8 @@ pub(crate) enum KeyError {
 	DatabaseToken,
 	/// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 	DatabaseTimestamp,
+	/// crate::key::database::us             /*{ns}*{db}!us{us}
+	DatabaseUser,
 	/// crate::key::database::vs             /*{ns}*{db}!vs
 	DatabaseVersionstamp,
 	///

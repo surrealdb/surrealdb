@@ -1,3 +1,5 @@
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE FUNCTION config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,12 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'f', b'n', 0xff]);
 	k
+}
+
+impl KeyRequirements for Fc<'_> {
+	fn key_category() -> KeyError {
+		KeyError::DatabaseFunction
+	}
 }
 
 impl<'a> Fc<'a> {
