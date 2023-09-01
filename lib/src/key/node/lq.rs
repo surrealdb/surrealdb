@@ -12,12 +12,10 @@ use uuid::Uuid;
 pub struct Lq<'a> {
 	__: u8,
 	_a: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 	_e: u8,
 	pub ns: &'a str,

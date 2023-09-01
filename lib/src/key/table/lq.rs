@@ -19,7 +19,6 @@ pub struct Lq<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
