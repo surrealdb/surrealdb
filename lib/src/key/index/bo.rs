@@ -26,7 +26,7 @@ pub struct Bo<'a> {
 
 impl KeyRequirements for Bo<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomOffset
+		KeyError::IndexOffset
 	}
 }
 

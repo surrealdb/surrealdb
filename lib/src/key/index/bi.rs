@@ -24,7 +24,7 @@ pub struct Bi<'a> {
 
 impl KeyRequirements for Bi<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomInfo
+		KeyError::IndexDocKeys
 	}
 }
 

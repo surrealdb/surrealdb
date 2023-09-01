@@ -24,7 +24,7 @@ pub struct Bl<'a> {
 
 impl KeyRequirements for Bl<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomLock
+		KeyError::IndexBTreeNodeDocLengths
 	}
 }
 

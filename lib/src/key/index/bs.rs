@@ -21,7 +21,7 @@ pub struct Bs<'a> {
 
 impl KeyRequirements for Bs<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomSize
+		KeyError::IndexFullTextState
 	}
 }
 

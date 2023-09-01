@@ -82,21 +82,21 @@ pub(crate) enum KeyError {
 	/// crate::key::index::bf                /*{ns}*{db}*{tb}+{ix}!bf{id}
 	IndexTermDocFrequency,
 	/// crate::key::index::bi                /*{ns}*{db}*{tb}+{ix}!bi{id}
-	IndexBloomInfo,
+	IndexDocKeys,
 	/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}
-	IndexBloomKey,
+	IndexTermList,
 	/// crate::key::index::bl                /*{ns}*{db}*{tb}+{ix}!bl{id}
-	IndexBloomLock,
+	IndexBTreeNodeDocLengths,
 	/// crate::key::index::bo                /*{ns}*{db}*{tb}+{ix}!bo{id}
-	IndexBloomOffset,
+	IndexOffset,
 	/// crate::key::index::bp                /*{ns}*{db}*{tb}+{ix}!bp{id}
-	IndexBloomPartition,
+	IndexBTreeNodePostings,
 	/// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
-	IndexBloomSize,
+	IndexFullTextState,
 	/// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
-	IndexBloomTimestamp,
+	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
-	IndexBloomUuid,
+	IndexTerms,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///

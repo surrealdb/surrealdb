@@ -24,7 +24,7 @@ pub struct Bk<'a> {
 
 impl KeyRequirements for Bk<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomKey
+		KeyError::IndexTermList
 	}
 }
 

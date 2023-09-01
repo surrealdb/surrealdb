@@ -24,7 +24,7 @@ pub struct Bp<'a> {
 
 impl KeyRequirements for Bp<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomPartition
+		KeyError::IndexBTreeNodePostings
 	}
 }
 

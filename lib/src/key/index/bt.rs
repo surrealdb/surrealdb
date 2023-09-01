@@ -24,7 +24,7 @@ pub struct Bt<'a> {
 
 impl KeyRequirements for Bt<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomTimestamp
+		KeyError::IndexBTreeNodeTerms
 	}
 }
 

@@ -24,7 +24,7 @@ pub struct Bu<'a> {
 
 impl KeyRequirements for Bu<'_> {
 	fn key_category() -> KeyError {
-		KeyError::IndexBloomUuid
+		KeyError::IndexTerms
 	}
 }
 
