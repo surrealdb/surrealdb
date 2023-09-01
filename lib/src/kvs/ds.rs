@@ -311,7 +311,7 @@ impl Datastore {
 				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
 				let ctx = Context::default();
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
+				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
 				txn.lock().await.commit().await?;
 				Ok(())
 			}
@@ -367,7 +367,13 @@ impl Datastore {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
-				tx.cancel().await
+				match tx.cancel().await {
+					Ok(_) => Err(e),
+					Err(e) => {
+						// We have a nested error
+						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
+					}
+				}
 			}
 		}
 	}
@@ -535,7 +541,8 @@ impl Datastore {
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
 		let mut ret = vec![];
 		for lq in lqs {
-			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
+			let lvs =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
 			let archived_lvs = lvs.clone().archive(this_node_id.clone());
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);

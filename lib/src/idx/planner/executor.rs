@@ -55,7 +55,7 @@ impl QueryExecutor {
 					}
 				} else {
 					let ikb = IndexKeyBase::new(opt, io.ix());
-					let az = run.get_az(opt.ns(), opt.db(), p.az.as_str()).await?;
+					let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
 					let ft = FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
 					let ixn = ixn.to_owned();
 					if entry.is_none() {

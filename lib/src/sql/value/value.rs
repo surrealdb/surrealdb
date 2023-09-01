@@ -27,7 +27,6 @@ use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
-use crate::sql::number::decimal_is_integer;
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
@@ -815,7 +814,7 @@ impl Value {
 
 	/// Check if this Value is a boolean value
 	pub fn is_bool(&self) -> bool {
-		self.is_true() || self.is_false()
+		matches!(self, Value::Bool(_))
 	}
 
 	/// Check if this Value is TRUE or 'true'
@@ -1098,7 +1097,7 @@ impl Value {
 	}
 
 	// -----------------------------------
-	// Simple conversion of value
+	// Simple conversion of values
 	// -----------------------------------
 
 	/// Treat a string as a table name
@@ -1225,7 +1224,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an i64
 				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
@@ -1250,7 +1249,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as u64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an u64
 				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
@@ -1326,7 +1325,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if decimal_is_integer(v) => match v.to_i64() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.to_i64() {
 				// The Decimal can be represented as an Int
 				Some(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
@@ -1800,7 +1799,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an Int
 				Ok(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds

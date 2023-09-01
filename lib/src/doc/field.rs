@@ -125,8 +125,18 @@ impl<'a> Document<'a> {
 					};
 					// Match the permission clause
 					match perms {
+						// The field PERMISSIONS clause
+						// is FULL, enabling this field
+						// to be updated without checks.
 						Permission::Full => (),
+						// The field PERMISSIONS clause
+						// is NONE, meaning that this
+						// change will be reverted.
 						Permission::None => val = old,
+						// The field PERMISSIONS clause
+						// is a custom expression, so
+						// we check the expression and
+						// revert the field if denied.
 						Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);

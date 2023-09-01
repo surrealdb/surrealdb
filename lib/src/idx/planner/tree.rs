@@ -54,7 +54,7 @@ impl<'a> TreeBuilder<'a> {
 				.clone()
 				.lock()
 				.await
-				.all_ix(self.opt.ns(), self.opt.db(), &self.table.0)
+				.all_tb_indexes(self.opt.ns(), self.opt.db(), &self.table.0)
 				.await?;
 			self.indexes = Some(indexes);
 		}

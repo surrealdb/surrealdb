@@ -159,7 +159,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				None => Value::None,
 			};
 			// Get the scope token
-			let de = tx.get_st(&ns, &db, &sc, &tk).await?;
+			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -224,7 +224,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the database token
-			let de = tx.get_dt(&ns, &db, &tk).await?;
+			let de = tx.get_db_token(&ns, &db, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -293,7 +293,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the namespace token
-			let de = tx.get_nt(&ns, &tk).await?;
+			let de = tx.get_ns_token(&ns, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;

@@ -424,6 +424,18 @@ pub enum Error {
 		table: String,
 	},
 
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to view the ${name} parameter")]
+	ParamPermissions {
+		name: String,
+	},
+
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to run the fn::{name} function")]
+	FunctionPermissions {
+		name: String,
+	},
+
 	/// The specified table can not be written as it is setup as a foreign table view
 	#[error("Unable to write to the `{table}` table while setup as a view")]
 	TableIsView {

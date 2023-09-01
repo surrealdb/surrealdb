@@ -150,7 +150,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
-		txn.clone().lock().await.all_ft(opt.ns(), opt.db(), &id.tb).await
+		txn.clone().lock().await.all_tb_views(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the events for this document
 	pub async fn ev(
@@ -161,7 +161,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
-		txn.clone().lock().await.all_ev(opt.ns(), opt.db(), &id.tb).await
+		txn.clone().lock().await.all_tb_events(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the fields for this document
 	pub async fn fd(
@@ -172,7 +172,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
-		txn.clone().lock().await.all_fd(opt.ns(), opt.db(), &id.tb).await
+		txn.clone().lock().await.all_tb_fields(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the indexes for this document
 	pub async fn ix(
@@ -183,7 +183,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
-		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
+		txn.clone().lock().await.all_tb_indexes(opt.ns(), opt.db(), &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(
@@ -194,6 +194,6 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition
-		txn.clone().lock().await.all_lv(opt.ns(), opt.db(), &id.tb).await
+		txn.clone().lock().await.all_tb_lives(opt.ns(), opt.db(), &id.tb).await
 	}
 }

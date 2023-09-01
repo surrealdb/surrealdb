@@ -1,4 +1,4 @@
-<h1><img height="25" src="./img/contributing.svg">&nbsp;&nbsp;Contributing</h1>
+# Contributing
 
 We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to contribute to SurrealDB and help make it better! We want contributing to SurrealDB to be fun, enjoyable, and educational for anyone and everyone. All contributions are welcome, including features, bugfixes, and documentation changes, as well as updates and tweaks, blog posts, workshops, and everything else.
 
@@ -169,7 +169,7 @@ Pull requests are great, but there are many other areas where you can help.
 
 ### Blogging and speaking
 
-Blogging, speaking about, or creating tutorials about one of SurrealDB's many features. Mention [@surrealdb](https://twitter.com/surrealdb) on Twitter, and email team@surrealdb.com so we can give pointers and tips and help you spread the word by promoting your content on the different SurrealDB communication channels. Please add your blog posts and videos of talks to our [showcase](https://github.com/surrealdb/showcase) repo on GitHub.
+Blogging, speaking about, or creating tutorials about one of SurrealDB's many features. Mention [@surrealdb](https://twitter.com/surrealdb) on Twitter, and email community@surrealdb.com so we can give pointers and tips and help you spread the word by promoting your content on the different SurrealDB communication channels. Please add your blog posts and videos of talks to our [showcase](https://github.com/surrealdb/showcase) repo on GitHub.
 
 ### Presenting at meetups
 
@@ -187,9 +187,11 @@ Submitting documentation updates, enhancements, designs, or bug fixes, and fixin
 
 Join our growing community around the world, for help, ideas, and discussions regarding SurrealDB.
 
-- View our official [Blog](https://medium.com/surrealdb)
+- View our official [Blog](https://surrealdb.com/blog)
 - Follow us on [Twitter](https://twitter.com/surrealdb)
 - Connect with us on [LinkedIn](https://www.linkedin.com/company/surrealdb/)
 - Join our [Dev community](https://dev.to/surrealdb)
 - Chat live with us on [Discord](https://discord.gg/surrealdb)
+- Get involved on [Reddit](http://reddit.com/r/surrealdb/)
+- Read our blog posts on [Medium](https://medium.com/surrealdb)
 - Questions tagged #surrealdb on [StackOverflow](https://stackoverflow.com/questions/tagged/surrealdb)
