@@ -31,20 +31,26 @@ impl<'a> Document<'a> {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Get ns and db ids
-			let (ns, db) = run.get_ns_db_ids(opt.ns(), opt.db()).await?;
+			let ns = run.add_and_cache_ns(opt.ns(), opt.strict).await?;
+			let ns = ns.id.unwrap();
+			let db = run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
+			let db = db.id.unwrap();
 			// Store the left pointer edge
-			let tb = run.get_tb_id_by_name(ns, db, &l.tb).await?;
+			let tb = run.add_and_cache_tb(opt.ns(), opt.db(), &l.tb, opt.strict).await?;
+			let tb = tb.id.unwrap();
 			let key = crate::key::graph::new(ns, db, tb, &l.id, o, rid);
 			run.set(key, vec![]).await?;
 			// Store the left inner edge
-			let tb = run.get_tb_id_by_name(ns, db, &rid.tb).await?;
+			let tb = run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await?;
+			let tb = tb.id.unwrap();
 			let key = crate::key::graph::new(ns, db, tb, &rid.id, i, l);
 			run.set(key, vec![]).await?;
 			// Store the right inner edge
 			let key = crate::key::graph::new(ns, db, tb, &rid.id, o, r);
 			run.set(key, vec![]).await?;
 			// Store the right pointer edge
-			let tb = run.get_tb_id_by_name(ns, db, &r.tb).await?;
+			let tb = run.add_and_cache_tb(opt.ns(), opt.db(), &r.tb, opt.strict).await?;
+			let tb = tb.id.unwrap();
 			let key = crate::key::graph::new(ns, db, tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
