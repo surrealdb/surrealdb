@@ -20,7 +20,7 @@ impl Di {
 	pub fn new(ns: u32) -> Self {
 		Self {
 			__: b'/',
-			_a: b'+',
+			_a: b'*',
 			ns,
 			_b: b'!',
 			_c: b'd',
@@ -36,10 +36,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Di::new(
-			123,
+			1,
 		);
 		let enc = Di::encode(&val).unwrap();
-		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);
+		assert_eq!(enc, b"/*\0\0\0\x01!di");
 
 		let dec = Di::decode(&enc).unwrap();
 		assert_eq!(val, dec);

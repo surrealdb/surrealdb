@@ -23,7 +23,7 @@ impl Ti {
 	pub fn new(ns: u32, db: u32) -> Self {
 		Ti {
 			__: b'/',
-			_a: b'+',
+			_a: b'*',
 			ns,
 			_b: b'*',
 			db,
@@ -41,10 +41,11 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ti::new(
-			123u32,
-			234u32,
+			1,
+			2,
 		);
 		let enc = Ti::encode(&val).unwrap();
+		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02!ti");
 		let dec = Ti::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

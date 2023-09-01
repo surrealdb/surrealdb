@@ -34,6 +34,7 @@ mod tests {
 		use super::*;
 		let val = Ni::new();
 		let enc = Ni::encode(&val).unwrap();
+		assert_eq!(enc, b"/!ni");
 		let dec = Ni::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
