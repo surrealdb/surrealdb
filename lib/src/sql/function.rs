@@ -182,7 +182,7 @@ impl Function {
 				};
 				// Check permissions
 				if opt.check_perms(Action::View) {
-					match val.permissions {
+					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
 							return Err(Error::FunctionPermissions {

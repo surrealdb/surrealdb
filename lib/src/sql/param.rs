@@ -83,7 +83,7 @@ impl Param {
 						Ok(val) => {
 							// Check permissions
 							if opt.check_perms(Action::View) {
-								match val.permissions {
+								match &val.permissions {
 									Permission::Full => (),
 									Permission::None => {
 										return Err(Error::ParamPermissions {
@@ -103,7 +103,7 @@ impl Param {
 								}
 							}
 							// Return the value
-							Ok(val.value)
+							Ok(val.value.to_owned())
 						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),
