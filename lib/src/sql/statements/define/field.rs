@@ -25,7 +25,6 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::combinator::opt;
-use nom::combinator::peek;
 use nom::multi::many0;
 use nom::sequence::tuple;
 use revision::revisioned;
