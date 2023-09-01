@@ -1,5 +1,7 @@
 //! Stores the term list for doc_ids
 use crate::idx::ft::docids::DocId;
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,12 @@ pub struct Bk<'a> {
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
+}
+
+impl KeyRequirements for Bk<'_> {
+	fn key_category() -> KeyError {
+		KeyError::IndexBloomKey
+	}
 }
 
 impl<'a> Bk<'a> {

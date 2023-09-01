@@ -76,11 +76,11 @@ pub(crate) enum KeyError {
 	/// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
 	IndexRoot,
 	/// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}
-	IndexBloom,
+	IndexTermDocList,
 	/// crate::key::index::bd                /*{ns}*{db}*{tb}+{ix}!bd{id}
-	IndexData,
+	IndexBtreeNode,
 	/// crate::key::index::bf                /*{ns}*{db}*{tb}+{ix}!bf{id}
-	IndexFilter,
+	IndexTermDocFrequency,
 	/// crate::key::index::bi                /*{ns}*{db}*{tb}+{ix}!bi{id}
 	IndexBloomInfo,
 	/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}

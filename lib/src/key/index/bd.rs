@@ -1,5 +1,7 @@
 //! Stores BTree nodes for doc ids
 use crate::idx::trees::store::NodeId;
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,12 @@ pub struct Bd<'a> {
 	_f: u8,
 	_g: u8,
 	pub node_id: Option<NodeId>,
+}
+
+impl KeyRequirements for Bd<'_> {
+	fn key_category() -> KeyError {
+		KeyError::IndexBtreeNode
+	}
 }
 
 impl<'a> Bd<'a> {
