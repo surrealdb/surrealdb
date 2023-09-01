@@ -1,4 +1,6 @@
 //! Stores the key prefix for all keys under a scope
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,12 @@ pub struct Scope<'a> {
 
 pub fn new<'a>(ns: &'a str, db: &'a str, sc: &'a str) -> Scope<'a> {
 	Scope::new(ns, db, sc)
+}
+
+impl KeyRequirements for Scope<'_> {
+	fn key_category() -> KeyError {
+		KeyError::ScopeRoot
+	}
 }
 
 impl<'a> Scope<'a> {
