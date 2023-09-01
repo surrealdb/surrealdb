@@ -65,7 +65,7 @@ impl RemoveUserStatement {
 				// Delete the definition
 				let ns = run.get_ns(opt.ns()).await?;
 				let ns = ns.id.unwrap();
-				let db = run.get_db(opt.db(), opt.db()).await?;
+				let db = run.get_db(opt.ns(), opt.db()).await?;
 				let db = db.id.unwrap();
 				let key = crate::key::database::us::new(ns, db, &self.name);
 				run.del(key).await?;
