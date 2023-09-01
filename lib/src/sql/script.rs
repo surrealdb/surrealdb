@@ -60,7 +60,7 @@ pub fn script(i: &str) -> IResult<&str, Script> {
 }
 
 fn script_raw(i: &str) -> IResult<&str, &str> {
-	let _diving = crate::sql::parser::depth::dive()?;
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	recognize(many0(alt((
 		script_comment,
 		script_object,

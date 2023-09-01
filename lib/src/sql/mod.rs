@@ -93,7 +93,7 @@ pub use self::datetime::Datetime;
 pub use self::dir::Dir;
 pub use self::duration::Duration;
 pub use self::edges::Edges;
-pub use self::error::Error;
+pub use self::error::ParseError;
 pub use self::explain::Explain;
 pub use self::expression::Expression;
 pub use self::fetch::Fetch;

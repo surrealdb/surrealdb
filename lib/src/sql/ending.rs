@@ -105,6 +105,7 @@ pub fn subquery(i: &str) -> IResult<&str, ()> {
 			value((), comment),
 			value((), char(']')),
 			value((), char('}')),
+			value((), char(')')),
 			value((), char(';')),
 			value((), char(',')),
 			value((), eof),

@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
+use super::util::expect_delimited;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -126,27 +128,15 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = openparentheses(i)?;
-	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = cut(closeparentheses)(i)?;
-	Ok((i, v))
+	expect_delimited(openparentheses, map(value, Subquery::Value), closeparentheses)(i)
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
-	let _diving = crate::sql::parser::depth::dive()?;
-	alt((
-		|i| {
-			let (i, _) = openparentheses(i)?;
-			let (i, v) = subquery_inner(i)?;
-			let (i, _) = cut(closeparentheses)(i)?;
-			Ok((i, v))
-		},
-		|i| {
-			let (i, v) = subquery_inner(i)?;
-			let (i, _) = ending(i)?;
-			Ok((i, v))
-		},
-	))(i)
+	alt((expect_delimited(openparentheses, subquery_inner, closeparentheses), |i| {
+		let (i, v) = subquery_inner(i)?;
+		let (i, _) = ending(i)?;
+		Ok((i, v))
+	}))(i)
 }
 
 fn subquery_inner(i: &str) -> IResult<&str, Subquery> {

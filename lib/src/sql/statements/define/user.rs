@@ -9,7 +9,7 @@ use crate::iam::Role;
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
-use crate::sql::error::Error as SqlError;
+use crate::sql::error::ParseError as SqlError;
 use crate::sql::error::IResult;
 use crate::sql::escape::quote_str;
 use crate::sql::fmt::Fmt;

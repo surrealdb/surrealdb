@@ -9,6 +9,7 @@ use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::param::param;
@@ -244,7 +245,8 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 	let (i, prefix) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, is_o) = cut(alt((value(true, tag("->")), value(false, tag("<-")))))(i)?;
+	let (i, is_o) =
+		expected("`->` or `<-`", cut(alt((value(true, tag("->")), value(false, tag("<-"))))))(i)?;
 
 	if is_o {
 		let (i, (kind, with)) = cut(relate_o)(i)?;

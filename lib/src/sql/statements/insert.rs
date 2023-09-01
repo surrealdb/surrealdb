@@ -143,8 +143,10 @@ pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, ignore) = opt(terminated(tag_no_case("IGNORE"), shouldbespace))(i)?;
 	let (i, _) = tag_no_case("INTO")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, into) = cut(alt((map(table, Value::Table), map(param, Value::Param))))(i)?;
-	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, into) = cut(alt((
+		map(terminated(table, shouldbespace), Value::Table),
+		map(terminated(param, shouldbespace), Value::Param),
+	)))(i)?;
 	let (i, data) = cut(alt((values, single)))(i)?;
 	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;

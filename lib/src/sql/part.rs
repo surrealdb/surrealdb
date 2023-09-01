@@ -1,5 +1,4 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::closebracket;
 use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -13,7 +12,6 @@ use crate::sql::value::{self, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::char;
 use nom::combinator::{self, cut, map, not, peek};
 use nom::sequence::{preceded, terminated};
 use revision::revisioned;
@@ -22,6 +20,9 @@ use std::fmt;
 use std::str;
 
 use super::comment::mightbespace;
+use super::common::{closebracket, openbracket};
+use super::error::{expected, ExplainResultExt};
+use super::util::{expect_delimited, expect_terminator};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
@@ -149,7 +150,7 @@ pub fn part(i: &str) -> IResult<&str, Part> {
 	alt((
 		flatten,
 		preceded(tag("."), cut(dot_part)),
-		preceded(char('['), cut(bracketed_part)),
+		expect_delimited(openbracket, cut(bracketed_part), closebracket),
 		graph,
 	))(i)
 }
@@ -164,11 +165,21 @@ pub fn flatten(i: &str) -> IResult<&str, Part> {
 
 pub fn local_part(i: &str) -> IResult<&str, Part> {
 	// Cant cut dot part since it might be part of the flatten at the end.
-	alt((preceded(tag("."), dot_part), preceded(tag("["), cut(local_bracketed_part))))(i)
+	alt((
+		preceded(tag("."), dot_part),
+		expect_delimited(openbracket, cut(local_bracketed_part), closebracket),
+	))(i)
 }
 
 pub fn basic_part(i: &str) -> IResult<&str, Part> {
-	alt((preceded(tag("."), cut(dot_part)), preceded(tag("["), cut(basic_bracketed_part))))(i)
+	alt((preceded(tag("."), cut(dot_part)), |s| {
+		let (i, _) = openbracket(s)?;
+		let (i, v) =
+			expected("$, * or a number", cut(terminated(basic_bracketed_part, closebracket)))(i)
+				.explain("basic idioms don't allow computed values", bracketed_value)
+				.explain("basic idioms don't allow where selectors", bracketed_where)?;
+		Ok((i, v))
+	}))(i)
 }
 
 fn dot_part(i: &str) -> IResult<&str, Part> {
@@ -180,26 +191,22 @@ fn dot_part(i: &str) -> IResult<&str, Part> {
 
 fn basic_bracketed_part(i: &str) -> IResult<&str, Part> {
 	alt((
-		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
-		// Can cut here since it can't be a parameter.
-		combinator::value(Part::All, terminated(tag("$"), cut(closebracket))),
-		map(terminated(number, cut(closebracket)), Part::Index),
+		combinator::value(Part::All, tag("*")),
+		combinator::value(Part::Last, tag("$")),
+		map(number, Part::Index),
 	))(i)
 }
 
 fn local_bracketed_part(i: &str) -> IResult<&str, Part> {
-	alt((
-		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
-		map(terminated(number, cut(closebracket)), Part::Index),
-	))(i)
+	alt((combinator::value(Part::All, tag("*")), map(number, Part::Index)))(i)
+		.explain("using `[$]` in a local idiom is not allowed", tag("$"))
 }
 
 fn bracketed_part(i: &str) -> IResult<&str, Part> {
 	alt((
-		combinator::value(Part::All, terminated(tag("*"), cut(closebracket))),
-		// Don't cut here, the '$' could be part of a param.
-		combinator::value(Part::Last, terminated(tag("$"), closebracket)),
-		map(terminated(number, cut(closebracket)), Part::Index),
+		combinator::value(Part::All, tag("*")),
+		combinator::value(Part::Last, terminated(tag("$"), peek(closebracket))),
+		map(number, Part::Index),
 		bracketed_where,
 		bracketed_value,
 	))(i)
@@ -219,8 +226,6 @@ pub fn bracketed_where(i: &str) -> IResult<&str, Part> {
 	))(i)?;
 
 	let (i, v) = value::value(i)?;
-
-	let (i, _) = cut(closebracket)(i)?;
 	Ok((i, Part::Where(v)))
 }
 
@@ -230,7 +235,6 @@ pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
 		map(param::param, Value::Param),
 		map(idiom::basic, Value::Idiom),
 	))(i)?;
-	let (i, _) = cut(closebracket)(i)?;
 	Ok((i, Part::Value(v)))
 }
 

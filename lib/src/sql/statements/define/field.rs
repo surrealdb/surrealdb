@@ -7,6 +7,9 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -20,7 +23,9 @@ use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
+use nom::combinator::peek;
 use nom::multi::many0;
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -107,13 +112,17 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = idiom::local(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, name) = cut(idiom::local)(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, _) = expect_tag_no_case("ON")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
+	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, what) = expected("a table name", cut(ident))(i)?;
 	let (i, opts) = many0(field_opts)(i)?;
+	let (i, _) = expected(
+		"one of FLEXIBLE, TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
+		cut(peek(ending::subquery)),
+	)(i)?;
 	// Create the base statement
 	let mut res = DefineFieldStatement {
 		name,

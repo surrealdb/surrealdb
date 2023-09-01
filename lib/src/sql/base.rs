@@ -8,6 +8,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::error::expected;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Base {
@@ -35,14 +37,17 @@ impl fmt::Display for Base {
 }
 
 pub fn base(i: &str) -> IResult<&str, Base> {
-	alt((
-		value(Base::Ns, tag_no_case("NAMESPACE")),
-		value(Base::Db, tag_no_case("DATABASE")),
-		value(Base::Root, tag_no_case("ROOT")),
-		value(Base::Ns, tag_no_case("NS")),
-		value(Base::Db, tag_no_case("DB")),
-		value(Base::Root, tag_no_case("KV")),
-	))(i)
+	expected(
+		"a base, one of NAMESPACE, DATABASE, ROOT or KV",
+		alt((
+			value(Base::Ns, tag_no_case("NAMESPACE")),
+			value(Base::Db, tag_no_case("DATABASE")),
+			value(Base::Root, tag_no_case("ROOT")),
+			value(Base::Ns, tag_no_case("NS")),
+			value(Base::Db, tag_no_case("DB")),
+			value(Base::Root, tag_no_case("KV")),
+		)),
+	)(i)
 }
 
 pub fn base_or_scope(i: &str) -> IResult<&str, Base> {
