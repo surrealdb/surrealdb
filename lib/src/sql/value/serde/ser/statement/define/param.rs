@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
+use crate::sql::Permission;
 use crate::sql::Strand;
 use crate::sql::Value;
 use ser::Serializer as _;
@@ -40,6 +41,7 @@ pub struct SerializeDefineParamStatement {
 	name: Ident,
 	value: Value,
 	comment: Option<Strand>,
+	permissions: Permission,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
@@ -60,6 +62,9 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"permissions" => {
+				self.permissions = value.serialize(ser::permission::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineParamStatement::{key}`"
@@ -74,6 +79,7 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			name: self.name,
 			value: self.value,
 			comment: self.comment,
+			permissions: self.permissions,
 		})
 	}
 }

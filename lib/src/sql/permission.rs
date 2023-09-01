@@ -157,7 +157,7 @@ fn full(i: &str) -> IResult<&str, Permissions> {
 }
 
 fn specific(i: &str) -> IResult<&str, Permissions> {
-	let (i, perms) = separated_list1(commasorspace, permission)(i)?;
+	let (i, perms) = separated_list1(commasorspace, rule)(i)?;
 	Ok((
 		i,
 		Permissions {
@@ -215,6 +215,16 @@ impl Default for Permission {
 	}
 }
 
+impl Permission {
+	pub fn is_none(&self) -> bool {
+		matches!(self, Permission::None)
+	}
+
+	pub fn is_full(&self) -> bool {
+		matches!(self, Permission::Full)
+	}
+}
+
 impl Display for Permission {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
@@ -225,7 +235,17 @@ impl Display for Permission {
 	}
 }
 
-fn permission(i: &str) -> IResult<&str, Vec<(PermissionKind, Permission)>> {
+pub fn permission(i: &str) -> IResult<&str, Permission> {
+	alt((
+		combinator::value(Permission::None, tag_no_case("NONE")),
+		combinator::value(Permission::Full, tag_no_case("FULL")),
+		map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
+			Permission::Specific(v)
+		}),
+	))(i)
+}
+
+fn rule(i: &str) -> IResult<&str, Vec<(PermissionKind, Permission)>> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	cut(|i| {
