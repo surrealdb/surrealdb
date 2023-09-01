@@ -153,7 +153,7 @@ pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 			map(terminated(param, shouldbespace), Value::Param),
 		))),
 	)(i)
-	.explain("expressions aren't allowed here", value)?;
+	.explain("expressions aren't allowed here.", value)?;
 	let (i, data) = cut(alt((values, single)))(i)?;
 	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
