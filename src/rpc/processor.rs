@@ -130,13 +130,8 @@ impl Processor {
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `PATCH`
-			"patch" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.patch(v, o).await.map(Into::into).map_err(Into::into),
-				_ => Err(Failure::INVALID_PARAMS),
-			},
-			// Update a value or values in the database using `PATCH`
-			"diff" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.diff(v, o).await.map(Into::into).map_err(Into::into),
+			"patch" => match params.needs_one_two_or_three() {
+				Ok((v, o, d)) => self.patch(v, o, d).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Delete a value or values from the database
@@ -440,41 +435,16 @@ impl Processor {
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, what: Value, data: Value) -> Result<Value, Error> {
+	async fn patch(&self, what: Value, data: Value, diff: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what PATCH $data RETURN AFTER";
-		// Specify the query parameters
-		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
-			String::from("data") => data,
-			=> &self.vars
-		});
-		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
-		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
+		let sql = match diff.is_true() {
+			true => "UPDATE $what PATCH $data RETURN DIFF",
+			false => "UPDATE $what PATCH $data RETURN AFTER",
 		};
-		// Return the result to the client
-		Ok(res)
-	}
-
-	// ------------------------------
-	// Methods for patching
-	// ------------------------------
-
-	async fn diff(&self, what: Value, data: Value) -> Result<Value, Error> {
-		// Return a single result?
-		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
-		// Specify the SQL query string
-		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
