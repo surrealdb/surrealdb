@@ -8,6 +8,8 @@ use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::is_pretty;
+use crate::sql::fmt::pretty_indent;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
@@ -23,7 +25,7 @@ use nom::multi::many0;
 use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -88,7 +90,13 @@ impl Display for DefineFieldStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		if !self.permissions.is_full() {
-			write!(f, " {}", self.permissions)?;
+			let _indent = if is_pretty() {
+				Some(pretty_indent())
+			} else {
+				f.write_char(' ')?;
+				None
+			};
+			write!(f, "{}", self.permissions)?;
 		}
 		Ok(())
 	}

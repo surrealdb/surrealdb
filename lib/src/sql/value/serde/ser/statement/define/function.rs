@@ -4,6 +4,7 @@ use crate::sql::value::serde::ser;
 use crate::sql::Block;
 use crate::sql::Ident;
 use crate::sql::Kind;
+use crate::sql::Permission;
 use crate::sql::Strand;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -42,6 +43,7 @@ pub struct SerializeDefineFunctionStatement {
 	args: Vec<(Ident, Kind)>,
 	block: Block,
 	comment: Option<Strand>,
+	permissions: Permission,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
@@ -65,6 +67,9 @@ impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"permissions" => {
+				self.permissions = value.serialize(ser::permission::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineFunctionStatement::{key}`"
@@ -80,6 +85,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
 			args: self.args,
 			block: self.block,
 			comment: self.comment,
+			permissions: self.permissions,
 		})
 	}
 }

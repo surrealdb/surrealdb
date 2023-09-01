@@ -8,7 +8,10 @@ use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::is_pretty;
+use crate::sql::fmt::pretty_indent;
 use crate::sql::ident::{ident, Ident};
+use crate::sql::permission::{permission, Permission};
 use crate::sql::strand::{strand, Strand};
 use crate::sql::value::{value, Value};
 use derive::Store;
@@ -18,7 +21,7 @@ use nom::character::complete::char;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -26,6 +29,7 @@ pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
 	pub comment: Option<Strand>,
+	pub permissions: Permission,
 }
 
 impl DefineParamStatement {
@@ -59,6 +63,15 @@ impl Display for DefineParamStatement {
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
+		if !self.permissions.is_full() {
+			let _indent = if is_pretty() {
+				Some(pretty_indent())
+			} else {
+				f.write_char(' ')?;
+				None
+			};
+			write!(f, "PERMISSIONS {}", self.permissions)?;
+		}
 		Ok(())
 	}
 }
@@ -85,6 +98,9 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 			DefineParamOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineParamOption::Permissions(v) => {
+				res.permissions = v;
+			}
 		}
 	}
 	// Check necessary options
@@ -98,10 +114,11 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 enum DefineParamOption {
 	Value(Value),
 	Comment(Strand),
+	Permissions(Permission),
 }
 
 fn param_opts(i: &str) -> IResult<&str, DefineParamOption> {
-	alt((param_value, param_comment))(i)
+	alt((param_value, param_comment, param_permissions))(i)
 }
 
 fn param_value(i: &str) -> IResult<&str, DefineParamOption> {
@@ -118,4 +135,12 @@ fn param_comment(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = strand(i)?;
 	Ok((i, DefineParamOption::Comment(v)))
+}
+
+fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = permission(i)?;
+	Ok((i, DefineParamOption::Permissions(v)))
 }

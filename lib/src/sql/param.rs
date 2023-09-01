@@ -2,9 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::Action;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::value::Value;
+use crate::sql::Permission;
 use nom::character::complete::char;
 use nom::combinator::cut;
 use revision::revisioned;
@@ -69,14 +71,40 @@ impl Param {
 				Some(v) => v.compute(ctx, opt, txn, doc).await,
 				// The param has not been set locally
 				None => {
-					// Claim transaction
-					let mut run = txn.lock().await;
-					// Get the param definition
-					let val = run.get_pa(opt.ns(), opt.db(), v).await;
+					let val = {
+						// Claim transaction
+						let mut run = txn.lock().await;
+						// Get the param definition
+						run.get_pa(opt.ns(), opt.db(), v).await
+					};
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
-						Ok(v) => Ok(v.value),
+						Ok(val) => {
+							// Check permissions
+							if opt.check_perms(Action::View) {
+								match val.permissions {
+									Permission::Full => (),
+									Permission::None => {
+										return Err(Error::ParamPermissions {
+											name: v.to_owned(),
+										})
+									}
+									Permission::Specific(e) => {
+										// Disable permissions
+										let opt = &opt.new_with_perms(false);
+										// Process the PERMISSION clause
+										if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+											return Err(Error::ParamPermissions {
+												name: v.to_owned(),
+											});
+										}
+									}
+								}
+							}
+							// Return the value
+							Ok(val.value)
+						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),
 					}
