@@ -125,13 +125,18 @@ impl Processor {
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `MERGE`
-			"change" | "merge" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.change(v, o).await.map(Into::into).map_err(Into::into),
+			"merge" => match params.needs_one_or_two() {
+				Ok((v, o)) => self.merge(v, o).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `PATCH`
-			"modify" | "patch" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.modify(v, o).await.map(Into::into).map_err(Into::into),
+			"patch" => match params.needs_one_or_two() {
+				Ok((v, o)) => self.patch(v, o).await.map(Into::into).map_err(Into::into),
+				_ => Err(Failure::INVALID_PARAMS),
+			},
+			// Update a value or values in the database using `PATCH`
+			"diff" => match params.needs_one_or_two() {
+				Ok((v, o)) => self.diff(v, o).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Delete a value or values from the database
@@ -404,10 +409,10 @@ impl Processor {
 	}
 
 	// ------------------------------
-	// Methods for changing
+	// Methods for merging
 	// ------------------------------
 
-	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
+	async fn merge(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -432,16 +437,44 @@ impl Processor {
 	}
 
 	// ------------------------------
-	// Methods for modifying
+	// Methods for patching
 	// ------------------------------
 
-	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
+	async fn patch(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what PATCH $data RETURN AFTER";
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
+			=> &self.vars
+		});
+		// Execute the query on the database
+		let mut res = kvs.execute(sql, &self.session, var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for patching
+	// ------------------------------
+
+	async fn diff(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the SQL query string
+		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
