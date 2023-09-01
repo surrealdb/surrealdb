@@ -1,4 +1,6 @@
 //! Stores a LIVE SELECT query definition on the table
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,6 +39,12 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q', 0xff]);
 	k
+}
+
+impl KeyRequirements for Lq<'_> {
+	fn key_category() -> KeyError {
+		KeyError::TableLiveQuery
+	}
 }
 
 impl<'a> Lq<'a> {
