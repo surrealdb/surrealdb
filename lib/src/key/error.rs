@@ -9,7 +9,7 @@ pub(crate) enum KeyError {
 	NamespaceIdentifier,
 	/// crate::key::root::ns                 /!ns{ns}
 	Namespace,
-	/// crate::key::root::us                 /!us
+	/// crate::key::root::us                 /!us{us}
 	User,
 	///
 	/// crate::key::node::all                /${nd}
@@ -27,6 +27,8 @@ pub(crate) enum KeyError {
 	DatabaseLogAlias,
 	/// crate::key::namespace::tk            /*{ns}!tk{tk}
 	NamespaceToken,
+	/// crate::key::namespace::us            /*{ns}!us{us}
+	NamespaceUser,
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,

@@ -1,4 +1,6 @@
 //! Stores the key prefix for all keys under a namespace
+use crate::key::error::KeyError;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,12 @@ pub struct All<'a> {
 
 pub fn new(ns: &str) -> All<'_> {
 	All::new(ns)
+}
+
+impl KeyRequirements for All<'_> {
+	fn key_category() -> KeyError {
+		KeyError::NamespaceRoot
+	}
 }
 
 impl<'a> All<'a> {

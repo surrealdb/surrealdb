@@ -5,7 +5,7 @@
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
 /// crate::key::root::ns                 /!ns{ns}
-/// crate::key::root::us                 /!us
+/// crate::key::root::us                 /!us{us}
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
@@ -15,6 +15,7 @@
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::tk            /*{ns}!tk{tk}
+/// crate::key::namespace::us            /*{ns}!us{us}
 ///
 /// crate::key::database::all            /*{ns}*{db}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
