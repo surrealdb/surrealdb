@@ -57,7 +57,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: make
-          args: ci-workspace-coverage-complete
+          args: ci-workspace-coverage
 
       - name: Debug info
         if: always()
@@ -237,13 +237,13 @@ jobs:
       - name: Download amd64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-nightly.linux-amd64
+          name: surreal-${{ github.ref_name }}.linux-amd64
           path: amd64
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-nightly.linux-arm64
+          name: surreal-${{ github.ref_name }}.linux-arm64
           path: arm64
 
       - name: Set file permissions
@@ -315,19 +315,19 @@ jobs:
         include:
           - arch: x86_64-apple-darwin
             os: macos-latest
-            file: surreal-nightly.darwin-amd64
+            file: surreal-${{ github.ref_name }}.darwin-amd64
           - arch: aarch64-apple-darwin
             os: macos-latest
-            file: surreal-nightly.darwin-arm64
+            file: surreal-${{ github.ref_name }}.darwin-arm64
           - arch: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            file: surreal-nightly.linux-amd64
+            file: surreal-${{ github.ref_name }}.linux-amd64
           - arch: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            file: surreal-nightly.linux-arm64
+            file: surreal-${{ github.ref_name }}.linux-arm64
           - arch: x86_64-pc-windows-msvc
             os: windows-latest
-            file: surreal-nightly.windows-amd64
+            file: surreal-${{ github.ref_name }}.windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Download artifacts
@@ -346,15 +346,15 @@ jobs:
         if: ${{ !contains(matrix.arch, 'windows') }}
         shell: bash
         run: |
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.tgz s3://download.surrealdb.com/nightly/
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.tgz s3://download.surrealdb.com/${{ github.ref_name }}/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/${{ github.ref_name }}/
 
       - name: Publish windows binaries
         if: ${{ contains(matrix.arch, 'windows') }}
         shell: bash
         run: |
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.exe s3://download.surrealdb.com/nightly/
-          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.exe s3://download.surrealdb.com/${{ github.ref_name }}/
+          aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/${{ github.ref_name }}/
 
   package-macos:
     name: Package macOS universal binary
@@ -364,13 +364,13 @@ jobs:
       - name: Download amd64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-nightly.darwin-amd64
+          name: surreal-${{ github.ref_name }}.darwin-amd64
           path: amd64
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v3
         with:
-          name: surreal-nightly.darwin-arm64
+          name: surreal-${{ github.ref_name }}.darwin-arm64
           path: arm64
 
       - name: Configure AWS
@@ -383,13 +383,13 @@ jobs:
       - name: Package universal MacOS binary
         shell: bash
         run: |
-          FILE="surreal-nightly.darwin-universal"
+          FILE="surreal-${{ github.ref_name }}.darwin-universal"
           lipo -create -output surreal amd64/surreal arm64/surreal
           chmod +x surreal
           tar -zcvf $FILE.tgz surreal
           echo $(shasum -a 256 $FILE.tgz | cut -f1 -d' ') > $FILE.txt
-          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/nightly/
-          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/nightly/
+          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ github.ref_name }}/
+          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ github.ref_name }}/
 
   deploy:
     name: Deploy
