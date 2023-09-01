@@ -1,7 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::key::error::KeyCategory;
-use crate::key::error::KeyCategory::Unknown;
 use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -664,7 +663,9 @@ impl From<JWTError> for Error {
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists(Unknown),
+			echodb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -675,7 +676,9 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists(Unknown),
+			indxdb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -686,7 +689,9 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists(Unknown),
+			tikv::Error::DuplicateKeyInsertion => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
