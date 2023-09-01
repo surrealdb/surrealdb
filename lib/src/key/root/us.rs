@@ -1,4 +1,4 @@
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,8 @@ pub fn suffix() -> Vec<u8> {
 }
 
 impl KeyRequirements for Us<'_> {
-	fn key_category() -> KeyError {
-		KeyError::User
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::User
 	}
 }
 

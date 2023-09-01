@@ -1,4 +1,4 @@
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE EVENT config definition
 use derive::Key;
@@ -36,8 +36,8 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Ev<'_> {
-	fn key_category() -> KeyError {
-		KeyError::TableEvent
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::TableEvent
 	}
 }
 

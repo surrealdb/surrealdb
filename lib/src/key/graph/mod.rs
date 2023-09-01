@@ -1,5 +1,5 @@
 //! Stores a graph edge pointer
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::sql::dir::Dir;
 use crate::sql::id::Id;
@@ -164,8 +164,8 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Ve
 }
 
 impl KeyRequirements for Graph<'_> {
-	fn key_category() -> KeyError {
-		KeyError::Graph
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Graph
 	}
 }
 

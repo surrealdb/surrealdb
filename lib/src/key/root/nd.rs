@@ -1,5 +1,5 @@
 //! Stores cluster membership information
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,8 @@ pub struct Nd {
 }
 
 impl KeyRequirements for Nd {
-	fn key_category() -> KeyError {
-		KeyError::Node
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Node
 	}
 }
 

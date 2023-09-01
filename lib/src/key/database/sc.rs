@@ -1,5 +1,5 @@
 //! Stores a DEFINE SCOPE config definition
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -34,8 +34,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Sc<'_> {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseScope
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseScope
 	}
 }
 

@@ -1,5 +1,5 @@
 //! Stores database timestamps
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -39,8 +39,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Ts<'_> {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseTimestamp
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseTimestamp
 	}
 }
 

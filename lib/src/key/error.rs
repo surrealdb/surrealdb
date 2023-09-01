@@ -1,4 +1,10 @@
-pub(crate) enum KeyError {
+use std::fmt::{Display, Formatter};
+
+#[derive(Debug, Copy, Clone)]
+pub enum KeyCategory {
+	/// This category is reserved for cases when we do not know the category
+	/// It should be caught and re-populated with the correct category where appropriate
+	Unknown,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::hb                 /!hb{ts}/{nd}
@@ -108,4 +114,63 @@ pub(crate) enum KeyError {
 	///
 	/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
 	Graph,
+}
+
+impl Display for KeyCategory {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let name = match self {
+			KeyCategory::Unknown => "Unknown",
+			KeyCategory::Root => "Root",
+			KeyCategory::Heartbeat => "Heartbeat",
+			KeyCategory::Node => "Node",
+			KeyCategory::NamespaceIdentifier => "NamespaceIdentifier",
+			KeyCategory::Namespace => "Namespace",
+			KeyCategory::User => "User",
+			KeyCategory::NodeRoot => "NodeRoot",
+			KeyCategory::NodeLiveQuery => "NodeLiveQuery",
+			KeyCategory::NamespaceRoot => "NamespaceRoot",
+			KeyCategory::DatabaseAlias => "DatabaseAlias",
+			KeyCategory::DatabaseIdentifier => "DatabaseIdentifier",
+			KeyCategory::DatabaseLogAlias => "DatabaseLogAlias",
+			KeyCategory::NamespaceToken => "NamespaceToken",
+			KeyCategory::NamespaceUser => "NamespaceUser",
+			KeyCategory::DatabaseRoot => "DatabaseRoot",
+			KeyCategory::DatabaseAnalyzer => "DatabaseAnalyzer",
+			KeyCategory::DatabaseFunction => "DatabaseFunction",
+			KeyCategory::DatabaseLog => "DatabaseLog",
+			KeyCategory::DatabaseParameter => "DatabaseParameter",
+			KeyCategory::DatabaseScope => "DatabaseScope",
+			KeyCategory::DatabaseTable => "DatabaseTable",
+			KeyCategory::DatabaseTableIdentifier => "DatabaseTableIdentifier",
+			KeyCategory::DatabaseToken => "DatabaseToken",
+			KeyCategory::DatabaseTimestamp => "DatabaseTimestamp",
+			KeyCategory::DatabaseUser => "DatabaseUser",
+			KeyCategory::DatabaseVersionstamp => "DatabaseVersionstamp",
+			KeyCategory::ScopeRoot => "ScopeRoot",
+			KeyCategory::ScopeToken => "ScopeToken",
+			KeyCategory::TableRoot => "TableRoot",
+			KeyCategory::TableEvent => "TableEvent",
+			KeyCategory::TableField => "TableField",
+			KeyCategory::TableView => "TableView",
+			KeyCategory::IndexDefinition => "IndexDefinition",
+			KeyCategory::TableLiveQuery => "TableLiveQuery",
+			KeyCategory::IndexRoot => "IndexRoot",
+			KeyCategory::IndexTermDocList => "IndexTermDocList",
+			KeyCategory::IndexBtreeNode => "IndexBtreeNode",
+			KeyCategory::IndexTermDocFrequency => "IndexTermDocFrequency",
+			KeyCategory::IndexDocKeys => "IndexDocKeys",
+			KeyCategory::IndexTermList => "IndexTermList",
+			KeyCategory::IndexBTreeNodeDocLengths => "IndexBTreeNodeDocLengths",
+			KeyCategory::IndexOffset => "IndexOffset",
+			KeyCategory::IndexBTreeNodePostings => "IndexBTreeNodePostings",
+			KeyCategory::IndexFullTextState => "IndexFullTextState",
+			KeyCategory::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
+			KeyCategory::IndexTerms => "IndexTerms",
+			KeyCategory::Index => "Index",
+			KeyCategory::ChangeFeed => "ChangeFeed",
+			KeyCategory::Thing => "Thing",
+			KeyCategory::Graph => "Graph",
+		};
+		write!(f, "{}", name)
+	}
 }

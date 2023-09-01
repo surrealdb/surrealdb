@@ -66,7 +66,7 @@ pub mod debug;
 pub(crate) mod error;
 pub mod graph;
 pub mod index;
-mod key_req;
+pub(crate) mod key_req;
 pub mod namespace;
 pub mod node;
 pub mod root;

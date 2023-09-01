@@ -1,4 +1,4 @@
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE FUNCTION config definition
 use derive::Key;
@@ -34,8 +34,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Fc<'_> {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseFunction
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseFunction
 	}
 }
 

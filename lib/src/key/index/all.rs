@@ -1,5 +1,5 @@
 //! Stores the key prefix for all keys under an index
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -22,8 +22,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> All<'a> {
 }
 
 impl KeyRequirements for All<'_> {
-	fn key_category() -> KeyError {
-		KeyError::IndexRoot
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::IndexRoot
 	}
 }
 

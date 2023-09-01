@@ -1,5 +1,5 @@
 //! Stores database versionstamps
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
 }
 
 impl KeyRequirements for Vs<'_> {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseVersionstamp
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseVersionstamp
 	}
 }
 

@@ -102,6 +102,7 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
+	use crate::key::key_req::KeyRequirements;
 	use crate::kvs::Datastore;
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
@@ -140,10 +141,13 @@ mod tests {
 		//
 
 		let mut tx0 = ds.transaction(true, false).await.unwrap();
-		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
-		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
+		let ns_root = crate::key::root::ns::new(ns);
+		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
+		let db_root = crate::key::namespace::db::new(ns, db);
+		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
 		let tb = tb.clone();
-		tx0.put(&crate::key::database::tb::new(ns, db, tb.as_ref()), dtb.clone()).await.unwrap();
+		let tb_root = crate::key::database::tb::new(ns, db, tb.as_ref());
+		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
 		// Let the db remember the timestamp for the current versionstamp

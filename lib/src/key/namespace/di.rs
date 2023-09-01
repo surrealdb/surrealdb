@@ -1,4 +1,4 @@
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 /// Stores a database ID generator state
 use derive::Key;
@@ -19,8 +19,8 @@ pub fn new(ns: u32) -> Di {
 }
 
 impl KeyRequirements for Di {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseIdentifier
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseIdentifier
 	}
 }
 impl Di {

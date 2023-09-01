@@ -18,6 +18,8 @@ use std::sync::Arc;
 // self or the fdb-rs Transaction it contains.
 //
 // We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use foundationdb::options::MutationType;
 use futures::lock::Mutex;
 use once_cell::sync::Lazy;
@@ -295,7 +297,12 @@ impl Transaction {
 	/// Suppose you've sent a query like `CREATE author:john SET ...` with
 	/// the namespace `test` and the database `test`-
 	/// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
-	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -310,7 +317,7 @@ impl Transaction {
 		}
 		let key: Vec<u8> = key.into();
 		if self.exi(key.clone().as_slice()).await? {
-			return Err(Error::TxKeyAlreadyExists);
+			return Err(Error::TxKeyAlreadyExists(category));
 		}
 		// Set the key
 		let key: &[u8] = &key[..];

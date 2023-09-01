@@ -1,5 +1,5 @@
 //! Stores a DEFINE TOKEN ON NAMESPACE config definition
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,8 @@ pub fn suffix(ns: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Tk<'_> {
-	fn key_category() -> KeyError {
-		KeyError::NamespaceToken
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::NamespaceToken
 	}
 }
 

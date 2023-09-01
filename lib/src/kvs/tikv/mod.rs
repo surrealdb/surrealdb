@@ -1,6 +1,8 @@
 #![cfg(feature = "kv-tikv")]
 
 use crate::err::Error;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -257,7 +259,12 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -271,13 +278,13 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key = key.into();
+		let key_tikv = key.into();
 		// Get the val
 		let val = val.into();
 		// Set the key if empty
-		match self.inner.key_exists(key.clone()).await? {
-			false => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxKeyAlreadyExists),
+		match self.inner.key_exists(key_tikv.clone()).await? {
+			false => self.inner.put(key_tikv, val).await?,
+			_ => return Err(Error::TxKeyAlreadyExists(category)),
 		};
 		// Return result
 		Ok(())

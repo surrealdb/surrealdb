@@ -1,5 +1,5 @@
 //! Stores FullText index states
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -20,8 +20,8 @@ pub struct Bs<'a> {
 }
 
 impl KeyRequirements for Bs<'_> {
-	fn key_category() -> KeyError {
-		KeyError::IndexFullTextState
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::IndexFullTextState
 	}
 }
 

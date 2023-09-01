@@ -1,6 +1,8 @@
 #![cfg(feature = "kv-speedb")]
 
 use crate::err::Error;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -261,7 +263,12 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -283,7 +290,7 @@ impl Transaction {
 		// Set the key if empty
 		match inner.get_opt(&key, &self.ro)? {
 			None => inner.put(key, val)?,
-			_ => return Err(Error::TxKeyAlreadyExists),
+			_ => return Err(Error::TxKeyAlreadyExists(category)),
 		};
 		// Return result
 		Ok(())

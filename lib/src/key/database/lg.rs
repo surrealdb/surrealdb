@@ -1,5 +1,5 @@
 //! Stores a DEFINE LOGIN ON DATABASE config definition
-use crate::key::error::KeyError;
+use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -34,8 +34,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Lg<'_> {
-	fn key_category() -> KeyError {
-		KeyError::DatabaseLog
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseLog
 	}
 }
 
