@@ -435,12 +435,14 @@ async fn verify_root_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-	let user_res = tx.get_root_user(user).await?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_root_user(user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 async fn verify_ns_creds(
@@ -449,16 +451,14 @@ async fn verify_ns_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-
-	let user_res = match tx.get_ns_user(ns, user).await {
-		Ok(u) => Ok(u),
-		Err(e) => Err(e),
-	}?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_ns_user(ns, user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 async fn verify_db_creds(
@@ -468,16 +468,14 @@ async fn verify_db_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-
-	let user_res = match tx.get_db_user(ns, db, user).await {
-		Ok(u) => Ok(u),
-		Err(e) => Err(e),
-	}?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_db_user(ns, db, user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
