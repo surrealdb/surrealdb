@@ -311,7 +311,7 @@ impl Datastore {
 				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
 				let ctx = Context::default();
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
+				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
 				txn.lock().await.commit().await?;
 				Ok(())
 			}
@@ -340,15 +340,6 @@ impl Datastore {
 		self
 	}
 
-	/// Creates a new datastore instance
-	///
-	/// Use this for clustered environments.
-	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
-		let ds = Datastore::new(path).await?;
-		ds.bootstrap().await?;
-		Ok(ds)
-	}
-
 	// Initialise bootstrap with implicit values intended for runtime
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		self.bootstrap_full(&self.id).await
@@ -359,12 +350,32 @@ impl Datastore {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
-		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
-		tx.commit().await?;
+		let archived = match self.register_remove_and_archive(&mut tx, node_id, now).await {
+			Ok(archived) => {
+				tx.commit().await?;
+				archived
+			}
+			Err(e) => {
+				error!("Error bootstrapping mark phase: {:?}", e);
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
 
 		let mut tx = self.transaction(true, false).await?;
-		self.remove_archived(&mut tx, archived).await?;
-		tx.commit().await
+		match self.remove_archived(&mut tx, archived).await {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error bootstrapping sweep phase: {:?}", e);
+				match tx.cancel().await {
+					Ok(_) => Err(e),
+					Err(e) => {
+						// We have a nested error
+						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
+					}
+				}
+			}
+		}
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -405,6 +416,7 @@ impl Datastore {
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
+			// TODO should be delr in case of nested entries
 			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
@@ -529,7 +541,8 @@ impl Datastore {
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
 		let mut ret = vec![];
 		for lq in lqs {
-			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
+			let lvs =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
 			let archived_lvs = lvs.clone().archive(this_node_id.clone());
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);
@@ -546,6 +559,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(ts, limit).await?;
+		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;

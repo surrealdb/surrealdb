@@ -110,19 +110,19 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
-	/// Check if this expression is an 'id' field
+	/// Check if this Idiom is an 'id' field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
-	/// Check if this expression is an 'in' field
+	/// Check if this Idiom is an 'in' field
 	pub(crate) fn is_in(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&IN[0])
 	}
-	/// Check if this expression is an 'out' field
+	/// Check if this Idiom is an 'out' field
 	pub(crate) fn is_out(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&OUT[0])
 	}
-	/// Check if this expression is an 'out' field
+	/// Check if this Idiom is a 'meta' field
 	pub(crate) fn is_meta(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&META[0])
 	}

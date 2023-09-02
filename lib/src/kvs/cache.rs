@@ -20,7 +20,10 @@ use std::sync::Arc;
 pub enum Entry {
 	// Single definitions
 	Db(Arc<DefineDatabaseStatement>),
+	Fc(Arc<DefineFunctionStatement>),
+	Ix(Arc<DefineIndexStatement>),
 	Ns(Arc<DefineNamespaceStatement>),
+	Pa(Arc<DefineParamStatement>),
 	Tb(Arc<DefineTableStatement>),
 	// Multi definitions
 	Azs(Arc<[DefineAnalyzerStatement]>),
@@ -38,9 +41,10 @@ pub enum Entry {
 	Nus(Arc<[DefineUserStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
-	Seq(U32),
 	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
+	// Sequences
+	Seq(U32),
 }
 
 #[derive(Default)]

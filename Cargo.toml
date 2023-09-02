@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -36,7 +36,7 @@ strip = false
 argon2 = "0.5.1"
 axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
 axum-client-ip = "0.4.1"
-axum-extra = { version = "0.7.7", features = ["typed-routing"] }
+axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.2"
 bytes = "1.4.0"

@@ -1,5 +1,4 @@
 use super::classes;
-use crate::sql::number::decimal_is_integer;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
 use js::Array;
@@ -26,7 +25,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::Strand(v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => Ok(js::Value::new_int(ctx.clone(), *v as i32)),
 			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx.clone(), *v)),
-			&Value::Number(Number::Decimal(v)) => match decimal_is_integer(&v) {
+			&Value::Number(Number::Decimal(v)) => match v.is_integer() {
 				true => Ok(js::Value::new_int(ctx.clone(), v.try_into().unwrap_or_default())),
 				false => Ok(js::Value::new_float(ctx.clone(), v.try_into().unwrap_or_default())),
 			},

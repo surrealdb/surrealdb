@@ -1,5 +1,6 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -34,6 +35,7 @@ pub mod vector;
 /// Attempts to run any function
 pub async fn run(
 	ctx: &Context<'_>,
+	opt: &Options,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
@@ -42,12 +44,14 @@ pub async fn run(
 	if name.eq("sleep")
 		|| name.starts_with("search")
 		|| name.starts_with("http")
+		|| name.starts_with("type::field")
+		|| name.starts_with("type::fields")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, Some(txn), doc, name, args).await
+		asynchronous(ctx, Some(opt), Some(txn), doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -320,6 +324,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
 	ctx: &Context<'_>,
+	opt: Option<&Options>,
 	txn: Option<&Transaction>,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
@@ -365,6 +370,9 @@ pub async fn asynchronous(
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
+		//
+		"type::field" => r#type::field((ctx, opt, txn, doc)).await,
+		"type::fields" => r#type::fields((ctx, opt, txn, doc)).await,
 	)
 }
 

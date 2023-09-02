@@ -1,4 +1,8 @@
+use crate::ctx::Context;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::parser::idiom;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -17,6 +21,56 @@ pub fn decimal((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_duration().map(Value::from)
+}
+
+pub async fn field(
+	(ctx, opt, txn, doc): (
+		&Context<'_>,
+		Option<&Options>,
+		Option<&Transaction>,
+		Option<&CursorDoc<'_>>,
+	),
+	(val,): (String,),
+) -> Result<Value, Error> {
+	match (opt, txn) {
+		(Some(opt), Some(txn)) => {
+			// Parse the string as an Idiom
+			let idi = idiom(&val)?;
+			// Return the Idiom or fetch the field
+			match opt.projections {
+				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
+				false => Ok(idi.into()),
+			}
+		}
+		_ => Ok(Value::None),
+	}
+}
+
+pub async fn fields(
+	(ctx, opt, txn, doc): (
+		&Context<'_>,
+		Option<&Options>,
+		Option<&Transaction>,
+		Option<&CursorDoc<'_>>,
+	),
+	(val,): (Vec<String>,),
+) -> Result<Value, Error> {
+	match (opt, txn) {
+		(Some(opt), Some(txn)) => {
+			let mut args: Vec<Value> = Vec::with_capacity(val.len());
+			for v in val {
+				// Parse the string as an Idiom
+				let idi = idiom(&v)?;
+				// Return the Idiom or fetch the field
+				match opt.projections {
+					true => args.push(idi.compute(ctx, opt, txn, doc).await?),
+					false => args.push(idi.into()),
+				}
+			}
+			Ok(args.into())
+		}
+		_ => Ok(Value::None),
+	}
 }
 
 pub fn float((val,): (Value,)) -> Result<Value, Error> {

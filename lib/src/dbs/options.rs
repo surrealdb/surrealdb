@@ -6,6 +6,7 @@ use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
 use channel::Sender;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
@@ -16,7 +17,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// Current Node ID
-	id: Option<uuid::Uuid>,
+	id: Option<Uuid>,
 	/// Currently selected NS
 	ns: Option<Arc<str>>,
 	/// Currently selected DB
@@ -45,6 +46,8 @@ pub struct Options {
 	pub indexes: bool,
 	/// Should we process function futures?
 	pub futures: bool,
+	/// Should we process variable field projections?
+	pub projections: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
 	/// Datastore capabilities
@@ -74,6 +77,7 @@ impl Options {
 			tables: true,
 			indexes: true,
 			futures: false,
+			projections: false,
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
@@ -116,7 +120,7 @@ impl Options {
 
 	/// Set the Node ID for subsequent code which uses
 	/// this `Options`, with support for chaining.
-	pub fn with_id(mut self, id: uuid::Uuid) -> Self {
+	pub fn with_id(mut self, id: Uuid) -> Self {
 		self.id = Some(id);
 		self
 	}
@@ -195,6 +199,12 @@ impl Options {
 	///
 	pub fn with_futures(mut self, futures: bool) -> Self {
 		self.futures = futures;
+		self
+	}
+
+	///
+	pub fn with_projections(mut self, projections: bool) -> Self {
+		self.projections = projections;
 		self
 	}
 
@@ -325,6 +335,19 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
+	pub fn new_with_projections(&self, projections: bool) -> Self {
+		Self {
+			sender: self.sender.clone(),
+			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			projections,
+			..*self
+		}
+	}
+
+	/// Create a new Options object for a subquery
 	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
 			sender: self.sender.clone(),
@@ -385,7 +408,7 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Get current Node ID
-	pub fn id(&self) -> Result<uuid::Uuid, Error> {
+	pub fn id(&self) -> Result<Uuid, Error> {
 		self.id.ok_or(Error::Unreachable)
 	}
 

@@ -31,7 +31,7 @@ impl QueryExecutor {
 			FtEntry::new(run, ft, io.clone()).await?
 		} else {
 			let ikb = IndexKeyBase::new(opt, io.ix());
-			let az = run.get_az(opt.ns(), opt.db(), p.az.as_str()).await?;
+			let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
 			let ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Read).await?;
 			let ixn = ixn.to_owned();
 			let entry = FtEntry::new(run, &ft, io.clone()).await?;
@@ -119,8 +119,8 @@ impl QueryExecutor {
 		}
 
 		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForExpression {
-			exp: exp.to_string(),
+		Err(Error::NoIndexFoundForMatch {
+			value: exp.to_string(),
 		})
 	}
 

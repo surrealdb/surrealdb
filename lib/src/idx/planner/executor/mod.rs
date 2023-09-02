@@ -105,8 +105,8 @@ impl QueryExecutor {
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForExpression {
-			exp: exp.to_string(),
+		Err(Error::NoIndexFoundForMatch {
+			value: exp.to_string(),
 		})
 	}
 }

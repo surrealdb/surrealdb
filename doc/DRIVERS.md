@@ -28,7 +28,7 @@ We absolutely agree! We intend to have a uniform, long-term approach with regard
 
 ### We need ORM support
 
-We absolutely agree! We don’t currently have ORM support in the drivers themselves, and aren’t likely to implemented this, as there are many ORM libraries and integrations with which to integrate. We are, however, very excited to discover what the community creates. We encourage both newcomers and existing members to explore various projects that address their needs - these can be found in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository. To add more projects to the list, simply open a pull-request!
+We absolutely agree! We don’t currently have ORM support in the drivers themselves, and aren’t likely to implement this, as there are many ORM libraries and integrations with which to integrate. We are, however, very excited to discover what the community creates. We encourage both newcomers and existing members to explore various projects that address their needs - these can be found in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository. To add more projects to the list, simply open a pull-request!
 
 ### Do you support language X?
 

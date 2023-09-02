@@ -139,8 +139,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 				what,
 				cond,
 				fetch,
-				archived: None,
-				auth: None, // Auth is set via options in compute()
+				..Default::default()
 			},
 		))
 	})(i)
