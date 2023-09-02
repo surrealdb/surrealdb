@@ -480,7 +480,7 @@ mod tests {
 			}
 			assert_eq!(map.len(), e.len());
 			for (k, p) in e {
-				assert_eq!(map.get(k), Some(&p));
+				assert_eq!(map.get(k), Some(&p), "{}", k);
 			}
 		} else {
 			panic!("hits is none");
@@ -574,7 +574,13 @@ mod tests {
 
 			// Search & score
 			let (hits, scr) = search(&mut tx, &fti, "hello").await;
-			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+			check_hits(
+				&mut tx,
+				hits,
+				scr,
+				vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))],
+			)
+			.await;
 
 			let (hits, scr) = search(&mut tx, &fti, "world").await;
 			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
@@ -697,10 +703,10 @@ mod tests {
 					hits,
 					scr,
 					vec![
-						(&doc1, Some(0.0)),
-						(&doc2, Some(0.0)),
-						(&doc3, Some(0.0)),
-						(&doc4, Some(0.0)),
+						(&doc1, Some(-3.4388628)),
+						(&doc2, Some(-3.621457)),
+						(&doc3, Some(-2.258829)),
+						(&doc4, Some(-2.393017)),
 					],
 				)
 				.await;
@@ -710,7 +716,11 @@ mod tests {
 					&mut tx,
 					hits,
 					scr,
-					vec![(&doc1, Some(0.0)), (&doc2, Some(0.0)), (&doc3, Some(0.0))],
+					vec![
+						(&doc1, Some(-0.7832165)),
+						(&doc2, Some(-0.8248031)),
+						(&doc3, Some(-0.87105393)),
+					],
 				)
 				.await;
 

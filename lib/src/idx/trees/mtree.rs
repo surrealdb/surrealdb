@@ -234,10 +234,17 @@ impl MTree {
 	}
 }
 
-enum InsertResult {
+enum InsertionResult {
 	DocAdded,
 	CoveringRadius(f64),
 	PromotedEntries(RoutingEntry, RoutingEntry),
+}
+
+enum DeletionResult {
+	_DocRemoved,
+	_CoveringRadius(f64),
+	_UnderflownRoutingEntries(Vec<RoutingEntry>),
+	_UnderflownLeafIndexMap(LeafIndexMap),
 }
 
 // Insertion
@@ -257,7 +264,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
 			let node = store.get_node(tx, root_id).await?;
-			if let InsertResult::PromotedEntries(r1, r2) =
+			if let InsertionResult::PromotedEntries(r1, r2) =
 				self.insert_at_node(tx, store, node, &None, Arc::new(v), id).await?
 			{
 				self.create_new_internal_root(store, r1, r2)?;
@@ -307,7 +314,7 @@ impl MTree {
 		parent_center: &Option<Arc<Vector>>,
 		object: Arc<Vector>,
 		id: DocId,
-	) -> Result<InsertResult, Error> {
+	) -> Result<InsertionResult, Error> {
 		match node.n {
 			MTreeNode::Internal(n) => {
 				self.insert_node_internal(
@@ -337,7 +344,7 @@ impl MTree {
 		parent_center: &Option<Arc<Vector>>,
 		object: Arc<Vector>,
 		id: DocId,
-	) -> Result<InsertResult, Error> {
+	) -> Result<InsertionResult, Error> {
 		let best_entry_idx = self.find_closest(&node, &object)?;
 		let best_entry = &mut node[best_entry_idx];
 		let best_node = store.get_node(tx, best_entry.node).await?;
@@ -345,7 +352,7 @@ impl MTree {
 			.insert_at_node(tx, store, best_node, &Some(best_entry.center.clone()), object, id)
 			.await?
 		{
-			InsertResult::PromotedEntries(p1, p2) => {
+			InsertionResult::PromotedEntries(p1, p2) => {
 				node.remove(best_entry_idx);
 				node.push(p1);
 				node.push(p2);
@@ -355,18 +362,18 @@ impl MTree {
 						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 						true,
 					)?;
-					return Ok(InsertResult::CoveringRadius(max_dist));
+					return Ok(InsertionResult::CoveringRadius(max_dist));
 				}
 				self.split_node(store, node_id, node_key, node)
 			}
-			InsertResult::DocAdded => {
+			InsertionResult::DocAdded => {
 				store.set_node(
 					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 					false,
 				)?;
-				Ok(InsertResult::DocAdded)
+				Ok(InsertionResult::DocAdded)
 			}
-			InsertResult::CoveringRadius(covering_radius) => {
+			InsertionResult::CoveringRadius(covering_radius) => {
 				let mut updated = false;
 				if covering_radius > best_entry.radius {
 					best_entry.radius = covering_radius;
@@ -377,7 +384,7 @@ impl MTree {
 					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 					updated,
 				)?;
-				return Ok(InsertResult::CoveringRadius(max_dist));
+				return Ok(InsertionResult::CoveringRadius(max_dist));
 			}
 		}
 	}
@@ -403,7 +410,7 @@ impl MTree {
 		parent_center: &Option<Arc<Vector>>,
 		object: Arc<Vector>,
 		id: DocId,
-	) -> Result<InsertResult, Error> {
+	) -> Result<InsertionResult, Error> {
 		match node.entry(object) {
 			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(id);
@@ -411,7 +418,7 @@ impl MTree {
 					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 					true,
 				)?;
-				return Ok(InsertResult::DocAdded);
+				return Ok(InsertionResult::DocAdded);
 			}
 			Entry::Vacant(e) => {
 				let d = parent_center
@@ -423,7 +430,7 @@ impl MTree {
 		if node.len() <= self.state.capacity as usize {
 			let max_dist = self.compute_leaf_max_distance(&node, parent_center);
 			store.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)?;
-			Ok(InsertResult::CoveringRadius(max_dist))
+			Ok(InsertionResult::CoveringRadius(max_dist))
 		} else {
 			self.split_node(store, node_id, node_key, node)
 		}
@@ -435,7 +442,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		node: N,
-	) -> Result<InsertResult, Error>
+	) -> Result<InsertionResult, Error>
 	where
 		N: NodeVectors,
 	{
@@ -467,7 +474,7 @@ impl MTree {
 			center: p2_obj,
 			radius: r2,
 		};
-		Ok(InsertResult::PromotedEntries(r1, r2))
+		Ok(InsertionResult::PromotedEntries(r1, r2))
 	}
 
 	fn select_promotion_objects(distances: &Vec<Vec<f64>>) -> (usize, usize) {
@@ -541,28 +548,64 @@ impl MTree {
 		}
 	}
 
-	async fn remove(
+	async fn delete(
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		v: Vector,
+		object: Vector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		if let Some(root_id) = self.state.root {
-			Ok(self.remove_vector(tx, store, root_id, Arc::new(v), doc_id).await?)
+			let node = store.get_node(tx, root_id).await?;
+			self.delete_at_node(tx, store, node, Arc::new(object), doc_id).await?;
+			Ok(true) // TODO: Is it true?
 		} else {
 			Ok(false)
 		}
 	}
 
-	async fn remove_vector(
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	async fn delete_at_node(
+		&mut self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		node: StoredNode<MTreeNode>,
+		object: Arc<Vector>,
+		id: DocId,
+	) -> Result<DeletionResult, Error> {
+		match node.n {
+			MTreeNode::Internal(n) => {
+				self.delete_node_internal(tx, store, node.id, node.key, n, object, id).await
+			}
+			MTreeNode::Leaf(n) => {
+				self.delete_node_leaf(store, node.id, node.key, n, object, id).await
+			}
+		}
+	}
+
+	async fn delete_node_internal(
 		&mut self,
 		_tx: &mut Transaction,
 		_store: &mut MTreeNodeStore,
-		_root_id: NodeId,
-		_v: Arc<Vector>,
-		_doc_id: DocId,
-	) -> Result<bool, Error> {
+		_node_id: NodeId,
+		_node_key: Key,
+		_node: InternalNode,
+		_object: Arc<Vector>,
+		_id: DocId,
+	) -> Result<DeletionResult, Error> {
+		todo!()
+	}
+
+	async fn delete_node_leaf(
+		&mut self,
+		_store: &mut MTreeNodeStore,
+		_node_id: NodeId,
+		_node_key: Key,
+		_node: LeafNode,
+		_object: Arc<Vector>,
+		_id: DocId,
+	) -> Result<DeletionResult, Error> {
 		todo!()
 	}
 
@@ -573,19 +616,6 @@ impl MTree {
 		Ok(())
 	}
 }
-
-// #[derive(PartialEq)]
-// enum Deletion {
-// 	KeyRemoved,
-// 	DocRemoved,
-// 	None,
-// }
-//
-// enum Sibling {
-// 	None,
-// 	Borrow(StoredNode<MTreeNode>),
-// 	Merge(StoredNode<MTreeNode>),
-// }
 
 #[derive(PartialEq, PartialOrd)]
 struct PriorityNode(f64, NodeId);
@@ -1229,7 +1259,7 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(t.remove(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
+			assert!(t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 		{
@@ -1246,8 +1276,8 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(!t.remove(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
-			assert!(!t.remove(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
+			assert!(!t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
+			assert!(!t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 
@@ -1282,7 +1312,7 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(t.remove(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
+			assert!(t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 		{
@@ -1302,8 +1332,8 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(!t.remove(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
-			assert!(!t.remove(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
+			assert!(!t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
+			assert!(!t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 	}
@@ -1368,7 +1398,7 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(t.remove(&mut tx, &mut s, v4.clone(), 40).await.unwrap());
+			assert!(t.delete(&mut tx, &mut s, v4.clone(), 40).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 		// Check -> Borrow from predecessor
@@ -1404,7 +1434,7 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(t.remove(&mut tx, &mut s, v3.clone(), 30).await.unwrap());
+			assert!(t.delete(&mut tx, &mut s, v3.clone(), 30).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 		// Check -> Merge nodes + reduce to root node
@@ -1487,7 +1517,7 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
-			assert!(t.remove(&mut tx, &mut s, v9.clone(), 90).await.unwrap());
+			assert!(t.delete(&mut tx, &mut s, v9.clone(), 90).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
 	}
