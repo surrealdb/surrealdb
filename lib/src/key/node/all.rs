@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub struct All {
 	__: u8,
 	_a: u8,
+	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
 
