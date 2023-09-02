@@ -147,7 +147,7 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		let ds = Datastore::new_full("fdb:/etc/foundationdb/fdb.cluster")
+		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster")
 			.await
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id));
