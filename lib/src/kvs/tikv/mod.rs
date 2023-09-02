@@ -5,7 +5,6 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
-use std::backtrace::{Backtrace, BacktraceStatus};
 use std::ops::Range;
 use tikv::CheckLevel;
 use tikv::TimestampExt;
@@ -44,8 +43,8 @@ impl Drop for Transaction {
 				Check::Panic => {
 					#[cfg(debug_assertions)]
 					{
-						let backtrace = Backtrace::force_capture();
-						if let BacktraceStatus::Captured = backtrace.status() {
+						let backtrace = std::backtrace::Backtrace::force_capture();
+						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
 							println!("{}", backtrace);
 						}
 					}
@@ -75,16 +74,21 @@ impl Datastore {
 			TransactionOptions::new_optimistic()
 		};
 		// Set the behaviour when dropping an unfinished transaction
-		opt = opt.drop_check(CheckLevel::Panic);
+		opt = opt.drop_check(CheckLevel::Warn);
 		// Set this transaction as read only if possible
 		if !write {
 			opt = opt.read_only();
 		}
-		// Create a new distributed transaction
+		// Specify the check level
+		#[cfg(not(debug_assertions))]
+		let check = Check::Warn;
+		#[cfg(debug_assertions)]
+		let check = Check::Panic;
+		// Create a new transaction
 		match self.db.begin_with_options(opt).await {
 			Ok(inner) => Ok(Transaction {
 				done: false,
-				check: Check::Panic,
+				check,
 				write,
 				inner,
 			}),
