@@ -871,15 +871,19 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
-		match val.writeable() {
-			true => txn.lock().await.commit().await?,
-			false => txn.lock().await.cancel().await?,
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
 		};
 		// Return result
-		Ok(res)
+		res
 	}
 
 	/// Subscribe to live notifications
