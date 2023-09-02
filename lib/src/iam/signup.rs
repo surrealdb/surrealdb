@@ -44,8 +44,12 @@ pub async fn sc(
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
+	// Fetch the specified scope from storage
+	let scope = tx.get_sc(&ns, &db, &sc).await;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
 	// Check if the supplied Scope login exists
-	match tx.get_sc(&ns, &db, &sc).await {
+	match scope {
 		Ok(sv) => {
 			match sv.signup {
 				// This scope allows signup

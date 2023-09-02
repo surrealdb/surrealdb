@@ -5,8 +5,8 @@ mod mem {
 	use crate::kvs::Transaction;
 	use serial_test::serial;
 
-	async fn new_ds(node_id: Uuid) -> Datastore {
-		Datastore::new_full("memory", sql::Uuid::from(node_id)).await.unwrap()
+	async fn new_ds(id: Uuid) -> Datastore {
+		Datastore::new("memory").await.unwrap().with_node_id(sql::Uuid::from(id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -37,9 +37,10 @@ mod rocksdb {
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("rocksdb:{path}").as_str(), sql::Uuid::from(node_id))
+		Datastore::new(format!("rocksdb:{path}").as_str())
 			.await
 			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -72,9 +73,10 @@ mod speedb {
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("speedb:{path}").as_str(), sql::Uuid::from(node_id))
+		Datastore::new(format!("speedb:{path}").as_str())
 			.await
 			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -105,8 +107,10 @@ mod tikv {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		let ds =
-			Datastore::new_full("tikv:127.0.0.1:2379", sql::Uuid::from(node_id)).await.unwrap();
+		let ds = Datastore::new("tikv:127.0.0.1:2379")
+			.await
+			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
@@ -143,9 +147,10 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		let ds = Datastore::new_full("fdb:/etc/foundationdb/fdb.cluster", sql::Uuid::from(node_id))
+		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster")
 			.await
-			.unwrap();
+			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
