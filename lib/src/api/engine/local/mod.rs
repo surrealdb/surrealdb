@@ -410,7 +410,7 @@ async fn export(
 	db: String,
 	chn: channel::Sender<Vec<u8>>,
 ) -> Result<()> {
-	if let Err(error) = kvs.prepare_export(sess, ns, db, chn).await?.await {
+	if let Err(error) = kvs.export(sess, ns, db, chn).await?.await {
 		if let crate::error::Db::Channel(message) = error {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");

@@ -38,7 +38,7 @@ async fn handler(
 	// Create a new bounded channel
 	let (snd, rcv) = surrealdb::channel::new(1);
 
-	let export_job = db.prepare_export(&session, nsv, dbv, snd).await.map_err(Error::from)?;
+	let export_job = db.export(&session, nsv, dbv, snd).await.map_err(Error::from)?;
 	// Spawn a new database export job
 	tokio::spawn(export_job);
 	// Process all processed values

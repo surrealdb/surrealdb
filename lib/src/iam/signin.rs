@@ -85,7 +85,7 @@ pub async fn signin(
 					// Process the provided values
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
-
+					// Attempt to signin to root
 					super::signin::kv(kvs, session, user, pass).await
 				}
 				// There is no username or password
@@ -106,8 +106,12 @@ pub async fn sc(
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied DB Scope exists
-	match tx.get_sc(&ns, &db, &sc).await {
+	// Fetch the specified scope from storage
+	let scope = tx.get_sc(&ns, &db, &sc).await;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
+	// Check if the supplied Scope login exists
+	match scope {
 		Ok(sv) => {
 			match sv.signin {
 				// This scope allows signin
@@ -189,6 +193,7 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
+	// Attempt to authenticate as the user
 	match verify_creds(kvs, Some(&ns), Some(&db), &user, &pass).await {
 		Ok((auth, u)) => {
 			// Create the authentication key
@@ -231,6 +236,7 @@ pub async fn ns(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
+	// Attempt to authenticate as the user
 	match verify_creds(kvs, Some(&ns), None, &user, &pass).await {
 		Ok((auth, u)) => {
 			// Create the authentication key
@@ -269,6 +275,7 @@ pub async fn kv(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
+	// Attempt to authenticate as the user
 	match verify_creds(kvs, None, None, &user, &pass).await {
 		Ok((auth, u)) => {
 			// Create the authentication key

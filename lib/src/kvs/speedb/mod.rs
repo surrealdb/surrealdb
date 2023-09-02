@@ -7,7 +7,6 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use futures::lock::Mutex;
 use speedb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
-use std::backtrace::{Backtrace, BacktraceStatus};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -53,8 +52,8 @@ impl Drop for Transaction {
 				Check::Panic => {
 					#[cfg(debug_assertions)]
 					{
-						let backtrace = Backtrace::force_capture();
-						if let BacktraceStatus::Captured = backtrace.status() {
+						let backtrace = std::backtrace::Backtrace::force_capture();
+						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
 							println!("{}", backtrace);
 						}
 					}
@@ -93,10 +92,15 @@ impl Datastore {
 		};
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
-		// Return the transaction
+		// Specify the check level
+		#[cfg(not(debug_assertions))]
+		let check = Check::Warn;
+		#[cfg(debug_assertions)]
+		let check = Check::Panic;
+		// Create a new transaction
 		Ok(Transaction {
 			done: false,
-			check: Check::Panic,
+			check,
 			write,
 			inner: Arc::new(Mutex::new(Some(inner))),
 			ro,
