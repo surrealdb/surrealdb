@@ -177,12 +177,11 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// # Examples
 ///
 /// Create a new instance, and allow all capabilities
-/// ```
+/// ```no_run
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # use surrealdb::engine::local::File;
-/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::all();
@@ -193,12 +192,14 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// ```
 ///
 /// Create a new instance, and allow certain functions
-/// ```
+/// ```no_run
+/// # use std::str::FromStr;
+/// # use surrealdb::engine::local::File;
 /// # use surrealdb::opt::capabilities::Capabilities;
+/// # use surrealdb::opt::capabilities::FuncTarget;
+/// # use surrealdb::opt::capabilities::Targets;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
-/// # use surrealdb::engine::local::File;
-/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::default()
