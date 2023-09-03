@@ -174,6 +174,43 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// - Allow all functions except `http.*`: `--allow-funcs --deny-funcs 'http.*'`
 /// - Allow all network addresses except AWS metadata endpoint: `--allow-net --deny-net='169.254.169.254'`
 ///
+/// # Examples
+///
+/// Create a new instance, and allow all capabilities
+/// ```
+/// # use surrealdb::opt::capabilities::Capabilities;
+/// # use surrealdb::opt::Config;
+/// # use surrealdb::Surreal;
+/// # use surrealdb::engine::local::File;
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// let capabilities = Capabilities::all();
+/// let config = Config::default().capabilities(capabilities);
+/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Create a new instance, and allow certain functions
+/// ```
+/// # use surrealdb::opt::capabilities::Capabilities;
+/// # use surrealdb::opt::Config;
+/// # use surrealdb::Surreal;
+/// # use surrealdb::engine::local::File;
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// let capabilities = Capabilities::default()
+///     .with_functions(Targets::<FuncTarget>::All)
+///     .without_functions(Targets::<FuncTarget>::Some(
+///         [FuncTarget::from_str("http::*").unwrap()].into(),
+///     ));
+/// let config = Config::default().capabilities(capabilities);
+/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Capabilities {
 	scripting: bool,
