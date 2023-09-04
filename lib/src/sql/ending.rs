@@ -11,6 +11,8 @@ use nom::combinator::peek;
 use nom::combinator::{eof, value};
 use nom::sequence::preceded;
 
+use super::operator;
+
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		value((), multispace1), // 1 + 1
@@ -87,46 +89,39 @@ pub fn field(i: &str) -> IResult<&str, ()> {
 }
 
 pub fn subquery(i: &str) -> IResult<&str, ()> {
-	alt((
+	peek(alt((
+		value((), preceded(shouldbespace, tag_no_case("THEN"))),
+		value((), preceded(shouldbespace, tag_no_case("ELSE"))),
+		value((), preceded(shouldbespace, tag_no_case("END"))),
 		|i| {
 			let (i, _) = mightbespace(i)?;
-			let (i, _) = char(';')(i)?;
-			let (i, _) = peek(alt((
-				preceded(shouldbespace, tag_no_case("THEN")),
-				preceded(shouldbespace, tag_no_case("ELSE")),
-				preceded(shouldbespace, tag_no_case("END")),
-			)))(i)?;
-			Ok((i, ()))
+			alt((
+				value((), eof),
+				value((), char(';')),
+				value((), char(',')),
+				value((), char('}')),
+				value((), char(')')),
+				value((), char(']')),
+			))(i)
 		},
-		peek(alt((
-			value((), preceded(shouldbespace, tag_no_case("THEN"))),
-			value((), preceded(shouldbespace, tag_no_case("ELSE"))),
-			value((), preceded(shouldbespace, tag_no_case("END"))),
-			value((), comment),
-			value((), char(']')),
-			value((), char('}')),
-			value((), char(')')),
-			value((), char(';')),
-			value((), char(',')),
-			value((), eof),
-		))),
-	))(i)
+	)))(i)
 }
 
 pub fn query(i: &str) -> IResult<&str, ()> {
-	peek(|i| {
-		let (i, _) = mightbespace(i)?;
-		alt((
-			value((), preceded(shouldbespace, tag_no_case("THEN"))),
-			value((), preceded(shouldbespace, tag_no_case("ELSE"))),
-			value((), preceded(shouldbespace, tag_no_case("END"))),
-			value((), comment),
-			value((), char(']')),
-			value((), char('}')),
-			value((), char(')')),
-			value((), char(';')),
-			value((), char(',')),
-			value((), eof),
-		))(i)
-	})(i)
+	peek(alt((
+		value((), preceded(shouldbespace, tag_no_case("THEN"))),
+		value((), preceded(shouldbespace, tag_no_case("ELSE"))),
+		value((), preceded(shouldbespace, tag_no_case("END"))),
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			alt((
+				value((), eof),
+				value((), char(';')),
+				value((), char(',')),
+				value((), char('}')),
+				value((), char(')')),
+				value((), char(']')),
+			))(i)
+		},
+	)))(i)
 }

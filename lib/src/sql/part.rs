@@ -173,14 +173,22 @@ pub fn local_part(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn basic_part(i: &str) -> IResult<&str, Part> {
-	alt((preceded(tag("."), cut(dot_part)), |s| {
-		let (i, _) = openbracket(s)?;
-		let (i, v) =
-			expected("$, * or a number", cut(terminated(basic_bracketed_part, closebracket)))(i)
-				.explain("basic idioms don't allow computed values", bracketed_value)
-				.explain("basic idioms don't allow where selectors", bracketed_where)?;
-		Ok((i, v))
-	}))(i)
+	alt((
+		preceded(
+			tag("."),
+			cut(|i| dot_part(i).explain("flattening is not allowed with a basic idiom", tag(".."))),
+		),
+		|s| {
+			let (i, _) = openbracket(s)?;
+			let (i, v) = expected(
+				"$, * or a number",
+				cut(terminated(basic_bracketed_part, closebracket)),
+			)(i)
+			.explain("basic idioms don't allow computed values", bracketed_value)
+			.explain("basic idioms don't allow where selectors", bracketed_where)?;
+			Ok((i, v))
+		},
+	))(i)
 }
 
 fn dot_part(i: &str) -> IResult<&str, Part> {
