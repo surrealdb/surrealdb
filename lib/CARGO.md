@@ -187,7 +187,7 @@ DEFINE TABLE user SCHEMAFULL;
 DEFINE FIELD name ON TABLE user TYPE object;
 DEFINE FIELD name.first ON TABLE user TYPE string;
 DEFINE FIELD name.last ON TABLE user TYPE string;
-DEFINE FIELD email ON TABLE user TYPE string ASSERT is::email($value);
+DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is::email($value);
 
 -- Add a unique index on the email field preventing duplicate values
 DEFINE INDEX email ON TABLE user COLUMNS email UNIQUE;
