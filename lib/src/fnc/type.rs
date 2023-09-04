@@ -128,10 +128,6 @@ pub mod is {
 		Ok(arg.is_array().into())
 	}
 
-	// pub fn set((arg,): (Value,)) -> Result<Value, Error> {
-	// 	Ok(arg.is_set().into())
-	// }
-
 	pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_bool().into())
 	}
