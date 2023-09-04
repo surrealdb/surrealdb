@@ -450,7 +450,21 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await?;
+					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+						Ok(lq) => lq,
+						Err(
+							err @ Error::LvNotFound {
+								..
+							},
+						) => {
+							warn!("Unable to find the live query in the table that was associated with the node: {:?}", err);
+							vec![]
+						}
+						Err(e) => {
+							error!("Error archiving lq during bootstrap phase: {:?}", e);
+							vec![]
+						}
+					};
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
