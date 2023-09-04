@@ -8,6 +8,8 @@ use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::changefeed::{changefeed, ChangeFeed};
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -20,6 +22,7 @@ use crate::sql::view::{view, View};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -104,7 +107,7 @@ impl DefineTableStatement {
 
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE {}", self.name)?;
+		write!(f, "TABLE {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
@@ -136,12 +139,14 @@ impl Display for DefineTableStatement {
 }
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
+	let (i, _) = expected(
+		"DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
+		ending::query,
+	)(i)?;
 	// Create the base statement
 	let mut res = DefineTableStatement {
 		name,
@@ -250,7 +255,7 @@ mod tests {
 
 	#[test]
 	fn define_table_with_changefeed() {
-		let sql = "DEFINE TABLE mytable SCHEMALESS CHANGEFEED 1h";
+		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h";
 		let res = table(sql);
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));

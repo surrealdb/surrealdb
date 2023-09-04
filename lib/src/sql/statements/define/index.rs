@@ -7,6 +7,9 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
@@ -19,6 +22,7 @@ use crate::sql::value::{Value, Values};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::multi::many0;
 use nom::sequence::tuple;
@@ -86,7 +90,7 @@ impl DefineIndexStatement {
 
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(f, "INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
@@ -98,17 +102,19 @@ impl Display for DefineIndexStatement {
 }
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("INDEX")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
-	let (i, opts) = many0(index_opts)(i)?;
+	let (i, (name, what, opts)) = cut(|i| {
+		let (i, name) = ident(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = ident(i)?;
+		let (i, opts) = many0(index_opts)(i)?;
+		let (i, _) = expected("one of ", ending::query)(i)?;
+		Ok((i, (name, what, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineIndexStatement {
 		name,
@@ -183,7 +189,7 @@ mod tests {
 
 	#[test]
 	fn check_create_non_unique_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -195,12 +201,12 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
+		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col");
 	}
 
 	#[test]
 	fn check_create_unique_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -212,12 +218,12 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
+		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col UNIQUE");
 	}
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -240,13 +246,12 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
 	}
 
 	#[test]
 	fn check_create_search_index() {
-		let sql =
-			"DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -268,7 +273,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
+			"INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
 		);
 	}
 }

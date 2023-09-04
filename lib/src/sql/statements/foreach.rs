@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::{block, Block, Entry};
 use crate::sql::comment::{mightbespace, shouldbespace};
-use crate::sql::error::IResult;
+use crate::sql::error::{expect_tag_no_case, IResult};
 use crate::sql::param::{param, Param};
 use crate::sql::value::{value, Value};
 use derive::Store;
@@ -105,7 +105,7 @@ pub fn foreach(i: &str) -> IResult<&str, ForeachStatement> {
 	let (i, param) = param(i)?;
 	let (i, (range, block)) = cut(|i| {
 		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("IN")(i)?;
+		let (i, _) = expect_tag_no_case("IN")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, range) = value(i)?;
 		let (i, _) = mightbespace(i)?;

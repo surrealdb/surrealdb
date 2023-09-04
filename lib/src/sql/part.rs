@@ -168,6 +168,7 @@ pub fn local_part(i: &str) -> IResult<&str, Part> {
 	alt((
 		preceded(tag("."), dot_part),
 		expect_delimited(openbracket, cut(local_bracketed_part), closebracket),
+		// TODO explain
 	))(i)
 }
 

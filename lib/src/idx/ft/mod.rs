@@ -537,7 +537,7 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
 
 		let btree_order = 5;
 
@@ -641,7 +641,7 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
-			let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
 
 			let doc1: Thing = ("t", "doc1").into();
 			let doc2: Thing = ("t", "doc2").into();

@@ -8,6 +8,8 @@ use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::changefeed::{changefeed, ChangeFeed};
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::strand::{strand, Strand};
@@ -15,6 +17,8 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
+use nom::combinator::peek;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -64,7 +68,7 @@ impl DefineDatabaseStatement {
 
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE {}", self.name)?;
+		write!(f, "DATABASE {}", self.name)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -76,12 +80,12 @@ impl Display for DefineDatabaseStatement {
 }
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(database_opts)(i)?;
+	let (i, _) = expected("COMMENT or CHANGEFEED", ending::query)(i)?;
+
 	// Create the base statement
 	let mut res = DefineDatabaseStatement {
 		name,
@@ -115,7 +119,7 @@ fn database_comment(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineDatabaseOption::Comment(v)))
 }
 
@@ -132,7 +136,7 @@ mod tests {
 
 	#[test]
 	fn define_database_with_changefeed() {
-		let sql = "DEFINE DATABASE mydatabase CHANGEFEED 1h";
+		let sql = "DATABASE mydatabase CHANGEFEED 1h";
 		let res = database(sql);
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));

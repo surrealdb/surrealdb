@@ -109,13 +109,10 @@ pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
-	let (i, (cond, output, timeout, parallel)) = cut(|i| {
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((i, (cond, output, timeout, parallel)))
-	})(i)?;
+	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	Ok((
 		i,
 		DeleteStatement {

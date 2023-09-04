@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
@@ -12,6 +13,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use revision::revisioned;
@@ -58,16 +60,14 @@ impl Display for RemoveFieldStatement {
 }
 
 pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = idiom::local(i)?;
+	let (i, name) = cut(idiom::local)(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = expect_tag_no_case("ON")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
+	let (i, what) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveFieldStatement {

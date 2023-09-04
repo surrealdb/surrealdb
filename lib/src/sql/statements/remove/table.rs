@@ -10,6 +10,7 @@ use crate::sql::ident::{ident, Ident};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -63,11 +64,9 @@ impl Display for RemoveTableStatement {
 }
 
 pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveTableStatement {

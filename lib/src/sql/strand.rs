@@ -14,6 +14,8 @@ use std::ops::Deref;
 use std::ops::{self, RangeInclusive};
 use std::str;
 
+use super::error::expected;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
 const SINGLE: char = '\'';
@@ -93,7 +95,7 @@ pub fn strand(i: &str) -> IResult<&str, Strand> {
 }
 
 pub fn strand_raw(i: &str) -> IResult<&str, String> {
-	alt((strand_blank, strand_single, strand_double))(i)
+	expected("a strand", alt((strand_blank, strand_single, strand_double)))(i)
 }
 
 fn strand_blank(i: &str) -> IResult<&str, String> {

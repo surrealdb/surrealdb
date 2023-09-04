@@ -77,7 +77,7 @@ impl DefineFieldStatement {
 
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
+		write!(f, "FIELD {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
@@ -107,21 +107,22 @@ impl Display for DefineFieldStatement {
 }
 
 pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(idiom::local)(i)?;
-	let (i, _) = cut(shouldbespace)(i)?;
-	let (i, _) = expect_tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = cut(shouldbespace)(i)?;
-	let (i, what) = expected("a table name", cut(ident))(i)?;
-	let (i, opts) = many0(field_opts)(i)?;
-	let (i, _) = expected(
-		"one of FLEXIBLE, TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
-		cut(ending::query),
-	)(i)?;
+	let (i, (name, what, opts)) = cut(|i| {
+		let (i, name) = idiom::local(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = ident(i)?;
+		let (i, opts) = many0(field_opts)(i)?;
+		let (i, _) = expected(
+			"one of FLEX(IBLE), TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
+			cut(ending::query),
+		)(i)?;
+		Ok((i, (name, what, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineFieldStatement {
 		name,
@@ -190,7 +191,7 @@ fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = kind(i)?;
+	let (i, v) = cut(kind)(i)?;
 	Ok((i, DefineFieldOption::Kind(v)))
 }
 
@@ -198,7 +199,7 @@ fn field_value(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Value(v)))
 }
 
@@ -206,7 +207,7 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ASSERT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Assert(v)))
 }
 
@@ -214,7 +215,7 @@ fn field_default(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("DEFAULT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Default(v)))
 }
 

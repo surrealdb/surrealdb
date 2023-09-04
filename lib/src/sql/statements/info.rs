@@ -7,6 +7,7 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::expected;
 use crate::sql::error::ExplainResultExt;
 use crate::sql::error::IResult;

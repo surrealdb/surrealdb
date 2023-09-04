@@ -11,6 +11,8 @@ use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::closeparentheses;
 use crate::sql::common::commas;
 use crate::sql::common::openparentheses;
+use crate::sql::ending;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -26,6 +28,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -68,7 +71,7 @@ impl DefineFunctionStatement {
 
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION fn::{}(", self.name)?;
+		write!(f, "FUNCTION fn::{}(", self.name)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
@@ -94,8 +97,6 @@ impl fmt::Display for DefineFunctionStatement {
 }
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
@@ -118,6 +119,7 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = mightbespace(i)?;
 	let (i, block) = block(i)?;
 	let (i, opts) = many0(function_opts)(i)?;
+	let (i, _) = expected("PERMISSIONS or COMMENT", ending::query)(i)?;
 	// Create the base statement
 	let mut res = DefineFunctionStatement {
 		name,
@@ -153,7 +155,7 @@ fn function_comment(i: &str) -> IResult<&str, DefineFunctionOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineFunctionOption::Comment(v)))
 }
 
@@ -161,6 +163,6 @@ fn function_permissions(i: &str) -> IResult<&str, DefineFunctionOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permission(i)?;
+	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineFunctionOption::Permissions(v)))
 }
