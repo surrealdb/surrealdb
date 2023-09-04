@@ -311,7 +311,6 @@ pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 			preceded(tag("encoding::"), cut(function_encoding)),
 			preceded(tag("geo::"), cut(function_geo)),
 			preceded(tag("http::"), cut(function_http)),
-			preceded(tag("is::"), cut(function_is)),
 			// Don't cut in time and math for now since there are also constant's with the same
 			// prefix.
 			preceded(tag("math::"), function_math),
@@ -446,24 +445,6 @@ fn function_http(i: &str) -> IResult<&str, &str> {
 	alt((tag("head"), tag("get"), tag("put"), tag("post"), tag("patch"), tag("delete")))(i)
 }
 
-fn function_is(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("alphanum"),
-		tag("alpha"),
-		tag("ascii"),
-		tag("datetime"),
-		tag("domain"),
-		tag("email"),
-		tag("hexadecimal"),
-		tag("latitude"),
-		tag("longitude"),
-		tag("numeric"),
-		tag("semver"),
-		tag("url"),
-		tag("uuid"),
-	))(i)
-}
-
 fn function_math(i: &str) -> IResult<&str, &str> {
 	alt((
 		alt((
@@ -571,6 +552,24 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("uppercase"),
 		tag("words"),
 		preceded(tag("distance::"), alt((tag("hamming"), tag("levenshtein")))),
+		preceded(
+			tag("is::"),
+			alt((
+				tag("alphanum"),
+				tag("alpha"),
+				tag("ascii"),
+				tag("datetime"),
+				tag("domain"),
+				tag("email"),
+				tag("hexadecimal"),
+				tag("latitude"),
+				tag("longitude"),
+				tag("numeric"),
+				tag("semver"),
+				tag("url"),
+				tag("uuid"),
+			)),
+		),
 		preceded(tag("similarity::"), alt((tag("fuzzy"), tag("jaro"), tag("smithwaterman")))),
 	))(i)
 }
@@ -616,6 +615,22 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("string"),
 		tag("table"),
 		tag("thing"),
+		preceded(
+			tag("is::"),
+			alt((
+				tag("array"),
+				tag("bool"),
+				tag("datetime"),
+				tag("duration"),
+				tag("float"),
+				tag("geometry"),
+				tag("int"),
+				tag("number"),
+				tag("object"),
+				tag("record"),
+				tag("string"),
+			)),
+		),
 	))(i)
 }
 
@@ -684,11 +699,11 @@ mod tests {
 
 	#[test]
 	fn function_arguments() {
-		let sql = "is::numeric(null)";
+		let sql = "string::is::numeric(null)";
 		let res = function(sql);
 		let out = res.unwrap().1;
-		assert_eq!("is::numeric(NULL)", format!("{}", out));
-		assert_eq!(out, Function::Normal(String::from("is::numeric"), vec![Value::Null]));
+		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
+		assert_eq!(out, Function::Normal(String::from("string::is::numeric"), vec![Value::Null]));
 	}
 
 	#[test]

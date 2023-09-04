@@ -1,28 +1,21 @@
-use super::fut;
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
-use js::prelude::Async;
-
-mod is;
 
 pub struct Package;
 
 impl_module_def!(
 	Package,
-	"type",
+	"type::is",
+	"array" => run,
 	"bool" => run,
 	"datetime" => run,
 	"decimal" => run,
 	"duration" => run,
-	"field" => fut Async,
-	"fields" => fut Async,
 	"float" => run,
+	"geometry" => run,
 	"int" => run,
-	"is" => (is::Package),
 	"number" => run,
-	"point" => run,
-	"regex" => run,
-	"string" => run,
-	"table" => run,
-	"thing" => run
+	"object" => run,
+	"record" => run,
+	"string" => run
 );
