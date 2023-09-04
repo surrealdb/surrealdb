@@ -186,7 +186,6 @@ pub mod is {
 	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
 	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
 
-
 	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(char::is_alphanumeric).into())
 	}

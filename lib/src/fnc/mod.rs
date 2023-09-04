@@ -15,7 +15,6 @@ pub mod duration;
 pub mod encoding;
 pub mod geo;
 pub mod http;
-pub mod is;
 pub mod math;
 pub mod meta;
 pub mod not;
@@ -297,7 +296,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::is::array" => r#type::is::array,
-		// "type::is::set" => r#type::is::set,
 		"type::is::bool" => r#type::is::bool,
 		"type::is::datetime" => r#type::is::datetime,
 		"type::is::decimal" => r#type::is::decimal,
