@@ -639,7 +639,7 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 				tag("polygon"),
 				tag("record"),
 				tag("string"),
-				tag("uuid")
+				tag("uuid"),
 			)),
 		),
 	))(i)

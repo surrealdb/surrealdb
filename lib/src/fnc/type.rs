@@ -122,8 +122,8 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::sql::Geometry;
 	use crate::sql::value::Value;
+	use crate::sql::Geometry;
 
 	pub fn array((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_array().into())
