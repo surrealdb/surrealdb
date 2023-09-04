@@ -20,7 +20,9 @@ COPY <<EOF /surreal-entrypoint.sh
 
 set -e
 
-# allow the container to be started with `--user`
+#
+# Run the process as `surreal` user
+#
 # Change ownership of the data directory to surreal
 if [ "\$(id -u)" = '0' ]; then
     find "\$SURREAL_DATA" \! -user surreal -exec chown surreal '{}' +
