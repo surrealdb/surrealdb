@@ -39,7 +39,17 @@ pub trait IntoEndpoint<Scheme> {
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
+pub(crate) fn replace_tilde(path: &str) -> String {
+	let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_owned());
+	path.replacen("://~", &format!("://{home}"), 1).replacen(":~", &format!(":{home}"), 1)
+}
+
 #[allow(dead_code)]
 fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
-	format!("{protocol}{}", path.as_ref().display())
+	use path_clean::PathClean;
+	use std::path::Path;
+
+	let path = format!("{protocol}{}", path.as_ref().display());
+	let expanded = replace_tilde(&path);
+	Path::new(&expanded).clean().display().to_string()
 }

@@ -95,7 +95,10 @@ use crate::api::opt::Endpoint;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::opt::replace_tilde;
+use path_clean::PathClean;
 use std::marker::PhantomData;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use url::Url;
@@ -115,10 +118,11 @@ impl IntoEndpoint for &str {
 			}
 			_ => {
 				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
+				let path = replace_tilde(self);
 				(
 					Url::parse(&format!("{scheme}://"))
 						.map_err(|_| Error::InvalidUrl(self.to_owned()))?,
-					self.to_owned(),
+					Path::new(&path).clean().display().to_string(),
 				)
 			}
 		};
