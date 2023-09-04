@@ -1,6 +1,7 @@
 //! The different options and types for use in API functions
 
 pub mod auth;
+pub mod capabilities;
 
 mod config;
 mod endpoint;

@@ -118,6 +118,10 @@ impl Transaction {
 		self
 	}
 
+	pub fn enclose(self) -> Arc<Mutex<Self>> {
+		Arc::new(Mutex::new(self))
+	}
+
 	// --------------------------------------------------
 	// Integral methods
 	// --------------------------------------------------

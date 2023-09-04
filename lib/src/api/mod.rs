@@ -103,15 +103,18 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
+			// Avoid establising another connection if already connected
+			if self.router.get().is_some() {
+				return Err(Error::AlreadyConnected.into());
+			}
 			let arc = Client::connect(self.address?, self.capacity).await?.router;
 			let cell = Arc::into_inner(arc).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");
-			if self.router.set(router).is_ok() {
-				let client = Surreal {
-					router: self.router,
-				};
-				client.check_server_version().await?;
-			}
+			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
+			let client = Surreal {
+				router: self.router,
+			};
+			client.check_server_version().await?;
 			Ok(())
 		})
 	}

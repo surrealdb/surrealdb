@@ -87,6 +87,7 @@ pub use self::block::Block;
 pub use self::bytes::Bytes;
 pub use self::cast::Cast;
 pub use self::cond::Cond;
+pub use self::constant::Constant;
 pub use self::data::Data;
 pub use self::datetime::Datetime;
 pub use self::dir::Dir;

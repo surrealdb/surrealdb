@@ -1,13 +1,11 @@
 #![cfg(feature = "kv-fdb")]
 
-use futures::TryStreamExt;
-use std::backtrace::{Backtrace, BacktraceStatus};
-
 use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
+use futures::TryStreamExt;
 use std::ops::Range;
 use std::sync::Arc;
 // We use it to work-around the fact that foundationdb-rs' Transaction
@@ -63,8 +61,8 @@ impl Drop for Transaction {
 				Check::Panic => {
 					#[cfg(debug_assertions)]
 					{
-						let backtrace = Backtrace::force_capture();
-						if let BacktraceStatus::Captured = backtrace.status() {
+						let backtrace = std::backtrace::Backtrace::force_capture();
+						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
 							println!("{}", backtrace);
 						}
 					}
@@ -97,10 +95,16 @@ impl Datastore {
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		// Specify the check level
+		#[cfg(not(debug_assertions))]
+		let check = Check::Warn;
+		#[cfg(debug_assertions)]
+		let check = Check::Panic;
+		// Create a new transaction
 		match self.db.create_trx() {
 			Ok(inner) => Ok(Transaction {
 				done: false,
-				check: Check::Panic,
+				check,
 				write,
 				lock,
 				inner: Arc::new(Mutex::new(Some(inner))),
