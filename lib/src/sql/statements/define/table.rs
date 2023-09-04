@@ -107,7 +107,7 @@ impl DefineTableStatement {
 
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "TABLE {}", self.name)?;
+		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
@@ -258,7 +258,7 @@ mod tests {
 		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h";
 		let res = table(sql);
 		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
 		let serialized: Vec<u8> = (&out).try_into().unwrap();
 		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();

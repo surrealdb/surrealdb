@@ -63,7 +63,7 @@ impl DefineScopeStatement {
 
 impl Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SCOPE {}", self.name)?;
+		write!(f, "DEFINE SCOPE {}", self.name)?;
 		if let Some(ref v) = self.session {
 			write!(f, " SESSION {v}")?
 		}

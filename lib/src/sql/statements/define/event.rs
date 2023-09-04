@@ -66,7 +66,11 @@ impl DefineEventStatement {
 
 impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "EVENT {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		write!(
+			f,
+			"DEFINE EVENT {} ON {} WHEN {} THEN {}",
+			self.name, self.what, self.when, self.then
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}

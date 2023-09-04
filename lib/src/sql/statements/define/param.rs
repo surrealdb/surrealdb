@@ -62,7 +62,7 @@ impl DefineParamStatement {
 
 impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "PARAM ${} VALUE {}", self.name, self.value)?;
+		write!(f, "DEFINE PARAM ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}

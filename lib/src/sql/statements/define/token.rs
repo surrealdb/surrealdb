@@ -96,7 +96,7 @@ impl Display for DefineTokenStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"TOKEN {} ON {} TYPE {} VALUE {}",
+			"DEFINE TOKEN {} ON {} TYPE {} VALUE {}",
 			self.name,
 			self.base,
 			self.kind,

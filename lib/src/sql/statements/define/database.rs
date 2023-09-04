@@ -68,7 +68,7 @@ impl DefineDatabaseStatement {
 
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DATABASE {}", self.name)?;
+		write!(f, "DEFINE DATABASE {}", self.name)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -139,7 +139,7 @@ mod tests {
 		let sql = "DATABASE mydatabase CHANGEFEED 1h";
 		let res = database(sql);
 		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
 		let serialized: Vec<u8> = (&out).try_into().unwrap();
 		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();

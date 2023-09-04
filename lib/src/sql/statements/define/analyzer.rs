@@ -61,7 +61,7 @@ impl DefineAnalyzerStatement {
 
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ANALYZER {}", self.name)?;
+		write!(f, "DEFINE ANALYZER {}", self.name)?;
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " TOKENIZERS {}", tokens.join(","))?;

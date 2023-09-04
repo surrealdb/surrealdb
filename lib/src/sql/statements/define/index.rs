@@ -90,7 +90,7 @@ impl DefineIndexStatement {
 
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
@@ -201,7 +201,7 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
 	}
 
 	#[test]
@@ -218,7 +218,7 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col UNIQUE");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
 	}
 
 	#[test]
@@ -246,7 +246,7 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
 	}
 
 	#[test]
@@ -273,7 +273,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
 		);
 	}
 }

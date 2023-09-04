@@ -77,7 +77,7 @@ impl DefineFieldStatement {
 
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FIELD {} ON {}", self.name, self.what)?;
+		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}

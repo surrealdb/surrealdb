@@ -126,7 +126,7 @@ impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"USER {} ON {} PASSHASH {} ROLES {}",
+			"DEFINE USER {} ON {} PASSHASH {} ROLES {}",
 			self.name,
 			self.base,
 			quote_str(&self.hash),
