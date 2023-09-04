@@ -4725,7 +4725,11 @@ async fn function_type_is_collection() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -4880,7 +4884,11 @@ async fn function_type_is_line() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -4925,7 +4933,11 @@ async fn function_type_is_multiline() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -4948,7 +4960,11 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -4971,7 +4987,11 @@ async fn function_type_is_multipolygon() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -4995,7 +5015,15 @@ async fn function_type_is_number() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -5040,7 +5068,11 @@ async fn function_type_is_point() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -5063,7 +5095,11 @@ async fn function_type_is_polygon() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
