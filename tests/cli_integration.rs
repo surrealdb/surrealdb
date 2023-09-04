@@ -504,11 +504,38 @@ mod cli_integration {
 
 	#[test(tokio::test)]
 	async fn test_capabilities() {
-		// Deny all, denies all users to execute functions and access any network address
-		info!("* When all capabilities are denied by default");
+		// Default capabilities only allow functions
+		info!("* When default capabilities");
 		{
 			let (addr, _server) = common::start_server(StartServerArguments {
 				args: "".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+
+			let query = format!("RETURN http::get('http://127.0.0.1/');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Access to network target 'http://127.0.0.1/' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN function() { return '1' };";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(
+				output.contains("Scripting functions are not allowed"),
+				"unexpected output: {output:?}"
+			);
+		}
+
+		// Deny all, denies all users to execute functions and access any network address
+		info!("* When all capabilities are denied");
+		{
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-all".to_owned(),
 				..Default::default()
 			})
 			.await
