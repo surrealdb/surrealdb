@@ -202,7 +202,8 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		value: 123,
 	};
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
-	let database = "test_db";
+	let database_owned = format!("test_db_{:?}", test.kvs);
+	let database = database_owned.as_str();
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
@@ -256,13 +257,13 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		.await
 		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
 		.unwrap();
-	assert_eq!(0, found.len());
+	assert_eq!(0, found.len(), "Found: {:?}", found);
 	let found = tx
 		.scan_ndlq(&new_node_id, 100)
 		.await
 		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
 		.unwrap();
-	assert_eq!(0, found.len());
+	assert_eq!(0, found.len(), "Found: {:?}", found);
 
 	// Verify table live query does not exist
 	let found = tx
@@ -270,6 +271,6 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		.await
 		.map_err(|e| format!("Error scanning tblq: {:?}", e))
 		.unwrap();
-	assert_eq!(0, found.len());
+	assert_eq!(0, found.len(), "Found: {:?}", found);
 	tx.cancel().await.unwrap();
 }
