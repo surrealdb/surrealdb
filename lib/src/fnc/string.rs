@@ -151,27 +151,6 @@ pub mod distance {
 	}
 }
 
-pub mod similarity {
-
-	use crate::err::Error;
-	use crate::fnc::util::string::fuzzy::Fuzzy;
-	use crate::sql::Value;
-
-	pub fn fuzzy((a, b): (String, String)) -> Result<Value, Error> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
-	}
-
-	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "string::similarity::jaro() function",
-		})
-	}
-
-	pub fn smithwaterman((a, b): (String, String)) -> Result<Value, Error> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
-	}
-}
-
 pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
@@ -240,6 +219,27 @@ pub mod is {
 			_ => false,
 		}
 		.into())
+	}
+}
+
+pub mod similarity {
+
+	use crate::err::Error;
+	use crate::fnc::util::string::fuzzy::Fuzzy;
+	use crate::sql::Value;
+
+	pub fn fuzzy((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	}
+
+	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "string::similarity::jaro() function",
+		})
+	}
+
+	pub fn smithwaterman((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().fuzzy_score(b.as_str()).into())
 	}
 }
 

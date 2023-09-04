@@ -148,6 +148,10 @@ pub mod is {
 		Ok(arg.is_float().into())
 	}
 
+	pub fn geometry((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_geometry().into())
+	}
+
 	pub fn int((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_int().into())
 	}
@@ -160,16 +164,12 @@ pub mod is {
 		Ok(arg.is_object().into())
 	}
 
-	pub fn string((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(arg.is_strand().into())
-	}
-
-	pub fn geometry((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(arg.is_geometry().into())
-	}
-
 	pub fn record((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_record().into())
+	}
+
+	pub fn string((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_strand().into())
 	}
 }
 
