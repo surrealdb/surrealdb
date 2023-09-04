@@ -200,7 +200,7 @@ pub fn minkowski(i: &str) -> IResult<&str, Distance> {
 }
 
 pub fn dimension(i: &str) -> IResult<&str, u16> {
-	let (i, _) = shouldbespace(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIMENSION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, dim) = uint16(i)?;

@@ -173,7 +173,7 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
-	use crate::sql::index::SearchParams;
+	use crate::sql::index::{Distance, MTreeParams, SearchParams};
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
 	use crate::sql::Idioms;
@@ -269,6 +269,31 @@ mod tests {
 		assert_eq!(
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
+		);
+	}
+
+	#[test]
+	fn check_create_mtree_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col MTREE DIMENSION 4";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::MTree(MTreeParams {
+					dimension: 4,
+					distance: Distance::Euclidean,
+					capacity: 40,
+					doc_ids_order: 100,
+				}),
+				comment: None,
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN CAPACITY 40 DOC_IDS_ORDER 100"
 		);
 	}
 }

@@ -11,7 +11,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
-		DEFINE INDEX bt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
 		SELECT id FROM pts WHERE point <2> $pt EXPLAIN;
@@ -44,7 +44,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 					{
 						detail: {
 							plan: {
-								index: 'bt_vec',
+								index: 'mt_pts',
 								operator: '<2>',
 								value: [2,3,4,5]
 							},
