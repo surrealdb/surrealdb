@@ -37,7 +37,7 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = BeginStatement::default();
+		let stmt = BeginStatement;
 		let value: BeginStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}

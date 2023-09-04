@@ -18,7 +18,6 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
-use nom::combinator::peek;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

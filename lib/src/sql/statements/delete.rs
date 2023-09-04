@@ -13,7 +13,6 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;

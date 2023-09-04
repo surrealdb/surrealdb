@@ -26,7 +26,6 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::multi::many0;
-use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::Err::Failure;
 use rand::distributions::Alphanumeric;
