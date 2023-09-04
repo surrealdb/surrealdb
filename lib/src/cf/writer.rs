@@ -141,8 +141,7 @@ mod tests {
 		let mut tx0 = ds.transaction(true, false).await.unwrap();
 		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
 		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
-		let tb = tb.clone();
-		tx0.put(&crate::key::database::tb::new(ns, db, tb.as_ref()), dtb.clone()).await.unwrap();
+		tx0.put(&crate::key::database::tb::new(ns, db, tb), dtb.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
 		// Let the db remember the timestamp for the current versionstamp
@@ -197,7 +196,6 @@ mod tests {
 		let start: u64 = 0;
 
 		let mut tx4 = ds.transaction(true, false).await.unwrap();
-		let tb = tb.clone();
 		let r =
 			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
@@ -252,7 +250,6 @@ mod tests {
 
 		// Now we should see the gc_all results
 		let mut tx6 = ds.transaction(true, false).await.unwrap();
-		let tb = tb.clone();
 		let r =
 			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
