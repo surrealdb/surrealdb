@@ -60,7 +60,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-use std::ops::Neg;
 use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
@@ -2603,28 +2602,14 @@ pub(crate) trait TryAdd<Rhs = Self> {
 impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_add(w.to_decimal()).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v + w)),
-			},
-			(Value::Strand(v), Value::Strand(w)) => Ok(Value::Strand(v + w)),
-			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w + v)),
-			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v + w)),
-			(Value::Duration(v), Value::Duration(w)) => Ok(Value::Duration(v + w)),
-			(v, w) => Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2638,28 +2623,14 @@ pub(crate) trait TrySub<Rhs = Self> {
 impl TrySub for Value {
 	type Output = Self;
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_sub(w.to_decimal()).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v - w)),
-			},
-			(Value::Datetime(v), Value::Datetime(w)) => Ok(Value::Duration(v - w)),
-			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w - v)),
-			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v - w)),
-			(Value::Duration(v), Value::Duration(w)) => Ok(Value::Duration(v - w)),
-			(v, w) => Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2673,24 +2644,10 @@ pub(crate) trait TryMul<Rhs = Self> {
 impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_mul(w.to_decimal()).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v * w)),
-			},
-			(v, w) => Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
+			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2704,17 +2661,10 @@ pub(crate) trait TryDiv<Rhs = Self> {
 impl TryDiv for Value {
 	type Output = Self;
 	fn try_div(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(_, Number::Int(0)) => Ok(Value::None),
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
-					// Divided a large number by a small number, got an overflowing number
-					Err(Error::TryDiv(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v / w)),
-			},
-			(v, w) => Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2728,20 +2678,10 @@ pub(crate) trait TryPow<Rhs = Self> {
 impl TryPow for Value {
 	type Output = Self;
 	fn try_pow(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w))
-					if w.try_into().ok().and_then(|w| v.checked_pow(w)).is_none() =>
-				{
-					Err(Error::TryPow(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Int(w)) if v.checked_powi(w).is_none() => {
-					Err(Error::TryPow(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v.pow(w))),
-			},
-			(v, w) => Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
+			(v, w) => return Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2755,10 +2695,10 @@ pub(crate) trait TryNeg<Rhs = Self> {
 impl TryNeg for Value {
 	type Output = Self;
 	fn try_neg(self) -> Result<Self, Error> {
-		match self {
-			Self::Number(n) if !matches!(n, Number::Int(i64::MIN)) => Ok(Self::Number(n.neg())),
-			v => Err(Error::TryNeg(v.to_string())),
-		}
+		Ok(match self {
+			Self::Number(n) => Self::Number(n.try_neg()?),
+			v => return Err(Error::TryNeg(v.to_string())),
+		})
 	}
 }
 
