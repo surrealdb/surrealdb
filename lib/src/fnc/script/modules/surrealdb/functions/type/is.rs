@@ -5,7 +5,7 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"is",
+	"type::is",
 	"array" => run,
 	"bool" => run,
 	"bytes" => run,
