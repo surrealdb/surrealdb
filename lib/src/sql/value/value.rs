@@ -2570,6 +2570,9 @@ impl Value {
 		txn: &Transaction,
 		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		// Prevent infinite recursion due to casting, expressions, etc.
+		let opt = &opt.dive(1)?;
+
 		match self {
 			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,

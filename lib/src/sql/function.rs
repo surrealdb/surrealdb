@@ -156,8 +156,6 @@ impl Function {
 		txn: &Transaction,
 		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Prevent long function chains
-		let opt = &opt.dive(1)?;
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the function type
