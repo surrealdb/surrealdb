@@ -5435,6 +5435,37 @@ pub async fn function_http_error() -> Result<(), Error> {
 	Ok(())
 }
 
+#[cfg(all(feature = "http", feature = "scripting"))]
+#[tokio::test]
+pub async fn function_http_get_from_script() -> Result<(), Error> {
+	use wiremock::{
+		matchers::{header, method, path},
+		Mock, ResponseTemplate,
+	};
+
+	let server = wiremock::MockServer::start().await;
+	Mock::given(method("GET"))
+		.and(path("/some/path"))
+		.and(header("user-agent", "SurrealDB"))
+		.and(header("a-test-header", "with-a-test-value"))
+		.respond_with(ResponseTemplate::new(200).set_body_string("some text result"))
+		.expect(1)
+		.mount(&server)
+		.await;
+
+	let query = format!(
+		r#"RETURN function() {{
+			return await surrealdb.functions.http.get("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}});
+		}}"#,
+		server.uri()
+	);
+	test_queries(&query, &["'some text result'"]).await?;
+
+	server.verify().await;
+
+	Ok(())
+}
+
 #[cfg(not(feature = "http"))]
 #[tokio::test]
 pub async fn function_http_disabled() -> Result<(), Error> {
