@@ -75,14 +75,6 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
-	pub(super) async fn new_mtree_index_knn_iterator(
-		&self,
-		_ir: IteratorRef,
-		_io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
-		todo!()
-	}
-
 	pub(crate) async fn matches(
 		&self,
 		txn: &Transaction,

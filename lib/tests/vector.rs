@@ -1,8 +1,9 @@
+mod helpers;
 mod parse;
+use crate::helpers::new_ds;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -16,7 +17,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
 		SELECT id FROM pts WHERE point <2> $pt EXPLAIN;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -29,11 +30,11 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 		"[
 			{
 				id: pts:1,
-				dist: 1.5f
+				dist: 2f
 			},
 			{
 				id: pts:2,
-				dist: 1.8f
+				dist: 4f
 			}
 		]",
 	);
@@ -48,7 +49,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 								operator: '<2>',
 								value: [2,3,4,5]
 							},
-							table: 'vec',
+							table: 'pts',
 						},
 						operation: 'Iterate Index'
 					}

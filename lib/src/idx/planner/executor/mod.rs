@@ -94,7 +94,7 @@ impl QueryExecutor {
 			} => self.new_ft_index_matches_iterator(ir, io).await?,
 			Lookup::MtKnn {
 				..
-			} => self.new_mtree_index_knn_iterator(ir, io).await?,
+			} => self.new_mtree_index_knn_iterator(ir),
 		})
 	}
 
