@@ -516,8 +516,8 @@ mod cli_integration {
 
 			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
 
-			let query = format!("RETURN http::get('http://127.0.0.1/');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
+			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
 				output.contains("Access to network target 'http://127.0.0.1/' is not allowed"),
 				"unexpected output: {output:?}"
