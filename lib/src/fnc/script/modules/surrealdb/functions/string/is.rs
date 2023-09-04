@@ -5,7 +5,7 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"string::is",
+	"is",
 	"alphanum" => run,
 	"alpha" => run,
 	"ascii" => run,
