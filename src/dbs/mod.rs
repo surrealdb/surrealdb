@@ -230,7 +230,7 @@ pub async fn init(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
-
+	// Log whether authentication is enabled
 	if auth_enabled {
 		info!("✅🔒 Authentication is enabled 🔒✅");
 	} else {

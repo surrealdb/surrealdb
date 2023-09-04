@@ -40,6 +40,7 @@ mod rocksdb {
 		Datastore::new_full(format!("rocksdb:{path}").as_str(), sql::Uuid::from(node_id), None)
 			.await
 			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -75,6 +76,7 @@ mod speedb {
 		Datastore::new_full(format!("speedb:{path}").as_str(), sql::Uuid::from(node_id), None)
 			.await
 			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
@@ -144,13 +146,10 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		let ds = Datastore::new_full(
-			"fdb:/etc/foundationdb/fdb.cluster",
-			sql::Uuid::from(node_id),
-			None,
-		)
-		.await
-		.unwrap();
+		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster")
+			.await
+			.unwrap()
+			.with_node_id(sql::Uuid::from(node_id), None);
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();

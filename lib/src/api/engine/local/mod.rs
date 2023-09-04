@@ -59,6 +59,7 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -66,8 +67,6 @@ use tokio::fs::OpenOptions;
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
@@ -403,9 +402,46 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 	}
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+async fn export(
+	kvs: &Datastore,
+	sess: &Session,
+	ns: String,
+	db: String,
+	chn: channel::Sender<Vec<u8>>,
+) -> Result<()> {
+	if let Err(error) = kvs.export(sess, ns, db, chn).await?.await {
+		if let crate::error::Db::Channel(message) = error {
+			// This is not really an error. Just logging it for improved visibility.
+			trace!("{message}");
+			return Ok(());
+		}
+		return Err(error.into());
+	}
+	Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn copy<'a, R, W>(
+	path: PathBuf,
+	reader: &'a mut R,
+	writer: &'a mut W,
+) -> std::result::Result<(), crate::Error>
+where
+	R: tokio::io::AsyncRead + Unpin + ?Sized,
+	W: tokio::io::AsyncWrite + Unpin + ?Sized,
+{
+	io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
+		crate::Error::Api(crate::error::Api::FileRead {
+			path,
+			error,
+		})
+	})
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
-	kvs: &Datastore,
+	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
 ) -> Result<DbResponse> {
@@ -514,34 +550,16 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let (tx, rx) = channel::new::<Vec<u8>>(1);
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			let (mut writer, mut reader) = io::duplex(10_240);
+			let (tx, rx) = channel::new(1);
 
-			// Write to channel.
-			async fn export_with_err(
-				kvs: &Datastore,
-				sess: &Session,
-				ns: String,
-				db: String,
-				chn: channel::Sender<Vec<u8>>,
-			) -> std::result::Result<(), crate::Error> {
-				let export = kvs.prepare_export(sess, ns, db, chn).await.map_err(|error| {
-					error!("Error preparing export: {error}");
-					crate::Error::Db(error)
-				})?;
-
-				export.await.map_err(|error| {
-					error!("Error processing export: {error}");
-					crate::Error::Db(error)
-				})
-			}
-			match (param.file, param.send) {
-				(None, None) => panic!("Expected file or channel, neither found"),
-				(Some(_), Some(_)) => panic!("Expected file or channel, found both"),
+			match (param.file, param.sender) {
 				(Some(path), None) => {
-					let export = export_with_err(kvs, session, ns, db, tx);
+					let (mut writer, mut reader) = io::duplex(10_240);
+
+					// Write to channel.
+					let export = export(kvs, session, ns, db, tx);
 
 					// Read from channel and write to pipe.
 					let bridge = async move {
@@ -555,56 +573,53 @@ async fn router(
 					};
 
 					// Output to stdout or file.
-					let mut output: Box<dyn AsyncWrite + Unpin + Send> =
-						match path.to_str().unwrap() {
-							"-" => Box::new(io::stdout()),
-							_ => {
-								let file = match OpenOptions::new()
-									.write(true)
-									.create(true)
-									.truncate(true)
-									.open(&path)
-									.await
-								{
-									Ok(path) => path,
-									Err(error) => {
-										return Err(Error::FileOpen {
-											path,
-											error,
-										}
-										.into());
-									}
-								};
-								Box::new(file)
+					let mut output = match OpenOptions::new()
+						.write(true)
+						.create(true)
+						.truncate(true)
+						.open(&path)
+						.await
+					{
+						Ok(path) => path,
+						Err(error) => {
+							return Err(Error::FileOpen {
+								path,
+								error,
+							}
+							.into());
+						}
+					};
+
+					// Copy from pipe to output.
+					let copy = copy(path, &mut reader, &mut output);
+
+					tokio::try_join!(export, bridge, copy)?;
+				}
+				(None, Some(backup)) => {
+					let kvs = kvs.clone();
+					let session = session.clone();
+					tokio::spawn(async move {
+						let export = async {
+							if let Err(error) = export(&kvs, &session, ns, db, tx).await {
+								let _ = backup.send(Err(error)).await;
 							}
 						};
 
-					// Copy from pipe to output.
-					async fn copy_with_err<'a, R, W>(
-						path: PathBuf,
-						reader: &'a mut R,
-						writer: &'a mut W,
-					) -> std::result::Result<(), crate::Error>
-					where
-						R: tokio::io::AsyncRead + Unpin + ?Sized,
-						W: tokio::io::AsyncWrite + Unpin + ?Sized,
-					{
-						io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
-							crate::Error::Api(crate::error::Api::FileRead {
-								path,
-								error,
-							})
-						})
-					}
+						let bridge = async {
+							while let Ok(bytes) = rx.recv().await {
+								if backup.send(Ok(bytes)).await.is_err() {
+									break;
+								}
+							}
+						};
 
-					let copy = copy_with_err(path, &mut reader, &mut output);
-
-					tokio::try_join!(export, bridge, copy).map(|_| DbResponse::Other(Value::None))
+						tokio::join!(export, bridge);
+					});
 				}
-				(None, Some(chn)) => export_with_err(kvs, session, ns, db, chn)
-					.await
-					.map(|_| DbResponse::Other(Value::None)),
+				_ => unreachable!(),
 			}
+
+			Ok(DbResponse::Other(Value::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {

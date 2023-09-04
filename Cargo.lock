@@ -5208,7 +5208,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5265,7 +5265,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "addr",
  "any_ascii",

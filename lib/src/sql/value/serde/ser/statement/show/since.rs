@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::datetime::Datetime;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::value::serde::ser;
 use serde::ser::Error as _;
@@ -33,9 +34,9 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match variant {
-			"Timestamp" => {
-				Ok(ShowSince::Timestamp(value.serialize(ser::datetime::Serializer.wrap())?))
-			}
+			"Timestamp" => Ok(ShowSince::Timestamp(Datetime(
+				value.serialize(ser::datetime::Serializer.wrap())?,
+			))),
 			"Versionstamp" => Ok(ShowSince::Versionstamp(
 				value.serialize(ser::primitive::u64::Serializer.wrap())?,
 			)),

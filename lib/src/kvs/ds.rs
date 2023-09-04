@@ -21,7 +21,7 @@ use crate::sql::statements::DefineUserStatement;
 use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
-use crate::vs;
+use crate::vs::Oracle;
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
@@ -58,19 +58,19 @@ pub struct Datastore {
 	id: Uuid,
 	// Whether this datastore runs in strict mode by default
 	strict: bool,
+	// Whether authentication is enabled on this datastore.
+	auth_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
 	transaction_timeout: Option<Duration>,
-	// The versionstamp oracle for this datastore.
-	// Used only in some datastores, such as tikv.
-	vso: Arc<Mutex<vs::Oracle>>,
-	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
-	auth_enabled: bool,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
+	// The versionstamp oracle for this datastore.
+	// Used only in some datastores, such as tikv.
+	versionstamp_oracle: Arc<Mutex<Oracle>>,
+	// Whether this datastore enables live query notifications to subscribers
+	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -295,17 +295,23 @@ impl Datastore {
 		}?;
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
-			id: node_id,
+			id: Uuid::new_v4(),
 			inner,
 			strict: false,
+			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
-			auth_enabled: false,
 			capabilities: Capabilities::default(),
+			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock: Arc::new(RwLock::new(clock)),
 		})
+	}
+
+	/// Specify whether this Datastore should run in strict mode
+	pub fn with_node_id(mut self, id: Uuid) -> Self {
+		self.id = id;
+		self
 	}
 
 	/// Specify whether this Datastore should run in strict mode
@@ -326,67 +332,73 @@ impl Datastore {
 		self
 	}
 
-	/// Enabled authentication for this Datastore?
-	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
-		self.auth_enabled = enabled;
-		self
-	}
-
-	pub fn is_auth_enabled(&self) -> bool {
-		self.auth_enabled
-	}
-
-	/// Setup the initial credentials
-	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
-		let txn = Arc::new(Mutex::new(self.transaction(true, false).await?));
-		let root_users = txn.lock().await.all_root_users().await;
-		match root_users {
-			Ok(val) if val.is_empty() => {
-				info!(
-					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
-				);
-				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
-				let ctx = Context::default();
-				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
-				txn.lock().await.commit().await?;
-				Ok(())
-			}
-			Ok(_) => {
-				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
-				warn!("Consider removing the --user/--pass arguments from the server start.");
-				txn.lock().await.commit().await?;
-				Ok(())
-			}
-			Err(e) => {
-				txn.lock().await.cancel().await?;
-				Err(e)
-			}
-		}
-	}
-
 	/// Set a global transaction timeout for this Datastore
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
 		self
 	}
 
-	/// Configure Datastore capabilities
+	/// Set whether authentication is enabled for this Datastore
+	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
+		self.auth_enabled = enabled;
+		self
+	}
+
+	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
 		self
 	}
 
-	// Initialise bootstrap with implicit values intended for runtime
-	pub async fn bootstrap(&self) -> Result<(), Error> {
-		self.bootstrap_full(&self.id).await
+	/// Is authentication enabled for this Datastore?
+	pub fn is_auth_enabled(&self) -> bool {
+		self.auth_enabled
 	}
 
-	// Initialise bootstrap with artificial values, intended for testing
-	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
+	/// Setup the initial credentials
+	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();
+		// Fetch the root users from the storage
+		let users = txn.lock().await.all_root_users().await;
+		// Process credentials, depending on existing users
+		match users {
+			Ok(v) if v.is_empty() => {
+				// Display information in the logs
+				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", creds.username);
+				// Create and save a new root users
+				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+				let ctx = Context::default();
+				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+				// We added a new user, so commit the transaction
+				txn.lock().await.commit().await?;
+				// Everything ok
+				Ok(())
+			}
+			Ok(_) => {
+				// Display warnings in the logs
+				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", creds.username);
+				warn!("Consider removing the --user and --pass arguments from the server start command");
+				// We didn't write anything, so just rollback
+				txn.lock().await.cancel().await?;
+				// Everything ok
+				Ok(())
+			}
+			Err(e) => {
+				// There was an unexpected error, so rollback
+				txn.lock().await.cancel().await?;
+				// Return any error
+				Err(e)
+			}
+		}
+	}
+
+	// Initialise bootstrap with implicit values intended for runtime
+	pub async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
-		let archived = match self.register_remove_and_archive(&mut tx, node_id).await {
+		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
 			Ok(archived) => {
 				tx.commit().await?;
 				archived
@@ -403,7 +415,13 @@ impl Datastore {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
-				tx.cancel().await
+				match tx.cancel().await {
+					Ok(_) => Err(e),
+					Err(e) => {
+						// We have a nested error
+						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
+					}
+				}
 			}
 		}
 	}
@@ -571,7 +589,8 @@ impl Datastore {
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
 		let mut ret = vec![];
 		for lq in lqs {
-			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
+			let lvs =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
 			let archived_lvs = lvs.clone().archive(this_node_id.clone());
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
 			ret.push(lq);
@@ -687,14 +706,6 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		#[cfg(debug_assertions)]
-		if lock {
-			warn!("There are issues with pessimistic locking in TiKV");
-		}
-		self.transaction_inner(write, lock).await
-	}
-
-	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
@@ -737,7 +748,7 @@ impl Datastore {
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
 			write_buffer: HashMap::new(),
-			vso: self.vso.clone(),
+			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 		})
 	}
@@ -805,7 +816,6 @@ impl Datastore {
 			}
 			.into());
 		}
-
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -871,7 +881,6 @@ impl Datastore {
 			}
 			.into());
 		}
-
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -881,10 +890,6 @@ impl Datastore {
 			.with_auth(sess.au.clone())
 			.with_auth_enabled(self.auth_enabled)
 			.with_strict(self.strict);
-		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?;
-		//
-		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
 		let mut ctx = Context::default();
 		// Set context capabilities
@@ -901,15 +906,19 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
-		match val.writeable() {
-			true => txn.lock().await.commit().await?,
-			false => txn.lock().await.cancel().await?,
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
 		};
 		// Return result
-		Ok(res)
+		res
 	}
 
 	/// Subscribe to live notifications
@@ -938,26 +947,23 @@ impl Datastore {
 
 	/// Performs a full database export as SQL
 	#[instrument(skip(self, sess, chn))]
-	pub async fn prepare_export(
+	pub async fn export(
 		&self,
 		sess: &Session,
 		ns: String,
 		db: String,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-		let mut txn = self.transaction(false, false).await?;
-
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
 			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
 		}
-
+		// Create a new readonly transaction
+		let mut txn = self.transaction(false, false).await?;
+		// Return an async export job
 		Ok(async move {
-			// Start a new transaction
 			// Process the export
-			let ns = ns.to_owned();
-			let db = db.to_owned();
 			txn.export(&ns, &db, chn).await?;
 			// Everything ok
 			Ok(())
@@ -975,7 +981,7 @@ impl Datastore {
 				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
 			)?;
 		}
-
+		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
 }

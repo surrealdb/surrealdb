@@ -1022,7 +1022,7 @@ mod ws_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn change_and_merge() -> Result<(), Box<dyn std::error::Error>> {
+	async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
@@ -1047,25 +1047,8 @@ mod ws_integration {
 		let what = res["id"].as_str().unwrap();
 
 		//
-		// Change / Marge data
+		// Merge data
 		//
-
-		let res = common::ws_send_msg_and_wait_response(
-			socket,
-			serde_json::to_string(&json!({
-			"id": "1",
-			"method": "change",
-			"params": [
-				what, {
-					"name_for_change": "foo",
-					"value_for_change": "bar",
-				}
-				]
-			}))
-			.unwrap(),
-		)
-		.await;
-		assert!(res.is_ok(), "result: {:?}", res);
 
 		let res = common::ws_send_msg_and_wait_response(
 			socket,
@@ -1094,8 +1077,6 @@ mod ws_integration {
 		let res = &res[0]["result"].as_array().unwrap()[0];
 
 		assert_eq!(res["id"], what);
-		assert_eq!(res["name_for_change"], "foo");
-		assert_eq!(res["value_for_change"], "bar");
 		assert_eq!(res["name_for_merge"], "foo");
 		assert_eq!(res["value_for_merge"], "bar");
 
@@ -1103,7 +1084,7 @@ mod ws_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn modify_and_patch() -> Result<(), Box<dyn std::error::Error>> {
+	async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
@@ -1119,51 +1100,13 @@ mod ws_integration {
 		// Setup the database
 		//
 		let res =
-			common::ws_query(socket, r#"CREATE table SET original_name = "oritinal_value""#).await;
+			common::ws_query(socket, r#"CREATE table SET original_name = "original_value""#).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 		assert!(res[0]["result"].is_array(), "result: {:?}", res);
 		let res = &res[0]["result"].as_array().unwrap()[0];
 
 		let what = res["id"].as_str().unwrap();
-
-		//
-		// Modify data
-		//
-
-		let ops = json!([
-			{
-				"op": "add",
-				"path": "modify_name",
-				"value": "modify_value"
-			},
-			{
-				"op": "remove",
-				"path": "original_name",
-			}
-		]);
-		let res = common::ws_send_msg_and_wait_response(
-			socket,
-			serde_json::to_string(&json!({
-				"id": "1",
-				"method": "modify",
-				"params": [
-					what, ops
-				]
-			}))
-			.unwrap(),
-		)
-		.await;
-		assert!(res.is_ok(), "result: {:?}", res);
-		let res = res.unwrap();
-		assert!(res["result"].is_object(), "result: {:?}", res);
-		let res = res["result"].as_object().unwrap();
-		assert_eq!(
-			res.get("modify_name"),
-			Some(json!("modify_value")).as_ref(),
-			"result: {:?}",
-			res
-		);
 
 		//
 		// Patch data
@@ -1174,6 +1117,10 @@ mod ws_integration {
 				"op": "add",
 				"path": "patch_name",
 				"value": "patch_value"
+			},
+			{
+				"op": "remove",
+				"path": "original_name",
 			}
 		]);
 		let res = common::ws_send_msg_and_wait_response(
@@ -1205,7 +1152,6 @@ mod ws_integration {
 
 		assert_eq!(res["id"], what);
 		assert!(res["original_name"].is_null());
-		assert_eq!(res["modify_name"], "modify_value");
 		assert_eq!(res["patch_name"], "patch_value");
 
 		Ok(())

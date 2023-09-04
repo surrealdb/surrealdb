@@ -3,9 +3,11 @@ use crate::cli::abstraction::{
 };
 use crate::err::Error;
 use clap::Args;
+use futures_util::StreamExt;
 use surrealdb::engine::any::connect;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
+use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
@@ -67,7 +69,18 @@ pub async fn init(
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;
 	// Export the data from the database
-	client.export(file).await?;
+	if file == "-" {
+		// Prepare the backup
+		let mut backup = client.export(()).await?;
+		// Get a handle to standard output
+		let mut stdout = io::stdout();
+		// Write the backup to standard output
+		while let Some(bytes) = backup.next().await {
+			stdout.write_all(&bytes?).await?;
+		}
+	} else {
+		client.export(file).await?;
+	}
 	info!("The SQL file was exported successfully");
 	// Everything OK
 	Ok(())

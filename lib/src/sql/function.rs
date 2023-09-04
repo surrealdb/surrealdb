@@ -3,6 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
+use crate::iam::Action;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::val_char;
 use crate::sql::common::{commas, openparentheses};
@@ -11,6 +12,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{value, Value};
+use crate::sql::Permission;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use nom::branch::alt;
@@ -176,8 +178,30 @@ impl Function {
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
-					run.get_fc(opt.ns(), opt.db(), s).await?
+					run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?
 				};
+				// Check permissions
+				if opt.check_perms(Action::View) {
+					match &val.permissions {
+						Permission::Full => (),
+						Permission::None => {
+							return Err(Error::FunctionPermissions {
+								name: s.to_owned(),
+							})
+						}
+						Permission::Specific(e) => {
+							// Disable permissions
+							let opt = &opt.new_with_perms(false);
+							// Process the PERMISSION clause
+							if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+								return Err(Error::FunctionPermissions {
+									name: s.to_owned(),
+								});
+							}
+						}
+					}
+				}
+				// Return the value
 				// Check the function arguments
 				if x.len() != val.args.len() {
 					return Err(Error::InvalidArguments {
@@ -193,8 +217,8 @@ impl Function {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
-				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(&kind)?);
+				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
+					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
 				val.block.compute(&ctx, opt, txn, doc).await
