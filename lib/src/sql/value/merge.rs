@@ -37,18 +37,13 @@ mod tests {
 				},
 			}",
 		);
-		let mrg = Value::None;
-		let val = Value::parse(
-			"{
-				name: {
-					first: 'Tobie',
-					last: 'Morgan Hitchcock',
-					initials: 'TMH',
-				},
-			}",
-		);
-		res.merge(mrg).unwrap();
-		assert_eq!(res, val);
+		let none = Value::None;
+		match res.merge(none.clone()).unwrap_err() {
+			Error::InvalidMerge {
+				value,
+			} => assert_eq!(value, none),
+			error => panic!("unexpected error: {error:?}"),
+		}
 	}
 
 	#[tokio::test]
