@@ -12,7 +12,6 @@ mod duration;
 mod encoding;
 mod geo;
 mod http;
-mod is;
 mod math;
 mod meta;
 mod parse;
@@ -37,7 +36,6 @@ impl_module_def!(
 	"encoding" => (encoding::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
-	"is" => (is::Package),
 	"math" => (math::Package),
 	"meta" => (meta::Package),
 	"not" => run,
