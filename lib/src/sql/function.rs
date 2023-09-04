@@ -623,6 +623,7 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 				tag("bytes"),
 				tag("collection"),
 				tag("datetime"),
+				tag("decimal"),
 				tag("duration"),
 				tag("float"),
 				tag("geometry"),
@@ -638,7 +639,7 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 				tag("polygon"),
 				tag("record"),
 				tag("string"),
-				tag("uuid"),
+				tag("uuid")
 			)),
 		),
 	))(i)
