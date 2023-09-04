@@ -26,7 +26,8 @@ use super::Config;
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
-	pub(crate) endpoint: Url,
+	pub(crate) url: Url,
+	pub(crate) path: String,
 	pub(crate) config: Config,
 }
 
@@ -38,7 +39,7 @@ pub trait IntoEndpoint<Scheme> {
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
-#[cfg(any(feature = "kv-fdb", feature = "kv-rocksdb", feature = "kv-speedb"))]
-fn make_url(scheme: &str, path: impl AsRef<std::path::Path>) -> String {
-	format!("{scheme}://{}", path.as_ref().display())
+#[allow(dead_code)]
+fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
+	format!("{protocol}{}", path.as_ref().display())
 }

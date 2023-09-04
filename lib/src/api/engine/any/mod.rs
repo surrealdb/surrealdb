@@ -108,12 +108,23 @@ pub trait IntoEndpoint {
 
 impl IntoEndpoint for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = match self {
-			"memory" => "mem://",
-			_ => self,
+		let (url, path) = match self {
+			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
+			url if url.starts_with("ws") | url.starts_with("http") => {
+				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
+			}
+			_ => {
+				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
+				(
+					Url::parse(&format!("{scheme}://"))
+						.map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					self.to_owned(),
+				)
+			}
 		};
 		Ok(Endpoint {
-			endpoint: Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+			url,
+			path,
 			config: Default::default(),
 		})
 	}
