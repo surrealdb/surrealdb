@@ -255,6 +255,7 @@ fn subquery_value(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((
 		|i| {
 			let (i, _) = openparentheses(i)?;
