@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::sql::statements::ThrowStatement;
 use crate::sql::value::serde::ser;
-use crate::sql::Strand;
+use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -35,7 +35,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeThrowStatement {
-	error: Strand,
+	error: Value,
 }
 
 impl serde::ser::SerializeStruct for SerializeThrowStatement {
@@ -48,7 +48,7 @@ impl serde::ser::SerializeStruct for SerializeThrowStatement {
 	{
 		match key {
 			"error" => {
-				self.error = Strand(value.serialize(ser::string::Serializer.wrap())?);
+				self.error = value.serialize(ser::value::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `ThrowStatement::{key}`")));
