@@ -96,9 +96,14 @@ docker exec -it <container_name> /surreal sql -c http://localhost:8000 -u root -
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Run using Docker Compose</h2>
 
 
-The Docker image can be used with the docker-compose tool.
-It is possible to override the entrypoint to ask it to use the start command.
-Here is an exemple of docker-compose.yml file.
+The Docker image can be used with the `docker-compose` tool.
+You can execute the following command to view the help of the `start` command to know the supported _environment variables_:
+
+```shell
+docker run --rm surrealdb/surrealdb:latest start --help
+```
+
+Here is an example of `docker-compose.yml` file.
 
 ```yaml
 version: '3'
@@ -107,17 +112,22 @@ services:
   surrealdb:
     env_file:
       - .env
-    entrypoint: 
-      - /surreal 
-      - start 
-      - --user
-      - $DB_USER
-      - --pass
-      - $DB_PASSWORD
+    command: start 
     image: surrealdb/surrealdb:latest
     ports:
       - 8000:8000
 ```
+
+Here is an example of `.env` file.
+
+```dotenv
+SURREAL_LOG=trace
+SURREAL_AUTH=true
+SURREAL_USER=root
+SURREAL_PASS=root
+SURREAL_CAPS_ALLOW_ALL=true
+```
+
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/community.svg?raw=true">&nbsp;&nbsp;Community</h2>
 

@@ -35,8 +35,6 @@ impl Future {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Prevent long future chains
-		let opt = &opt.dive(1)?;
 		// Process the future if enabled
 		match opt.futures {
 			true => self.0.compute(ctx, opt, txn, doc).await?.ok(),

@@ -46,7 +46,7 @@ impl Connection for Any {
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
-			match address.endpoint.scheme() {
+			match address.url.scheme() {
 				"fdb" => {
 					#[cfg(feature = "kv-fdb")]
 					{
@@ -144,7 +144,7 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						let mut address = address;
-						address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
+						address.url = address.url.join(engine::remote::ws::PATH)?;
 						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}

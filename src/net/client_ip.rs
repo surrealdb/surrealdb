@@ -34,6 +34,9 @@ pub enum ClientIp {
 	/// Nginx real IP
 	#[clap(name = "X-Real-IP")]
 	XRealIp,
+	/// Industry standard header used by many proxies
+	#[clap(name = "X-Forwarded-For")]
+	XForwardedFor,
 }
 
 impl std::fmt::Display for ClientIp {
@@ -45,6 +48,7 @@ impl std::fmt::Display for ClientIp {
 			ClientIp::FlyClientIp => write!(f, "Fly-Client-IP"),
 			ClientIp::TrueClientIP => write!(f, "True-Client-IP"),
 			ClientIp::XRealIp => write!(f, "X-Real-IP"),
+			ClientIp::XForwardedFor => write!(f, "X-Forwarded-For"),
 		}
 	}
 }
@@ -58,6 +62,7 @@ impl ClientIp {
 			ClientIp::FlyClientIp => true,
 			ClientIp::TrueClientIP => true,
 			ClientIp::XRealIp => true,
+			ClientIp::XForwardedFor => true,
 		}
 	}
 }

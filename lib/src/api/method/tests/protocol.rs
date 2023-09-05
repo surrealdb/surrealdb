@@ -30,7 +30,8 @@ impl IntoEndpoint<Test> for () {
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		Ok(Endpoint {
-			endpoint: Url::parse("test://")?,
+			url: Url::parse("test://")?,
+			path: String::new(),
 			config: Default::default(),
 		})
 	}

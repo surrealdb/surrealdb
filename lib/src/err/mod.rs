@@ -124,6 +124,18 @@ pub enum Error {
 		sql: String,
 	},
 
+	/// There was an error with the SQL query
+	#[error("Can not use {value} in a CONTENT clause")]
+	InvalidContent {
+		value: Value,
+	},
+
+	/// There was an error with the SQL query
+	#[error("Can not use {value} in a MERGE clause")]
+	InvalidMerge {
+		value: Value,
+	},
+
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {message}")]
 	InvalidPatch {

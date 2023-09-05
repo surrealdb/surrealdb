@@ -47,8 +47,6 @@ impl Cast {
 		txn: &Transaction,
 		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		// Prevent long cast chains
-		let opt = &opt.dive(1)?;
 		// Compute the value to be cast and convert it
 		self.1.compute(ctx, opt, txn, doc).await?.convert_to(&self.0)
 	}
