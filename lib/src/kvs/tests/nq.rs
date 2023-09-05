@@ -38,11 +38,12 @@ async fn archive_lv_for_node_archives() {
 		.await
 		.unwrap();
 	assert_eq!(results.len(), 1);
-	assert_eq!(results[0].nd, sql::uuid::Uuid(node_id.clone()));
-	assert_eq!(results[0].ns, namespace);
-	assert_eq!(results[0].db, database);
-	assert_eq!(results[0].tb, table);
-	assert_eq!(results[0].lq, lv_id);
+	let lq = results[0].as_ref().unwrap();
+	assert_eq!(lq.nd, sql::uuid::Uuid(node_id.clone()));
+	assert_eq!(lq.ns, namespace);
+	assert_eq!(lq.db, database);
+	assert_eq!(lq.tb, table);
+	assert_eq!(lq.lq, lv_id);
 	tx.commit().await.unwrap();
 
 	let mut tx = test.db.transaction(true, false).await.unwrap();

@@ -367,9 +367,22 @@ impl Datastore {
 				return Err(e);
 			}
 		};
+		let mut filtered = vec![];
+		let mut err = vec![];
+		for res in archived {
+			if let Ok(lq) = res {
+				filtered.push(lq);
+			} else if let Err(e) = res {
+				err.push(e);
+			}
+		}
+		if err.len() > 0 {
+			error!("Error bootstrapping mark phase: {:?}", err);
+			return Err(Error::Tx(format!("Error bootstrapping mark phase: {:?}", err)));
+		}
 
 		let mut tx = self.transaction(true, false).await?;
-		match self.remove_archived(&mut tx, archived).await {
+		match self.remove_archived(&mut tx, filtered).await {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
@@ -390,7 +403,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<Result<LqValue, Error>>, Error> {
 		trace!("Registering node {}", node_id);
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
@@ -440,7 +453,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<Result<LqValue, Error>>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
@@ -499,15 +512,15 @@ impl Datastore {
 	) -> Result<(), Error> {
 		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
-		let mut archived: Vec<LqValue> = vec![];
+		let mut _archived: Vec<LqValue> = vec![];
 		for hb in dead_heartbeats {
 			let new_archived = self
 				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
 				.await?;
 			tx.del_nd(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
-			for lq_value in new_archived {
-				archived.push(lq_value);
+			for _lq_value in new_archived {
+				// archived.push(lq_value);
 			}
 		}
 		Ok(())
@@ -556,16 +569,22 @@ impl Datastore {
 		tx: &mut Transaction,
 		nd: &Uuid,
 		this_node_id: Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<Result<LqValue, Error>>, Error> {
 		let lqs = tx.all_lq(nd).await?;
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
 		let mut ret = vec![];
 		for lq in lqs {
-			let lvs =
-				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
-			let archived_lvs = lvs.clone().archive(this_node_id.clone());
-			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
-			ret.push(lq);
+			let lv_res =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
+			if let Err(e) = lv_res {
+				error!("Error getting live query for node {}: {:?}", nd, e);
+				ret.push(Err(e));
+				continue;
+			}
+			let lv = lv_res.unwrap();
+			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
+			ret.push(Ok(lq));
 		}
 		Ok(ret)
 	}

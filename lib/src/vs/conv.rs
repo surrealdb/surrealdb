@@ -87,7 +87,7 @@ pub fn to_u128_be(vs: [u8; 10]) -> u128 {
 	u128::from_be_bytes(buf)
 }
 
-#[derive(Error)]
+#[derive(Error, Clone)]
 pub enum Error {
 	#[error("invalid versionstamp")]
 	// InvalidVersionstamp is returned when a versionstamp has an unexpected length.

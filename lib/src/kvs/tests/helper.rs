@@ -18,11 +18,26 @@ impl TestContext {
 		node_id: crate::sql::uuid::Uuid,
 		time: Timestamp,
 	) -> Result<(), Error> {
+		// TODO we shouldn't test bootstrapping manually
 		let mut tx = self.db.transaction(true, false).await?;
 		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
+
+		let mut errors = vec![];
+		let mut values = vec![];
+		for res in archived {
+			match res {
+				Ok(v) => values.push(v),
+				Err(e) => errors.push(e),
+			}
+		}
+		if !errors.is_empty() {
+			// You can customize this panic message as per your needs
+			panic!("Encountered errors: {:?}", errors);
+		}
+
 		let mut tx = self.db.transaction(true, false).await?;
-		self.db.remove_archived(&mut tx, archived).await?;
+		self.db.remove_archived(&mut tx, values).await?;
 		Ok(tx.commit().await?)
 	}
 

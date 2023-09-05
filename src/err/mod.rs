@@ -14,7 +14,7 @@ use surrealdb::iam::Error as SurrealIamError;
 use surrealdb::Error as SurrealError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum Error {
 	#[error("The request body contains invalid data")]
 	Request,
