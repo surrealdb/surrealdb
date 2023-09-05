@@ -23,7 +23,7 @@ args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "r
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["test", "--workspace"]
+args = ["test", "--workspace", "--no-fail-fast"]
 
 # Check
 [tasks.cargo-check]

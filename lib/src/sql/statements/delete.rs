@@ -16,14 +16,15 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DeleteStatement {
+	#[revision(start = 2)]
+	pub only: bool,
 	pub what: Values,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
@@ -35,14 +36,6 @@ impl DeleteStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
-	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match self.what.len() {
-			1 if self.what[0].is_object() => true,
-			1 if self.what[0].is_thing() => true,
-			_ => false,
-		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -73,13 +66,27 @@ impl DeleteStatement {
 			})?;
 		}
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		match i.output(ctx, opt, txn, &stm).await? {
+			// This is a single record result
+			Value::Array(mut a) if self.only => match a.len() {
+				// There was exactly one result
+				v if v == 1 => Ok(a.remove(0)),
+				// There were no results
+				_ => Err(Error::SingleOnlyOutput),
+			},
+			// This is standard query result
+			v => Ok(v),
+		}
 	}
 }
 
 impl fmt::Display for DeleteStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DELETE {}", self.what)?;
+		write!(f, "DELETE")?;
+		if self.only {
+			f.write_str(" ONLY")?
+		}
+		write!(f, " {}", self.what)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}
@@ -98,8 +105,9 @@ impl fmt::Display for DeleteStatement {
 
 pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, _) = tag_no_case("DELETE")(i)?;
+	let (i, _) = opt(preceded(shouldbespace, tag_no_case("FROM")))(i)?;
+	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = opt(terminated(tag_no_case("FROM"), shouldbespace))(i)?;
 	let (i, what) = whats(i)?;
 	let (i, (cond, output, timeout, parallel)) = cut(|i| {
 		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
@@ -111,6 +119,7 @@ pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	Ok((
 		i,
 		DeleteStatement {
+			only: only.is_some(),
 			what,
 			cond,
 			output,
