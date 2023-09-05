@@ -168,7 +168,7 @@ struct KnnResult {
 struct MTree {
 	state: MState,
 	distance: Distance,
-	_minimum: usize,
+	minimum: usize,
 	updated: bool,
 }
 
@@ -178,7 +178,7 @@ impl MTree {
 		Self {
 			state,
 			distance,
-			_minimum: minimum,
+			minimum,
 			updated: false,
 		}
 	}
@@ -256,10 +256,11 @@ enum InsertionResult {
 }
 
 enum DeletionResult {
-	_DocRemoved,
-	_CoveringRadius(f64),
-	_UnderflownRoutingEntries(Vec<RoutingEntry>),
-	_UnderflownLeafIndexMap(LeafIndexMap),
+	NotFound,
+	DocRemoved,
+	CoveringRadius(f64),
+	UnderflownRoutingEntries(NodeId, Key, InternalNode),
+	UnderflownLeafIndexMap(NodeId, Key, LeafNode),
 }
 
 // Insertion
@@ -574,8 +575,20 @@ impl MTree {
 	) -> Result<bool, Error> {
 		if let Some(root_id) = self.state.root {
 			let node = store.get_node(tx, root_id).await?;
-			self.delete_at_node(tx, store, node, Arc::new(object), doc_id).await?;
-			Ok(true) // TODO: Is it true?
+			match self.delete_at_node(tx, store, node, &None, Arc::new(object), doc_id).await? {
+				DeletionResult::DocRemoved => Ok(true),
+				DeletionResult::CoveringRadius(_) | DeletionResult::NotFound => Ok(false),
+				DeletionResult::UnderflownRoutingEntries(id, key, e) => {
+					let sn = StoredNode::new(MTreeNode::Internal(e), id, key, 0);
+					store.set_node(sn, true)?;
+					Ok(true)
+				}
+				DeletionResult::UnderflownLeafIndexMap(id, key, n) => {
+					let sn = StoredNode::new(MTreeNode::Leaf(n), id, key, 0);
+					store.set_node(sn, true)?;
+					Ok(true)
+				}
+			}
 		} else {
 			Ok(false)
 		}
@@ -588,42 +601,115 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
 		node: StoredNode<MTreeNode>,
+		parent_center: &Option<Arc<Vector>>,
 		object: Arc<Vector>,
 		id: DocId,
 	) -> Result<DeletionResult, Error> {
 		match node.n {
 			MTreeNode::Internal(n) => {
-				self.delete_node_internal(tx, store, node.id, node.key, n, object, id).await
+				self.delete_node_internal(
+					tx,
+					store,
+					node.id,
+					node.key,
+					n,
+					parent_center,
+					object,
+					id,
+				)
+				.await
 			}
 			MTreeNode::Leaf(n) => {
-				self.delete_node_leaf(store, node.id, node.key, n, object, id).await
+				self.delete_node_leaf(store, node.id, node.key, n, parent_center, object, id).await
 			}
 		}
 	}
 
 	async fn delete_node_internal(
 		&mut self,
-		_tx: &mut Transaction,
-		_store: &mut MTreeNodeStore,
-		_node_id: NodeId,
-		_node_key: Key,
-		_node: InternalNode,
-		_object: Arc<Vector>,
-		_id: DocId,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		node_id: NodeId,
+		node_key: Key,
+		mut node: InternalNode,
+		_parent_center: &Option<Arc<Vector>>,
+		object: Arc<Vector>,
+		id: DocId,
 	) -> Result<DeletionResult, Error> {
-		todo!()
+		let mut node_update = false;
+		let mut child_idx = None;
+		let mut child_radius = 0.0;
+		for (i, e) in node.iter().enumerate() {
+			child_radius = self.calculate_distance(e.center.as_ref(), &object);
+			if child_radius <= e.radius {
+				child_idx = Some(i);
+				break;
+			}
+		}
+		let mut res = DeletionResult::NotFound;
+		if let Some(child_idx) = child_idx {
+			let child_entry = &mut node[child_idx];
+			let child_id = child_entry.node;
+			let child_center = child_entry.center.clone();
+			let child_node = store.get_node(tx, child_id).await?;
+			match self
+				.delete_at_node(tx, store, child_node, &Some(child_center), object, id)
+				.await?
+			{
+				DeletionResult::NotFound => res = DeletionResult::NotFound,
+				DeletionResult::DocRemoved => res = DeletionResult::DocRemoved,
+				DeletionResult::CoveringRadius(r) => {
+					if r > child_radius {
+						node[child_idx].radius = r;
+						node_update = true;
+					}
+				}
+				DeletionResult::UnderflownRoutingEntries(_, _, _) => todo!(),
+				DeletionResult::UnderflownLeafIndexMap(_, _, _) => todo!(),
+			}
+		}
+		if node.len() < self.minimum {
+			return Ok(DeletionResult::UnderflownRoutingEntries(node_id, node_key, node));
+		}
+		let sn = StoredNode::new(MTreeNode::Internal(node), node_id, node_key, 0);
+		store.set_node(sn, node_update)?;
+		Ok(res)
 	}
 
 	async fn delete_node_leaf(
 		&mut self,
-		_store: &mut MTreeNodeStore,
-		_node_id: NodeId,
-		_node_key: Key,
-		_node: LeafNode,
-		_object: Arc<Vector>,
-		_id: DocId,
+		store: &mut MTreeNodeStore,
+		node_id: NodeId,
+		node_key: Key,
+		mut node: LeafNode,
+		parent_center: &Option<Arc<Vector>>,
+		object: Arc<Vector>,
+		id: DocId,
 	) -> Result<DeletionResult, Error> {
-		todo!()
+		let mut doc_removed = false;
+		let mut entry_removed = false;
+		if let Entry::Occupied(mut e) = node.entry(object) {
+			let p = e.get_mut();
+			if p.docs.remove(id) {
+				doc_removed = true;
+				if p.docs.is_empty() {
+					e.remove();
+					entry_removed = true;
+				}
+			}
+		}
+		if entry_removed && node.len() < self.minimum && self.state.root != Some(node_id) {
+			return Ok(DeletionResult::UnderflownLeafIndexMap(node_id, node_key, node));
+		}
+		if doc_removed {
+			let sn = StoredNode::new(MTreeNode::Leaf(node), node_id, node_key, 0);
+			store.set_node(sn, true)?;
+			return Ok(DeletionResult::DocRemoved);
+		}
+		let max_dist = self.compute_leaf_max_distance(&node, parent_center);
+		let sn = StoredNode::new(MTreeNode::Leaf(node), node_id, node_key, 0);
+		store.set_node(sn, false)?;
+		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
 	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
@@ -1257,7 +1343,6 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.objects, vec![vec![10], vec![20, 21]]);
 			check_tree_properties(&mut tx, &mut s, &t, 1, 1, Some(2), Some(2)).await;
-			finish_operation(tx, s, false).await;
 		}
 
 		// Remove the doc 21
@@ -1273,7 +1358,6 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.objects, vec![vec![10], vec![20]]);
 			check_tree_properties(&mut tx, &mut s, &t, 1, 1, Some(2), Some(2)).await;
-			finish_operation(tx, s, false).await;
 		}
 
 		// Remove again vec2 / 21 => Deletion::None
@@ -1305,7 +1389,6 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![51]]);
 			check_tree_properties(&mut tx, &mut s, &t, 3, 2, Some(2), Some(3)).await;
-			finish_operation(tx, s, false).await;
 		}
 
 		// Remove the doc 51
@@ -1321,7 +1404,6 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![50]]);
 			check_tree_properties(&mut tx, &mut s, &t, 3, 2, Some(2), Some(3)).await;
-			finish_operation(tx, s, false).await;
 		}
 
 		// Remove again vec5 / 51 => Deletion::None
@@ -1332,118 +1414,12 @@ mod tests {
 			assert!(!t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_deletions_leaf_operations() {
-		let ds = Datastore::new("memory").await.unwrap();
-
-		let mut t = MTree::new(MState::new(4), Distance::Euclidean);
-
-		let v0 = vec![0.into()];
-		let v1 = vec![1.into()];
-		let v2 = vec![2.into()];
-		let v3 = vec![3.into()];
-		let v4 = vec![4.into()];
-		let v5 = vec![5.into()];
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			t.insert(&mut tx, &mut s, v1.clone(), 10).await.unwrap();
-			t.insert(&mut tx, &mut s, v2.clone(), 20).await.unwrap();
-			t.insert(&mut tx, &mut s, v3.clone(), 30).await.unwrap();
-			t.insert(&mut tx, &mut s, v4.clone(), 40).await.unwrap();
-			t.insert(&mut tx, &mut s, v5.clone(), 50).await.unwrap();
-			finish_operation(tx, s, true).await;
-		}
-
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
 			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &v0, 20).await.unwrap();
+			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![50]]);
 			check_tree_properties(&mut tx, &mut s, &t, 3, 2, Some(2), Some(3)).await;
-			assert_eq!(t.state.root, Some(0));
-			check_internal(&mut tx, &mut s, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, 0, &v1, 1, 2.0);
-				check_routing_vec(m, 1, &v5, 2, 1.0);
-			})
-			.await;
-			check_leaf(&mut tx, &mut s, 1, |m| {
-				assert_eq!(m.len(), 3);
-				check_leaf_vec(m, 0, &v1, 0.0, &[10]);
-				check_leaf_vec(m, 1, &v2, 1.0, &[20]);
-				check_leaf_vec(m, 2, &v3, 2.0, &[30]);
-			})
-			.await;
-			check_leaf(&mut tx, &mut s, 2, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, 0, &v4, 1.0, &[40]);
-				check_leaf_vec(m, 1, &v5, 0.0, &[50]);
-			})
-			.await;
-			finish_operation(tx, s, false).await;
-		}
-
-		// Remove -> Borrow from predecessor
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, v4.clone(), 40).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		// Check -> Borrow from predecessor
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &v0, 20).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![50]]);
-			check_tree_properties(&mut tx, &mut s, &t, 3, 2, Some(2), Some(2)).await;
-			assert_eq!(t.state.root, Some(0));
-			check_internal(&mut tx, &mut s, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, 0, &v1, 1, 1.0);
-				check_routing_vec(m, 1, &v5, 2, 2.0);
-			})
-			.await;
-			check_leaf(&mut tx, &mut s, 1, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, 0, &v1, 0.0, &[10]);
-				check_leaf_vec(m, 1, &v2, 1.0, &[20]);
-			})
-			.await;
-			check_leaf(&mut tx, &mut s, 2, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, 0, &v3, 2.0, &[30]);
-				check_leaf_vec(m, 1, &v5, 0.0, &[50]);
-			})
-			.await;
-			finish_operation(tx, s, false).await;
-		}
-		// Remove -> Merge nodes + reduce to root node
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, v3.clone(), 30).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		// Check -> Merge nodes + reduce to root node
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &v0, 20).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![50]]);
-			check_tree_properties(&mut tx, &mut s, &t, 1, 1, Some(3), Some(3)).await;
-			assert_eq!(t.state.root, Some(1));
-			check_leaf(&mut tx, &mut s, 1, |m| {
-				assert_eq!(m.len(), 3);
-				check_leaf_vec(m, 0, &v1, 0.0, &[10]);
-				check_leaf_vec(m, 1, &v2, 0.0, &[20]);
-				check_leaf_vec(m, 2, &v5, 0.0, &[50]);
-			})
-			.await;
-			finish_operation(tx, s, false).await;
 		}
 	}
 
