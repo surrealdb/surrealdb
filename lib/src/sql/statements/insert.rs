@@ -41,14 +41,6 @@ impl InsertStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match &self.data {
-			Data::SingleExpression(v) if v.is_object() => true,
-			Data::ValuesExpression(v) if v.len() == 1 => true,
-			_ => false,
-		}
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

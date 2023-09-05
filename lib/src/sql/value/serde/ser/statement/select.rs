@@ -50,6 +50,7 @@ impl ser::Serializer for Serializer {
 pub struct SerializeSelectStatement {
 	expr: Option<Fields>,
 	omit: Option<Idioms>,
+	only: Option<bool>,
 	what: Option<Values>,
 	with: Option<With>,
 	cond: Option<Cond>,
@@ -79,6 +80,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			}
 			"omit" => {
 				self.omit = value.serialize(ser::idiom::vec::opt::Serializer.wrap())?.map(Idioms);
+			}
+			"only" => {
+				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
 			"what" => {
 				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
@@ -131,6 +135,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
 				expr,
 				omit: self.omit,
+				only: self.only.is_some_and(|v| v == true),
 				what,
 				with: self.with,
 				parallel,
