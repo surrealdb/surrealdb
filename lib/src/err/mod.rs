@@ -124,6 +124,18 @@ pub enum Error {
 		sql: String,
 	},
 
+	/// There was an error with the SQL query
+	#[error("Can not use {value} in a CONTENT clause")]
+	InvalidContent {
+		value: Value,
+	},
+
+	/// There was an error with the SQL query
+	#[error("Can not use {value} in a MERGE clause")]
+	InvalidMerge {
+		value: Value,
+	},
+
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {message}")]
 	InvalidPatch {
@@ -415,6 +427,10 @@ pub enum Error {
 	KillStatement {
 		value: String,
 	},
+
+	/// Can not execute CREATE statement using the specified value
+	#[error("Expected a single result output when using the ONLY keyword")]
+	SingleOnlyOutput,
 
 	/// The permissions do not allow this query to be run on this table
 	#[error("You don't have permission to run this query on the `{table}` table")]

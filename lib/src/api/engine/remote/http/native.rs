@@ -57,7 +57,7 @@ impl Connection for Client {
 
 			let client = builder.build()?;
 
-			let base_url = address.endpoint;
+			let base_url = address.url;
 
 			super::health(client.get(base_url.join(Method::Health.as_str())?)).await?;
 

@@ -370,9 +370,11 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
-			id: tester:test
-		}",
+		"[
+			{
+				id: tester:test
+			}
+		]",
 	);
 	assert_eq!(tmp, val);
 	//
@@ -380,7 +382,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("tester:test");
+	let val = Value::parse("[tester:test]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;

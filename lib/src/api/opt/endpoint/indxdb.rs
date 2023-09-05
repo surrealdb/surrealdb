@@ -1,6 +1,5 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::IndxDb;
-use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -14,9 +13,10 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let url = format!("indxdb://{self}");
+					let protocol = "indxdb://";
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(protocol).unwrap(),
+						path: super::path_to_string(protocol, self),
 						config: Default::default(),
 					})
 				}
