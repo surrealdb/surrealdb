@@ -20,7 +20,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
           components: rustfmt
@@ -34,16 +34,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Check format
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-format
+        run: cargo make ci-format
 
   check:
     name: Check workspace
@@ -51,7 +45,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -68,16 +62,10 @@ jobs:
           sudo apt-get -y update
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Check workspace
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-check
+        run: cargo make ci-check
 
   check-wasm:
     name: Check Wasm
@@ -85,7 +73,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
           targets: wasm32-unknown-unknown
@@ -99,16 +87,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Check wasm
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-check-wasm
+        run: cargo make ci-check-wasm
 
   clippy:
     name: Check clippy
@@ -116,7 +98,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
           components: clippy
@@ -134,16 +116,10 @@ jobs:
           sudo apt-get -y update
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Run clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-clippy
+        run: cargo make ci-clippy
 
   cli:
     name: CLI integration tests
@@ -151,7 +127,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -168,16 +144,10 @@ jobs:
           sudo apt-get -y update
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Run CLI integration tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-cli-integration
+        run: cargo make ci-cli-integration
       
       - name: Debug info
         if: always()
@@ -195,7 +165,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -212,16 +182,10 @@ jobs:
           sudo apt-get -y update
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Run HTTP integration tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-http-integration
+        run: cargo make ci-http-integration
 
   ws-server:
     name: WebSocket integration tests
@@ -229,7 +193,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -246,16 +210,10 @@ jobs:
           sudo apt-get -y update
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Run WS integration tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-ws-integration
+        run: cargo make ci-ws-integration
 
   test:
     name: Test workspace
@@ -263,7 +221,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -294,16 +252,10 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test workspace + coverage
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-workspace-coverage
+        run: cargo make ci-workspace-coverage
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v3
@@ -320,7 +272,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -342,16 +294,10 @@ jobs:
           version: "7.1.30"
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test ws engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-ws
+        run: cargo make ci-api-integration-ws
 
       - name: Debug info
         if: always()
@@ -368,7 +314,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -390,16 +336,10 @@ jobs:
           version: "7.1.30"
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test http engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-http
+        run: cargo make ci-api-integration-http
 
       - name: Debug info
         if: always()
@@ -416,7 +356,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -438,16 +378,10 @@ jobs:
           version: "7.1.30"
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test any engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-any
+        run: cargo make ci-api-integration-any
 
       - name: Debug info
         if: always()
@@ -464,7 +398,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -477,16 +411,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test mem engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-mem
+        run: cargo make ci-api-integration-mem
 
   file-engine:
     name: File engine
@@ -494,7 +422,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -507,16 +435,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test file engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-file
+        run: cargo make ci-api-integration-file
 
   rocksdb-engine:
     name: RocksDB engine
@@ -524,7 +446,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -537,16 +459,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test rocksdb engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-rocksdb
+        run: cargo make ci-api-integration-rocksdb
 
   speedb-engine:
     name: SpeeDB engine
@@ -554,7 +470,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -567,16 +483,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test speedb engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-speedb
+        run: cargo make ci-api-integration-speedb
 
   tikv-engine:
      name: TiKV engine
@@ -584,7 +494,7 @@ jobs:
      steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -606,16 +516,10 @@ jobs:
           ~/.tiup/bin/tiup -v
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test tikv engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-tikv
+        run: cargo make ci-api-integration-tikv
 
       - name: Debug info
         if: always()
@@ -632,7 +536,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -650,16 +554,10 @@ jobs:
           version: "7.1.30"
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test fdb engine
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-api-integration-fdb
+        run: cargo make ci-api-integration-fdb
 
       - name: Debug info
         if: always()
