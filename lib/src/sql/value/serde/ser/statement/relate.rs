@@ -96,7 +96,7 @@ impl serde::ser::SerializeStruct for SerializeRelateStatement {
 		match (self.kind, self.from, self.with, self.uniq, self.parallel) {
 			(Some(kind), Some(from), Some(with), Some(uniq), Some(parallel)) => {
 				Ok(RelateStatement {
-					only: self.only.is_some_and(|v| v == true),
+					only: self.only.is_some_and(|v| v),
 					kind,
 					from,
 					with,

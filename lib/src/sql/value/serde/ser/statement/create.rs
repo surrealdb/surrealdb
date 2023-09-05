@@ -86,7 +86,7 @@ impl serde::ser::SerializeStruct for SerializeCreateStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.what, self.parallel) {
 			(Some(what), Some(parallel)) => Ok(CreateStatement {
-				only: self.only.is_some_and(|v| v == true),
+				only: self.only.is_some_and(|v| v),
 				what,
 				parallel,
 				data: self.data,

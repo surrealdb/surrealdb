@@ -135,7 +135,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
 				expr,
 				omit: self.omit,
-				only: self.only.is_some_and(|v| v == true),
+				only: self.only.is_some_and(|v| v),
 				what,
 				with: self.with,
 				parallel,

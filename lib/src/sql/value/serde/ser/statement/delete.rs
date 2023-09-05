@@ -83,7 +83,7 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.what, self.parallel) {
 			(Some(what), Some(parallel)) => Ok(DeleteStatement {
-				only: self.only.is_some_and(|v| v == true),
+				only: self.only.is_some_and(|v| v),
 				what,
 				parallel,
 				cond: self.cond,
