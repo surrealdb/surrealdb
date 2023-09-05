@@ -18,7 +18,8 @@ macro_rules! endpoints {
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("http://{self}");
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						path: String::new(),
 						config: Default::default(),
 					})
 				}
@@ -40,7 +41,8 @@ macro_rules! endpoints {
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("https://{self}");
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						path: String::new(),
 						config: Default::default(),
 					})
 				}
