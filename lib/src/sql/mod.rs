@@ -4,6 +4,7 @@ pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;
 pub(crate) mod block;
+pub(crate) mod builtin;
 pub(crate) mod bytes;
 pub(crate) mod cast;
 pub(crate) mod changefeed;

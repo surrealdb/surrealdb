@@ -63,6 +63,10 @@ pub enum ParseError<I> {
 	InvalidUnicode {
 		tried: I,
 	},
+	InvalidPath {
+		tried: I,
+		parent: I,
+	},
 }
 
 impl<I: Clone> ParseError<I> {
