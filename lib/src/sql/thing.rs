@@ -131,7 +131,7 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 	delimited(char('\"'), thing_raw, char('\"'))(i)
 }
 
-fn thing_raw(i: &str) -> IResult<&str, Thing> {
+pub fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, v) = alt((

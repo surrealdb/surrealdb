@@ -29,7 +29,7 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 /// Parses a SurrealQL [`Thing`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
-	parse_impl(input, super::thing::thing)
+	parse_impl(input, super::thing::thing_raw)
 }
 
 /// Parses a SurrealQL [`Idiom`]

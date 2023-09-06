@@ -2762,7 +2762,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			into(model),
 			into(edges),
 			into(range),
-			into(thing),
+			into(thing_raw),
 			into(strand),
 			into(idiom::path),
 		)),
@@ -2800,7 +2800,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			into(model),
 			into(edges),
 			into(range),
-			into(thing),
+			into(thing_raw),
 			into(table),
 			into(strand),
 		)),
@@ -2823,7 +2823,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		into(model),
 		into(edges),
 		into(range),
-		into(thing),
+		into(thing_raw),
 		into(table),
 	))(i)?;
 	reparse_idiom_start(v, i)
