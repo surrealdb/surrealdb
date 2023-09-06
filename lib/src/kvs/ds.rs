@@ -406,7 +406,7 @@ impl Datastore {
 		if resolve_err.is_err() {
 			err.push(resolve_err.unwrap_err());
 		}
-		if err.len() > 0 {
+		if err.is_empty() {
 			error!("Error bootstrapping sweep phase: {:?}", err);
 			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
 		}
