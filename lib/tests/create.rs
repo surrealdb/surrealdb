@@ -173,7 +173,7 @@ async fn create_with_id() -> Result<(), Error> {
 async fn create_with_custom_function() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::record::create($data: any) {
-			RETURN CREATE person:ulid() CONTENT { data: $data } RETURN AFTER;
+			RETURN CREATE ONLY person:ulid() CONTENT { data: $data } RETURN AFTER;
 		};
 		RETURN fn::record::create({ test: true, name: 'Tobie' });
 		RETURN fn::record::create({ test: true, name: 'Jaime' });

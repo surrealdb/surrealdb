@@ -1,7 +1,6 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::File;
 use crate::api::engine::local::RocksDb;
-use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -17,9 +16,10 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let url = super::make_url("rocksdb", self);
+					let protocol = "rocksdb://";
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(protocol).unwrap(),
+						path: super::path_to_string(protocol, self),
 						config: Default::default(),
 					})
 				}
@@ -39,9 +39,10 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let url = super::make_url("file", self);
+					let protocol = "file://";
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(protocol).unwrap(),
+						path: super::path_to_string(protocol, self),
 						config: Default::default(),
 					})
 				}

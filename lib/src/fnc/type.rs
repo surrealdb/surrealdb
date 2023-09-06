@@ -119,3 +119,111 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 		}
 	})
 }
+
+pub mod is {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use crate::sql::Geometry;
+
+	pub fn array((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_array().into())
+	}
+
+	pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_bool().into())
+	}
+
+	pub fn bytes((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_bytes().into())
+	}
+
+	pub fn collection((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::Collection(_))).into())
+	}
+
+	pub fn datetime((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_datetime().into())
+	}
+
+	pub fn decimal((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_decimal().into())
+	}
+
+	pub fn duration((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_duration().into())
+	}
+
+	pub fn float((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_float().into())
+	}
+
+	pub fn geometry((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_geometry().into())
+	}
+
+	pub fn int((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_int().into())
+	}
+
+	pub fn line((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::Line(_))).into())
+	}
+
+	pub fn null((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_null().into())
+	}
+
+	pub fn multiline((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::MultiLine(_))).into())
+	}
+
+	pub fn multipoint((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::MultiPoint(_))).into())
+	}
+
+	pub fn multipolygon((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::MultiPolygon(_))).into())
+	}
+
+	pub fn number((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_number().into())
+	}
+
+	pub fn object((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_object().into())
+	}
+
+	pub fn point((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::Point(_))).into())
+	}
+
+	pub fn polygon((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(matches!(arg, Value::Geometry(Geometry::Polygon(_))).into())
+	}
+
+	pub fn record((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_record().into())
+	}
+
+	pub fn string((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_strand().into())
+	}
+
+	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_uuid().into())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::sql::value::Value;
+
+	#[test]
+	fn is_array() {
+		let value = super::is::array((vec!["hello", "world"].into(),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::array(("test".into(),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+}

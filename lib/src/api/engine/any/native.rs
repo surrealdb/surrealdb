@@ -61,7 +61,7 @@ impl Connection for Any {
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
-			match address.endpoint.scheme() {
+			match address.url.scheme() {
 				"fdb" => {
 					#[cfg(feature = "kv-fdb")]
 					{
@@ -151,7 +151,7 @@ impl Connection for Any {
 							};
 						}
 						let client = builder.build()?;
-						let base_url = address.endpoint;
+						let base_url = address.url;
 						engine::remote::http::health(
 							client.get(base_url.join(Method::Health.as_str())?),
 						)
@@ -169,7 +169,7 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
-						let url = address.endpoint.join(engine::remote::ws::PATH)?;
+						let url = address.url.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						let maybe_connector = address.config.tls_config.map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
