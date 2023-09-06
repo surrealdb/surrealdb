@@ -329,14 +329,14 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_full_text(
-		&self,
+		&mut self,
 		run: &mut kvs::Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_db_analyzer(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
 		let mut ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Write).await?;
-		if let Some(n) = &self.n {
+		if let Some(n) = self.n.take() {
 			ft.index_document(run, self.rid, n).await?;
 		} else {
 			ft.remove_document(run, self.rid).await?;
@@ -344,13 +344,20 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(run).await
 	}
 
-	async fn index_mtree(&self, run: &mut kvs::Transaction, p: &MTreeParams) -> Result<(), Error> {
+	async fn index_mtree(
+		&mut self,
+		run: &mut kvs::Transaction,
+		p: &MTreeParams,
+	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut mt = MTreeIndex::new(run, ikb, p, TreeStoreType::Write).await?;
-		if let Some(n) = &self.n {
+		// Delete the old index data
+		if let Some(o) = self.o.take() {
+			mt.remove_document(run, self.rid, o).await?;
+		}
+		// Create the new index data
+		if let Some(n) = self.n.take() {
 			mt.index_document(run, self.rid, n).await?;
-		} else {
-			mt.remove_document(run, self.rid).await?;
 		}
 		mt.finish(run).await
 	}

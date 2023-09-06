@@ -68,17 +68,18 @@ impl MTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: &[Value],
+		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 		// Index the values
 		let mut store = self.store.lock().await;
+		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
 			let vector = self.check_vector_value(v)?;
-			self.mtree.write().await.insert(tx, &mut store, vector, doc_id).await?;
+			mtree.insert(tx, &mut store, vector, doc_id).await?;
 		}
 		Ok(())
 	}
@@ -86,7 +87,7 @@ impl MTreeIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		a: &Array,
+		a: Array,
 		k: usize,
 	) -> Result<VecDeque<RoaringTreemap>, Error> {
 		// Extract the vector
@@ -97,7 +98,7 @@ impl MTreeIndex {
 		Ok(res.objects)
 	}
 
-	fn check_vector_array(&self, a: &Array) -> Result<Vector, Error> {
+	fn check_vector_array(&self, a: Array) -> Result<Vector, Error> {
 		if a.0.len() != self.dim {
 			return Err(Error::InvalidVectorDimension {
 				current: a.0.len(),
@@ -105,9 +106,9 @@ impl MTreeIndex {
 			});
 		}
 		let mut vec = Vec::with_capacity(a.len());
-		for v in &a.0 {
+		for v in a.0 {
 			if let Value::Number(n) = v {
-				vec.push(n.clone());
+				vec.push(n);
 			} else {
 				return Err(Error::InvalidVectorType {
 					current: v.clone().to_string(),
@@ -118,7 +119,7 @@ impl MTreeIndex {
 		Ok(vec)
 	}
 
-	fn check_vector_value(&self, v: &Value) -> Result<Vector, Error> {
+	fn check_vector_value(&self, v: Value) -> Result<Vector, Error> {
 		if let Value::Array(a) = v {
 			self.check_vector_array(a)
 		} else {
@@ -132,9 +133,17 @@ impl MTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
+		content: Vec<Value>,
 	) -> Result<(), Error> {
-		if let Some(_doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
-			todo!()
+		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
+			// Index the values
+			let mut store = self.store.lock().await;
+			let mut mtree = self.mtree.write().await;
+			for v in content {
+				// Extract the vector
+				let vector = self.check_vector_value(v)?;
+				mtree.delete(tx, &mut store, vector, doc_id).await?;
+			}
 		}
 		Ok(())
 	}
@@ -160,6 +169,7 @@ impl MTreeIndex {
 struct KnnResult {
 	objects: VecDeque<RoaringTreemap>,
 	#[cfg(debug_assertions)]
+	#[allow(dead_code)]
 	visited_nodes: usize,
 }
 
@@ -352,6 +362,8 @@ impl MTree {
 			}
 		}
 	}
+
+	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
 		tx: &mut Transaction,
@@ -402,7 +414,7 @@ impl MTree {
 					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 					updated,
 				)?;
-				return Ok(InsertionResult::CoveringRadius(max_dist));
+				Ok(InsertionResult::CoveringRadius(max_dist))
 			}
 		}
 	}
@@ -419,6 +431,7 @@ impl MTree {
 		Ok(idx)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn insert_node_leaf(
 		&mut self,
 		store: &mut MTreeNodeStore,
@@ -495,11 +508,12 @@ impl MTree {
 		Ok(InsertionResult::PromotedEntries(r1, r2))
 	}
 
-	fn select_promotion_objects(distances: &Vec<Vec<f64>>) -> (usize, usize) {
+	fn select_promotion_objects(distances: &[Vec<f64>]) -> (usize, usize) {
 		let mut promo = (0, 1);
 		let mut max_distance = distances[0][1];
 		// Compare each pair of objects
 		let n = distances.len();
+		#[allow(clippy::needless_range_loop)]
 		for i in 0..n {
 			for j in i + 1..n {
 				let distance = distances[i][j];
@@ -625,6 +639,7 @@ impl MTree {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_internal(
 		&mut self,
 		tx: &mut Transaction,
@@ -676,6 +691,7 @@ impl MTree {
 		Ok(res)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_leaf(
 		&mut self,
 		store: &mut MTreeNodeStore,

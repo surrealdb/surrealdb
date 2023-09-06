@@ -31,12 +31,12 @@ impl QueryExecutor {
 		{
 			let ixn = &io.ix().name.0;
 			let entry = if let Some(mt) = self.mt_map.get(ixn) {
-				MtEntry::new(run, mt, a, *k).await?
+				MtEntry::new(run, mt, a.clone(), *k).await?
 			} else {
 				let ikb = IndexKeyBase::new(opt, io.ix());
 				let mt = MTreeIndex::new(run, ikb, p, TreeStoreType::Read).await?;
 				let ixn = ixn.to_owned();
-				let entry = MtEntry::new(run, &mt, a, *k).await?;
+				let entry = MtEntry::new(run, &mt, a.clone(), *k).await?;
 				self.mt_map.insert(ixn, mt);
 				entry
 			};
@@ -66,7 +66,7 @@ impl MtEntry {
 	async fn new(
 		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
-		a: &Array,
+		a: Array,
 		k: u32,
 	) -> Result<Self, Error> {
 		let res = mt.knn_search(tx, a, k as usize).await?;
