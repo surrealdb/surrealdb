@@ -469,7 +469,6 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
-		// TODO this is the issue. We need to track LqValue for stage 2, but also collect errors
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
