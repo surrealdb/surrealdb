@@ -49,8 +49,7 @@ pub async fn signin(
 					// Attempt to signin to database
 					super::signin::db(kvs, session, ns, db, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
 		// NS signin
@@ -69,8 +68,7 @@ pub async fn signin(
 					// Attempt to signin to namespace
 					super::signin::ns(kvs, session, ns, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
 		// KV signin
@@ -88,11 +86,10 @@ pub async fn signin(
 					// Attempt to signin to root
 					super::signin::kv(kvs, session, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoSigninTarget),
 	}
 }
 
@@ -165,23 +162,18 @@ pub async fn sc(
 								match enc {
 									// The auth token was created successfully
 									Ok(tk) => Ok(Some(tk)),
-									// There was an error creating the token
-									_ => Err(Error::InvalidAuth),
+									_ => Err(Error::TokenMakingFailed),
 								}
 							}
-							// No record was returned
-							_ => Err(Error::InvalidAuth),
+							_ => Err(Error::NoRecordFound),
 						},
-						// The signin query failed
-						_ => Err(Error::InvalidAuth),
+						_ => Err(Error::SigninQueryFailed),
 					}
 				}
-				// This scope does not allow signin
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::ScopeNoSignin),
 			}
 		}
-		// The scope does not exists
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoScopeFound),
 	}
 }
 
@@ -220,12 +212,10 @@ pub async fn db(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		// The password did not verify
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::InvalidPass),
 	}
 }
 
@@ -261,8 +251,7 @@ pub async fn ns(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
 		Err(e) => Err(e),
@@ -298,8 +287,7 @@ pub async fn kv(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
 		Err(e) => Err(e),
