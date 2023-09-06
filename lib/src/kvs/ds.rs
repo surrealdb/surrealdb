@@ -512,30 +512,6 @@ impl Datastore {
 		Ok(())
 	}
 
-	pub async fn _garbage_collect(
-		// TODO not invoked
-		// But this is garbage collection outside of bootstrap
-		&self,
-		tx: &mut Transaction,
-		watermark: &Timestamp,
-		this_node_id: &Uuid,
-	) -> Result<(), Error> {
-		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
-		trace!("Found dead hbs: {:?}", dead_heartbeats);
-		let mut _archived: Vec<LqValue> = vec![];
-		for hb in dead_heartbeats {
-			let new_archived = self
-				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
-				.await?;
-			tx.del_nd(hb.nd).await?;
-			trace!("Deleted node {}", hb.nd);
-			for _lq_value in new_archived {
-				// archived.push(lq_value);
-			}
-		}
-		Ok(())
-	}
-
 	// Garbage collection task to run when a client disconnects from a surrealdb node
 	// i.e. we know the node, we are not performing a full wipe on the node
 	// and the wipe must be fully performed by this node
