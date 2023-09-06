@@ -122,6 +122,10 @@ impl<I: Clone> ParseError<I> {
 		| Self::InvalidUnicode {
 			ref tried,
 			..
+		}
+		| Self::InvalidPath {
+			ref tried,
+			..
 		}) = self;
 		tried.clone()
 	}
@@ -225,6 +229,22 @@ impl ParseError<&str> {
 					location.line, location.column, expected
 				);
 				let snippet = Snippet::from_source_location(input, location, Some(*explained));
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseError::InvalidPath {
+				tried,
+				parent,
+			} => {
+				let location = Location::of_in(tried, input);
+				// Writing to a string can't return an error.
+				let text = format!(
+					"Path is not a member of {parent} at line {} column {}",
+					location.line, location.column
+				);
+				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,
 					snippets: vec![snippet],

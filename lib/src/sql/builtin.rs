@@ -1,14 +1,14 @@
-use crate::sql::{error::ParseError, ident::ident_raw};
+use crate::sql::{constant, error::ParseError, ident::ident_raw};
 use nom::{
 	bytes::complete::tag,
 	combinator::{opt, peek, value},
 	Err, IResult,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum BuiltinName<I> {
 	Function(I),
-	Constant(I),
+	Constant(constant::Constant),
 }
 
 macro_rules! impl_builtins {
@@ -40,10 +40,11 @@ macro_rules! impl_builtins {
 			Ok(res)
 		}
 	};
-	(@variant, $full:expr, $name:ident,$($s:ident)?,$($rename:expr)?, { const }) => {
+	(@variant, $full:expr, $name:ident,$($s:ident)?,$($rename:expr)?, { const = $value:expr}) => {
+		#[allow(non_snake_case)]
 		fn $name<'a>(i: &'a str) -> IResult<&'a str, BuiltinName<&'a str>, ParseError<&'a str>>{
 			let parser = tag(impl_builtins!(@rename,$name,$($rename)?));
-			let res = value(BuiltinName::Constant($full),parser)(i)?;
+			let res = value(BuiltinName::Constant($value),parser)(i)?;
 			Ok(res)
 		}
 	};
@@ -126,7 +127,7 @@ macro_rules! impl_builtins {
 	};
 }
 
-pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>> {
+pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>> {
 	impl_builtins! {
 		array => {
 			add => { fn },
@@ -171,7 +172,7 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 				desc => {fn },
 			},
 			transpose => { fn },
-			union => { fn },
+			r#union = "union" => { fn },
 		},
 		bytes => {
 			len => { fn }
@@ -268,6 +269,26 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 			top => { fn },
 			trimean => { fn },
 			variance => { fn },
+			E => { const = constant::Constant::MathE },
+			FRAC_1_PI => { const = constant::Constant::MathFrac1Pi },
+			FRAC_1_SQRT_2 => { const = constant::Constant::MathFrac1Sqrt2 },
+			FRAC_2_PI => { const = constant::Constant::MathFrac2Pi },
+			FRAC_2_SQRT_PI => { const = constant::Constant::MathFrac2SqrtPi },
+			FRAC_PI_2 => { const = constant::Constant::MathFracPi2 },
+			FRAC_PI_3 => { const = constant::Constant::MathFracPi3 },
+			FRAC_PI_4 => { const = constant::Constant::MathFracPi4 },
+			FRAC_PI_6 => { const = constant::Constant::MathFracPi6 },
+			FRAC_PI_8 => { const = constant::Constant::MathFracPi8 },
+			INF => { const = constant::Constant::MathInf },
+			LN_10 => { const = constant::Constant::MathLn10 },
+			LN_2 => { const = constant::Constant::MathLn2 },
+			LOG10_2 => { const = constant::Constant::MathLog102 },
+			LOG10_E => { const = constant::Constant::MathLog10E },
+			LOG2_10 => { const = constant::Constant::MathLog210 },
+			LOG2_E => { const = constant::Constant::MathLog2E },
+			PI => { const = constant::Constant::MathPi },
+			SQRT_2 => { const = constant::Constant::MathSqrt2 },
+			TAU => { const = constant::Constant::MathTau },
 		},
 		meta => {
 			id => { fn },
@@ -289,7 +310,7 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 				scheme => { fn },
 			}
 		},
-		rand => {
+		rand(func) => {
 			r#bool = "bool" => { fn },
 			r#enum = "enum" => { fn },
 			float => { fn },
@@ -344,6 +365,21 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 				jaro => { fn },
 				smithwaterman => { fn },
 			},
+			is => {
+				alphanum => { fn },
+				alpha => { fn },
+				ascii => { fn },
+				datetime => { fn },
+				domain => { fn },
+				email => { fn },
+				hexadecimal => { fn },
+				latitude => { fn },
+				longitude => { fn },
+				numeric => { fn },
+				semver => { fn },
+				url => { fn },
+				uuid => { fn },
+			}
 		},
 		time => {
 			ceil => { fn },
@@ -386,6 +422,30 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 			string => { fn },
 			table => { fn },
 			thing => { fn },
+			is => {
+				array => { fn },
+				r#bool = "bool" => { fn },
+				bytes => { fn },
+				collection => { fn },
+				datetime => { fn },
+				decimal => { fn },
+				duration => { fn },
+				float => { fn },
+				geometry => { fn },
+				int => { fn },
+				line => { fn },
+				null => { fn },
+				multiline => { fn },
+				multipoint => { fn },
+				multipolygon => { fn },
+				number => { fn },
+				object => { fn },
+				point => { fn },
+				polygon => { fn },
+				record => { fn },
+				string => { fn },
+				uuid => { fn },
+			}
 		},
 		vector => {
 			add => { fn },
@@ -412,7 +472,10 @@ pub(crate) fn parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, Pa
 				pearson => {fn },
 				spearman => {fn },
 			}
-		}
+		},
+		count => { fn },
+		not => { fn },
+		sleep => { fn },
 	}
 	_parse_builtin_name(i)
 }

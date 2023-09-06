@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
+use super::error::expected;
 use super::util::delimited_list0;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
@@ -254,16 +255,20 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, custom, script))(i)
+	alt((custom, script))(i)
 }
 
-pub fn normal(i: &str) -> IResult<&str, Function> {
-	let (i, s) = function_names(i)?;
-	let (i, a) =
-		delimited_list0(openparentheses, commas, terminated(cut(value), mightbespace), char(')'))(
-			i,
-		)?;
-	Ok((i, Function::Normal(s.to_string(), a)))
+pub fn builtin_function<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Function> {
+	let (i, a) = expected(
+		" function arguments",
+		delimited_list0(
+			cut(openparentheses),
+			commas,
+			terminated(cut(value), mightbespace),
+			char(')'),
+		),
+	)(i)?;
+	Ok((i, Function::Normal(name.to_string(), a)))
 }
 
 pub fn custom(i: &str) -> IResult<&str, Function> {
@@ -271,11 +276,14 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 	cut(|i| {
 		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list0(
-			openparentheses,
-			commas,
-			terminated(cut(value), mightbespace),
-			char(')'),
+		let (i, a) = expected(
+			" function arguments",
+			delimited_list0(
+				cut(openparentheses),
+				commas,
+				terminated(cut(value), mightbespace),
+				char(')'),
+			),
 		)(i)?;
 		Ok((i, Function::Custom(s.to_string(), a)))
 	})(i)

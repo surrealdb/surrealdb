@@ -8,6 +8,7 @@ use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
+use crate::sql::builtin::builtin_name;
 use crate::sql::bytes::Bytes;
 use crate::sql::cast::{cast, Cast};
 use crate::sql::comment::mightbespace;
@@ -20,7 +21,7 @@ use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
 use crate::sql::expression::{unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{function, Function};
+use crate::sql::function::{builtin_function, function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
@@ -39,7 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::{operator, Query};
+use crate::sql::{builtin, operator, Query};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -2739,10 +2740,9 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2779,10 +2779,9 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2801,6 +2800,18 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 		)),
 	))(i)?;
 	reparse_idiom_start(v, i)
+}
+
+pub fn function_or_const(i: &str) -> IResult<&str, Value> {
+	alt((into(function), |i| {
+		let (i, v) = builtin_name(i)?;
+		match v {
+			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
+			builtin::BuiltinName::Function(name) => {
+				builtin_function(name, i).map(|(i, v)| (i, v.into()))
+			}
+		}
+	}))(i)
 }
 
 pub fn select(i: &str) -> IResult<&str, Value> {
@@ -2828,9 +2839,8 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 pub fn what(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
-		into(function),
+		function_or_const,
 		into(subquery),
-		into(constant),
 		into(datetime),
 		into(duration),
 		into(future),
