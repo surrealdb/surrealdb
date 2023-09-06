@@ -356,7 +356,11 @@ impl Datastore {
 	}
 
 	// Initialise bootstrap with implicit values intended for runtime
-	pub async fn bootstrap(&self) -> Result<(), Error> {
+	// An error indicates that a failure happened, but that does not mean that the bootstrap
+	// completely failed. It may have partially completed. It certainly has side-effects
+	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
+	// ability.
+	pub(crate) async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
