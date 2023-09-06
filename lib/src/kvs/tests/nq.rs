@@ -38,7 +38,15 @@ async fn archive_lv_for_node_archives() {
 		.await
 		.unwrap();
 	assert_eq!(results.len(), 1);
-	let lq = results[0].as_ref().unwrap();
+	let (lq, opt_err) = &results[0];
+	match opt_err {
+		None => {
+			//expected
+		}
+		Some(err) => {
+			panic!("Unexpected error: {:?}", err);
+		}
+	}
 	assert_eq!(lq.nd, sql::uuid::Uuid(node_id.clone()));
 	assert_eq!(lq.ns, namespace);
 	assert_eq!(lq.db, database);

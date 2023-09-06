@@ -71,6 +71,10 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
 
+/// We always want to be circulating the live query information
+/// And we will sometimes have an error attached but still not want to lose the LQ.
+pub(crate) type BootstrapOperationResult = (LqValue, Option<Error>);
+
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]
@@ -367,22 +371,26 @@ impl Datastore {
 				return Err(e);
 			}
 		};
-		let mut filtered = vec![];
+		// Filtered includes all lqs that should be used in subsequent step
+		// Currently that is all of them, no matter the error encountered
+		let mut filtered: Vec<LqValue> = vec![];
+		// err is used to aggregate all errors across all stages
 		let mut err = vec![];
 		for res in archived {
-			if let Ok(lq) = res {
-				filtered.push(lq);
-			} else if let Err(e) = res {
-				err.push(e);
+			match res {
+				(lq, Some(e)) => {
+					filtered.push(lq);
+					err.push(e);
+				}
+				(lq, None) => {
+					filtered.push(lq);
+				}
 			}
-		}
-		if err.len() > 0 {
-			error!("Error bootstrapping mark phase: {:?}", err);
-			return Err(Error::Tx(format!("Error bootstrapping mark phase: {:?}", err)));
 		}
 
 		let mut tx = self.transaction(true, false).await?;
-		match self.remove_archived(&mut tx, filtered).await {
+		let val = self.remove_archived(&mut tx, filtered).await;
+		let resolve_err = match val {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
@@ -394,7 +402,15 @@ impl Datastore {
 					}
 				}
 			}
+		};
+		if resolve_err.is_err() {
+			err.push(resolve_err.unwrap_err());
 		}
+		if err.len() > 0 {
+			error!("Error bootstrapping sweep phase: {:?}", err);
+			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
+		}
+		Ok(())
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -403,7 +419,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
-	) -> Result<Vec<Result<LqValue, Error>>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
@@ -453,7 +469,8 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
-	) -> Result<Vec<Result<LqValue, Error>>, Error> {
+		// TODO this is the issue. We need to track LqValue for stage 2, but also collect errors
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
@@ -465,19 +482,12 @@ impl Datastore {
 				let node_archived_lqs =
 					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
 						Ok(lq) => lq,
-						Err(
-							err @ Error::LvNotFound {
-								..
-							},
-						) => {
-							warn!("Unable to find the live query in the table that was associated with the node: {:?}", err);
-							vec![]
-						}
 						Err(e) => {
-							error!("Error archiving lq during bootstrap phase: {:?}", e);
+							error!("Error archiving lqs during bootstrap phase: {:?}", e);
 							vec![]
 						}
 					};
+				// We need to add lv nodes not found so that they can be deleted in second stage
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
@@ -491,6 +501,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		archived: Vec<LqValue>,
 	) -> Result<(), Error> {
+		trace!("Gone into removing archived");
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
 			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
@@ -569,22 +580,22 @@ impl Datastore {
 		tx: &mut Transaction,
 		nd: &Uuid,
 		this_node_id: Uuid,
-	) -> Result<Vec<Result<LqValue, Error>>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let lqs = tx.all_lq(nd).await?;
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
-		let mut ret = vec![];
+		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		for lq in lqs {
 			let lv_res =
 				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
 			if let Err(e) = lv_res {
 				error!("Error getting live query for node {}: {:?}", nd, e);
-				ret.push(Err(e));
+				ret.push((lq, Some(e)));
 				continue;
 			}
 			let lv = lv_res.unwrap();
 			let archived_lvs = lv.clone().archive(this_node_id.clone());
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
-			ret.push(Ok(lq));
+			ret.push((lq, None));
 		}
 		Ok(ret)
 	}

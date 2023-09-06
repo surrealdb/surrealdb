@@ -27,8 +27,13 @@ impl TestContext {
 		let mut values = vec![];
 		for res in archived {
 			match res {
-				Ok(v) => values.push(v),
-				Err(e) => errors.push(e),
+				(v, Some(e)) => {
+					values.push(v);
+					errors.push(e);
+				}
+				(v, None) => {
+					values.push(v);
+				}
 			}
 		}
 		if !errors.is_empty() {
