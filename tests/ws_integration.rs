@@ -733,8 +733,124 @@ mod ws_integration {
 
 	#[test(tokio::test)]
 	async fn live_params_retained() -> Result<(), Box<dyn std::error::Error>> {
-		// TODO test live queries evaluate params before storage
-		// Changing param does not change live query
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+
+		let socket = &mut common::connect_ws(&addr).await?;
+
+		let ns = "8e6611502b0d420996374935f57b547b";
+		let db = "ae6513e092fc4e47ab63a7c22702bcaa";
+		let tb = "table_6459e41b1c414f4caa7bc9a410be7bf2".to_string();
+		let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
+		let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+
+		// Set Params
+		common::ws_query(socket, format!("LET $number=100").as_str()).await?;
+		common::ws_query(socket, format!("LET $table='{}'", tb).as_str()).await?;
+
+		// LIVE query via query endpoint
+		let lq_res = common::ws_query(
+			socket,
+			format!("LIVE SELECT * FROM $table WHERE name=$name;").as_str(),
+		)
+		.await?;
+		assert_eq!(lq_res.len(), 1, "Expected 1 result got: {:?}", lq_res);
+		let live_id = lq_res[0]["result"].as_str().unwrap();
+
+		// Create some data for notification
+		let id = "3cf27e14-846c-47b8-ba45-c0697aa9f8aa";
+		let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, tb, id);
+		let json = json!({
+			"id": "f194b91e-6d9e-4ad6-b83e-e2566d5ec90c",
+			"method": "query",
+			"params": [query],
+		});
+
+		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+
+		// Wait some time for all messages to arrive, and then search for the notification message
+		let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
+		let msgs = msgs.unwrap();
+		assert!(
+			msgs.iter().all(|v| v["error"].is_null()),
+			"Unexpected error received: {:#?}",
+			msgs
+		);
+
+		let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
+		assert!(
+			lq_notif.is_some(),
+			"Expected to find a notification for LQ id {}: {:#?}",
+			live_id,
+			msgs
+		);
+
+		// Change params
+		common::ws_query(socket, format!("LET $number=17").as_str()).await?;
+		common::ws_query(socket, format!("LET $table='other'").as_str()).await?;
+
+		// Create a new notification matching previous params
+		let id = "3cf27e14-846c-47b8-ba45-c0697aa9f8aa";
+		let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, tb, id);
+		let json = json!({
+			"id": "f194b91e-6d9e-4ad6-b83e-e2566d5ec90c",
+			"method": "query",
+			"params": [query],
+		});
+		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+
+		// Create a new notification matching new params (should not receive)
+		let id = "3cf27e14-846c-47b8-ba45-c0697aa9f8aa";
+		let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, tb, id);
+		let json = json!({
+			"id": "f194b91e-6d9e-4ad6-b83e-e2566d5ec90c",
+			"method": "query",
+			"params": [query],
+		});
+		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
+
+		// Wait some time for all messages to arrive, and then search for the notification message
+		let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
+		let msgs = msgs.unwrap();
+		assert!(
+			msgs.iter().all(|v| v["error"].is_null()),
+			"Unexpected error received: {:#?}",
+			msgs
+		);
+
+		let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
+		assert!(
+			lq_notif.is_some(),
+			"Expected to find a notification for LQ id {}: {:#?}",
+			live_id,
+			msgs
+		);
+
+		// Extract the notification object
+		let lq_notif = lq_notif.unwrap();
+		let lq_notif = lq_notif["result"].as_object().unwrap();
+
+		// Verify message on individual keys since the notification ID is random
+		let action = lq_notif["action"].as_str().unwrap();
+		let result = lq_notif["result"].as_object().unwrap();
+		assert_eq!(action, "CREATE", "expected notification to be `CREATE`: {:?}", lq_notif);
+		let expected_id = format!("{}:⟨{}⟩", tb, id);
+		assert_eq!(
+			result["id"].as_str(),
+			Some(expected_id.as_str()),
+			"expected notification to have id {:?}: {:?}",
+			expected_id,
+			lq_notif
+		);
+		assert_eq!(
+			result["name"].as_str(),
+			Some("ok"),
+			"expected notification to have name `ok`: {:?}",
+			lq_notif
+		);
+
+		Ok(())
 	}
 
 	#[test(tokio::test)]
