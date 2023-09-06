@@ -215,7 +215,7 @@ pub async fn db(
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		_ => Err(Error::InvalidPass),
+		_ => Err(Error::InvalidAuth),
 	}
 }
 
