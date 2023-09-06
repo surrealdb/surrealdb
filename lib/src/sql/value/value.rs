@@ -37,7 +37,7 @@ use crate::sql::regex::{regex, Regex};
 use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
-use crate::sql::thing::{thing, Thing};
+use crate::sql::thing::{thing, thing_raw, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
 use crate::sql::{operator, Query};
 use async_recursion::async_recursion;
