@@ -732,6 +732,12 @@ mod ws_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn live_params_retained() -> Result<(), Box<dyn std::error::Error>> {
+		// TODO test live queries evaluate params before storage
+		// Changing param does not change live query
+	}
+
+	#[test(tokio::test)]
 	async fn let_and_set() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
