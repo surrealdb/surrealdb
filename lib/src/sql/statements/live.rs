@@ -12,7 +12,7 @@ use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::value::Value;
-use crate::sql::Uuid;
+use crate::sql::{idiom, Fetch, Uuid};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -59,7 +59,7 @@ impl LiveStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Check that auth has been set
-		let self_override = LiveStatement {
+		let mut self_override = LiveStatement {
 			auth: match self.auth {
 				Some(ref auth) => Some(auth.clone()),
 				None => Some(opt.auth.as_ref().clone()),
@@ -69,6 +69,29 @@ impl LiveStatement {
 		trace!("Evaluated live query auth to {:?}", self_override.auth);
 		// Claim transaction
 		let mut run = txn.lock().await;
+		// Replace Params for condition
+		if let Some(condition) = self_override.cond {
+			let parsed = condition.compute(ctx, opt, txn, None).await?;
+			trace!("Evaluated live query condition {:?} to {:?}", condition, parsed);
+			self_override.cond = Some(Cond(parsed));
+		}
+		// Replace Params for fetch
+		if let Some(fetches) = self_override.fetch {
+			let mut parsed_fetches = vec![];
+			for the_fetch in fetches {
+				let parsed = the_fetch.compute(ctx, opt, txn, None).await?;
+				trace!("Evaluated live query fetch {:?} to {:?}", the_fetch, parsed);
+				match parsed {
+					Value::Idiom(i) => {
+						parsed_fetches.push(Fetch(i));
+					}
+					_ => Err(Error::LiveStatement {
+						value: parsed.to_string(),
+					})?,
+				}
+			}
+			self_override.fetch = Some(Fetchs(parsed_fetches));
+		}
 		// Process the live query table
 		match self_override.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
