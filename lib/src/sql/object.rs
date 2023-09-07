@@ -10,14 +10,14 @@ use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::Operation;
 use crate::sql::thing::Thing;
-use crate::sql::util::{delimited_list0, expect_terminator};
+use crate::sql::util::expect_terminator;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
 use nom::combinator::{cut, opt};
-use nom::sequence::{delimited, terminated};
+use nom::sequence::delimited;
 use nom::Err;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -326,7 +326,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	fn entry(i: &str) -> IResult<&str, (String, Value)> {
 		let (i, k) = key(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, _) = expected(":", char(':'))(i)?;
+		let (i, _) = expected("`:`", char(':'))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = cut(value)(i)?;
 		Ok((i, (String::from(k), v)))
@@ -337,7 +337,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	let (i, first) = match entry(i) {
 		Ok(x) => x,
 		Err(Err::Error(_)) => {
-			let (i, _) = expect_terminator(start, closebraces)(i)?;
+			let (i, _) = closebraces(i)?;
 			return Ok((i, Object(BTreeMap::new())));
 		}
 		Err(Err::Failure(x)) => return Err(Err::Failure(x)),

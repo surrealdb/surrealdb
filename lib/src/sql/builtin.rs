@@ -1,6 +1,6 @@
 use crate::sql::{constant, error::ParseError, ident::ident_raw};
 use nom::{
-	bytes::complete::tag,
+	bytes::complete::{tag, tag_no_case},
 	combinator::{opt, peek, value},
 	Err, IResult,
 };
@@ -25,7 +25,7 @@ macro_rules! impl_builtins {
 				}
 			)*
 			$(
-				if let Ok((i, x)) = $name(i){
+				if let (i, Some(x)) = opt($name)(i)?{
 					return Ok((i,x))
 				}
 			)*
@@ -35,7 +35,7 @@ macro_rules! impl_builtins {
 
 	(@variant, $full:expr, $name:ident, $($s:ident)?,$($rename:expr)?, { fn }) => {
 		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
-			let parser = tag(impl_builtins!(@rename,$name,$($rename)?));
+			let parser = tag_no_case(impl_builtins!(@rename,$name,$($rename)?));
 			let res = value(BuiltinName::Function($full),parser)(i)?;
 			Ok(res)
 		}
@@ -43,25 +43,25 @@ macro_rules! impl_builtins {
 	(@variant, $full:expr, $name:ident,$($s:ident)?,$($rename:expr)?, { const = $value:expr}) => {
 		#[allow(non_snake_case)]
 		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
-			let parser = tag(impl_builtins!(@rename,$name,$($rename)?));
+			let parser = tag_no_case(impl_builtins!(@rename,$name,$($rename)?));
 			let res = value(BuiltinName::Constant($value),parser)(i)?;
 			Ok(res)
 		}
 	};
 	(@variant, $full:expr, $name:ident,$($s:ident)*,$($rename:expr)?, { $($t:tt)* }) => {
 		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
-			let (i,_) = tag(impl_builtins!(@rename,$name,$($rename)?))(i)?;
+			let (i,_) = tag_no_case(impl_builtins!(@rename,$name,$($rename)?))(i)?;
 			let (i,_) = impl_builtins!(@sep, i,$full, $($s)*);
 
 			let (i,_) = impl_builtins!{@block,i, $full, { $($t)* }};
 
 			if let Ok((i, Some(_))) = peek(opt(ident_raw))(i){
-				Err(Err::Error(ParseError::InvalidPath{
+				Err(Err::Failure(ParseError::InvalidPath{
 					tried: i,
 					parent: $full
 				}))
 			}else{
-				Err(Err::Error(ParseError::Expected{
+				Err(Err::Failure(ParseError::Expected{
 					tried: i,
 					expected: "a identifier"
 				}))
