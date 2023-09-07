@@ -357,7 +357,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		input = i
 	}
 	let (i, _) = expect_terminator(start, closebraces)(input)?;
-	return Ok((i, Object(tree)));
+	Ok((i, Object(tree)))
 }
 
 pub fn key(i: &str) -> IResult<&str, &str> {

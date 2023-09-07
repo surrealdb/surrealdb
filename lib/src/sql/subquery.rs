@@ -136,7 +136,7 @@ fn subquery_value(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
-	alt((expect_delimited(openparentheses, |i| subquery_inner(i), closeparentheses), |i| {
+	alt((expect_delimited(openparentheses, subquery_inner, closeparentheses), |i| {
 		let (i, v) = subquery_inner(i)?;
 		let (i, _) = ending(i)?;
 		let (i, _) = eat_semicolon(i)?;
