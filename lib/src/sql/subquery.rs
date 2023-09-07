@@ -27,7 +27,6 @@ use std::fmt::{self, Display, Formatter};
 
 use super::comment::{mightbespace, shouldbespace};
 use super::error::ExplainResultExt;
-use super::statement;
 use super::util::expect_delimited;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";

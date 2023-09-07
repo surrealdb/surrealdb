@@ -21,7 +21,7 @@ use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
 use nom::combinator::{cut, recognize};
 use nom::multi::separated_list1;
-use nom::sequence::{preceded, terminated};
+use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;

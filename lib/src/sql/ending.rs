@@ -11,8 +11,6 @@ use nom::combinator::peek;
 use nom::combinator::{eof, value};
 use nom::sequence::preceded;
 
-use super::operator;
-
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		value((), multispace1), // 1 + 1

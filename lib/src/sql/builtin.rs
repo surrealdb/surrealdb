@@ -5,7 +5,7 @@ use nom::{
 	Err, IResult,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum BuiltinName<I> {
 	Function(I),
 	Constant(constant::Constant),
