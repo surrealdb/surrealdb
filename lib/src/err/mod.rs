@@ -448,6 +448,10 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute CREATE statement using the specified value
+	#[error("Expected a single result output when using the ONLY keyword")]
+	SingleOnlyOutput,
+
 	/// The permissions do not allow this query to be run on this table
 	#[error("You don't have permission to run this query on the `{table}` table")]
 	TablePermissions {

@@ -75,145 +75,25 @@ impl Subquery {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		// Duplicate context
+		let mut ctx = Context::new(ctx);
+		// Add parent document
+		if let Some(doc) = doc {
+			ctx.add_value("parent", doc.doc.as_ref());
+		}
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Define(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Remove(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Select(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
-			Self::Create(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
-			Self::Update(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
-			Self::Delete(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
-			Self::Relate(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
-			Self::Insert(ref v) => {
-				// Is this a single output?
-				let one = v.single();
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent", doc.doc.as_ref());
-				}
-				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
-					// This is a single record result
-					Value::Array(mut a) if one => match a.len() {
-						// There was at least one result
-						v if v > 0 => Ok(a.remove(0)),
-						// There were no results
-						_ => Ok(Value::None),
-					},
-					// This is standard query result
-					v => Ok(v),
-				}
-			}
+			Self::Value(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Ifelse(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Output(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Define(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Select(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Create(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Update(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Delete(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Relate(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Insert(ref v) => v.compute(&ctx, opt, txn, doc).await,
 		}
 	}
 }

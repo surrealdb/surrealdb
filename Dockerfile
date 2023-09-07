@@ -7,7 +7,5 @@ ARG TARGETARCH
 # Add the binary file 'surreal' from the specified path on the host machine to the root directory in the container
 ADD $TARGETARCH/surreal /
 
-USER root
-
 # Set the entry point for the container to be the 'surreal' binary
 ENTRYPOINT ["/surreal"]

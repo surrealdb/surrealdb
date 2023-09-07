@@ -4,8 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
-use crate::sql::strand::{strand, Strand};
-use crate::sql::value::Value;
+use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use revision::revisioned;
@@ -15,7 +14,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct ThrowStatement {
-	pub error: Strand,
+	pub error: Value,
 }
 
 impl ThrowStatement {
@@ -26,12 +25,12 @@ impl ThrowStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Thrown(self.error.as_str().to_owned()))
+		Err(Error::Thrown(self.error.compute(ctx, opt, txn, doc).await?.to_raw_string()))
 	}
 }
 
@@ -44,7 +43,7 @@ impl fmt::Display for ThrowStatement {
 pub fn throw(i: &str) -> IResult<&str, ThrowStatement> {
 	let (i, _) = tag_no_case("THROW")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, e) = strand(i)?;
+	let (i, e) = value(i)?;
 	Ok((
 		i,
 		ThrowStatement {

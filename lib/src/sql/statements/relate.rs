@@ -30,8 +30,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RelateStatement {
+	#[revision(start = 2)]
+	pub only: bool,
 	pub kind: Value,
 	pub from: Value,
 	pub with: Value,
@@ -46,16 +48,6 @@ impl RelateStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
-	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match (&self.from, &self.with) {
-			(v, w) if v.is_object() && w.is_object() => true,
-			(v, w) if v.is_object() && w.is_thing() => true,
-			(v, w) if v.is_thing() && w.is_object() => true,
-			(v, w) if v.is_thing() && w.is_thing() => true,
-			_ => false,
-		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -183,13 +175,27 @@ impl RelateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		match i.output(ctx, opt, txn, &stm).await? {
+			// This is a single record result
+			Value::Array(mut a) if self.only => match a.len() {
+				// There was exactly one result
+				v if v == 1 => Ok(a.remove(0)),
+				// There were no results
+				_ => Err(Error::SingleOnlyOutput),
+			},
+			// This is standard query result
+			v => Ok(v),
+		}
 	}
 }
 
 impl fmt::Display for RelateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
+		write!(f, "RELATE")?;
+		if self.only {
+			f.write_str(" ONLY")?
+		}
+		write!(f, " {} -> {} -> {}", self.from, self.kind, self.with)?;
 		if self.uniq {
 			f.write_str(" UNIQUE")?
 		}
@@ -211,6 +217,7 @@ impl fmt::Display for RelateStatement {
 
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	let (i, _) = tag_no_case("RELATE")(i)?;
+	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, path) = relate_oi(i)?;
 	let (i, uniq) = opt(preceded(shouldbespace, tag_no_case("UNIQUE")))(i)?;
@@ -221,6 +228,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	Ok((
 		i,
 		RelateStatement {
+			only: only.is_some(),
 			kind: path.0,
 			from: path.1,
 			with: path.2,
