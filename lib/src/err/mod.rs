@@ -606,7 +606,7 @@ pub enum Error {
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
 	FeatureNotYetImplemented {
-		feature: &'static str,
+		feature: String,
 	},
 
 	/// Duplicated match references are not allowed
