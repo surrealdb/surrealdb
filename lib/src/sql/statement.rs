@@ -231,7 +231,7 @@ impl Display for Statement {
 }
 
 pub fn statement(i: &str) -> IResult<&str, Statement> {
-	dbg!(delimited(
+	delimited(
 		mightbespace,
 		alt((
 			alt((
@@ -267,7 +267,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			map(value, Statement::Value),
 		)),
 		mightbespace,
-	)(i))
+	)(i)
 }
 
 #[cfg(test)]

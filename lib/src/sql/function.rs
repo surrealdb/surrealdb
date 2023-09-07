@@ -260,7 +260,7 @@ pub fn defined_function(i: &str) -> IResult<&str, Function> {
 
 pub fn builtin_function<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Function> {
 	let (i, a) = expected(
-		" function arguments",
+		"function arguments",
 		delimited_list0(openparentheses, commas, terminated(cut(value), mightbespace), char(')')),
 	)(i)?;
 	Ok((i, Function::Normal(name.to_string(), a)))
@@ -272,7 +272,7 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, a) = expected(
-			" function arguments",
+			"function arguments",
 			delimited_list0(
 				cut(openparentheses),
 				commas,

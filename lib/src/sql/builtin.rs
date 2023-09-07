@@ -11,6 +11,8 @@ pub enum BuiltinName<I> {
 	Constant(constant::Constant),
 }
 
+/// A macro to generate a parser which is able to parse all the different functions, returning an
+/// error of the function does not exists.
 macro_rules! impl_builtins {
 	($($name:ident$( ( $s:ident ) )? $(= $rename:expr)? => { $($t:tt)* }),*$(,)?) => {
 		fn _parse_builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>> {

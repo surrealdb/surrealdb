@@ -9,7 +9,6 @@ use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ending;
 use crate::sql::error::expect_tag_no_case;
-use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
@@ -112,7 +111,7 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, what) = ident(i)?;
 		let (i, opts) = many0(index_opts)(i)?;
-		let (i, _) = expected("one of ", ending::query)(i)?;
+		let (i, _) = ending::query(i)?;
 		Ok((i, (name, what, opts)))
 	})(i)?;
 	// Create the base statement
