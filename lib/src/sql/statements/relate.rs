@@ -180,7 +180,7 @@ impl RelateStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				v if v == 1 => Ok(a.remove(0)),
+				1 => Ok(a.remove(0)),
 				// There were no results
 				_ => Err(Error::SingleOnlyOutput),
 			},

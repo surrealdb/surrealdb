@@ -78,14 +78,7 @@ impl SelectStatement {
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match self.what.len() {
-			1 if self.what[0].is_object() => true,
-			1 if self.what[0].is_thing() => true,
-			_ => false,
-		}
-	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -150,7 +143,7 @@ impl SelectStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				v if v == 1 => Ok(a.remove(0)),
+				1 => Ok(a.remove(0)),
 				// There were no results
 				_ => Err(Error::SingleOnlyOutput),
 			},
