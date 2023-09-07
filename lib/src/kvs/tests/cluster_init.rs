@@ -1,4 +1,5 @@
 use futures::lock::Mutex;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use crate::ctx::context;
@@ -20,17 +21,28 @@ async fn expired_nodes_are_garbage_collected() {
 	let old_time = Timestamp {
 		value: 123,
 	};
-	let test = init(new_node, old_time).await.unwrap();
+	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(new_node, clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
-	test.db.bootstrap_full(&sql::Uuid::from(old_node)).await.unwrap();
+	test.db = test.db.with_node_id(sql::Uuid::from(old_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
 		value: 567,
 	};
-	test.clock.write().await.set(new_time.clone());
-	test.db.bootstrap_full(&sql::Uuid::from(new_node)).await.unwrap();
+	{
+		// Lock released after scope
+		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
+			clock.set(new_time.clone());
+		} else {
+			panic!("Clock is not fake");
+		}
+	}
+	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -57,10 +69,13 @@ async fn expired_nodes_get_live_queries_archived() {
 	let old_time = Timestamp {
 		value: 123,
 	};
-	let test = init(old_node, old_time).await.unwrap();
+	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(old_node, clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
-	test.db.bootstrap_full(&sql::Uuid::from(old_node)).await.unwrap();
+	test.db = test.db.with_node_id(sql::Uuid::from(old_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Set up live query
 	let ses = Session::owner()
@@ -100,9 +115,17 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
 		value: 456,
-	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
-	test.clock.write().await.set(new_time.clone());
-	test.db.bootstrap_full(&sql::Uuid::from(new_node)).await.unwrap();
+	};
+	{
+		// Lock is released after scope
+		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
+			clock.set(new_time.clone());
+		} else {
+			panic!("Clock is not fake");
+		}
+	}
+	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(true, false).await.unwrap();
@@ -123,7 +146,9 @@ async fn single_live_queries_are_garbage_collected() {
 	let time = Timestamp {
 		value: 123,
 	};
-	let test = init(node_id, time).await.unwrap();
+	let clock = SizedClock::Fake(FakeClock::new(time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(node_id, clock).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
@@ -138,7 +163,8 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
-	test.db.bootstrap_full(&crate::sql::uuid::Uuid::from(node_id)).await.unwrap();
+	test.db = test.db.with_node_id(crate::sql::uuid::Uuid::from(node_id));
+	test.db.bootstrap().await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");

@@ -23,6 +23,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
 pub struct CreateStatement {
+	// Indicates the result should be a single record
 	#[revision(start = 2)]
 	pub only: bool,
 	pub what: Values,

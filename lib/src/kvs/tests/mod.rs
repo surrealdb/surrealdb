@@ -5,15 +5,19 @@ mod mem {
 	use crate::kvs::Transaction;
 	use serial_test::serial;
 
-	async fn new_ds(node_id: Uuid) -> Datastore {
-		Datastore::new_full("memory", sql::Uuid::from(node_id), None).await.unwrap()
+	async fn new_ds(node_id: Uuid, clock_override: Arc<RwLock<SizedClock>>) -> Datastore {
+		Datastore::new_full("memory", Some(clock_override))
+			.await
+			.unwrap()
+			.with_node_id(crate::sql::Uuid::from(node_id))
 	}
 
 	async fn new_tx(write: bool, lock: bool) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("361893b5-a041-40c0-996c-c3a8828ef06b").unwrap();
-		new_ds(new_tx_uuid).await.transaction(write, lock).await.unwrap()
+		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		new_ds(new_tx_uuid, clock).await.transaction(write, lock).await.unwrap()
 	}
 
 	include!("cluster_init.rs");
@@ -37,7 +41,7 @@ mod rocksdb {
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("rocksdb:{path}").as_str(), sql::Uuid::from(node_id), None)
+		Datastore::new_full(format!("rocksdb:{path}").as_str(), None)
 			.await
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id))
@@ -73,7 +77,7 @@ mod speedb {
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("speedb:{path}").as_str(), sql::Uuid::from(node_id), None)
+		Datastore::new_full(format!("speedb:{path}").as_str(), None)
 			.await
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id))
@@ -107,9 +111,7 @@ mod tikv {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> Datastore {
-		let ds = Datastore::new_full("tikv:127.0.0.1:2379", sql::Uuid::from(node_id), None)
-			.await
-			.unwrap();
+		let ds = Datastore::new_full("tikv:127.0.0.1:2379", None).await.unwrap();
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
@@ -149,7 +151,7 @@ mod fdb {
 		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster")
 			.await
 			.unwrap()
-			.with_node_id(sql::Uuid::from(node_id), None);
+			.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();

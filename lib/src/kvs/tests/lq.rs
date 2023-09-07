@@ -4,7 +4,8 @@ use uuid::Uuid;
 #[serial]
 async fn scan_node_lq() {
 	let node_id = Uuid::parse_str("63bb5c1a-b14e-4075-a7f8-680267fbe136").unwrap();
-	let test = init(node_id, Timestamp::default()).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
@@ -48,9 +49,7 @@ async fn live_creates_remote_notification() {
 	let remote_node = Uuid::parse_str("30a9bea3-8430-42db-9524-3d4d5c41e3ea").unwrap();
 	let local_node = Uuid::parse_str("4aa13527-538c-40da-b903-2402f57c4e74").unwrap();
 	let context = context::Context::background();
-	let options = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)))
-		// .with_live(true)
-		;
+	let options = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner))).with_live(true);
 	let _namespace = "test_namespace";
 	let _database = "test_database";
 	let table = "f3d4a40b50ba4221ab02fa406edb58cc";
@@ -61,12 +60,14 @@ async fn live_creates_remote_notification() {
 
 	// Init as local node, so we do not receive the notification
 	println!("First init");
-	let test = init(local_node, now).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(now.clone()))));
+	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
 	let mut tx = test.db.transaction(true, false).await.unwrap();
 	println!("Second init");
-	test.db.bootstrap_full(&sql::uuid::Uuid::from(local_node)).await.unwrap();
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node));
+	test.db.bootstrap().await.unwrap();
 	println!("Init complete");
 	tx.commit().await.unwrap();
 
@@ -91,6 +92,7 @@ async fn live_creates_remote_notification() {
 	let tx = test.db.transaction(true, false).await.unwrap();
 	let tx = Arc::new(Mutex::new(tx));
 	let create_stm = CreateStatement {
+		only: false,
 		what: Default::default(),
 		data: None,
 		output: None,
@@ -113,6 +115,7 @@ async fn live_creates_remote_notification() {
 		.await
 		.unwrap();
 	tx.lock().await.commit().await.unwrap();
+
 	assert_eq!(res.len(), 1);
 	// TODO verify key and value
 	let mut tx = test.db.transaction(true, false).await.unwrap();

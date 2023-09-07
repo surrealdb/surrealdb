@@ -1,6 +1,6 @@
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
-use crate::kvs::clock::FakeClock;
+use crate::kvs::clock::{FakeClock, SizedClock};
 use tokio::sync::RwLock;
 
 pub struct TestContext {
@@ -9,8 +9,6 @@ pub struct TestContext {
 	// It will usually be a uuid or combination of uuid and fixed string identifier.
 	// It is useful for separating test setups when environments are shared.
 	pub(crate) context_id: String,
-	// The clock used to control the time available in transactions
-	pub(crate) clock: Arc<RwLock<FakeClock>>,
 }
 
 /// TestContext is a container for an initialised test context
@@ -24,12 +22,14 @@ impl TestContext {
 
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
-pub(crate) async fn init(node_id: Uuid, now: Timestamp) -> Result<TestContext, Error> {
-	let db = new_ds(node_id).await;
+pub(crate) async fn init(
+	node_id: Uuid,
+	clock: Arc<RwLock<SizedClock>>,
+) -> Result<TestContext, Error> {
+	let db = new_ds(node_id, clock).await;
 	return Ok(TestContext {
 		db,
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
-		clock: Arc::new(RwLock::new(FakeClock::new(now))),
 	});
 }
 
