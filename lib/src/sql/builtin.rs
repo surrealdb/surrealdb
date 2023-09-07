@@ -34,7 +34,7 @@ macro_rules! impl_builtins {
 	};
 
 	(@variant, $full:expr, $name:ident, $($s:ident)?,$($rename:expr)?, { fn }) => {
-		fn $name<'a>(i: &'a str) -> IResult<&'a str, BuiltinName<&'a str>, ParseError<&'a str>>{
+		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
 			let parser = tag(impl_builtins!(@rename,$name,$($rename)?));
 			let res = value(BuiltinName::Function($full),parser)(i)?;
 			Ok(res)
@@ -42,14 +42,14 @@ macro_rules! impl_builtins {
 	};
 	(@variant, $full:expr, $name:ident,$($s:ident)?,$($rename:expr)?, { const = $value:expr}) => {
 		#[allow(non_snake_case)]
-		fn $name<'a>(i: &'a str) -> IResult<&'a str, BuiltinName<&'a str>, ParseError<&'a str>>{
+		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
 			let parser = tag(impl_builtins!(@rename,$name,$($rename)?));
 			let res = value(BuiltinName::Constant($value),parser)(i)?;
 			Ok(res)
 		}
 	};
 	(@variant, $full:expr, $name:ident,$($s:ident)*,$($rename:expr)?, { $($t:tt)* }) => {
-		fn $name<'a>(i: &'a str) -> IResult<&'a str, BuiltinName<&'a str>, ParseError<&'a str>>{
+		fn $name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseError<&str>>{
 			let (i,_) = tag(impl_builtins!(@rename,$name,$($rename)?))(i)?;
 			let (i,_) = impl_builtins!(@sep, i,$full, $($s)*);
 
@@ -166,6 +166,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			push => { fn },
 			remove => { fn },
 			reverse => { fn },
+			slice => { fn },
 			// says that sort is also itself a function
 			sort(func) => {
 				asc => {fn },
@@ -404,7 +405,8 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			year => { fn },
 			from => {
 				micros => {fn},
-				millies => {fn},
+				millis => {fn},
+				unix => {fn},
 				secs => {fn},
 			}
 		},

@@ -21,7 +21,7 @@ use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
 use crate::sql::expression::{unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{builtin_function, function, Function};
+use crate::sql::function::{builtin_function, defined_function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
@@ -2803,7 +2803,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 }
 
 pub fn function_or_const(i: &str) -> IResult<&str, Value> {
-	alt((into(function), |i| {
+	alt((into(defined_function), |i| {
 		let (i, v) = builtin_name(i)?;
 		match v {
 			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),

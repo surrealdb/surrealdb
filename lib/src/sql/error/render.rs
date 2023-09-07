@@ -72,16 +72,16 @@ impl Snippet {
 	/// Trims whitespace of an line and additionally truncates a string if it is too long.
 	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
 		let full_line_length = line.len();
-		let full_line = line.trim_start();
-		let mut offset = around_offset - (full_line_length - full_line.len());
-		let full_line = line.trim_end();
+		line = line.trim_start();
+		let mut offset = around_offset - (full_line_length - line.len());
+		line = line.trim_end();
 		let mut truncation = Truncation::None;
 
 		if around_offset > Self::MAX_ERROR_LINE_OFFSET {
 			// Actual error is to far to the right, just truncated everything to the left.
 			// show some prefix for some extra context.
 			let extra_offset = around_offset - 10;
-			let mut chars = full_line.chars();
+			let mut chars = line.chars();
 			for _ in 0..extra_offset {
 				chars.next();
 			}
