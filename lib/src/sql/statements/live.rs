@@ -12,7 +12,7 @@ use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::value::Value;
-use crate::sql::{idiom, Fetch, Uuid};
+use crate::sql::{idiom, Expression, Fetch, Uuid};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -24,6 +24,7 @@ use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ptr::Unique;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -71,7 +72,7 @@ impl LiveStatement {
 		let mut run = txn.lock().await;
 		// Replace Params for condition
 		if let Some(condition) = self_override.cond {
-			let parsed = condition.compute(ctx, opt, txn, None).await?;
+			let parsed = self_override.compute_condition(condition).await?;
 			trace!("Evaluated live query condition {:?} to {:?}", condition, parsed);
 			self_override.cond = Some(Cond(parsed));
 		}
@@ -124,6 +125,12 @@ impl LiveStatement {
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
 		self.archived = Some(node_id);
 		self
+	}
+
+	fn compute_condition(self, condition: Cond) -> Cond {
+		match condition {
+			Cond(Ex) => {}
+		}
 	}
 }
 
