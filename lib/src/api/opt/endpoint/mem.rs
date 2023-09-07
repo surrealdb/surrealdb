@@ -11,7 +11,8 @@ impl IntoEndpoint<Mem> for () {
 
 	fn into_endpoint(self) -> Result<Endpoint> {
 		Ok(Endpoint {
-			endpoint: Url::parse("mem://").unwrap(),
+			url: Url::parse("mem://").unwrap(),
+			path: "memory".to_owned(),
 			config: Default::default(),
 		})
 	}

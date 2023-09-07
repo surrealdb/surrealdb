@@ -164,7 +164,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: false
 /// - Guest access: false
-/// - Functions: No function is allowed nor denied, hence all functions are denied unless explicitly allowed
+/// - Functions: All functions are allowed
 /// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
 ///
 /// The capabilities are defined using allow/deny lists for fine-grained control.
@@ -235,23 +235,19 @@ impl std::fmt::Display for Capabilities {
 
 impl Default for Capabilities {
 	fn default() -> Self {
-		Self::none()
-	}
-}
-
-impl Capabilities {
-	fn none() -> Self {
 		Self {
 			scripting: false,
 			guest_access: false,
 
-			allow_funcs: Arc::new(Targets::None),
+			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
 		}
 	}
+}
 
+impl Capabilities {
 	pub fn all() -> Self {
 		Self {
 			scripting: true,

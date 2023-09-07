@@ -12,7 +12,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
-		DEFINE FIELD email ON person TYPE string ASSERT is::email($value);
+		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NONE;
@@ -99,7 +99,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
-		DEFINE FIELD email ON person TYPE string ASSERT is::email($value);
+		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
 	";

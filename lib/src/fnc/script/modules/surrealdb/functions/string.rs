@@ -2,6 +2,7 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
 mod distance;
+mod is;
 mod similarity;
 pub struct Package;
 
@@ -12,6 +13,7 @@ impl_module_def!(
 	"contains" => run,
 	"distance" => (distance::Package),
 	"endsWith" => run,
+	"is" => (is::Package),
 	"join" => run,
 	"len" => run,
 	"lowercase" => run,
