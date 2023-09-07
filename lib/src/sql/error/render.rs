@@ -85,7 +85,7 @@ impl Snippet {
 			for _ in 0..extra_offset {
 				chars.next();
 			}
-			offset += extra_offset;
+			offset -= extra_offset;
 			line = chars.as_str();
 			truncation = Truncation::Start;
 		}
@@ -129,7 +129,12 @@ impl fmt::Display for Snippet {
 				writeln!(f, "...{}...", self.source)?;
 			}
 		}
-		let error_offset = self.offset;
+		let error_offset = self.offset
+			+ if matches!(self.truncation, Truncation::Start | Truncation::Both) {
+				3
+			} else {
+				0
+			};
 		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "^",)?;
 		if let Some(ref explain) = self.explain {
 			write!(f, "{explain}")?;
