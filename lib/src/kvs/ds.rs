@@ -749,7 +749,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -779,7 +779,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -844,7 +844,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -920,13 +920,13 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(skip(self, sess, chn))]
+	#[instrument(level = "debug", skip(self, sess, chn))]
 	pub async fn export(
 		&self,
 		sess: &Session,
@@ -951,7 +951,7 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(skip(self, sess, sql))]
+	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
