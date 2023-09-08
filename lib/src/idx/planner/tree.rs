@@ -71,20 +71,20 @@ impl<'a> TreeBuilder<'a> {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
-		Ok(match v {
-			Value::Expression(e) => self.eval_expression(e).await?,
-			Value::Idiom(i) => self.eval_idiom(i).await?,
-			Value::Strand(_) => Node::Scalar(v.to_owned()),
-			Value::Number(_) => Node::Scalar(v.to_owned()),
-			Value::Bool(_) => Node::Scalar(v.to_owned()),
-			Value::Thing(_) => Node::Scalar(v.to_owned()),
-			Value::Subquery(s) => self.eval_subquery(s).await?,
+		match v {
+			Value::Expression(e) => self.eval_expression(e).await,
+			Value::Idiom(i) => self.eval_idiom(i).await,
+			Value::Strand(_) => Ok(Node::Scalar(v.to_owned())),
+			Value::Number(_) => Ok(Node::Scalar(v.to_owned())),
+			Value::Bool(_) => Ok(Node::Scalar(v.to_owned())),
+			Value::Thing(_) => Ok(Node::Scalar(v.to_owned())),
+			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(&v).await?
+				self.eval_value(&v).await
 			}
-			_ => Node::Unsupported,
-		})
+			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
+		}
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
@@ -99,9 +99,7 @@ impl<'a> TreeBuilder<'a> {
 		match e {
 			Expression::Unary {
 				..
-			} => Err(Error::FeatureNotYetImplemented {
-				feature: "unary expressions in index",
-			}),
+			} => Ok(Node::Unsupported("unary expressions not supported".to_string())),
 			Expression::Binary {
 				l,
 				o,
@@ -173,10 +171,10 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
-		Ok(match s {
-			Subquery::Value(v) => self.eval_value(v).await?,
-			_ => Node::Unsupported,
-		})
+		match s {
+			Subquery::Value(v) => self.eval_value(v).await,
+			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
+		}
 	}
 }
 
@@ -201,7 +199,7 @@ pub(super) enum Node {
 	IndexedField(Idiom, DefineIndexStatement),
 	NonIndexedField,
 	Scalar(Value),
-	Unsupported,
+	Unsupported(String),
 }
 
 impl Node {

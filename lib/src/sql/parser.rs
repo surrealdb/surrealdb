@@ -1,13 +1,11 @@
 use crate::err::Error;
-use crate::iam::Error as IamError;
-use crate::sql::error::Error::{ExcessiveDepth, Field, Group, Order, Parser, Role, Split};
 use crate::sql::error::IResult;
 use crate::sql::idiom::Idiom;
 use crate::sql::query::{query, Query};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use nom::Err;
+use nom::Finish;
 use std::str;
 use tracing::instrument;
 
@@ -65,82 +63,20 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 		// The input query was empty
 		0 => Err(Error::QueryEmpty),
 		// Continue parsing the query
-		_ => match parser(input) {
+		_ => match parser(input).finish() {
 			// The query was parsed successfully
 			Ok((v, parsed)) if v.is_empty() => Ok(parsed),
 			// There was unparsed SQL remaining
 			Ok((_, _)) => Err(Error::QueryRemaining),
 			// There was an error when parsing the query
-			Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(match e {
-				// There was a parsing error
-				Parser(e) => {
-					// Locate the parser position
-					let (s, l, c) = locate(input, e);
-					// Return the parser error
-					Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					}
-				}
-				// There was a parsing error
-				ExcessiveDepth => Error::ComputationDepthExceeded,
-				// There was a SPLIT ON error
-				Field(e, f) => Error::InvalidField {
-					line: locate(input, e).1,
-					field: f,
-				},
-				// There was a SPLIT ON error
-				Split(e, f) => Error::InvalidSplit {
-					line: locate(input, e).1,
-					field: f,
-				},
-				// There was a ORDER BY error
-				Order(e, f) => Error::InvalidOrder {
-					line: locate(input, e).1,
-					field: f,
-				},
-				// There was a GROUP BY error
-				Group(e, f) => Error::InvalidGroup {
-					line: locate(input, e).1,
-					field: f,
-				},
-				// There was an error parsing the ROLE
-				Role(_, role) => Error::IamError(IamError::InvalidRole(role)),
-			}),
-			_ => unreachable!(),
+			Err(e) => Err(Error::InvalidQuery(e.render_on(input))),
 		},
 	}
 }
 
-fn truncate(s: &str, l: usize) -> &str {
-	// TODO: use s.floor_char_boundary once https://github.com/rust-lang/rust/issues/93743 lands
-	match s.char_indices().nth(l) {
-		None => s,
-		Some((i, _)) => &s[..i],
-	}
-}
-
-fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
-	let index = input.len() - tried.len();
-	let tried = truncate(tried, 100);
-	let lines = input.split('\n').map(|l| l.len()).enumerate();
-	let (mut total, mut chars) = (0, 0);
-	for (line, size) in lines {
-		total += size + 1;
-		if index < total {
-			let line_num = line + 1;
-			let char_num = index - chars;
-			return (tried, line_num, char_num);
-		}
-		chars += size + 1;
-	}
-	(tried, 0, 0)
-}
-
 pub(crate) mod depth {
 	use crate::cnf::MAX_COMPUTATION_DEPTH;
-	use crate::sql::Error::ExcessiveDepth;
+	use crate::sql::ParseError;
 	use nom::Err;
 	use std::cell::Cell;
 	use std::thread::panicking;
@@ -170,14 +106,14 @@ pub(crate) mod depth {
 	/// Call at least once in recursive parsing code paths to limit recursion depth.
 	#[inline(never)]
 	#[must_use = "must store and implicitly drop when returning"]
-	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
+	pub(crate) fn dive<I>(position: I) -> Result<Diving, Err<crate::sql::ParseError<I>>> {
 		DEPTH.with(|cell| {
 			let depth = cell.get().saturating_add(DEPTH_PER_DIVE);
 			if depth <= *MAX_COMPUTATION_DEPTH {
 				cell.replace(depth);
 				Ok(Diving)
 			} else {
-				Err(Err::Failure(ExcessiveDepth))
+				Err(Err::Failure(ParseError::ExcessiveDepth(position)))
 			}
 		})
 	}
@@ -422,6 +358,8 @@ mod tests {
 		n: usize,
 		excessive: bool,
 	) {
+		use crate::sql::error::ParseError;
+
 		let mut sql = String::from(prefix);
 		for _ in 0..n {
 			sql.push_str(recursive_start);
@@ -431,11 +369,11 @@ mod tests {
 			sql.push_str(recursive_end);
 		}
 		let start = Instant::now();
-		let res = parse(&sql);
+		let res = query(&sql).finish();
 		let elapsed = start.elapsed();
 		if excessive {
 			assert!(
-				matches!(res, Err(Error::ComputationDepthExceeded)),
+				matches!(res, Err(ParseError::ExcessiveDepth(_))),
 				"expected computation depth exceeded, got {:?}",
 				res
 			);

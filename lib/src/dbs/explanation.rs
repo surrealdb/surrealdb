@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::Iterable;
 use crate::sql::{Explain, Object, Value};
 use std::collections::HashMap;
@@ -6,13 +7,22 @@ use std::collections::HashMap;
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
-	pub(super) fn new(e: Option<&Explain>, iterables: &Vec<Iterable>) -> (bool, Option<Self>) {
+	pub(super) fn new(
+		ctx: &Context<'_>,
+		e: Option<&Explain>,
+		iterables: &Vec<Iterable>,
+	) -> (bool, Option<Self>) {
 		match e {
 			None => (true, None),
 			Some(e) => {
 				let mut exp = Self::default();
 				for i in iterables {
 					exp.add_iter(i);
+				}
+				if let Some(qp) = ctx.get_query_planner() {
+					for reason in qp.fallbacks() {
+						exp.add_fallback(reason.to_string());
+					}
 				}
 				(e.0, Some(exp))
 			}
@@ -25,6 +35,10 @@ impl Explanation {
 
 	pub(super) fn add_fetch(&mut self, count: usize) {
 		self.0.push(ExplainItem::new_fetch(count));
+	}
+
+	fn add_fallback(&mut self, reason: String) {
+		self.0.push(ExplainItem::new_fallback(reason));
 	}
 
 	pub(super) fn output(self, results: &mut Vec<Value>) {
@@ -44,6 +58,13 @@ impl ExplainItem {
 		Self {
 			name: "Fetch".into(),
 			details: vec![("count", count.into())],
+		}
+	}
+
+	fn new_fallback(reason: String) -> Self {
+		Self {
+			name: "Fallback".into(),
+			details: vec![("reason", reason.into())],
 		}
 	}
 

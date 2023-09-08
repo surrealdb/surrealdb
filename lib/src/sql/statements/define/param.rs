@@ -7,6 +7,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -18,6 +20,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -77,13 +80,12 @@ impl Display for DefineParamStatement {
 }
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PARAM")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = char('$')(i)?;
-	let (i, name) = ident(i)?;
+	let (i, _) = cut(char('$'))(i)?;
+	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(param_opts)(i)?;
+	let (i, _) = expected("VALUE, PERMISSIONS, or COMMENT", ending::query)(i)?;
 	// Create the base statement
 	let mut res = DefineParamStatement {
 		name,
@@ -125,7 +127,7 @@ fn param_value(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineParamOption::Value(v)))
 }
 
@@ -133,7 +135,7 @@ fn param_comment(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineParamOption::Comment(v)))
 }
 
@@ -141,6 +143,6 @@ fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permission(i)?;
+	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineParamOption::Permissions(v)))
 }

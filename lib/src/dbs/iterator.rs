@@ -278,7 +278,7 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
-		let (do_iterate, mut explanation) = Explanation::new(stm.explain(), &self.entries);
+		let (do_iterate, mut explanation) = Explanation::new(ctx, stm.explain(), &self.entries);
 
 		if do_iterate {
 			// Process prepared values

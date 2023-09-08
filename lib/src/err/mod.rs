@@ -1,5 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
+use crate::sql::error::RenderedError as RenderedParserError;
 use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -117,12 +118,8 @@ pub enum Error {
 	UnknownAuth,
 
 	/// There was an error with the SQL query
-	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
-	InvalidQuery {
-		line: usize,
-		char: usize,
-		sql: String,
-	},
+	#[error("Parse error: {0}")]
+	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
 	#[error("Can not use {value} in a CONTENT clause")]
@@ -606,7 +603,7 @@ pub enum Error {
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
 	FeatureNotYetImplemented {
-		feature: &'static str,
+		feature: String,
 	},
 
 	/// Duplicated match references are not allowed

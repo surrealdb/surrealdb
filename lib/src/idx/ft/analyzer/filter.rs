@@ -191,17 +191,13 @@ mod tests {
 			"بدل", "من", "الجر",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(arabic);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(arabic);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ar);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ar);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ara);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ara);",
 			input,
 			&output,
 		);
@@ -235,20 +231,16 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(danish);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(danish);",
 			input,
 			&output,
 		);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(dan);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(dan);",
 			input,
 			&output,
 		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(da);",
-			input,
-			&output,
-		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(da);", input, &output);
 	}
 
 	#[test]
@@ -259,17 +251,13 @@ mod tests {
 			"klein", "hond", "slaapt", "liever", "in", "zijn", "mand", "dan", "te", "renn", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(dutch);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(dutch);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(nl);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(nl);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(nld);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(nld);",
 			input,
 			&output,
 		);
@@ -283,20 +271,16 @@ mod tests {
 			"read", "in", "her", "spare", "time", "rather", "than", "teach", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(english);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(english);",
 			input,
 			&output,
 		);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(eng);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(eng);",
 			input,
 			&output,
 		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(en);",
-			input,
-			&output,
-		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(en);", input, &output);
 	}
 
 	#[test]
@@ -307,17 +291,13 @@ mod tests {
 			"chien", "aim", "plutôt", "se", "blott", "sur", "le", "canap", "que", "de", "cour",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(french);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(french);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(fr);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(fr);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(fra);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(fra);",
 			input,
 			&output,
 		);
@@ -332,17 +312,13 @@ mod tests {
 			"zu", "lauf", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(german);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(german);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(de);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(de);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(deu);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(deu);",
 			input,
 			&output,
 		);
@@ -377,20 +353,16 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(greek);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(greek);",
 			input,
 			&output,
 		);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ell);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ell);",
 			input,
 			&output,
 		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(el);",
-			input,
-			&output,
-		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(el);", input, &output);
 	}
 
 	#[test]
@@ -401,17 +373,13 @@ mod tests {
 			"inkább", "alsz", "a", "kosar", ",", "mints", "fu", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(hungarian);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(hungarian);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(hu);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(hu);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(hun);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(hun);",
 			input,
 			&output,
 		);
@@ -425,17 +393,13 @@ mod tests {
 			"prefer", "dorm", "nel", "suo", "cest", "piuttost", "che", "corr", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(italian);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(italian);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(it);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(it);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ita);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ita);",
 			input,
 			&output,
 		);
@@ -469,17 +433,13 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(norwegian);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(norwegian);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(no);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(no);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(nor);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(nor);",
 			input,
 			&output,
 		);
@@ -493,17 +453,13 @@ mod tests {
 			"prefer", "dorm", "na", "sua", "cam", "em", "vez", "de", "corr", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(portuguese);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(portuguese);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(pt);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(pt);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(por);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(por);",
 			input,
 			&output,
 		);
@@ -517,17 +473,13 @@ mod tests {
 			"să", "doarm", "în", "coș", "lui", "decât", "să", "alerg", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(romanian);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(romanian);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ro);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ro);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ron);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ron);",
 			input,
 			&output,
 		);
@@ -559,17 +511,13 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(russian);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(russian);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ru);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ru);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(rus);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(rus);",
 			input,
 			&output,
 		);
@@ -583,17 +531,13 @@ mod tests {
 			"prefier", "dorm", "en", "su", "cam", "en", "lug", "de", "corr", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(spanish);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(spanish);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(es);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(es);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(spa);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(spa);",
 			input,
 			&output,
 		);
@@ -627,17 +571,13 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(swedish);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(swedish);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(sv);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(sv);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(swe);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(swe);",
 			input,
 			&output,
 		);
@@ -674,17 +614,13 @@ mod tests {
 			".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(tamil);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tamil);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ta);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(ta);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(tam);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tam);",
 			input,
 			&output,
 		);
@@ -698,17 +634,13 @@ mod tests {
 			"yatak", "uyuma", "tercih", "eder", ".",
 		];
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(turkish);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(turkish);",
 			input,
 			&output,
 		);
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(tr);", input, &output);
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(tr);",
-			input,
-			&output,
-		);
-		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(tur);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tur);",
 			input,
 			&output,
 		);
@@ -717,7 +649,7 @@ mod tests {
 	#[test]
 	fn test_ngram() {
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
 		);
@@ -726,7 +658,7 @@ mod tests {
 	#[test]
 	fn test_edgengram() {
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
+			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
 		);

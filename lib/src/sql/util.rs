@@ -1,4 +1,55 @@
-use nom::{error::ParseError, Err, IResult, InputLength, Parser};
+use crate::sql::error::{IResult, ParseError};
+use nom::{Err, InputLength, Parser};
+
+/// Parses a parser delimited by two other parsers.
+///
+/// This parser failes (not errors) if the second delimiting parser returns an error.
+pub fn expect_delimited<I, D, V, T, O, O1>(
+	mut prefix: D,
+	mut value: V,
+	mut terminator: T,
+) -> impl FnMut(I) -> IResult<I, O, ParseError<I>>
+where
+	I: Clone + InputLength,
+	V: Parser<I, O, ParseError<I>>,
+	D: Parser<I, I, ParseError<I>>,
+	T: Parser<I, O1, ParseError<I>>,
+{
+	move |i| {
+		let (i, s) = prefix.parse(i)?;
+		let (i, res) = value.parse(i)?;
+		match terminator.parse(i) {
+			Ok((i, _)) => Result::Ok((i, res)),
+			Result::Err(Err::Failure(e)) | Result::Err(Err::Error(e)) => {
+				Result::Err(Err::Failure(ParseError::MissingDelimiter {
+					opened: s,
+					tried: e.tried(),
+				}))
+			}
+			Result::Err(Err::Incomplete(e)) => Result::Err(Err::Incomplete(e)),
+		}
+	}
+}
+
+pub fn expect_terminator<P, I, O>(
+	open_span: I,
+	mut terminator: P,
+) -> impl FnMut(I) -> IResult<I, O, ParseError<I>>
+where
+	I: Clone,
+	P: Parser<I, O, ParseError<I>>,
+{
+	move |i| match terminator.parse(i) {
+		Ok((i, x)) => Ok((i, x)),
+		Result::Err(Err::Failure(e)) | Result::Err(Err::Error(e)) => {
+			Result::Err(Err::Failure(ParseError::MissingDelimiter {
+				opened: open_span.clone(),
+				tried: e.tried(),
+			}))
+		}
+		Result::Err(Err::Incomplete(e)) => Result::Err(Err::Incomplete(e)),
+	}
+}
 
 /// Parses a delimited list with an option trailing seperator in the form of:
 ///
@@ -17,22 +68,21 @@ use nom::{error::ParseError, Err, IResult, InputLength, Parser};
 /// and if there is none it returns a failure. Otherwise completes with an vec of the parsed
 /// values.
 ///
-pub fn delimited_list0<I, E, D, S, V, T, O, O1, O2, O3>(
+pub fn delimited_list0<I, D, S, V, T, O, O1, O2>(
 	mut prefix: D,
 	mut seperator: S,
 	mut value: V,
 	mut terminator: T,
-) -> impl FnMut(I) -> IResult<I, Vec<O>, E>
+) -> impl FnMut(I) -> IResult<I, Vec<O>, ParseError<I>>
 where
 	I: Clone + InputLength,
-	V: Parser<I, O, E>,
-	D: Parser<I, O1, E>,
-	S: Parser<I, O2, E>,
-	T: Parser<I, O3, E>,
-	E: ParseError<I>,
+	V: Parser<I, O, ParseError<I>>,
+	D: Parser<I, I, ParseError<I>>,
+	S: Parser<I, O1, ParseError<I>>,
+	T: Parser<I, O2, ParseError<I>>,
 {
 	move |i| {
-		let (i, _) = prefix.parse(i)?;
+		let (i, s) = prefix.parse(i)?;
 		let mut res = Vec::new();
 		let mut input = i;
 		loop {
@@ -50,12 +100,17 @@ where
 				Ok((i, _)) => {
 					input = i;
 				}
-				Err(Err::Error(_)) => match terminator.parse(i) {
+				Err(Err::Error(_)) => match terminator.parse(i.clone()) {
 					Ok((i, _)) => {
 						input = i;
 						break;
 					}
-					Result::Err(Err::Error(e)) => return Err(Err::Failure(e)),
+					Result::Err(Err::Error(_)) => {
+						return Err(Err::Failure(ParseError::MissingDelimiter {
+							opened: s,
+							tried: i,
+						}))
+					}
 					Result::Err(e) => return Err(e),
 				},
 				Err(e) => return Err(e),
@@ -82,22 +137,21 @@ where
 /// and if there is none it returns a failure. Otherwise completes with an vec of the parsed
 /// values.
 ///
-pub fn delimited_list1<I, E, D, S, V, T, O, O1, O2, O3>(
+pub fn delimited_list1<I, D, S, V, T, O, O1, O2>(
 	mut prefix: D,
 	mut seperator: S,
 	mut value: V,
 	mut terminator: T,
-) -> impl FnMut(I) -> IResult<I, Vec<O>, E>
+) -> impl FnMut(I) -> IResult<I, Vec<O>, ParseError<I>>
 where
 	I: Clone + InputLength,
-	V: Parser<I, O, E>,
-	D: Parser<I, O1, E>,
-	S: Parser<I, O2, E>,
-	T: Parser<I, O3, E>,
-	E: ParseError<I>,
+	V: Parser<I, O, ParseError<I>>,
+	D: Parser<I, I, ParseError<I>>,
+	S: Parser<I, O1, ParseError<I>>,
+	T: Parser<I, O2, ParseError<I>>,
 {
 	move |i| {
-		let (i, _) = prefix.parse(i)?;
+		let (i, s) = prefix.parse(i)?;
 		let mut res = Vec::new();
 		let mut input = i;
 		loop {
@@ -115,12 +169,17 @@ where
 				Ok((i, _)) => {
 					input = i;
 				}
-				Err(Err::Error(_)) => match terminator.parse(i) {
+				Err(Err::Error(_)) => match terminator.parse(i.clone()) {
 					Ok((i, _)) => {
 						input = i;
 						break;
 					}
-					Result::Err(Err::Error(e)) => return Err(Err::Failure(e)),
+					Result::Err(Err::Error(_)) => {
+						return Err(Err::Failure(ParseError::MissingDelimiter {
+							opened: s,
+							tried: i,
+						}))
+					}
 					Result::Err(e) => return Err(e),
 				},
 				Err(e) => return Err(e),

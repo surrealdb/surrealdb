@@ -1,5 +1,6 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use derive::Store;
@@ -35,10 +36,13 @@ pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = tag_no_case("OPTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, n) = ident(i)?;
-	let (i, v) = cut(opt(alt((
-		value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
-		value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
-	))))(i)?;
+	let (i, v) = expected(
+		"'=' follwed by a value for the option",
+		cut(opt(alt((
+			value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
+			value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
+		)))),
+	)(i)?;
 	Ok((
 		i,
 		OptionStatement {

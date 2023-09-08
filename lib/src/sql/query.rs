@@ -1,9 +1,9 @@
-use crate::sql::error::IResult;
+use crate::sql::error::{IResult, ParseError};
 use crate::sql::fmt::Pretty;
 use crate::sql::statement::{statements, Statement, Statements};
 use crate::sql::Value;
 use derive::Store;
-use nom::combinator::all_consuming;
+use nom::Err;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -46,7 +46,14 @@ impl Display for Query {
 }
 
 pub fn query(i: &str) -> IResult<&str, Query> {
-	let (i, v) = all_consuming(statements)(i)?;
+	let (i, v) = statements(i)?;
+	if !i.is_empty() {
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "query to end",
+			explained: "perhaps missing a semicolon on the previous statement?",
+		}));
+	}
 	Ok((i, Query(v)))
 }
 

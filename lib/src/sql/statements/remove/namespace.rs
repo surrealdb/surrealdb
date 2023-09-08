@@ -11,6 +11,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -53,11 +54,9 @@ impl Display for RemoveNamespaceStatement {
 }
 
 pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveNamespaceStatement {

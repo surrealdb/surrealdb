@@ -8,6 +8,8 @@ use crate::iam::ResourceKind;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
 use crate::sql::datetime::datetime;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use crate::sql::value::Value;
@@ -99,15 +101,18 @@ impl fmt::Display for ShowStatement {
 }
 
 pub fn table_or_database(i: &str) -> IResult<&str, Option<Table>> {
-	let (i, v) = alt((
-		map(preceded(tag_no_case("table"), preceded(shouldbespace, table)), Some),
-		value(None, tag_no_case("database")),
-	))(i)?;
+	let (i, v) = expected(
+		"one of TABLE, DATABASE",
+		alt((
+			map(preceded(tag_no_case("TABLE"), preceded(shouldbespace, cut(table))), Some),
+			value(None, tag_no_case("DATABASE")),
+		)),
+	)(i)?;
 	Ok((i, v))
 }
 
 pub fn since(i: &str) -> IResult<&str, ShowSince> {
-	let (i, _) = tag_no_case("SINCE")(i)?;
+	let (i, _) = expect_tag_no_case("SINCE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 
 	cut(alt((map(take_u64, ShowSince::Versionstamp), map(datetime, ShowSince::Timestamp))))(i)
@@ -116,7 +121,6 @@ pub fn since(i: &str) -> IResult<&str, ShowSince> {
 pub fn limit(i: &str) -> IResult<&str, u32> {
 	let (i, _) = tag_no_case("LIMIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-
 	cut(u32)(i)
 }
 

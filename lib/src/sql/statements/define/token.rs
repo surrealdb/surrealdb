@@ -8,6 +8,9 @@ use crate::iam::ResourceKind;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::escape::quote_str;
 use crate::sql::ident::{ident, Ident};
@@ -16,6 +19,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -106,16 +110,18 @@ impl Display for DefineTokenStatement {
 }
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TOKEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base_or_scope(i)?;
-	let (i, opts) = many0(token_opts)(i)?;
+	let (i, (name, base, opts)) = cut(|i| {
+		let (i, name) = ident(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, base) = base_or_scope(i)?;
+		let (i, opts) = many0(token_opts)(i)?;
+		let (i, _) = expected("TYPE, VALUE, or COMMENT", ending::query)(i)?;
+		Ok((i, (name, base, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineTokenStatement {
 		name,
@@ -158,7 +164,7 @@ fn token_type(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = algorithm(i)?;
+	let (i, v) = cut(algorithm)(i)?;
 	Ok((i, DefineTokenOption::Type(v)))
 }
 
@@ -166,7 +172,7 @@ fn token_value(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand_raw(i)?;
+	let (i, v) = cut(strand_raw)(i)?;
 	Ok((i, DefineTokenOption::Value(v)))
 }
 
@@ -174,6 +180,6 @@ fn token_comment(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineTokenOption::Comment(v)))
 }

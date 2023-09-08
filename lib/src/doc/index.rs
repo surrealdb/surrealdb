@@ -57,7 +57,7 @@ impl<'a> Document<'a> {
 					Index::Search(p) => ic.index_full_text(&mut run, p).await?,
 					Index::MTree(_) => {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "MTree indexing",
+							feature: "MTree indexing".to_string(),
 						})
 					}
 				};
