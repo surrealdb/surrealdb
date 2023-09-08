@@ -8,6 +8,7 @@ use surrealdb::dbs::node::Timestamp;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
+use surrealdb::sql;
 use surrealdb::sql::{Id, Thing, Value};
 
 #[tokio::test]
@@ -377,7 +378,8 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
-	let dbs = new_ds().await?.with_notifications();
+	let node_id = uuid::Uuid::parse_str("bc52f447-831e-4fa2-834c-ed3e5c4e95bc").unwrap();
+	let dbs = new_ds().await?.with_notifications().with_node_id(sql::Uuid::from(node_id));
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -412,21 +414,26 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 
 	// Validate notification
 	let notifications = dbs.notifications().unwrap();
-	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
+	let mut not =
+		recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
+	// We cannot easily determine the timestamp
+	assert!(not.timestamp.value > 0);
+	not.timestamp = Timestamp::default();
+	// We cannot easily determine the notification ID either
+	assert_ne!(not.notification_id, sql::Uuid::default());
+	not.notification_id = sql::Uuid::default();
 	assert_eq!(
 		not,
 		Notification {
 			live_id,
-			node_id: Default::default(),
+			node_id: sql::Uuid::from(node_id),
 			action: Action::Delete,
 			result: Value::Thing(Thing {
 				tb: "person".to_string(),
 				id: Id::String("test_true".to_string()),
 			}),
 			notification_id: Default::default(),
-			timestamp: Timestamp {
-				value: 0
-			},
+			timestamp: Timestamp::default(),
 		}
 	);
 	Ok(())
