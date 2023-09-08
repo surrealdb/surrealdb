@@ -1,15 +1,14 @@
 use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub};
 use crate::err::Error;
 use crate::sql::ending::number as ending;
-use crate::sql::error::Error::Parser;
-use crate::sql::error::IResult;
+use crate::sql::error::{IResult, ParseError};
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::i64;
 use nom::combinator::{opt, value};
 use nom::number::complete::recognize_float;
-use nom::Err::Failure;
+use nom::Err;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -747,9 +746,43 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
 	let number = match suffix {
-		Suffix::None => Number::try_from(v).map_err(|_| Failure(Parser(i)))?,
-		Suffix::Float => Number::from(f64::from_str(v).map_err(|_| Failure(Parser(i)))?),
-		Suffix::Decimal => Number::from(Decimal::from_str(v).map_err(|_| Failure(Parser(i)))?),
+		Suffix::None => {
+			// Manually check for int or float for better parsing errors
+			if v.contains(['e', 'E', '.']) {
+				let float = f64::from_str(v)
+					.map_err(|e| ParseError::ParseFloat {
+						tried: v,
+						error: e,
+					})
+					.map_err(Err::Failure)?;
+				Number::from(float)
+			} else {
+				let int = i64::from_str(v)
+					.map_err(|e| ParseError::ParseInt {
+						tried: v,
+						error: e,
+					})
+					.map_err(Err::Failure)?;
+				Number::from(int)
+			}
+		}
+		Suffix::Float => {
+			let float = f64::from_str(v)
+				.map_err(|e| ParseError::ParseFloat {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?;
+			Number::from(float)
+		}
+		Suffix::Decimal => Number::from(
+			Decimal::from_str(v)
+				.map_err(|e| ParseError::ParseDecimal {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?,
+		),
 	};
 	Ok((i, number))
 }

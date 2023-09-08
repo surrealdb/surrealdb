@@ -32,6 +32,8 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
+use super::util::expect_delimited;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -179,11 +181,15 @@ impl Display for Block {
 }
 
 pub fn block(i: &str) -> IResult<&str, Block> {
-	let (i, _) = openbraces(i)?;
-	let (i, v) = separated_list0(colons, entry)(i)?;
-	let (i, _) = many0(colons)(i)?;
-	let (i, _) = closebraces(i)?;
-	Ok((i, Block(v)))
+	expect_delimited(
+		openbraces,
+		|i| {
+			let (i, v) = separated_list0(colons, entry)(i)?;
+			let (i, _) = many0(colons)(i)?;
+			Ok((i, Block(v)))
+		},
+		closebraces,
+	)(i)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

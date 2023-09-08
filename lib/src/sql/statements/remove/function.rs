@@ -53,8 +53,6 @@ impl Display for RemoveFunctionStatement {
 }
 
 pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;

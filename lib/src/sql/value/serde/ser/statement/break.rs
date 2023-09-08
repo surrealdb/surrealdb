@@ -37,7 +37,7 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = BreakStatement::default();
+		let stmt = BreakStatement;
 		let value: BreakStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}

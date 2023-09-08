@@ -190,9 +190,17 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 				assert_eq!(res.len(), 1);
 				//
 				let tmp = res.next().unwrap();
-				assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+				assert!(
+					matches!(tmp, Err(Error::ComputationDepthExceeded)),
+					"didn't return a computation depth exceeded: {:?}",
+					tmp
+				);
 			}
-			Err(e) => assert!(matches!(e, Error::ComputationDepthExceeded)),
+			Err(e) => assert!(
+				matches!(e, Error::InvalidQuery(_)),
+				"didn't return a computation depth exceeded: {:?}",
+				e
+			),
 		}
 		//
 		Ok(())

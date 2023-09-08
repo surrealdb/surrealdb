@@ -3,21 +3,22 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::openbraces;
+use crate::sql::common::{closebraces, openbraces};
 use crate::sql::common::{commas, val_char};
-use crate::sql::error::IResult;
+use crate::sql::error::{expected, IResult};
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::Operation;
 use crate::sql::thing::Thing;
-use crate::sql::util::delimited_list0;
+use crate::sql::util::expect_terminator;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
-use nom::combinator::cut;
-use nom::sequence::{delimited, terminated};
+use nom::combinator::{cut, opt};
+use nom::sequence::delimited;
+use nom::Err;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -325,15 +326,38 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	fn entry(i: &str) -> IResult<&str, (String, Value)> {
 		let (i, k) = key(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(':')(i)?;
+		let (i, _) = expected("`:`", char(':'))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = cut(value)(i)?;
 		Ok((i, (String::from(k), v)))
 	}
 
-	let (i, v) =
-		delimited_list0(openbraces, commas, terminated(entry, mightbespace), char('}'))(i)?;
-	Ok((i, Object(v.into_iter().collect())))
+	let start = i;
+	let (i, _) = openbraces(i)?;
+	let (i, first) = match entry(i) {
+		Ok(x) => x,
+		Err(Err::Error(_)) => {
+			let (i, _) = closebraces(i)?;
+			return Ok((i, Object(BTreeMap::new())));
+		}
+		Err(Err::Failure(x)) => return Err(Err::Failure(x)),
+		Err(Err::Incomplete(x)) => return Err(Err::Incomplete(x)),
+	};
+
+	let mut tree = BTreeMap::new();
+	tree.insert(first.0, first.1);
+
+	let mut input = i;
+	while let (i, Some(_)) = opt(commas)(input)? {
+		if let (i, Some(_)) = opt(closebraces)(i)? {
+			return Ok((i, Object(tree)));
+		}
+		let (i, v) = cut(entry)(i)?;
+		tree.insert(v.0, v.1);
+		input = i
+	}
+	let (i, _) = expect_terminator(start, closebraces)(input)?;
+	Ok((i, Object(tree)))
 }
 
 pub fn key(i: &str) -> IResult<&str, &str> {

@@ -18,6 +18,7 @@ pub use field::{field, RemoveFieldStatement};
 pub use function::{function, RemoveFunctionStatement};
 pub use index::{index, RemoveIndexStatement};
 pub use namespace::{namespace, RemoveNamespaceStatement};
+use nom::bytes::complete::tag_no_case;
 pub use param::{param, RemoveParamStatement};
 pub use scope::{scope, RemoveScopeStatement};
 pub use table::{table, RemoveTableStatement};
@@ -29,6 +30,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use derive::Store;
@@ -105,6 +107,8 @@ impl Display for RemoveStatement {
 }
 
 pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(namespace, RemoveStatement::Namespace),
 		map(database, RemoveStatement::Database),
