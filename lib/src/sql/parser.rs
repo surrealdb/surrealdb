@@ -19,37 +19,37 @@ use tracing::instrument;
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
 /// Parses a SurrealQL [`Thing`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
 /// Parses a SurrealQL [`Idiom`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	parse_impl(input, super::idiom::plain)
 }
 
 /// Parses a SurrealQL [`Value`].
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::value)
 }
 
 /// Parses a SurrealQL Subquery [`Subquery`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	parse_impl(input, super::subquery::subquery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
-#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input.trim(), super::value::json)
 }
