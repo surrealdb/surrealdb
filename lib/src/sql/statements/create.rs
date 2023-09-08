@@ -57,7 +57,6 @@ impl CreateStatement {
 		// Loop over the create targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
-			println!("Preparing iterator in create");
 			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
@@ -67,7 +66,6 @@ impl CreateStatement {
 				e => e,
 			})?;
 		}
-		println!("Matching output results from iterator");
 		// Output the results
 		match i.output(ctx, opt, txn, &stm).await? {
 			// This is a single record result
@@ -78,10 +76,7 @@ impl CreateStatement {
 				_ => Err(Error::SingleOnlyOutput),
 			},
 			// This is standard query result
-			v => {
-				println!("Returning value from create as it matched value (but is an array)");
-				Ok(v)
-			}
+			v => Ok(v),
 		}
 	}
 }

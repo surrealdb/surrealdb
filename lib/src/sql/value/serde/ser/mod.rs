@@ -199,7 +199,7 @@ trait Serializer: Sized {
 	where
 		T: ?Sized + Serialize,
 	{
-		Err(Self::unexpected("newtype model", Some(name)))
+		Err(Self::unexpected("newtype struct", Some(name)))
 	}
 
 	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -226,7 +226,7 @@ trait Serializer: Sized {
 		name: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeTupleStruct, Self::Error> {
-		Err(Self::unexpected("tuple model", Some(name)))
+		Err(Self::unexpected("tuple struct", Some(name)))
 	}
 
 	fn serialize_tuple_variant(
@@ -248,7 +248,7 @@ trait Serializer: Sized {
 		name: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStruct, Self::Error> {
-		Err(Self::unexpected("model", Some(name)))
+		Err(Self::unexpected("struct", Some(name)))
 	}
 
 	fn serialize_struct_variant(
@@ -258,7 +258,7 @@ trait Serializer: Sized {
 		_variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		Err(Self::unexpected("model variant", Some(name)))
+		Err(Self::unexpected("struct variant", Some(name)))
 	}
 
 	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>

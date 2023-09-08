@@ -78,7 +78,7 @@ mod speedb {
 
 	async fn new_ds(node_id: Uuid, clock_override: Arc<RwLock<SizedClock>>) -> Datastore {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		Datastore::new_full(format!("speedb:{path}").as_str(), None)
+		Datastore::new_full(format!("speedb:{path}").as_str(), Some(clock_override))
 			.await
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id))
@@ -113,7 +113,10 @@ mod tikv {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: Arc<RwLock<SizedClock>>) -> Datastore {
-		let ds = Datastore::new_full("tikv:127.0.0.1:2379", None).await.unwrap();
+		let ds = Datastore::new_full("tikv:127.0.0.1:2379", Some(clock_override))
+			.await
+			.unwrap()
+			.with_node_id(sql::uuid::Uuid(node_id));
 		// Clear any previous test entries
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
@@ -151,7 +154,7 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: Arc<RwLock<SizedClock>>) -> Datastore {
-		let ds = Datastore::new("fdb:/etc/foundationdb/fdb.cluster")
+		let ds = Datastore::new_full("fdb:/etc/foundationdb/fdb.cluster", Some(clock_override))
 			.await
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id));

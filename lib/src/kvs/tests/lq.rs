@@ -47,8 +47,6 @@ async fn scan_node_lq() {
 #[tokio::test]
 #[serial]
 async fn live_creates_remote_notification_for_create() {
-	println!("STARTED");
-
 	// Setup
 	let remote_node = Uuid::parse_str("30a9bea3-8430-42db-9524-3d4d5c41e3ea").unwrap();
 	let local_node = Uuid::parse_str("4aa13527-538c-40da-b903-2402f57c4e74").unwrap();
@@ -72,24 +70,19 @@ async fn live_creates_remote_notification_for_create() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	println!("First init");
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
-	println!("Second init");
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
-	println!("Init complete");
 
-	println!("Before starting live query statement");
 	// Register a live query on the remote node
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
-	println!("Created live query");
 
 	// Write locally to cause a remote notification
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -133,7 +126,6 @@ async fn live_creates_remote_notification_for_create() {
 		.await
 		.unwrap();
 	tx.lock().await.commit().await.unwrap();
-	println!("Did the scan");
 
 	// Validate there is a remote notification
 	assert_eq!(res.len(), 1);
@@ -150,14 +142,11 @@ async fn live_creates_remote_notification_for_create() {
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
-	println!("Finished test");
 }
 
 #[tokio::test]
 #[serial]
 async fn live_creates_remote_notification_for_update() {
-	println!("STARTED");
-
 	// Setup
 	let remote_node = Uuid::parse_str("c529eedc-2f41-4825-a41e-906bb1791a7d").unwrap();
 	let local_node = Uuid::parse_str("6e0bfb9a-3e60-4b64-b0f4-97b7a7566001").unwrap();
@@ -181,15 +170,12 @@ async fn live_creates_remote_notification_for_update() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	println!("First init");
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
-	println!("Second init");
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
-	println!("Init complete");
 
 	// Create the record we will update
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -207,16 +193,13 @@ async fn live_creates_remote_notification_for_update() {
 		}
 		_ => panic!("Expected a uuid"),
 	};
-	println!("Created entry");
 
-	println!("Before starting live query statement");
 	// Register a live query on the remote node
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
-	println!("Created live query");
 
 	// Update to cause a remote notification
 	let thing = match create_value
@@ -264,7 +247,6 @@ async fn live_creates_remote_notification_for_update() {
 		.await
 		.unwrap();
 	tx.lock().await.commit().await.unwrap();
-	println!("Did the scan");
 
 	// Validate there is a remote notification
 	assert_eq!(res.len(), 1);
@@ -282,14 +264,11 @@ async fn live_creates_remote_notification_for_update() {
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
-	println!("Finished test");
 }
 
 #[tokio::test]
 #[serial]
 async fn live_creates_remote_notification_for_delete() {
-	println!("STARTED");
-
 	// Setup
 	let remote_node = Uuid::parse_str("50b98717-71aa-491e-a96a-51c4e1e249c6").unwrap();
 	let local_node = Uuid::parse_str("25750b67-65df-4a0a-b4f8-bd5dd0418730").unwrap();
@@ -313,15 +292,12 @@ async fn live_creates_remote_notification_for_delete() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	println!("First init");
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
-	println!("Second init");
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
-	println!("Init complete");
 
 	// Create a record that we intend to delete for a notification
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -339,16 +315,13 @@ async fn live_creates_remote_notification_for_delete() {
 		}
 		_ => panic!("Expected a uuid"),
 	};
-	println!("Created entry");
 
-	println!("Before starting live query statement");
 	// Register a live query on the remote node
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
-	println!("Created live query");
 
 	// Write locally to cause a remote notification
 	let thing = match create_value
@@ -390,7 +363,6 @@ async fn live_creates_remote_notification_for_delete() {
 		.await
 		.unwrap();
 	tx.lock().await.commit().await.unwrap();
-	println!("Did the scan");
 
 	// Validate there is a remote notification
 	assert_eq!(res.len(), 1);
@@ -408,7 +380,6 @@ async fn live_creates_remote_notification_for_delete() {
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
-	println!("Finished test");
 }
 
 async fn compute_live<'a>(

@@ -17,7 +17,6 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		println!("LIVES WAS INVOKED");
 		// Check if forced
 		if !opt.force && !self.changed() {
 			return Ok(());
@@ -25,20 +24,17 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
-		// if let Some(chn) = &opt.sender {
 		match &opt.sender {
 			None => {
 				warn!("Lives was invoked, but no sender attached to options")
 			}
 			Some(chn) => {
-				println!("LIVES HAS SENDER");
 				// Clone the sending channel
 				let chn = chn.clone();
 				// Loop through all index statements
 				for lv in self.lv(opt, txn).await?.iter() {
 					// Create a new statement
 					let lq = Statement::from(lv);
-					println!("HANDLING LIVE QUERY {:?}", lq);
 					// Check LIVE SELECT where condition
 					if let Some(cond) = lq.conds() {
 						// Check if this is a delete statement
@@ -92,7 +88,6 @@ impl<'a> Document<'a> {
 							}
 						} else if self.is_new() {
 							// Send a CREATE notification
-							println!("Handling create notification");
 							let notification = Notification {
 								live_id: lv.id.clone(),
 								node_id: lv.node.clone(),
@@ -103,10 +98,8 @@ impl<'a> Document<'a> {
 							};
 							if opt.id()? == lv.node.0 {
 								// TODO read pending remote notifications
-								println!("Sent notification to channel");
 								chn.send(notification).await?;
 							} else {
-								println!("Record notification in db");
 								tx.putc_tbnt(
 									opt.ns(),
 									opt.db(),
