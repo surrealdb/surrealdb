@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::IResult;
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
@@ -126,7 +127,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	cut(|i| {
 		let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
 		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("FROM")(i)?;
+		let (i, _) = expect_tag_no_case("FROM")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, what) = alt((into(param), into(table)))(i)?;
 		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;

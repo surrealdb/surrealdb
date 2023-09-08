@@ -13,6 +13,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::util::expect_delimited;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -50,9 +52,7 @@ impl fmt::Display for Future {
 }
 
 pub fn future(i: &str) -> IResult<&str, Future> {
-	let (i, _) = openchevron(i)?;
-	let (i, _) = tag("future")(i)?;
-	let (i, _) = closechevron(i)?;
+	let (i, _) = expect_delimited(openchevron, tag("future"), closechevron)(i)?;
 	cut(|i| {
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = block(i)?;

@@ -7,11 +7,14 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
+use crate::sql::error::expected;
+use crate::sql::error::ExplainResultExt;
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::param::param;
 use crate::sql::table::table;
 use crate::sql::timeout::{timeout, Timeout};
+use crate::sql::value::value;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -143,8 +146,14 @@ pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, ignore) = opt(terminated(tag_no_case("IGNORE"), shouldbespace))(i)?;
 	let (i, _) = tag_no_case("INTO")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, into) = cut(alt((map(table, Value::Table), map(param, Value::Param))))(i)?;
-	let (i, _) = cut(shouldbespace)(i)?;
+	let (i, into) = expected(
+		"a parameter or a table name",
+		cut(alt((
+			map(terminated(table, shouldbespace), Value::Table),
+			map(terminated(param, shouldbespace), Value::Param),
+		))),
+	)(i)
+	.explain("expressions aren't allowed here.", value)?;
 	let (i, data) = cut(alt((values, single)))(i)?;
 	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;

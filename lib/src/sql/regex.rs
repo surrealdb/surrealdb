@@ -134,7 +134,7 @@ pub fn regex(i: &str) -> IResult<&str, Regex> {
 	let (i, _) = char('/')(i)?;
 	let (i, v) = escaped(is_not("\\/"), '\\', anychar)(i)?;
 	let (i, _) = char('/')(i)?;
-	let regex = v.parse().map_err(|_| nom::Err::Error(crate::sql::Error::Parser(v)))?;
+	let regex = v.parse().map_err(|_| nom::Err::Error(crate::sql::ParseError::Base(v)))?;
 	Ok((i, regex))
 }
 

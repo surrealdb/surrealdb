@@ -218,3 +218,115 @@ async fn single_live_queries_are_garbage_collected() {
 	assert_eq!(&scanned[0].lq, &sql::Uuid::from(live_query_to_keep));
 	tx.commit().await.unwrap();
 }
+
+#[test(tokio::test)]
+#[serial]
+async fn bootstrap_does_not_error_on_missing_live_queries() {
+	// Test parameters
+	let ctx = context::Context::background();
+	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
+	let t1 = Timestamp {
+		value: 123_000,
+	};
+	let t2 = Timestamp {
+		value: 456_000,
+	};
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let test = init(old_node_id, clock.clone()).await.unwrap();
+	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
+	let database_owned = format!("test_db_{:?}", test.kvs);
+	let database = database_owned.as_str();
+	let table = "test_table";
+	let options = Options::default()
+		.with_required(
+			old_node_id.clone(),
+			Some(Arc::from(namespace)),
+			Some(Arc::from(database)),
+			Arc::new(Auth::for_root(Role::Owner)),
+		)
+		.with_live(true);
+
+	// We do standard cluster init
+	trace!("Bootstrapping node {}", old_node_id);
+	test.db.bootstrap().await.unwrap();
+
+	// We set up 2 live queries, one of which we want to garbage collect
+	trace!("Setting up live queries");
+	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let live_query_to_corrupt = Uuid::parse_str("d4cee7ce-5c78-4a30-9fa9-2444d58029f6").unwrap();
+	let live_st = LiveStatement {
+		id: sql::Uuid(live_query_to_corrupt),
+		node: sql::uuid::Uuid::from(old_node_id),
+		expr: Fields(vec![sql::Field::All], false),
+		what: Table(sql::Table::from(table)),
+		cond: None,
+		fetch: None,
+		archived: None,
+		auth: Some(Auth::for_root(Role::Owner)),
+	};
+	live_st
+		.compute(&ctx, &options, &tx, None)
+		.await
+		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
+		.unwrap();
+
+	// Now we corrupt the live query entry by leaving the node entry in but removing the table entry
+	let key = crate::key::table::lq::new(namespace, database, table, live_query_to_corrupt);
+	tx.lock().await.del(key).await.unwrap();
+	tx.lock().await.commit().await.unwrap();
+
+	// Subject: Perform the action we are testing
+	trace!("Bootstrapping");
+	let new_node_id = Uuid::parse_str("53f7355d-5be1-4a94-9803-5192b59c5244").unwrap();
+	// There should not be an error
+	match clock.write().await.deref_mut() {
+		SizedClock::Fake(clock) => {
+			clock.set(t2.clone());
+		}
+		_ => {
+			panic!("Clock is not fake");
+		}
+	}
+	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
+	match second_node.bootstrap().await {
+		Ok(_) => {
+			panic!("Expected an error because of missing live query")
+		}
+		Err(Error::Tx(e)) => match e {
+			_ if e.contains("LvNotFound") => {
+				// This is what we want... an LvNotFound error, but it gets wrapped into a string so that Tx doesnt carry vecs
+			}
+			_ => {
+				panic!("Expected an LvNotFound error but got: {:?}", e);
+			}
+		},
+		Err(e) => {
+			panic!("Missing live query error: {:?}", e)
+		}
+	}
+
+	// Verify node live query was deleted
+	let mut tx = second_node.transaction(true, false).await.unwrap();
+	let found = tx
+		.scan_ndlq(&old_node_id, 100)
+		.await
+		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
+		.unwrap();
+	assert_eq!(0, found.len(), "Found: {:?}", found);
+	let found = tx
+		.scan_ndlq(&new_node_id, 100)
+		.await
+		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
+		.unwrap();
+	assert_eq!(0, found.len(), "Found: {:?}", found);
+
+	// Verify table live query does not exist
+	let found = tx
+		.scan_tblq(namespace, database, table, 100)
+		.await
+		.map_err(|e| format!("Error scanning tblq: {:?}", e))
+		.unwrap();
+	assert_eq!(0, found.len(), "Found: {:?}", found);
+	tx.cancel().await.unwrap();
+}

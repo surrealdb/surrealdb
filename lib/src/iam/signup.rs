@@ -30,7 +30,7 @@ pub async fn signup(
 			// Attempt to signup to specified scope
 			super::signup::sc(kvs, session, ns, db, sc, vars).await
 		}
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::InvalidSignup),
 	}
 }
 
@@ -103,22 +103,17 @@ pub async fn sc(
 								match enc {
 									// The auth token was created successfully
 									Ok(tk) => Ok(Some(tk)),
-									// There was an error creating the token
-									_ => Err(Error::InvalidAuth),
+									_ => Err(Error::TokenMakingFailed),
 								}
 							}
-							// No record was returned
-							_ => Err(Error::InvalidAuth),
+							_ => Err(Error::NoRecordFound),
 						},
-						// The signup query failed
-						Err(_) => Err(Error::InvalidAuth),
+						Err(_) => Err(Error::SignupQueryFailed),
 					}
 				}
-				// This scope does not allow signup
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::ScopeNoSignup),
 			}
 		}
-		// The scope does not exists
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoScopeFound),
 	}
 }

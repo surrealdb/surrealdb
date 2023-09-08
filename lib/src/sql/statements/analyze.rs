@@ -58,7 +58,7 @@ impl AnalyzeStatement {
 					}
 					_ => {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "Statistics on unique and non-unique indexes.",
+							feature: "Statistics on unique and non-unique indexes.".to_string(),
 						})
 					}
 				};

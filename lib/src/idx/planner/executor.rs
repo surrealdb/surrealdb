@@ -122,7 +122,7 @@ impl QueryExecutor {
 				..
 			} => self.new_search_index_iterator(ir, io).await,
 			_ => Err(Error::FeatureNotYetImplemented {
-				feature: "VectorSearch iterator",
+				feature: "VectorSearch iterator".to_string(),
 			}),
 		}
 	}

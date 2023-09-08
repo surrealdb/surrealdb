@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 
 pub struct TestContext {
 	pub(crate) db: Datastore,
+	pub(crate) kvs: Kvs,
 	// A string identifier for this context.
 	// It will usually be a uuid or combination of uuid and fixed string identifier.
 	// It is useful for separating test setups when environments are shared.
@@ -26,9 +27,10 @@ pub(crate) async fn init(
 	node_id: Uuid,
 	clock: Arc<RwLock<SizedClock>>,
 ) -> Result<TestContext, Error> {
-	let db = new_ds(node_id, clock).await;
+	let (db, kvs) = new_ds(node_id, clock).await;
 	return Ok(TestContext {
 		db,
+		kvs,
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
 	});
 }
