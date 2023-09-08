@@ -1163,7 +1163,7 @@ impl Transaction {
 		let suffix = crate::key::table::nt::suffix(ns, db, tb, lq);
 		let res = self.scan(prefix..suffix, limit).await?;
 		let mut out: Vec<Notification> = vec![];
-		for (_i, (_k, v)) in res.into_iter().enumerate() {
+		for (_k, v) in res.into_iter() {
 			let value = crate::dbs::Notification::from(v);
 			out.push(value);
 		}
