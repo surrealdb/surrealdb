@@ -313,7 +313,7 @@ mod tests {
 	#[test]
 	fn test_tokenize_blank_class() {
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
+			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
 			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
 			&[
 				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
@@ -325,7 +325,7 @@ mod tests {
 	#[test]
 	fn test_tokenize_source_code() {
 		test_analyzer(
-			"DEFINE ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
+			"ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
 			r#"struct MyRectangle {
     // specified by corners
     top_left: Point,

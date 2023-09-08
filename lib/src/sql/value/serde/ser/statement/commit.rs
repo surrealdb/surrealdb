@@ -37,7 +37,7 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = CommitStatement::default();
+		let stmt = CommitStatement;
 		let value: CommitStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}

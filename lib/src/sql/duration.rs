@@ -15,6 +15,8 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::time;
 
+use super::error::expected;
+
 static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
 static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
@@ -296,9 +298,11 @@ impl<'a> Sum<&'a Self> for Duration {
 }
 
 pub fn duration(i: &str) -> IResult<&str, Duration> {
-	let (i, v) = many1(duration_raw)(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, v.iter().sum::<Duration>()))
+	expected("a duration", |i| {
+		let (i, v) = many1(duration_raw)(i)?;
+		let (i, _) = ending(i)?;
+		Ok((i, v.iter().sum::<Duration>()))
+	})(i)
 }
 
 fn duration_raw(i: &str) -> IResult<&str, Duration> {
@@ -319,7 +323,7 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 		_ => unreachable!("shouldn't have parsed {u} as duration unit"),
 	};
 
-	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(crate::sql::Error::Parser(i)))
+	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(crate::sql::ParseError::Base(i)))
 }
 
 fn part(i: &str) -> IResult<&str, u64> {

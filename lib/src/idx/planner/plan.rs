@@ -20,7 +20,7 @@ impl<'a> PlanBuilder<'a> {
 	pub(super) fn build(root: Node, with: &'a Option<With>) -> Result<Plan, Error> {
 		if let Some(with) = with {
 			if matches!(with, With::NoIndex) {
-				return Ok(Plan::TableIterator);
+				return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
 			}
 		}
 		let mut b = PlanBuilder {
@@ -30,12 +30,12 @@ impl<'a> PlanBuilder<'a> {
 			all_exp_with_index: true,
 		};
 		// Browse the AST and collect information
-		if !b.eval_node(root)? {
-			return Ok(Plan::TableIterator);
+		if let Err(e) = b.eval_node(root) {
+			return Ok(Plan::TableIterator(Some(e.to_string())));
 		}
 		// If we didn't found any index, we're done with no index plan
 		if b.indexes.is_empty() {
-			return Ok(Plan::TableIterator);
+			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
 		}
 		// If every boolean operator are AND then we can use the single index plan
 		if b.all_and {
@@ -47,7 +47,7 @@ impl<'a> PlanBuilder<'a> {
 		if b.all_exp_with_index {
 			return Ok(Plan::MultiIndex(b.indexes));
 		}
-		Ok(Plan::TableIterator)
+		Ok(Plan::TableIterator(None))
 	}
 
 	// Check if we have an explicit list of index we can use
@@ -62,7 +62,7 @@ impl<'a> PlanBuilder<'a> {
 		io
 	}
 
-	fn eval_node(&mut self, node: Node) -> Result<bool, Error> {
+	fn eval_node(&mut self, node: Node) -> Result<(), String> {
 		match node {
 			Node::Expression {
 				io,
@@ -79,10 +79,12 @@ impl<'a> PlanBuilder<'a> {
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
-				self.eval_expression(*left, *right)
+				self.eval_node(*left)?;
+				self.eval_node(*right)?;
+				Ok(())
 			}
-			Node::Unsupported => Ok(false),
-			_ => Ok(true),
+			Node::Unsupported(reason) => Err(reason),
+			_ => Ok(()),
 		}
 	}
 
@@ -99,23 +101,13 @@ impl<'a> PlanBuilder<'a> {
 		}
 	}
 
-	fn eval_expression(&mut self, left: Node, right: Node) -> Result<bool, Error> {
-		if !self.eval_node(left)? {
-			return Ok(false);
-		}
-		if !self.eval_node(right)? {
-			return Ok(false);
-		}
-		Ok(true)
-	}
-
 	fn add_index_option(&mut self, e: Expression, i: IndexOption) {
 		self.indexes.push((e, i));
 	}
 }
 
 pub(super) enum Plan {
-	TableIterator,
+	TableIterator(Option<String>),
 	SingleIndex(Expression, IndexOption),
 	MultiIndex(Vec<(Expression, IndexOption)>),
 }

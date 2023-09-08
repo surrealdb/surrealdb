@@ -1,4 +1,4 @@
-use crate::sql::error::Error;
+use crate::sql::error::ParseError;
 use crate::sql::field::{Field, Fields};
 use crate::sql::group::Groups;
 use crate::sql::order::Orders;
@@ -40,14 +40,14 @@ pub fn check_split_on_fields<'a>(
 	i: &'a str,
 	fields: &Fields,
 	splits: &Option<Splits>,
-) -> Result<(), Err<Error<&'a str>>> {
+) -> Result<(), Err<ParseError<&'a str>>> {
 	// Check to see if a SPLIT ON clause has been defined
 	if let Some(splits) = splits {
 		// Loop over each of the expressions in the SPLIT ON clause
 		for split in splits.iter() {
 			if !contains_idiom(fields, &split.0) {
 				// If the expression isn't specified in the SELECT clause, then error
-				return Err(Failure(Error::Split(i, split.to_string())));
+				return Err(Failure(ParseError::Split(i, split.to_string())));
 			}
 		}
 	}
@@ -59,14 +59,14 @@ pub fn check_order_by_fields<'a>(
 	i: &'a str,
 	fields: &Fields,
 	orders: &Option<Orders>,
-) -> Result<(), Err<Error<&'a str>>> {
+) -> Result<(), Err<ParseError<&'a str>>> {
 	// Check to see if a ORDER BY clause has been defined
 	if let Some(orders) = orders {
 		// Loop over each of the expressions in the ORDER BY clause
 		for order in orders.iter() {
 			if !contains_idiom(fields, order) {
 				// If the expression isn't specified in the SELECT clause, then error
-				return Err(Failure(Error::Order(i, order.to_string())));
+				return Err(Failure(ParseError::Order(i, order.to_string())));
 			}
 		}
 	}
@@ -78,14 +78,14 @@ pub fn check_group_by_fields<'a>(
 	i: &'a str,
 	fields: &Fields,
 	groups: &Option<Groups>,
-) -> Result<(), Err<Error<&'a str>>> {
+) -> Result<(), Err<ParseError<&'a str>>> {
 	// Check to see if a GROUP BY clause has been defined
 	if let Some(groups) = groups {
 		// Loop over each of the expressions in the GROUP BY clause
 		for group in groups.iter() {
 			if !contains_idiom(fields, &group.0) {
 				// If the expression isn't specified in the SELECT clause, then error
-				return Err(Failure(Error::Group(i, group.to_string())));
+				return Err(Failure(ParseError::Group(i, group.to_string())));
 			}
 		}
 		// Check if this is a GROUP ALL clause or a GROUP BY clause
@@ -120,7 +120,7 @@ pub fn check_group_by_fields<'a>(
 					}
 				}
 				// If the expression isn't an aggregate function and isn't specified in the GROUP BY clause, then error
-				return Err(Failure(Error::Field(i, field.to_string())));
+				return Err(Failure(ParseError::Field(i, field.to_string())));
 			}
 		}
 	}

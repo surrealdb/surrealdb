@@ -19,6 +19,8 @@ use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
 
+use super::error::expected;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Permissions {
@@ -236,13 +238,16 @@ impl Display for Permission {
 }
 
 pub fn permission(i: &str) -> IResult<&str, Permission> {
-	alt((
-		combinator::value(Permission::None, tag_no_case("NONE")),
-		combinator::value(Permission::Full, tag_no_case("FULL")),
-		map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
-			Permission::Specific(v)
-		}),
-	))(i)
+	expected(
+		"a permission",
+		alt((
+			combinator::value(Permission::None, tag_no_case("NONE")),
+			combinator::value(Permission::Full, tag_no_case("FULL")),
+			map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
+				Permission::Specific(v)
+			}),
+		)),
+	)(i)
 }
 
 fn rule(i: &str) -> IResult<&str, Vec<(PermissionKind, Permission)>> {

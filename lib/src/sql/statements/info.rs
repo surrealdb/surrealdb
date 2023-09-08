@@ -7,6 +7,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expected;
+use crate::sql::error::ExplainResultExt;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::object::Object;
@@ -236,10 +238,11 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = tag_no_case("INFO")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
-	cut(|i| {
-		let (i, _) = shouldbespace(i)?;
-		alt((root, ns, db, sc, tb, user))(i)
-	})(i)
+	let (i, _) = cut(shouldbespace)(i)?;
+	expected(
+		"ROOT, NAMESPACE, DATABASE, SCOPE, TABLE or USER",
+		cut(alt((root, ns, db, sc, tb, user))),
+	)(i)
 }
 
 fn root(i: &str) -> IResult<&str, InfoStatement> {
@@ -260,19 +263,15 @@ fn db(i: &str) -> IResult<&str, InfoStatement> {
 fn sc(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, scope) = ident(i)?;
-		Ok((i, InfoStatement::Sc(scope)))
-	})(i)
+	let (i, scope) = cut(ident)(i)?;
+	Ok((i, InfoStatement::Sc(scope)))
 }
 
 fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, table) = ident(i)?;
-		Ok((i, InfoStatement::Tb(table)))
-	})(i)
+	let (i, table) = cut(ident)(i)?;
+	Ok((i, InfoStatement::Tb(table)))
 }
 
 fn user(i: &str) -> IResult<&str, InfoStatement> {
@@ -285,7 +284,8 @@ fn user(i: &str) -> IResult<&str, InfoStatement> {
 			let (i, _) = tag_no_case("ON")(i)?;
 			cut(|i| {
 				let (i, _) = shouldbespace(i)?;
-				let (i, base) = base(i)?;
+				let (i, base) =
+					base(i).explain("scopes are not allowed here", tag_no_case("SCOPE"))?;
 				Ok((i, base))
 			})(i)
 		})(i)?;
