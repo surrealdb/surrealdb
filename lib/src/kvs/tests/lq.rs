@@ -1,6 +1,6 @@
 use crate::dbs::{Action, Notification};
-use crate::doc::CursorDoc;
-use crate::sql::statements::CreateStatement;
+use crate::sql::statements::{CreateStatement, DeleteStatement, UpdateStatement};
+use crate::sql::Data::ContentExpression;
 use crate::sql::{Data, Id, Object, Strand, Thing, Values};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -401,7 +401,6 @@ async fn compute_create<'a>(
 	let mut map: BTreeMap<String, Value> = BTreeMap::new();
 	map.insert("name".to_string(), Value::Strand(Strand::from("a name")));
 	let obj_val = Value::Object(Object::from(map));
-	let doc = CursorDoc::from(&obj_val);
 	let data = Data::ContentExpression(obj_val.clone());
 	let thing = Thing::from((table.to_string(), Id::rand()));
 	let create_stm = CreateStatement {
@@ -412,5 +411,46 @@ async fn compute_create<'a>(
 		timeout: None,
 		parallel: false,
 	};
-	create_stm.compute(ctx, opt, &tx, Some(&doc)).await.unwrap()
+	create_stm.compute(ctx, opt, &tx, None).await.unwrap()
+}
+
+async fn _compute_delete<'a>(
+	ctx: &'a context::Context<'a>,
+	opt: &'a Options,
+	tx: Arc<Mutex<Transaction>>,
+	what: Thing,
+) -> Value {
+	let delete_stm = DeleteStatement {
+		only: false,
+		what: Values(vec![Value::Thing(what)]),
+		cond: None,
+		output: None,
+		timeout: None,
+		parallel: false,
+	};
+	delete_stm.compute(ctx, opt, &tx, None).await.unwrap()
+}
+
+async fn _compute_update<'a>(
+	ctx: &'a context::Context<'a>,
+	opt: &'a Options,
+	tx: Arc<Mutex<Transaction>>,
+	what: Thing,
+	field: String,
+	value: Value,
+) -> Value {
+	let mut map = BTreeMap::new();
+	map.insert(field, value);
+	let obj = Object::from(map);
+	let data = ContentExpression(Value::Object(obj));
+	let update_stm = UpdateStatement {
+		only: false,
+		what: Values(vec![Value::Thing(what)]),
+		data: Some(data),
+		cond: None,
+		output: None,
+		timeout: None,
+		parallel: false,
+	};
+	update_stm.compute(ctx, opt, &tx, None).await.unwrap()
 }
