@@ -1,3 +1,5 @@
+use crate::dbs::{Action, Notification};
+use crate::doc::CursorDoc;
 use crate::sql::statements::CreateStatement;
 use crate::sql::{Data, Id, Object, Strand, Thing, Values};
 use std::collections::BTreeMap;
@@ -56,10 +58,12 @@ async fn live_creates_remote_notification_for_create() {
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
 	let ctx = context::Context::background();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
+	let (send, _recv) = channel::unbounded();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(local_node)
 		.with_live(true)
+		.new_with_sender(send)
 		.with_ns(ses.ns())
 		.with_db(ses.db());
 	let remote_options = local_options.clone().with_id(remote_node);
@@ -89,8 +93,20 @@ async fn live_creates_remote_notification_for_create() {
 
 	// Write locally to cause a remote notification
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
-	let _value = compute_create(&ctx, &local_options, tx.clone(), table).await;
+	let create_value = compute_create(&ctx, &local_options, tx.clone(), table).await;
 	tx.lock().await.commit().await.unwrap();
+	let create_value = match create_value {
+		Value::Array(arr) => {
+			assert_eq!(arr.len(), 1);
+			match arr.get(0).unwrap().clone() {
+				Value::Object(o) => o,
+				_ => {
+					panic!("Expected an object");
+				}
+			}
+		}
+		_ => panic!("Expected a uuid"),
+	};
 	println!("Created entry");
 
 	// Verify local node did not get notification
@@ -104,7 +120,7 @@ async fn live_creates_remote_notification_for_create() {
 
 	// Verify there is a remote node notification entry
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
-	let res = tx
+	let mut res = tx
 		.lock()
 		.await
 		.scan_nt(
@@ -119,21 +135,23 @@ async fn live_creates_remote_notification_for_create() {
 	tx.lock().await.commit().await.unwrap();
 	println!("Did the scan");
 
+	// Validate there is a remote notification
 	assert_eq!(res.len(), 1);
-	// TODO verify key and value
-	let mut tx = test.db.transaction(true, false).await.unwrap();
-
-	let res = tx.scan_ndlq(&remote_node, 100).await.unwrap();
-	tx.commit().await.unwrap();
-	assert_eq!(res.len(), 1);
-	let val = res.get(0).unwrap();
-	// for val in res {
-	assert_eq!(val.nd.0, remote_node.clone());
-	assert_eq!(val.ns, namespace.as_str());
-	assert_eq!(val.db, database.as_str());
-	assert_eq!(val.lq.0, live_query_id.clone());
-	// }
+	let not = res.get_mut(0).unwrap();
+	// Notification ID is random, so we set it to a known value
+	assert!(!not.notification_id.is_nil());
+	not.notification_id = Default::default();
+	let expected_remote_notification = Notification {
+		live_id: crate::sql::uuid::Uuid::from(live_query_id),
+		node_id: crate::sql::uuid::Uuid::from(remote_node),
+		notification_id: Default::default(),
+		action: Action::Create,
+		result: Value::Object(create_value),
+		timestamp: t1,
+	};
+	assert_eq!(not, &expected_remote_notification);
 	println!("Finished test");
+	panic!("baklava")
 }
 #[tokio::test]
 #[serial]
@@ -173,7 +191,8 @@ async fn compute_create<'a>(
 	let mut map: BTreeMap<String, Value> = BTreeMap::new();
 	map.insert("name".to_string(), Value::Strand(Strand::from("a name")));
 	let obj_val = Value::Object(Object::from(map));
-	let data = Data::ContentExpression(obj_val);
+	let doc = CursorDoc::from(&obj_val);
+	let data = Data::ContentExpression(obj_val.clone());
 	let thing = Thing::from((table.to_string(), Id::rand()));
 	let create_stm = CreateStatement {
 		only: false,
@@ -183,5 +202,5 @@ async fn compute_create<'a>(
 		timeout: None,
 		parallel: false,
 	};
-	create_stm.compute(ctx, opt, &tx, None).await.unwrap()
+	create_stm.compute(ctx, opt, &tx, Some(&doc)).await.unwrap()
 }

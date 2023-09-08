@@ -49,6 +49,8 @@ pub struct Options {
 	/// Should we process variable field projections?
 	pub projections: bool,
 	/// The channel over which we send notifications
+	/// Must be set alongside live, and preferably populated via datastore notifications channel
+	/// TODO create ticket to sort this
 	pub sender: Option<Sender<Notification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
@@ -148,6 +150,7 @@ impl Options {
 
 	/// Specify whether live queries are supported for
 	/// code which uses this `Options`, with chaining.
+	/// NOTE: You should use new_with_sender, using the notifications from the datastore
 	pub fn with_live(mut self, live: bool) -> Self {
 		self.live = live;
 		self
@@ -370,6 +373,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			sender: Some(sender),
+			live: true,
 			..*self
 		}
 	}

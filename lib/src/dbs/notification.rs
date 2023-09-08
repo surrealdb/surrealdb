@@ -5,7 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]
 #[revisioned(revision = 1)]
 pub enum Action {
@@ -24,14 +24,20 @@ impl Display for Action {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Store, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct Notification {
+	// The Live Query ID used to differentiate between requests
 	pub live_id: Uuid,
+	// Node ID of the destined SurrealDB recipient
 	pub node_id: Uuid,
+	// Unique to avoid storage collisions
 	pub notification_id: Uuid,
+	// The type of change that happened
 	pub action: Action,
+	// The compute change that matches the user request
 	pub result: Value,
+	// The system-clock timestamp used for non-deterministic ordering
 	pub timestamp: Timestamp,
 }
 
