@@ -78,7 +78,7 @@ async fn live_creates_remote_notification_for_create() {
 
 	// Bootstrap the remote node, so both nodes are alive
 	println!("Second init");
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node)).with_notifications();
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
 	println!("Init complete");
 
@@ -187,20 +187,11 @@ async fn live_creates_remote_notification_for_update() {
 
 	// Bootstrap the remote node, so both nodes are alive
 	println!("Second init");
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node)).with_notifications();
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
 	println!("Init complete");
 
-	println!("Before starting live query statement");
-	// Register a live query on the remote node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
-	let live_value =
-		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
-	tx.lock().await.commit().await.unwrap();
-	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
-	println!("Created live query");
-
-	// Write locally to cause a remote notification
+	// Create the record we will update
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let create_value = compute_create(&ctx, &local_options, tx.clone(), table).await;
 	tx.lock().await.commit().await.unwrap();
@@ -217,6 +208,37 @@ async fn live_creates_remote_notification_for_update() {
 		_ => panic!("Expected a uuid"),
 	};
 	println!("Created entry");
+
+	println!("Before starting live query statement");
+	// Register a live query on the remote node
+	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let live_value =
+		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
+	tx.lock().await.commit().await.unwrap();
+	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
+	println!("Created live query");
+
+	// Update to cause a remote notification
+	let thing = match create_value
+		.get("id")
+		.ok_or(Error::Unreachable("Created records should always have an id".to_string()))
+		.unwrap()
+		.clone()
+	{
+		Value::Thing(thing) => thing,
+		_ => panic!("Expected ID to be a thing"),
+	};
+	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let update_value = compute_update(
+		&ctx,
+		&local_options,
+		tx.clone(),
+		thing.clone(),
+		"some_field".to_string(),
+		Value::Strand(Strand::from("Some Value")),
+	)
+	.await;
+	tx.lock().await.commit().await.unwrap();
 
 	// Verify local node did not get notification
 	assert!(test
@@ -250,12 +272,13 @@ async fn live_creates_remote_notification_for_update() {
 	// Notification ID is random, so we set it to a known value
 	assert!(!not.notification_id.is_nil());
 	not.notification_id = Default::default();
+	// TODO bug that update notifs are array
 	let expected_remote_notification = Notification {
 		live_id: crate::sql::uuid::Uuid::from(live_query_id),
 		node_id: crate::sql::uuid::Uuid::from(remote_node),
 		notification_id: Default::default(),
-		action: Action::Create,
-		result: Value::Object(create_value),
+		action: Action::Update,
+		result: update_value,
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
@@ -296,7 +319,7 @@ async fn live_creates_remote_notification_for_delete() {
 
 	// Bootstrap the remote node, so both nodes are alive
 	println!("Second init");
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node)).with_notifications();
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
 	println!("Init complete");
 
@@ -445,10 +468,11 @@ async fn compute_delete<'a>(
 		timeout: None,
 		parallel: false,
 	};
+	// delete returns an empty array
 	delete_stm.compute(ctx, opt, &tx, None).await.unwrap()
 }
 
-async fn _compute_update<'a>(
+async fn compute_update<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
 	tx: Arc<Mutex<Transaction>>,
@@ -469,5 +493,13 @@ async fn _compute_update<'a>(
 		timeout: None,
 		parallel: false,
 	};
-	update_stm.compute(ctx, opt, &tx, None).await.unwrap()
+	let array_result = update_stm.compute(ctx, opt, &tx, None).await.unwrap();
+	// TODO update(1) returns array, create(1) returns object
+	match array_result {
+		Value::Array(arr) => {
+			assert_eq!(arr.len(), 1);
+			arr.get(0).unwrap().clone()
+		}
+		_ => panic!("Expected an array"),
+	}
 }
