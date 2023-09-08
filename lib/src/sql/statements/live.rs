@@ -31,6 +31,7 @@ pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
+	// Param or Table
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -60,6 +61,7 @@ impl LiveStatement {
 		println!("After realtime check in live");
 		// Valid options?
 		opt.valid_for_db()?;
+		println!("After valid db");
 		// Check that auth has been set
 		let self_override = LiveStatement {
 			auth: match self.auth {
@@ -68,12 +70,14 @@ impl LiveStatement {
 			},
 			..self.clone()
 		};
+		println!("After override");
 		trace!("Evaluated live query auth to {:?}", self_override.auth);
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
 		match self_override.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
+				println!("Table proc");
 				// Clone the current statement
 				let mut stm = self_override.clone();
 				// Store the current Node ID
@@ -81,21 +85,26 @@ impl LiveStatement {
 					trace!("No ID for live query {:?}, error={:?}", stm, e)
 				}
 				stm.node = Uuid(opt.id()?);
+				println!("Node assigned");
 				// Insert the node live query
 				let key =
 					crate::key::node::lq::new(opt.id()?, self_override.id.0, opt.ns(), opt.db());
 				run.putc(key, tb.as_str(), None).await?;
+				println!("Put node lq");
 				// Insert the table live query
 				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self_override.id.0);
 				run.putc(key, stm, None).await?;
+				println!("Put table lq");
 			}
 			v => {
+				println!("Value proc");
 				return Err(Error::LiveStatement {
 					value: v.to_string(),
-				})
+				});
 			}
 		};
 		// Return the query id
+		println!("After proc");
 		trace!("Live query after processing: {:?}", self_override);
 		Ok(self_override.id.clone().into())
 	}

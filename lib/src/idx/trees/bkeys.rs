@@ -102,7 +102,7 @@ impl BKeys for FstKeys {
 	}
 
 	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
-		Err(Error::Unreachable)
+		Err(Error::Unreachable("79d9b4d2-cf55-4e86-b332-21ea47595e8d".to_string()))
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -157,7 +157,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("07c6c050-fdb4-463a-88e4-a23ab70ac4f1".to_string()))
 		}
 	}
 
@@ -398,7 +398,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(Error::Unreachable);
+			return Err(Error::Unreachable("75dcafde-ab21-4257-80e2-4fab5db3dbec".to_string()));
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {

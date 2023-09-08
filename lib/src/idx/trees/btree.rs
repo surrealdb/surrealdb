@@ -405,7 +405,9 @@ where
 								if let Some(root_id) = self.state.root {
 									// Delete the old root node
 									if root_id != node.id {
-										return Err(Error::Unreachable);
+										return Err(Error::Unreachable(
+											"c3a10ed8-41fd-4c2b-8ba8-4e0925e7418a".to_string(),
+										));
 									}
 								}
 								store.remove_node(node_id, node.key)?;

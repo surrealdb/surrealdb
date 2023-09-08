@@ -393,6 +393,10 @@ impl Datastore {
 	}
 
 	// Initialise bootstrap with implicit values intended for runtime
+	// NOTE: If you get deadlocks, check your transactions around this method.
+	// This should be called before any transactions are made in release mode
+	// In tests, it should be outside any other transaction - in isolation.
+	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;

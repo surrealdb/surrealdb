@@ -84,6 +84,7 @@ impl<'a> Document<'a> {
 						}
 					} else if self.is_new() {
 						// Send a CREATE notification
+						println!("Handling create notification");
 						let notification = Notification {
 							live_id: lv.id.clone(),
 							node_id: lv.node.clone(),
@@ -94,8 +95,10 @@ impl<'a> Document<'a> {
 						};
 						if opt.id()? == lv.node.0 {
 							// TODO read pending remote notifications
+							println!("Sent notification to channel");
 							chn.send(notification).await?;
 						} else {
+							println!("Record notification in db");
 							tx.putc_tbnt(
 								opt.ns(),
 								opt.db(),
