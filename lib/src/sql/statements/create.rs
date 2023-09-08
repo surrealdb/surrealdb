@@ -131,8 +131,9 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
+	use crate::sql::{Object, Thing};
+	use std::collections::BTreeMap;
 
 	#[test]
 	fn create_statement() {
@@ -140,5 +141,25 @@ mod tests {
 		let res = create(sql);
 		let out = res.unwrap().1;
 		assert_eq!("CREATE test", format!("{}", out))
+	}
+
+	#[test]
+	fn create_table_entry() {
+		let sql = "CREATE table:record CONTENT { field: true }";
+		let res = create(sql);
+		let actual = res.unwrap().1;
+		let thing = Thing::from(("table", "record"));
+		let mut map = BTreeMap::new();
+		map.insert("field".to_string(), Value::Bool(true));
+		let content_expression = Object::from(map);
+		let expected = CreateStatement {
+			only: false,
+			what: Values(vec![Value::Thing(thing)]),
+			data: Some(Data::ContentExpression(Value::Object(content_expression))),
+			output: None,
+			timeout: None,
+			parallel: false,
+		};
+		assert_eq!(actual, expected)
 	}
 }
