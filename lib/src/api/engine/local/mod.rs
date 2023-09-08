@@ -655,7 +655,10 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			vars.insert(key, value);
+			match kvs.compute(value, &*session, Some(vars.clone())).await? {
+				Value::None => vars.remove(&key),
+				v => vars.insert(key, v),
+			};
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {
