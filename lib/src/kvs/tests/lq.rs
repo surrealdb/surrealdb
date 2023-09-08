@@ -1,7 +1,7 @@
 use crate::dbs::{Action, Notification};
 use crate::sql::statements::{CreateStatement, DeleteStatement, UpdateStatement};
 use crate::sql::Data::ContentExpression;
-use crate::sql::{Data, Id, Object, Strand, Thing, Values};
+use crate::sql::{Array, Data, Id, Object, Strand, Thing, Values};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -300,16 +300,7 @@ async fn live_creates_remote_notification_for_delete() {
 	test.db.bootstrap().await.unwrap();
 	println!("Init complete");
 
-	println!("Before starting live query statement");
-	// Register a live query on the remote node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
-	let live_value =
-		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
-	tx.lock().await.commit().await.unwrap();
-	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
-	println!("Created live query");
-
-	// Write locally to cause a remote notification
+	// Create a record that we intend to delete for a notification
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let create_value = compute_create(&ctx, &local_options, tx.clone(), table).await;
 	tx.lock().await.commit().await.unwrap();
@@ -326,6 +317,31 @@ async fn live_creates_remote_notification_for_delete() {
 		_ => panic!("Expected a uuid"),
 	};
 	println!("Created entry");
+
+	println!("Before starting live query statement");
+	// Register a live query on the remote node
+	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let live_value =
+		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
+	tx.lock().await.commit().await.unwrap();
+	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
+	println!("Created live query");
+
+	// Write locally to cause a remote notification
+	let thing = match create_value
+		.get("id")
+		.ok_or(Error::Unreachable("Created records should always have an id".to_string()))
+		.unwrap()
+		.clone()
+	{
+		Value::Thing(thing) => thing,
+		_ => panic!("Expected ID to be a thing"),
+	};
+	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let delete_value = compute_delete(&ctx, &local_options, tx.clone(), thing.clone()).await;
+	tx.lock().await.commit().await.unwrap();
+	// Delete returns empty
+	assert_eq!(Value::Array(Array::new()), delete_value);
 
 	// Verify local node did not get notification
 	assert!(test
@@ -359,12 +375,13 @@ async fn live_creates_remote_notification_for_delete() {
 	// Notification ID is random, so we set it to a known value
 	assert!(!not.notification_id.is_nil());
 	not.notification_id = Default::default();
+	// The notification value for delete is just the ID of the record
 	let expected_remote_notification = Notification {
 		live_id: crate::sql::uuid::Uuid::from(live_query_id),
 		node_id: crate::sql::uuid::Uuid::from(remote_node),
 		notification_id: Default::default(),
-		action: Action::Create,
-		result: Value::Object(create_value),
+		action: Action::Delete,
+		result: Value::Thing(thing),
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
@@ -414,7 +431,7 @@ async fn compute_create<'a>(
 	create_stm.compute(ctx, opt, &tx, None).await.unwrap()
 }
 
-async fn _compute_delete<'a>(
+async fn compute_delete<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
 	tx: Arc<Mutex<Transaction>>,
