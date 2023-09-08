@@ -34,7 +34,7 @@ impl Processor {
 	}
 
 	pub async fn process_request(&mut self, method: &str, params: Array) -> Result<Data, Failure> {
-		info!("Process RPC request");
+		debug!("Process RPC request");
 
 		// Match the method to a function
 		match method {

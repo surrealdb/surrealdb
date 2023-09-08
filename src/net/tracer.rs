@@ -34,7 +34,7 @@ pub(crate) struct HttpTraceLayerHooks;
 impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 	fn make_span(&mut self, req: &Request<B>) -> Span {
 		// The fields follow the OTEL semantic conventions: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/trace/semantic_conventions/http.md
-		let span = tracing::info_span!(
+		let span = tracing::debug_span!(
 			"request",
 			otel.name = field::Empty,
 			otel.kind = "server",
@@ -102,7 +102,7 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 
 impl<B> OnRequest<B> for HttpTraceLayerHooks {
 	fn on_request(&mut self, _: &Request<B>, _: &Span) {
-		tracing::event!(Level::INFO, "started processing request");
+		tracing::event!(Level::DEBUG, "started processing request");
 	}
 }
 
@@ -116,7 +116,7 @@ impl<B> OnResponse<B> for HttpTraceLayerHooks {
 		// Server errors are handled by the OnFailure hook
 		if !response.status().is_server_error() {
 			span.record("http.latency.ms", latency.as_millis());
-			tracing::event!(Level::INFO, "finished processing request");
+			tracing::event!(Level::DEBUG, "finished processing request");
 		}
 	}
 }
