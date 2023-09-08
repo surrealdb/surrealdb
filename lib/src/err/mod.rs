@@ -109,14 +109,6 @@ pub enum Error {
 	#[error("The SQL query was not parsed fully")]
 	QueryRemaining,
 
-	/// There was an error with authentication
-	#[error("There was a problem with authentication")]
-	InvalidAuth,
-
-	/// Auth was expected to be set but was unknown
-	#[error("Auth was expected to be set but was unknown")]
-	UnknownAuth,
-
 	/// There was an error with the SQL query
 	#[error("Parse error: {0}")]
 	InvalidQuery(RenderedParserError),
@@ -651,6 +643,51 @@ pub enum Error {
 	/// Network target is not allowed
 	#[error("Access to network target '{0}' is not allowed")]
 	NetTargetNotAllowed(String),
+
+	//
+	// Authentication / Signup
+	//
+	#[error("There was an error creating the token")]
+	TokenMakingFailed,
+
+	#[error("No record was returned")]
+	NoRecordFound,
+
+	#[error("The signup query failed")]
+	SignupQueryFailed,
+
+	#[error("The signin query failed")]
+	SigninQueryFailed,
+
+	#[error("This scope does not allow signup")]
+	ScopeNoSignup,
+
+	#[error("This scope does not allow signin")]
+	ScopeNoSignin,
+
+	#[error("The scope does not exist")]
+	NoScopeFound,
+
+	#[error("Username or Password was not provided")]
+	MissingUserOrPass,
+
+	#[error("No signin target to either SC or DB or NS or KV")]
+	NoSigninTarget,
+
+	#[error("The password did not verify")]
+	InvalidPass,
+
+	/// There was an error with authentication
+	#[error("There was a problem with authentication")]
+	InvalidAuth,
+
+	/// There was an error with signing up
+	#[error("There was a problem with signing up")]
+	InvalidSignup,
+
+	/// Auth was expected to be set but was unknown
+	#[error("Auth was expected to be set but was unknown")]
+	UnknownAuth,
 }
 
 impl From<Error> for String {
