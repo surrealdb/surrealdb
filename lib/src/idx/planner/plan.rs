@@ -119,18 +119,22 @@ pub(crate) struct IndexOption(Arc<Inner>);
 pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
-	a: Array,
 	qs: Option<String>,
-	op: Operator,
+	op: IndexOperation,
 	mr: Option<MatchRef>,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub(super) enum IndexOperation {
+	Operator(Operator, Array),
+	Range(RangeValue, RangeValue),
 }
 
 impl IndexOption {
 	pub(super) fn new(
 		ix: DefineIndexStatement,
 		id: Idiom,
-		op: Operator,
-		a: Array,
+		op: IndexOperation,
 		qs: Option<String>,
 		mr: Option<MatchRef>,
 	) -> Self {
@@ -138,7 +142,6 @@ impl IndexOption {
 			ix,
 			id,
 			op,
-			a,
 			qs,
 			mr,
 		}))
@@ -148,12 +151,8 @@ impl IndexOption {
 		&self.0.ix
 	}
 
-	pub(super) fn op(&self) -> &Operator {
+	pub(super) fn op(&self) -> &IndexOperation {
 		&self.0.op
-	}
-
-	pub(super) fn array(&self) -> &Array {
-		&self.0.a
 	}
 
 	pub(super) fn qs(&self) -> Option<&String> {
@@ -169,22 +168,45 @@ impl IndexOption {
 	}
 
 	pub(crate) fn explain(&self) -> Value {
-		let v = if self.0.a.len() == 1 {
-			self.0.a[0].clone()
-		} else {
-			Value::Array(self.0.a.clone())
+		let mut r = HashMap::from([("index", Value::from(self.ix().name.0.to_owned()))]);
+		match self.op() {
+			IndexOperation::Operator(op, a) => {
+				let v = if a.len() == 1 {
+					a[0].clone()
+				} else {
+					Value::Array(a.clone())
+				};
+				r.insert("operator", Value::from(op.to_string()));
+				r.insert("value", v);
+			}
+			IndexOperation::Range(from, to) => {
+				r.insert("operator", Value::from("Range"));
+				r.insert("from", from.into());
+				r.insert("to", to.into());
+			}
 		};
-		Value::Object(Object::from(HashMap::from([
-			("index", Value::from(self.ix().name.0.to_owned())),
-			("operator", Value::from(self.op().to_string())),
-			("value", v),
+		Value::Object(Object::from(r))
+	}
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub(super) struct RangeValue {
+	value: Value,
+	inclusive: bool,
+}
+
+impl From<&RangeValue> for Value {
+	fn from(rv: &RangeValue) -> Self {
+		Value::from(Object::from(HashMap::from([
+			("value", rv.value.to_owned()),
+			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::IndexOption;
+	use crate::idx::planner::plan::{IndexOperation, IndexOption};
 	use crate::sql::statements::DefineIndexStatement;
 	use crate::sql::{Array, Idiom, Operator};
 	use std::collections::HashSet;
@@ -195,8 +217,7 @@ mod tests {
 		let io1 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			Operator::Equal,
-			Array::from(vec!["test"]),
+			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
 			None,
 			None,
 		);
@@ -204,8 +225,7 @@ mod tests {
 		let io2 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			Operator::Equal,
-			Array::from(vec!["test"]),
+			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
 			None,
 			None,
 		);

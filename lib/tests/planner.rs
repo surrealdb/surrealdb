@@ -8,7 +8,7 @@ use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
-	let mut res = execute_test(&three_multi_index_query("", ""), 12).await?;
+	let mut res = execute_test(&three_multi_index_query("", ""), 12, 8).await?;
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	// OR results
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -20,7 +20,7 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> {
-	let mut res = execute_test(&three_multi_index_query("", "PARALLEL"), 12).await?;
+	let mut res = execute_test(&three_multi_index_query("", "PARALLEL"), 12, 8).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -32,9 +32,12 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), Error> {
-	let mut res =
-		execute_test(&three_multi_index_query("WITH INDEX uniq_name,idx_genre,ft_company", ""), 12)
-			.await?;
+	let mut res = execute_test(
+		&three_multi_index_query("WITH INDEX uniq_name,idx_genre,ft_company", ""),
+		12,
+		8,
+	)
+	.await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -46,7 +49,8 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<(), Error> {
-	let mut res = execute_test(&three_multi_index_query("WITH INDEX ft_company", ""), 12).await?;
+	let mut res =
+		execute_test(&three_multi_index_query("WITH INDEX ft_company", ""), 12, 8).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
 	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
@@ -58,7 +62,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), Error> {
-	let mut res = execute_test(&three_multi_index_query("WITH INDEX uniq_name", ""), 12).await?;
+	let mut res = execute_test(&three_multi_index_query("WITH INDEX uniq_name", ""), 12, 8).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
 	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
@@ -70,7 +74,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 
 #[tokio::test]
 async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
-	let mut res = execute_test(&two_multi_index_query("", ""), 9).await?;
+	let mut res = execute_test(&two_multi_index_query("", ""), 9, 5).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, TWO_MULTI_INDEX_EXPLAIN)?;
@@ -82,7 +86,7 @@ async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
 
 #[tokio::test]
 async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Error> {
-	let mut res = execute_test(&two_multi_index_query("WITH INDEX idx_genre", ""), 9).await?;
+	let mut res = execute_test(&two_multi_index_query("WITH INDEX idx_genre", ""), 9, 5).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, &table_explain(2))?;
@@ -95,7 +99,7 @@ async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Err
 #[tokio::test]
 async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Error> {
 	let mut res =
-		execute_test(&two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9).await?;
+		execute_test(&two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9, 5).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, TWO_MULTI_INDEX_EXPLAIN)?;
@@ -107,7 +111,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Err
 
 #[tokio::test]
 async fn select_where_iterate_two_no_index() -> Result<(), Error> {
-	let mut res = execute_test(&two_multi_index_query("WITH NOINDEX", ""), 9).await?;
+	let mut res = execute_test(&two_multi_index_query("WITH NOINDEX", ""), 9, 5).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, &table_explain_no_index(2))?;
@@ -117,13 +121,17 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn execute_test(sql: &str, expected_result: usize) -> Result<Vec<Response>, Error> {
+async fn execute_test(
+	sql: &str,
+	expected_result: usize,
+	check_results: usize,
+) -> Result<Vec<Response>, Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	// Check that the setup is ok
-	for _ in 0..(expected_result - 4) {
+	for _ in 0..check_results {
 		let _ = res.remove(0).result?;
 	}
 	Ok(res)
@@ -412,5 +420,43 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 			]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_standard_index_range() -> Result<(), Error> {
+	let sql = r"
+	DEFINE INDEX year ON TABLE test COLUMNS year;
+	CREATE test:0 SET year = 2000;
+	CREATE test:10 SET year = 2010;
+	CREATE test:15 SET year = 2015;
+	CREATE test:20 SET year = 2020;
+	SELECT * FROM test WHERE year > 2000 AND year < 2020 EXPLAIN;
+	SELECT * FROM test WHERE year > 2000 AND year < 2020";
+	let mut res = execute_test(sql, 7, 5).await?;
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						detail: {
+							plan: {
+								index: 'year',
+								operator: '<',
+								value: 2020
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(r#"[{test:test]"#);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 	Ok(())
 }

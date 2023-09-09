@@ -8,7 +8,7 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
 };
-use crate::idx::planner::plan::IndexOption;
+use crate::idx::planner::plan::{IndexOperation, IndexOption};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
@@ -128,28 +128,34 @@ impl QueryExecutor {
 	}
 
 	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
+		match io.op() {
+			IndexOperation::Operator(Operator::Equal, array) => {
+				Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
+					opt,
+					io.ix(),
+					array,
+				)?)))
+			}
+			IndexOperation::Range(_, _) => {
+				todo!()
+			}
+			_ => Ok(None),
 		}
-		Ok(None)
 	}
 
 	fn new_unique_index_iterator(
 		opt: &Options,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if io.op() == &Operator::Equal {
-			return Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-				opt,
-				io.ix(),
-				io.array(),
-			)?)));
+		match io.op() {
+			IndexOperation::Operator(Operator::Equal, array) => Ok(Some(
+				ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, io.ix(), array)?),
+			)),
+			IndexOperation::Range(_, _) => {
+				todo!()
+			}
+			_ => Ok(None),
 		}
-		Ok(None)
 	}
 
 	async fn new_search_index_iterator(
@@ -158,7 +164,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(exp) = self.iterators.get(ir as usize) {
-			if let Operator::Matches(_) = io.op() {
+			if let IndexOperation::Operator(Operator::Matches(_), _) = io.op() {
 				let ixn = &io.ix().name.0;
 				if let Some(fti) = self.ft_map.get(ixn) {
 					if let Some(fte) = self.exp_entries.get(exp) {

@@ -1,11 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::IndexOption;
+use crate::idx::planner::plan::{IndexOperation, IndexOption};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,10 +29,11 @@ impl Tree {
 			table,
 			indexes: None,
 			index_map: IndexMap::default(),
+			next_group_id: 0,
 		};
 		let mut res = None;
 		if let Some(cond) = cond {
-			res = Some((b.eval_value(&cond.0).await?, b.index_map));
+			res = Some((b.eval_value(&cond.0, 0).await?, b.index_map));
 		}
 		Ok(res)
 	}
@@ -44,6 +46,7 @@ struct TreeBuilder<'a> {
 	table: &'a Table,
 	indexes: Option<Arc<[DefineIndexStatement]>>,
 	index_map: IndexMap,
+	next_group_id: usize,
 }
 
 impl<'a> TreeBuilder<'a> {
@@ -70,9 +73,9 @@ impl<'a> TreeBuilder<'a> {
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
+	async fn eval_value(&mut self, v: &Value, group_id: usize) -> Result<Node, Error> {
 		match v {
-			Value::Expression(e) => self.eval_expression(e).await,
+			Value::Expression(e) => self.eval_expression(e, group_id).await,
 			Value::Idiom(i) => self.eval_idiom(i).await,
 			Value::Strand(_) => Ok(Node::Scalar(v.to_owned())),
 			Value::Number(_) => Ok(Node::Scalar(v.to_owned())),
@@ -81,7 +84,7 @@ impl<'a> TreeBuilder<'a> {
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(&v).await
+				self.eval_value(&v, group_id).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
@@ -95,7 +98,7 @@ impl<'a> TreeBuilder<'a> {
 		})
 	}
 
-	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
+	async fn eval_expression(&mut self, e: &Expression, gid: usize) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
 				..
@@ -105,9 +108,9 @@ impl<'a> TreeBuilder<'a> {
 				o,
 				r,
 			} => {
-				let left = self.eval_value(l).await?;
-				let right = self.eval_value(r).await?;
-				if let Some(io) = self.index_map.0.get(e) {
+				let left = self.eval_value(l, gid).await?;
+				let right = self.eval_value(r, gid).await?;
+				if let Some(io) = self.index_map.check_and_get(e, gid) {
 					return Ok(Node::Expression {
 						io: Some(io.clone()),
 						left: Box::new(left),
@@ -117,9 +120,9 @@ impl<'a> TreeBuilder<'a> {
 				}
 				let mut io = None;
 				if let Some((id, ix)) = left.is_indexed_field() {
-					io = self.lookup_index_option(ix, o, id, &right, e);
+					io = self.lookup_index_option(ix, o, id, &right, e, gid);
 				} else if let Some((id, ix)) = right.is_indexed_field() {
-					io = self.lookup_index_option(ix, o, id, &left, e);
+					io = self.lookup_index_option(ix, o, id, &left, e, gid);
 				};
 				Ok(Node::Expression {
 					io,
@@ -138,10 +141,11 @@ impl<'a> TreeBuilder<'a> {
 		id: &Idiom,
 		v: &Node,
 		e: &Expression,
+		gid: usize,
 	) -> Option<IndexOption> {
 		if let Some(v) = v.is_scalar() {
 			let (found, mr, qs) = match &ix.index {
-				Index::Idx => (Operator::Equal.eq(op), None, None),
+				Index::Idx => (Self::standard_index_supported_operators(op), None, None),
 				Index::Uniq => (Operator::Equal.eq(op), None, None),
 				Index::Search {
 					..
@@ -158,21 +162,32 @@ impl<'a> TreeBuilder<'a> {
 				let io = IndexOption::new(
 					ix.clone(),
 					id.clone(),
-					op.to_owned(),
-					Array::from(v.clone()),
+					IndexOperation::Operator(op.to_owned(), Array::from(v.clone())),
 					qs,
 					mr,
 				);
-				self.index_map.0.insert(e.clone(), io.clone());
+				self.index_map.add(e.clone(), io.clone(), gid);
 				return Some(io);
 			}
 		}
 		None
 	}
 
+	fn standard_index_supported_operators(op: &Operator) -> bool {
+		match op {
+			Operator::Equal
+			| Operator::LessThan
+			| Operator::LessThanOrEqual
+			| Operator::MoreThan
+			| Operator::MoreThanOrEqual => true,
+			_ => false,
+		}
+	}
+
 	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
+		self.next_group_id += 1;
 		match s {
-			Subquery::Value(v) => self.eval_value(v).await,
+			Subquery::Value(v) => self.eval_value(v, self.next_group_id).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
 	}
@@ -180,11 +195,43 @@ impl<'a> TreeBuilder<'a> {
 
 /// For each expression the a possible index option
 #[derive(Default)]
-pub(super) struct IndexMap(HashMap<Expression, IndexOption>);
+pub(super) struct IndexMap {
+	per_expression: HashMap<Expression, IndexOption>,
+	grouped: HashMap<usize, HashMap<String, IndexOption>>,
+}
 
 impl IndexMap {
+	fn add(&mut self, exp: Expression, io: IndexOption, gid: usize) {
+		self.per_expression.insert(exp, io.clone());
+		self.check_group(io, gid)
+	}
+
+	fn check_group(&mut self, io: IndexOption, gid: usize) {
+		let index_name = io.ix().name.to_string();
+		match self.grouped.entry(gid) {
+			Entry::Occupied(mut e) => {
+				e.get_mut().insert(index_name, io);
+			}
+			Entry::Vacant(e) => {
+				e.insert(HashMap::from([(index_name, io)]));
+			}
+		}
+	}
+
+	fn check_and_get(&mut self, exp: &Expression, gid: usize) -> Option<IndexOption> {
+		let io = self.per_expression.get(exp).map(|io| io.clone());
+		io.map(|io| {
+			self.check_group(io.clone(), gid);
+			io.clone()
+		})
+	}
+
+	pub(super) fn groups(&self) -> &HashMap<usize, HashMap<String, IndexOption>> {
+		&self.grouped
+	}
+
 	pub(super) fn consume(self) -> HashMap<Expression, IndexOption> {
-		self.0
+		self.per_expression
 	}
 }
 

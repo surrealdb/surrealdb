@@ -8,7 +8,7 @@ use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
-use crate::idx::planner::tree::Tree;
+use crate::idx::planner::tree::{IndexMap, Tree};
 use crate::sql::with::With;
 use crate::sql::{Cond, Table};
 use std::collections::HashMap;
@@ -44,6 +44,7 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		match Tree::build(ctx, self.opt, txn, &t, self.cond).await? {
 			Some((node, im)) => {
+				Self::detect_range_queries(&im);
 				let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
 				match PlanBuilder::build(node, self.with)? {
 					Plan::SingleIndex(exp, io) => {
@@ -73,6 +74,13 @@ impl<'a> QueryPlanner<'a> {
 			}
 		}
 		Ok(())
+	}
+
+	fn detect_range_queries(im: &IndexMap) {
+		for (_, ios) in im.groups() {
+			for (_, io) in ios {}
+		}
+		todo!()
 	}
 
 	pub(crate) fn has_executors(&self) -> bool {
