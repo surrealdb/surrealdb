@@ -34,7 +34,7 @@ impl Processor {
 	}
 
 	pub async fn process_request(&mut self, method: &str, params: Array) -> Result<Data, Failure> {
-		info!("Process RPC request");
+		debug!("Process RPC request");
 
 		// Match the method to a function
 		match method {
@@ -235,7 +235,12 @@ impl Processor {
 	// ------------------------------
 
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
-		match val {
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the query parameters
+		let var = Some(self.vars.to_owned());
+		// Compute the specified parameter
+		match kvs.compute(val, &self.session, var).await? {
 			// Remove the variable if undefined
 			Value::None => self.vars.remove(&key.0),
 			// Store the variable if defined

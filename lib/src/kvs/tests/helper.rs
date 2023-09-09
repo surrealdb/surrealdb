@@ -3,6 +3,7 @@ use crate::err::Error;
 
 pub struct TestContext {
 	pub(crate) db: Datastore,
+	pub(crate) kvs: Kvs,
 	// A string identifier for this context.
 	// It will usually be a uuid or combination of uuid and fixed string identifier.
 	// It is useful for separating test setups when environments are shared.
@@ -17,11 +18,31 @@ impl TestContext {
 		node_id: crate::sql::uuid::Uuid,
 		time: Timestamp,
 	) -> Result<(), Error> {
+		// TODO we shouldn't test bootstrapping manually
 		let mut tx = self.db.transaction(true, false).await?;
 		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
+
+		let mut errors = vec![];
+		let mut values = vec![];
+		for res in archived {
+			match res {
+				(v, Some(e)) => {
+					values.push(v);
+					errors.push(e);
+				}
+				(v, None) => {
+					values.push(v);
+				}
+			}
+		}
+		if !errors.is_empty() {
+			// You can customize this panic message as per your needs
+			panic!("Encountered errors: {:?}", errors);
+		}
+
 		let mut tx = self.db.transaction(true, false).await?;
-		self.db.remove_archived(&mut tx, archived).await?;
+		self.db.remove_archived(&mut tx, values).await?;
 		Ok(tx.commit().await?)
 	}
 
@@ -34,9 +55,10 @@ impl TestContext {
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
 pub(crate) async fn init(node_id: Uuid) -> Result<TestContext, Error> {
-	let db = new_ds(node_id).await;
+	let (db, kvs) = new_ds(node_id).await;
 	return Ok(TestContext {
 		db,
+		kvs,
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
 	});
 }

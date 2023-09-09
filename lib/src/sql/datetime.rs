@@ -21,6 +21,8 @@ use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
+use super::error::expected;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
@@ -108,7 +110,7 @@ impl ops::Sub<Self> for Datetime {
 }
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
-	alt((datetime_single, datetime_double))(i)
+	expected("a datetime", alt((datetime_single, datetime_double)))(i)
 }
 
 fn datetime_single(i: &str) -> IResult<&str, Datetime> {

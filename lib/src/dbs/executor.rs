@@ -169,7 +169,7 @@ impl<'a> Executor<'a> {
 		opt.set_db(Some(db.into()));
 	}
 
-	#[instrument(name = "executor", skip_all)]
+	#[instrument(level = "debug", name = "executor", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,

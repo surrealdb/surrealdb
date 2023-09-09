@@ -15,7 +15,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-use super::util::delimited_list1;
+use super::util::{delimited_list1, expect_terminator};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
@@ -140,9 +140,9 @@ fn option(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("option")(i)?;
 	let (i, _) = mightbespace(i)?;
 	cut(|i| {
-		let (i, _) = char('<')(i)?;
+		let (i, s) = tag("<")(i)?;
 		let (i, v) = map(alt((either, simple, geometry, record, array, set)), Box::new)(i)?;
-		let (i, _) = char('>')(i)?;
+		let (i, _) = expect_terminator(s, char('>'))(i)?;
 		Ok((i, Kind::Option(v)))
 	})(i)
 }
@@ -152,9 +152,9 @@ fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) =
 		opt(alt((delimited_list1(openparentheses, commas, cut(table), closeparentheses), |i| {
-			let (i, _) = char('<')(i)?;
+			let (i, s) = tag("<")(i)?;
 			let (i, v) = separated_list1(verbar, table)(i)?;
-			let (i, _) = char('>')(i)?;
+			let (i, _) = expect_terminator(s, char('>'))(i)?;
 			Ok((i, v))
 		})))(i)?;
 	Ok((i, Kind::Record(v.unwrap_or_default())))
@@ -165,9 +165,9 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 	let (i, v) =
 		opt(alt((delimited_list1(openparentheses, commas, cut(geo), closeparentheses), |i| {
 			let (i, _) = mightbespace(i)?;
-			let (i, _) = char('<')(i)?;
+			let (i, s) = tag("<")(i)?;
 			let (i, v) = separated_list1(verbar, cut(geo))(i)?;
-			let (i, _) = char('>')(i)?;
+			let (i, _) = expect_terminator(s, char('>'))(i)?;
 			Ok((i, v))
 		})))(i)?;
 	Ok((i, Kind::Geometry(v.unwrap_or_default())))
@@ -176,7 +176,7 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 fn array(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("array")(i)?;
 	let (i, v) = opt(|i| {
-		let (i, _) = char('<')(i)?;
+		let (i, s) = tag("<")(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, k) = kind(i)?;
 		let (i, _) = mightbespace(i)?;
@@ -187,7 +187,7 @@ fn array(i: &str) -> IResult<&str, Kind> {
 			let (i, _) = mightbespace(i)?;
 			Ok((i, l))
 		})(i)?;
-		let (i, _) = char('>')(i)?;
+		let (i, _) = expect_terminator(s, char('>'))(i)?;
 		Ok((i, (k, l)))
 	})(i)?;
 	Ok((
@@ -202,7 +202,7 @@ fn array(i: &str) -> IResult<&str, Kind> {
 fn set(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("set")(i)?;
 	let (i, v) = opt(|i| {
-		let (i, _) = char('<')(i)?;
+		let (i, s) = tag("<")(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, k) = kind(i)?;
 		let (i, _) = mightbespace(i)?;
@@ -213,7 +213,7 @@ fn set(i: &str) -> IResult<&str, Kind> {
 			let (i, _) = mightbespace(i)?;
 			Ok((i, l))
 		})(i)?;
-		let (i, _) = char('>')(i)?;
+		let (i, _) = expect_terminator(s, char('>'))(i)?;
 		Ok((i, (k, l)))
 	})(i)?;
 	Ok((

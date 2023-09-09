@@ -17,11 +17,17 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::combinator::{cut, map};
+use nom::bytes::complete::{tag, tag_no_case};
+use nom::combinator::{map, opt, peek};
+use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
+
+use super::comment::{mightbespace, shouldbespace};
+use super::error::ExplainResultExt;
+use super::util::expect_delimited;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
@@ -126,27 +132,29 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = openparentheses(i)?;
-	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = cut(closeparentheses)(i)?;
-	Ok((i, v))
+	expect_delimited(openparentheses, map(value, Subquery::Value), closeparentheses)(i)
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
-	let _diving = crate::sql::parser::depth::dive()?;
-	alt((
-		|i| {
-			let (i, _) = openparentheses(i)?;
-			let (i, v) = subquery_inner(i)?;
-			let (i, _) = cut(closeparentheses)(i)?;
-			Ok((i, v))
-		},
-		|i| {
-			let (i, v) = subquery_inner(i)?;
-			let (i, _) = ending(i)?;
-			Ok((i, v))
-		},
-	))(i)
+	alt((expect_delimited(openparentheses, subquery_inner, closeparentheses), |i| {
+		let (i, v) = subquery_inner(i)?;
+		let (i, _) = ending(i)?;
+		let (i, _) = eat_semicolon(i)?;
+		Ok((i, v))
+	}))(i)
+}
+
+fn eat_semicolon(i: &str) -> IResult<&str, ()> {
+	let (i, _) = opt(|i| {
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = tag(";")(i)?;
+		let (i, _) = peek(tuple((
+			shouldbespace,
+			alt((tag_no_case("THEN"), tag_no_case("ELSE"), tag_no_case("END"))),
+		)))(i)?;
+		Ok((i, ()))
+	})(i)?;
+	Ok((i, ()))
 }
 
 fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
@@ -161,6 +169,27 @@ fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
 		map(define, Subquery::Define),
 		map(remove, Subquery::Remove),
 	))(i)
+	.explain("This statement is not allowed in a subquery", disallowed_subquery_statements)
+}
+
+fn disallowed_subquery_statements(i: &str) -> IResult<&str, ()> {
+	let (i, _) = alt((
+		tag_no_case("ANALYZED"),
+		tag_no_case("BEGIN"),
+		tag_no_case("BREAK"),
+		tag_no_case("CONTINUE"),
+		tag_no_case("COMMIT"),
+		tag_no_case("FOR"),
+		tag_no_case("INFO"),
+		tag_no_case("KILL"),
+		tag_no_case("LIVE"),
+		tag_no_case("OPTION"),
+		tag_no_case("RELATE"),
+		tag_no_case("SLEEP"),
+		tag_no_case("THROW"),
+		tag_no_case("USE"),
+	))(i)?;
+	Ok((i, ()))
 }
 
 #[cfg(test)]

@@ -96,7 +96,7 @@ impl Response {
 	pub async fn send(self, out: OutputFormat, chn: Sender<Message>) {
 		let span = Span::current();
 
-		info!("Process RPC response");
+		debug!("Process RPC response");
 
 		let is_error = self.result.is_err();
 		if let Err(err) = &self.result {
