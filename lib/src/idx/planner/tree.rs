@@ -77,10 +77,11 @@ impl<'a> TreeBuilder<'a> {
 			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
 				Ok(Node::Scalar(v.to_owned()))
 			}
+			Value::Array(a) => Ok(self.eval_array(a)),
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(&v).await?
+				self.eval_value(&v).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}

@@ -703,8 +703,7 @@ impl MTree {
 		Ok(res)
 	}
 
-	#[allow(unused_variables)]
-	#[allow(unused_assignments)]
+	#[allow(unused_variables, unused_assignments, clippy::too_many_arguments)]
 	async fn deletion_underflown(
 		&mut self,
 		tx: &mut Transaction,
