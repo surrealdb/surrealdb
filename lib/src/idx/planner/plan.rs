@@ -5,7 +5,8 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Object};
 use crate::sql::{Expression, Idiom, Operator, Value};
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -42,6 +43,12 @@ impl<'a> PlanBuilder<'a> {
 
 		// If every boolean operator are AND then we can use the single index plan
 		if b.all_and {
+			// TODO: This is currently pretty arbitrary
+			// We take the "first" range query if one is available
+			if let Some((_, rb)) = b.range_queries.iter().next() {
+				return Ok(Plan::SingleIndexMultiExpression(rb.exps));
+			}
+			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.indexes.pop() {
 				return Ok(Plan::SingleIndex(e, i));
 			}
@@ -104,9 +111,20 @@ impl<'a> PlanBuilder<'a> {
 		}
 	}
 
-	fn add_index_option(&mut self, e: Arc<Expression>, i: IndexOption) {
-		// TODO check RangeOption
-		self.indexes.push((e, i));
+	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
+		if let OperatorType::Range(o, v) = io.op_type() {
+			match self.range_queries.entry(io.ix().name.0.to_owned()) {
+				Entry::Occupied(mut e) => {
+					e.get_mut().add(exp.clone(), o, v);
+				}
+				Entry::Vacant(e) => {
+					let mut b = RangeQueryBuilder::default();
+					b.add(exp.clone(), o, v);
+					e.insert(b);
+				}
+			}
+		}
+		self.indexes.push((exp, io));
 	}
 }
 
@@ -114,6 +132,7 @@ pub(super) enum Plan {
 	TableIterator(Option<String>),
 	SingleIndex(Arc<Expression>, IndexOption),
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
+	SingleIndexMultiExpression(HashSet<Arc<Expression>>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -193,10 +212,64 @@ impl IndexOption {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
 	value: Value,
 	inclusive: bool,
+}
+
+impl RangeValue {
+	fn set_less_than(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			return;
+		}
+		if self.inclusive {
+			if self.value.ge(v) {
+				self.value = v.clone();
+			}
+		} else {
+			if self.value.gt(v) {
+				self.value = v.clone();
+			}
+		}
+	}
+
+	fn set_less_than_inclusive(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			return;
+		}
+		if self.value.gt(v) {
+			self.value = v.clone();
+		}
+	}
+
+	fn set_more_than(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			return;
+		}
+		if self.value.lt(v) {
+			self.value = v.clone();
+		}
+	}
+
+	fn set_more_than_inclusive(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			return;
+		}
+		if self.inclusive {
+			if self.value.le(v) {
+				self.value = v.clone();
+			}
+		} else {
+			if self.value.lt(v) {
+				self.value = v.clone();
+			}
+		}
+	}
 }
 
 impl From<&RangeValue> for Value {
@@ -208,16 +281,29 @@ impl From<&RangeValue> for Value {
 	}
 }
 
+#[derive(Default)]
 struct RangeQueryBuilder {
+	exps: HashSet<Arc<Expression>>,
 	from: RangeValue,
 	to: RangeValue,
 }
 
-impl RangeQueryBuilder {}
+impl RangeQueryBuilder {
+	fn add(&mut self, exp: Arc<Expression>, op: &Operator, v: &Value) {
+		match op {
+			Operator::LessThan => self.to.set_less_than(v),
+			Operator::LessThanOrEqual => self.to.set_less_than_inclusive(v),
+			Operator::MoreThan => self.from.set_more_than(v),
+			Operator::MoreThanOrEqual => self.from.set_more_than_inclusive(v),
+			_ => return,
+		}
+		self.exps.insert(exp);
+	}
+}
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType};
+	use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType, RangeValue};
 	use crate::sql::statements::DefineIndexStatement;
 	use crate::sql::{Array, Idiom, Operator, Value};
 	use std::collections::HashSet;
@@ -244,5 +330,12 @@ mod tests {
 		set.insert(io2);
 
 		assert_eq!(set.len(), 1);
+	}
+
+	#[test]
+	fn test_range_value() {
+		let r = RangeValue::default();
+		assert_eq!(r.value, Value::None);
+		assert_eq!(r.inclusive, false);
 	}
 }
