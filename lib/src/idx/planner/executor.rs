@@ -9,28 +9,45 @@ use crate::idx::planner::iterators::{
 	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
-use crate::idx::planner::plan::{IndexOperator, IndexOption};
+use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Table, Thing, Value};
-use std::collections::HashMap;
+use crate::sql::{Expression, Object, Table, Thing, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-pub(crate) type IteratorRef = u16;
-
 pub(crate) struct QueryExecutor {
 	table: String,
 	ft_map: HashMap<String, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
-	iterators: Vec<Arc<Expression>>,
+	it_entries: Vec<IteratorEntry>,
 }
 
+pub(crate) type IteratorRef = u16;
+
+pub(super) enum IteratorEntry {
+	Single(Arc<Expression>, IndexOption),
+	Range(HashSet<Arc<Expression>>, String, RangeValue, RangeValue),
+}
+
+impl IteratorEntry {
+	pub(super) fn explain(&self) -> Value {
+		match self {
+			Self::Single(_, io) => io.explain(),
+			Self::Range(_, ixn, from, to) => {
+				let mut r = HashMap::from([("index", Value::from(ixn.to_owned()))]);
+				r.insert("from", Value::from(from));
+				r.insert("to", Value::from(to));
+				Value::Object(Object::from(r))
+			}
+		}
+	}
+}
 impl QueryExecutor {
 	pub(super) async fn new(
 		opt: &Options,
@@ -83,22 +100,33 @@ impl QueryExecutor {
 			ft_map,
 			mr_entries,
 			exp_entries,
-			iterators: Vec::new(),
+			it_entries: Vec::new(),
 		})
 	}
 
-	pub(super) fn add_iterator(&mut self, exp: Arc<Expression>) -> IteratorRef {
-		let ir = self.iterators.len();
-		self.iterators.push(exp);
+	pub(super) fn add_iterator(&mut self, it_entry: IteratorEntry) -> IteratorRef {
+		let ir = self.it_entries.len();
+		self.it_entries.push(it_entry);
 		ir as IteratorRef
 	}
 
 	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
-		(ir as usize) < self.iterators.len()
+		(ir as usize) < self.it_entries.len()
 	}
 
-	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
-		self.iterators.get(ir as usize).map(|exp| exp.as_ref())
+	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
+		match self.it_entries.get(ir as usize) {
+			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
+			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
+			_ => false,
+		}
+	}
+
+	pub(crate) fn explain(&self, ir: IteratorRef) -> Value {
+		match self.it_entries.get(ir as usize) {
+			Some(ie) => ie.explain(),
+			None => Value::None,
+		}
 	}
 
 	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
@@ -114,17 +142,22 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		ir: IteratorRef,
-		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		match &io.ix().index {
-			Index::Idx => Self::new_index_iterator(opt, io),
-			Index::Uniq => Self::new_unique_index_iterator(opt, io),
-			Index::Search {
-				..
-			} => self.new_search_index_iterator(ir, io).await,
-			_ => Err(Error::FeatureNotYetImplemented {
-				feature: "VectorSearch iterator".to_string(),
-			}),
+		match self.it_entries.get(ir as usize) {
+			Some(IteratorEntry::Single(_, io)) => match io.ix().index {
+				Index::Idx => Self::new_index_iterator(opt, io.clone()),
+				Index::Uniq => Self::new_unique_index_iterator(opt, io.clone()),
+				Index::Search {
+					..
+				} => self.new_search_index_iterator(ir, io.clone()).await,
+				_ => Err(Error::FeatureNotYetImplemented {
+					feature: "VectorSearch iterator".to_string(),
+				}),
+			},
+			Some(IteratorEntry::Range(_, ixn, from, to)) => {
+				todo!()
+			}
+			None => Ok(None),
 		}
 	}
 
@@ -133,7 +166,7 @@ impl QueryExecutor {
 			IndexOperator::Equality(array) => Ok(Some(ThingIterator::NonUniqueEqual(
 				NonUniqueEqualThingIterator::new(opt, io.ix(), array)?,
 			))),
-			IndexOperator::Range(_, _) => {
+			IndexOperator::RangePart(_, _) => {
 				todo!()
 			}
 			_ => Ok(None),
@@ -148,7 +181,7 @@ impl QueryExecutor {
 			IndexOperator::Equality(array) => Ok(Some(ThingIterator::UniqueEqual(
 				UniqueEqualThingIterator::new(opt, io.ix(), array)?,
 			))),
-			IndexOperator::Range(_, _) => {
+			IndexOperator::RangePart(_, _) => {
 				todo!()
 			}
 			_ => Ok(None),
@@ -160,11 +193,11 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(exp) = self.iterators.get(ir as usize) {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(ir as usize) {
 			if let Matches(_, _) = io.op() {
 				let ixn = &io.ix().name.0;
 				if let Some(fti) = self.ft_map.get(ixn) {
-					if let Some(fte) = self.exp_entries.get(exp) {
+					if let Some(fte) = self.exp_entries.get(exp.as_ref()) {
 						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}

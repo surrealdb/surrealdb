@@ -6,7 +6,7 @@ mod tree;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::planner::executor::{IteratorEntry, QueryExecutor};
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
@@ -47,20 +47,23 @@ impl<'a> QueryPlanner<'a> {
 				let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
 				match PlanBuilder::build(node, self.with)? {
 					Plan::SingleIndex(exp, io) => {
-						let ir = exe.add_iterator(exp);
-						it.ingest(Iterable::Index(t.clone(), ir, io));
+						let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
+						it.ingest(Iterable::Index(t.clone(), ir));
 						self.executors.insert(t.0.clone(), exe);
 					}
 					Plan::MultiIndex(v) => {
 						for (exp, io) in v {
-							let ir = exe.add_iterator(exp);
-							it.ingest(Iterable::Index(t.clone(), ir, io));
+							let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
+							it.ingest(Iterable::Index(t.clone(), ir));
 							self.requires_distinct = true;
 						}
 						self.executors.insert(t.0.clone(), exe);
 					}
-					Plan::SingleIndexMultiExpression(_) => {
-						todo!()
+					Plan::SingleIndexMultiExpression(ixn, rq) => {
+						let ir =
+							exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+						it.ingest(Iterable::Index(t.clone(), ir));
+						self.executors.insert(t.0.clone(), exe);
 					}
 					Plan::TableIterator(fallback) => {
 						if let Some(fallback) = fallback {

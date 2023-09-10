@@ -45,8 +45,8 @@ impl<'a> PlanBuilder<'a> {
 		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
-			if let Some((_, rb)) = b.range_queries.iter().next() {
-				return Ok(Plan::SingleIndexMultiExpression(rb.exps.clone()));
+			if let Some((ixn, rq)) = b.range_queries.drain().take(1).next() {
+				return Ok(Plan::SingleIndexMultiExpression(ixn, rq));
 			}
 			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.indexes.pop() {
@@ -112,7 +112,7 @@ impl<'a> PlanBuilder<'a> {
 	}
 
 	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
-		if let IndexOperator::Range(o, v) = io.op() {
+		if let IndexOperator::RangePart(o, v) = io.op() {
 			match self.range_queries.entry(io.ix().name.0.to_owned()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().add(exp.clone(), o, v);
@@ -132,7 +132,7 @@ pub(super) enum Plan {
 	TableIterator(Option<String>),
 	SingleIndex(Arc<Expression>, IndexOption),
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
-	SingleIndexMultiExpression(HashSet<Arc<Expression>>),
+	SingleIndexMultiExpression(String, RangeQueryBuilder),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -148,7 +148,7 @@ pub(super) struct Inner {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Array),
-	Range(Operator, Value),
+	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 }
 
@@ -189,7 +189,7 @@ impl IndexOption {
 				r.insert("operator", Value::from(Operator::Matches(a.clone()).to_string()));
 				r.insert("value", Value::from(qs.to_owned()));
 			}
-			IndexOperator::Range(op, v) => {
+			IndexOperator::RangePart(op, v) => {
 				r.insert("operator", Value::from(op.to_string()));
 				r.insert("value", v.to_owned());
 			}
@@ -273,11 +273,11 @@ impl From<&RangeValue> for Value {
 	}
 }
 
-#[derive(Default)]
-struct RangeQueryBuilder {
-	exps: HashSet<Arc<Expression>>,
-	from: RangeValue,
-	to: RangeValue,
+#[derive(Default, Debug)]
+pub(super) struct RangeQueryBuilder {
+	pub(super) exps: HashSet<Arc<Expression>>,
+	pub(super) from: RangeValue,
+	pub(super) to: RangeValue,
 }
 
 impl RangeQueryBuilder {
@@ -306,15 +306,13 @@ mod tests {
 		let io1 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Operator(Operator::Equal, Array::from(vec!["test"])),
-			IndexOperator::Equality(Value::None),
+			IndexOperator::Equality(Array::from(vec!["test"])),
 		);
 
 		let io2 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Operator(Operator::Equal, Array::from(vec!["test"])),
-			IndexOperator::Equality(Value::None),
+			IndexOperator::Equality(Array::from(vec!["test"])),
 		);
 
 		set.insert(io1);

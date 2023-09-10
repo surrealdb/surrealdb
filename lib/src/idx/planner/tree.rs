@@ -169,7 +169,7 @@ impl<'a> TreeBuilder<'a> {
 			Operator::LessThan
 			| Operator::LessThanOrEqual
 			| Operator::MoreThan
-			| Operator::MoreThanOrEqual => Some(IndexOperator::Range(op.clone(), v.clone())),
+			| Operator::MoreThanOrEqual => Some(IndexOperator::RangePart(op.clone(), v.clone())),
 			_ => None,
 		}
 	}
