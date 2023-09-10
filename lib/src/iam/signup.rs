@@ -86,6 +86,8 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Log the authenticated scope info
+								trace!("Signing up to scope `{}`", sc);
 								// Create the authentication token
 								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
