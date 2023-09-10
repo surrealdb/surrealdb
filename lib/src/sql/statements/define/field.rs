@@ -84,6 +84,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.kind {
 			write!(f, " TYPE {v}")?
 		}
+		if let Some(ref v) = self.default {
+			write!(f, " DEFAULT {v}")?
+		}
 		if let Some(ref v) = self.value {
 			write!(f, " VALUE {v}")?
 		}
