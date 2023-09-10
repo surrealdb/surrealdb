@@ -787,7 +787,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authoritzation layer
+		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
@@ -803,8 +803,8 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -852,7 +852,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Value, Error> {
 		// Check if anonymous actors can compute values when auth is enabled
-		// TODO(sgirones): Check this as part of the authoritzation layer
+		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
@@ -868,8 +868,8 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
 		let mut ctx = Context::default();
 		// Set context capabilities
