@@ -8,15 +8,15 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
 };
-use crate::idx::planner::plan::OperatorType::Matches;
-use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType};
+use crate::idx::planner::plan::IndexOperator::Matches;
+use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Operator, Table, Thing, Value};
+use crate::sql::{Expression, Table, Thing, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -67,7 +67,7 @@ impl QueryExecutor {
 			}
 
 			if let Some(e) = entry {
-				if let Matches(_, Some(mr)) = e.0.index_option.op_type() {
+				if let Matches(_, Some(mr)) = e.0.index_option.op() {
 					if mr_entries.insert(*mr, e.clone()).is_some() {
 						return Err(Error::DuplicatedMatchRef {
 							mr: *mr,
@@ -130,14 +130,10 @@ impl QueryExecutor {
 
 	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperation::Operator(Operator::Equal, array) => {
-				Ok(Some(ThingIterator::NonUniqueEqual(NonUniqueEqualThingIterator::new(
-					opt,
-					io.ix(),
-					array,
-				)?)))
-			}
-			IndexOperation::Range(_, _) => {
+			IndexOperator::Equality(array) => Ok(Some(ThingIterator::NonUniqueEqual(
+				NonUniqueEqualThingIterator::new(opt, io.ix(), array)?,
+			))),
+			IndexOperator::Range(_, _) => {
 				todo!()
 			}
 			_ => Ok(None),
@@ -149,10 +145,10 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperation::Operator(Operator::Equal, array) => Ok(Some(
-				ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, io.ix(), array)?),
-			)),
-			IndexOperation::Range(_, _) => {
+			IndexOperator::Equality(array) => Ok(Some(ThingIterator::UniqueEqual(
+				UniqueEqualThingIterator::new(opt, io.ix(), array)?,
+			))),
+			IndexOperator::Range(_, _) => {
 				todo!()
 			}
 			_ => Ok(None),
@@ -165,7 +161,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(exp) = self.iterators.get(ir as usize) {
-			if let IndexOperation::Operator(Operator::Matches(_), _) = io.op() {
+			if let Matches(_, _) = io.op() {
 				let ixn = &io.ix().name.0;
 				if let Some(fti) = self.ft_map.get(ixn) {
 					if let Some(fte) = self.exp_entries.get(exp) {
@@ -311,7 +307,7 @@ impl FtEntry {
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
-		if let OperatorType::Matches(qs, _) = io.op_type() {
+		if let Matches(qs, _) = io.op() {
 			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
 			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {

@@ -59,6 +59,9 @@ impl<'a> QueryPlanner<'a> {
 						}
 						self.executors.insert(t.0.clone(), exe);
 					}
+					Plan::SingleIndexMultiExpression(_) => {
+						todo!()
+					}
 					Plan::TableIterator(fallback) => {
 						if let Some(fallback) = fallback {
 							self.fallbacks.push(fallback);

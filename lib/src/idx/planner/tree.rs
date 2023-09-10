@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType};
+use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
@@ -140,27 +140,22 @@ impl<'a> TreeBuilder<'a> {
 		e: &Expression,
 	) -> Option<IndexOption> {
 		if let Some(v) = v.is_scalar() {
-			let op_type = match &ix.index {
+			let op = match &ix.index {
 				Index::Idx => Self::eval_index_operator(op, v),
 				Index::Uniq => Self::eval_index_operator(op, v),
 				Index::Search {
 					..
 				} => {
 					if let Operator::Matches(mr) = op {
-						Some(OperatorType::Matches(v.clone().to_raw_string(), *mr))
+						Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr))
 					} else {
 						None
 					}
 				}
 				Index::MTree(_) => None,
 			};
-			if let Some(op_type) = op_type {
-				let io = IndexOption::new(
-					ix.clone(),
-					id.clone(),
-					IndexOperation::Operator(op.to_owned(), Array::from(v.clone())),
-					op_type,
-				);
+			if let Some(op) = op {
+				let io = IndexOption::new(ix.clone(), id.clone(), op);
 				self.index_map.0.insert(Arc::new(e.clone()), io.clone());
 				return Some(io);
 			}
@@ -168,13 +163,13 @@ impl<'a> TreeBuilder<'a> {
 		None
 	}
 
-	fn eval_index_operator(op: &Operator, v: &Value) -> Option<OperatorType> {
+	fn eval_index_operator(op: &Operator, v: &Value) -> Option<IndexOperator> {
 		match op {
-			Operator::Equal => Some(OperatorType::Equality(v.clone())),
+			Operator::Equal => Some(IndexOperator::Equality(Array::from(v.clone()))),
 			Operator::LessThan
 			| Operator::LessThanOrEqual
 			| Operator::MoreThan
-			| Operator::MoreThanOrEqual => Some(OperatorType::Range(op.clone(), v.clone())),
+			| Operator::MoreThanOrEqual => Some(IndexOperator::Range(op.clone(), v.clone())),
 			_ => None,
 		}
 	}

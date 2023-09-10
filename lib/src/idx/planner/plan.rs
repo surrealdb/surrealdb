@@ -46,7 +46,7 @@ impl<'a> PlanBuilder<'a> {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
 			if let Some((_, rb)) = b.range_queries.iter().next() {
-				return Ok(Plan::SingleIndexMultiExpression(rb.exps));
+				return Ok(Plan::SingleIndexMultiExpression(rb.exps.clone()));
 			}
 			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.indexes.pop() {
@@ -112,7 +112,7 @@ impl<'a> PlanBuilder<'a> {
 	}
 
 	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
-		if let OperatorType::Range(o, v) = io.op_type() {
+		if let IndexOperator::Range(o, v) = io.op() {
 			match self.range_queries.entry(io.ix().name.0.to_owned()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().add(exp.clone(), o, v);
@@ -142,35 +142,22 @@ pub(crate) struct IndexOption(Arc<Inner>);
 pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
-	op: IndexOperation,
-	op_type: OperatorType,
+	op: IndexOperator,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
-pub(super) enum IndexOperation {
-	Operator(Operator, Array),
-	Range(RangeValue, RangeValue),
-}
-
-#[derive(Debug, Eq, PartialEq, Hash)]
-pub(super) enum OperatorType {
-	Equality(Value),
+pub(super) enum IndexOperator {
+	Equality(Array),
 	Range(Operator, Value),
 	Matches(String, Option<MatchRef>),
 }
 
 impl IndexOption {
-	pub(super) fn new(
-		ix: DefineIndexStatement,
-		id: Idiom,
-		op: IndexOperation,
-		op_type: OperatorType,
-	) -> Self {
+	pub(super) fn new(ix: DefineIndexStatement, id: Idiom, op: IndexOperator) -> Self {
 		Self(Arc::new(Inner {
 			ix,
 			id,
 			op,
-			op_type,
 		}))
 	}
 
@@ -178,12 +165,8 @@ impl IndexOption {
 		&self.0.ix
 	}
 
-	pub(super) fn op(&self) -> &IndexOperation {
+	pub(super) fn op(&self) -> &IndexOperator {
 		&self.0.op
-	}
-
-	pub(super) fn op_type(&self) -> &OperatorType {
-		&self.0.op_type
 	}
 
 	pub(super) fn id(&self) -> &Idiom {
@@ -193,19 +176,22 @@ impl IndexOption {
 	pub(crate) fn explain(&self) -> Value {
 		let mut r = HashMap::from([("index", Value::from(self.ix().name.0.to_owned()))]);
 		match self.op() {
-			IndexOperation::Operator(op, a) => {
+			IndexOperator::Equality(a) => {
 				let v = if a.len() == 1 {
 					a[0].clone()
 				} else {
 					Value::Array(a.clone())
 				};
-				r.insert("operator", Value::from(op.to_string()));
+				r.insert("operator", Value::from(Operator::Equal.to_string()));
 				r.insert("value", v);
 			}
-			IndexOperation::Range(from, to) => {
-				r.insert("operator", Value::from("Range"));
-				r.insert("from", from.into());
-				r.insert("to", to.into());
+			IndexOperator::Matches(qs, a) => {
+				r.insert("operator", Value::from(Operator::Matches(a.clone()).to_string()));
+				r.insert("value", Value::from(qs.to_owned()));
+			}
+			IndexOperator::Range(op, v) => {
+				r.insert("operator", Value::from(op.to_string()));
+				r.insert("value", v.to_owned());
 			}
 		};
 		Value::Object(Object::from(r))
@@ -219,54 +205,60 @@ pub(super) struct RangeValue {
 }
 
 impl RangeValue {
-	fn set_less_than(&mut self, v: &Value) {
-		if self.value.is_none() {
-			self.value = v.clone();
-			return;
-		}
-		if self.inclusive {
-			if self.value.ge(v) {
-				self.value = v.clone();
-			}
-		} else {
-			if self.value.gt(v) {
-				self.value = v.clone();
-			}
-		}
-	}
-
-	fn set_less_than_inclusive(&mut self, v: &Value) {
-		if self.value.is_none() {
-			self.value = v.clone();
-			return;
-		}
-		if self.value.gt(v) {
-			self.value = v.clone();
-		}
-	}
-
-	fn set_more_than(&mut self, v: &Value) {
+	fn set_to(&mut self, v: &Value) {
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
 		}
 		if self.value.lt(v) {
 			self.value = v.clone();
+			self.inclusive = false;
 		}
 	}
 
-	fn set_more_than_inclusive(&mut self, v: &Value) {
+	fn set_to_inclusive(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			self.inclusive = true;
+			return;
+		}
+		if self.inclusive {
+			if self.value.lt(v) {
+				self.value = v.clone();
+			}
+		} else {
+			if self.value.le(v) {
+				self.value = v.clone();
+				self.inclusive = true;
+			}
+		}
+	}
+
+	fn set_from(&mut self, v: &Value) {
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
 		}
+		if self.value.gt(v) {
+			self.value = v.clone();
+			self.inclusive = false;
+		}
+	}
+
+	fn set_from_inclusive(&mut self, v: &Value) {
+		if self.value.is_none() {
+			self.value = v.clone();
+			self.inclusive = true;
+			return;
+		}
 		if self.inclusive {
-			if self.value.le(v) {
+			if self.value.gt(v) {
 				self.value = v.clone();
 			}
 		} else {
-			if self.value.lt(v) {
+			if self.value.ge(v) {
 				self.value = v.clone();
+				self.inclusive = true;
 			}
 		}
 	}
@@ -291,10 +283,10 @@ struct RangeQueryBuilder {
 impl RangeQueryBuilder {
 	fn add(&mut self, exp: Arc<Expression>, op: &Operator, v: &Value) {
 		match op {
-			Operator::LessThan => self.to.set_less_than(v),
-			Operator::LessThanOrEqual => self.to.set_less_than_inclusive(v),
-			Operator::MoreThan => self.from.set_more_than(v),
-			Operator::MoreThanOrEqual => self.from.set_more_than_inclusive(v),
+			Operator::LessThan => self.to.set_to(v),
+			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),
+			Operator::MoreThan => self.from.set_from(v),
+			Operator::MoreThanOrEqual => self.from.set_from_inclusive(v),
 			_ => return,
 		}
 		self.exps.insert(exp);
@@ -303,7 +295,7 @@ impl RangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType, RangeValue};
+	use crate::idx::planner::plan::{IndexOperator, IndexOperator, IndexOption, RangeValue};
 	use crate::sql::statements::DefineIndexStatement;
 	use crate::sql::{Array, Idiom, Operator, Value};
 	use std::collections::HashSet;
@@ -314,15 +306,15 @@ mod tests {
 		let io1 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
-			OperatorType::Equality(Value::None),
+			IndexOperator::Operator(Operator::Equal, Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::None),
 		);
 
 		let io2 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
-			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
-			OperatorType::Equality(Value::None),
+			IndexOperator::Operator(Operator::Equal, Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::None),
 		);
 
 		set.insert(io1);
@@ -333,9 +325,92 @@ mod tests {
 	}
 
 	#[test]
-	fn test_range_value() {
+	fn test_range_default_value() {
 		let r = RangeValue::default();
 		assert_eq!(r.value, Value::None);
 		assert_eq!(r.inclusive, false);
+	}
+	#[test]
+	fn test_range_value_from_inclusive() {
+		let mut r = RangeValue::default();
+		r.set_from_inclusive(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+		r.set_from_inclusive(&10.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, true);
+		r.set_from_inclusive(&20.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, true);
+	}
+
+	#[test]
+	fn test_range_value_from() {
+		let mut r = RangeValue::default();
+		r.set_from(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, false);
+		r.set_from(&10.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, false);
+		r.set_from(&20.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, false);
+	}
+
+	#[test]
+	fn test_range_value_to_inclusive() {
+		let mut r = RangeValue::default();
+		r.set_to_inclusive(&10.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, true);
+		r.set_to_inclusive(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+		r.set_to_inclusive(&10.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+	}
+
+	#[test]
+	fn test_range_value_to() {
+		let mut r = RangeValue::default();
+		r.set_to(&10.into());
+		assert_eq!(r.value, 10.into());
+		assert_eq!(r.inclusive, false);
+		r.set_to(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, false);
+		r.set_to(&10.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, false);
+	}
+
+	#[test]
+	fn test_range_value_to_switch_inclusive() {
+		let mut r = RangeValue::default();
+		r.set_to(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, false);
+		r.set_to_inclusive(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+		r.set_to(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+	}
+
+	#[test]
+	fn test_range_value_from_switch_inclusive() {
+		let mut r = RangeValue::default();
+		r.set_from(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, false);
+		r.set_from_inclusive(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
+		r.set_from(&20.into());
+		assert_eq!(r.value, 20.into());
+		assert_eq!(r.inclusive, true);
 	}
 }
