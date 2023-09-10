@@ -9,6 +9,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::define::{define, DefineStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
+use crate::sql::statements::foreach::{foreach, ForeachStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
 use crate::sql::statements::insert::{insert, InsertStatement};
 use crate::sql::statements::output::{output, OutputStatement};
@@ -86,6 +87,9 @@ impl Block {
 				}
 				Entry::Continue(v) => {
 					// Always errors immediately
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
+				Entry::Foreach(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Ifelse(v) => {
@@ -210,6 +214,7 @@ pub enum Entry {
 	Throw(ThrowStatement),
 	Break(BreakStatement),
 	Continue(ContinueStatement),
+	Foreach(ForeachStatement),
 }
 
 impl PartialOrd for Entry {
@@ -238,6 +243,7 @@ impl Entry {
 			Self::Throw(v) => v.writeable(),
 			Self::Break(v) => v.writeable(),
 			Self::Continue(v) => v.writeable(),
+			Self::Foreach(v) => v.writeable(),
 		}
 	}
 }
@@ -260,6 +266,7 @@ impl Display for Entry {
 			Self::Throw(v) => write!(f, "{v}"),
 			Self::Break(v) => write!(f, "{v}"),
 			Self::Continue(v) => write!(f, "{v}"),
+			Self::Foreach(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -282,6 +289,7 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 			map(throw, Entry::Throw),
 			map(r#break, Entry::Break),
 			map(r#continue, Entry::Continue),
+			map(foreach, Entry::Foreach),
 			map(value, Entry::Value),
 		)),
 		mightbespace,

@@ -7,6 +7,7 @@ use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::{expect_tag_no_case, IResult};
 use crate::sql::param::{param, Param};
 use crate::sql::value::{value, Value};
+use async_recursion::async_recursion;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
@@ -28,12 +29,14 @@ impl ForeachStatement {
 		self.range.writeable() || self.block.writeable()
 	}
 	/// Process this type returning a computed simple Value
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check the loop data
 		match &self.range.compute(ctx, opt, txn, doc).await? {
@@ -58,6 +61,7 @@ impl ForeachStatement {
 							Entry::Value(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Break(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Continue(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Foreach(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Ifelse(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Select(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Create(v) => v.compute(&ctx, opt, txn, doc).await,
