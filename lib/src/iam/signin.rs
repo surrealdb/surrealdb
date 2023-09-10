@@ -145,6 +145,8 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Log the authenticated scope info
+								trace!("Signing in to scope `{}`", sc);
 								// Create the authentication token
 								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
@@ -201,6 +203,8 @@ pub async fn db(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated database info
+			trace!("Signing in to database `{}`", db);
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -241,6 +245,8 @@ pub async fn ns(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated namespace info
+			trace!("Signing in to namespace `{}`", ns);
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -278,6 +284,8 @@ pub async fn kv(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated root info
+			trace!("Signing in as root");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
