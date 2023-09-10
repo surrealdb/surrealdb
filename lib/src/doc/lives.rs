@@ -172,10 +172,8 @@ impl<'a> Document<'a> {
 		if opt.check_perms(stm.into()) {
 			// Get the table
 			let tb = self.tb(opt, txn).await?;
-			// Get the permission clause
-			let perms = &tb.permissions.select;
 			// Process the table permissions
-			match perms {
+			match &tb.permissions.select {
 				Permission::None => return Err(Error::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
