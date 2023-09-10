@@ -10,7 +10,8 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 pub(super) struct PlanBuilder<'a> {
-	indexes: Vec<(Expression, IndexOption)>,
+	indexes: Vec<(Arc<Expression>, IndexOption)>,
+	range_queries: HashMap<String, RangeQueryBuilder>,
 	with: &'a Option<With>,
 	all_and: bool,
 	all_exp_with_index: bool,
@@ -25,6 +26,7 @@ impl<'a> PlanBuilder<'a> {
 		}
 		let mut b = PlanBuilder {
 			indexes: Vec::new(),
+			range_queries: HashMap::new(),
 			with,
 			all_and: true,
 			all_exp_with_index: true,
@@ -37,6 +39,7 @@ impl<'a> PlanBuilder<'a> {
 		if b.indexes.is_empty() {
 			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
 		}
+
 		// If every boolean operator are AND then we can use the single index plan
 		if b.all_and {
 			if let Some((e, i)) = b.indexes.pop() {
@@ -101,15 +104,16 @@ impl<'a> PlanBuilder<'a> {
 		}
 	}
 
-	fn add_index_option(&mut self, e: Expression, i: IndexOption) {
+	fn add_index_option(&mut self, e: Arc<Expression>, i: IndexOption) {
+		// TODO check RangeOption
 		self.indexes.push((e, i));
 	}
 }
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(Expression, IndexOption),
-	MultiIndex(Vec<(Expression, IndexOption)>),
+	SingleIndex(Arc<Expression>, IndexOption),
+	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -119,9 +123,8 @@ pub(crate) struct IndexOption(Arc<Inner>);
 pub(super) struct Inner {
 	ix: DefineIndexStatement,
 	id: Idiom,
-	qs: Option<String>,
 	op: IndexOperation,
-	mr: Option<MatchRef>,
+	op_type: OperatorType,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -130,20 +133,25 @@ pub(super) enum IndexOperation {
 	Range(RangeValue, RangeValue),
 }
 
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub(super) enum OperatorType {
+	Equality(Value),
+	Range(Operator, Value),
+	Matches(String, Option<MatchRef>),
+}
+
 impl IndexOption {
 	pub(super) fn new(
 		ix: DefineIndexStatement,
 		id: Idiom,
 		op: IndexOperation,
-		qs: Option<String>,
-		mr: Option<MatchRef>,
+		op_type: OperatorType,
 	) -> Self {
 		Self(Arc::new(Inner {
 			ix,
 			id,
 			op,
-			qs,
-			mr,
+			op_type,
 		}))
 	}
 
@@ -155,16 +163,12 @@ impl IndexOption {
 		&self.0.op
 	}
 
-	pub(super) fn qs(&self) -> Option<&String> {
-		self.0.qs.as_ref()
+	pub(super) fn op_type(&self) -> &OperatorType {
+		&self.0.op_type
 	}
 
 	pub(super) fn id(&self) -> &Idiom {
 		&self.0.id
-	}
-
-	pub(super) fn match_ref(&self) -> Option<&MatchRef> {
-		self.0.mr.as_ref()
 	}
 
 	pub(crate) fn explain(&self) -> Value {
@@ -204,11 +208,18 @@ impl From<&RangeValue> for Value {
 	}
 }
 
+struct RangeQueryBuilder {
+	from: RangeValue,
+	to: RangeValue,
+}
+
+impl RangeQueryBuilder {}
+
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::{IndexOperation, IndexOption};
+	use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType};
 	use crate::sql::statements::DefineIndexStatement;
-	use crate::sql::{Array, Idiom, Operator};
+	use crate::sql::{Array, Idiom, Operator, Value};
 	use std::collections::HashSet;
 
 	#[test]
@@ -218,16 +229,14 @@ mod tests {
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
-			None,
-			None,
+			OperatorType::Equality(Value::None),
 		);
 
 		let io2 = IndexOption::new(
 			DefineIndexStatement::default(),
 			Idiom::from("a.b".to_string()),
 			IndexOperation::Operator(Operator::Equal, Array::from(vec!["test"])),
-			None,
-			None,
+			OperatorType::Equality(Value::None),
 		);
 
 		set.insert(io1);

@@ -8,7 +8,8 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
 };
-use crate::idx::planner::plan::{IndexOperation, IndexOption};
+use crate::idx::planner::plan::OperatorType::Matches;
+use crate::idx::planner::plan::{IndexOperation, IndexOption, OperatorType};
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
@@ -26,8 +27,8 @@ pub(crate) struct QueryExecutor {
 	table: String,
 	ft_map: HashMap<String, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
-	exp_entries: HashMap<Expression, FtEntry>,
-	iterators: Vec<Expression>,
+	exp_entries: HashMap<Arc<Expression>, FtEntry>,
+	iterators: Vec<Arc<Expression>>,
 }
 
 impl QueryExecutor {
@@ -35,7 +36,7 @@ impl QueryExecutor {
 		opt: &Options,
 		txn: &Transaction,
 		table: &Table,
-		index_map: IndexMap,
+		im: IndexMap,
 	) -> Result<Self, Error> {
 		let mut run = txn.lock().await;
 
@@ -45,7 +46,7 @@ impl QueryExecutor {
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Expressions and MatchRef
-		for (exp, io) in index_map.consume() {
+		for (exp, io) in im.0 {
 			let mut entry = None;
 			if let Index::Search(p) = &io.ix().index {
 				let ixn = &io.ix().name.0;
@@ -66,7 +67,7 @@ impl QueryExecutor {
 			}
 
 			if let Some(e) = entry {
-				if let Some(mr) = e.0.index_option.match_ref() {
+				if let Matches(_, Some(mr)) = e.0.index_option.op_type() {
 					if mr_entries.insert(*mr, e.clone()).is_some() {
 						return Err(Error::DuplicatedMatchRef {
 							mr: *mr,
@@ -86,7 +87,7 @@ impl QueryExecutor {
 		})
 	}
 
-	pub(super) fn add_iterator(&mut self, exp: Expression) -> IteratorRef {
+	pub(super) fn add_iterator(&mut self, exp: Arc<Expression>) -> IteratorRef {
 		let ir = self.iterators.len();
 		self.iterators.push(exp);
 		ir as IteratorRef
@@ -97,7 +98,7 @@ impl QueryExecutor {
 	}
 
 	pub(crate) fn get_iterator_expression(&self, ir: IteratorRef) -> Option<&Expression> {
-		self.iterators.get(ir as usize)
+		self.iterators.get(ir as usize).map(|exp| exp.as_ref())
 	}
 
 	fn get_match_ref(match_ref: &Value) -> Option<MatchRef> {
@@ -310,7 +311,7 @@ impl FtEntry {
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
-		if let Some(qs) = io.qs() {
+		if let OperatorType::Matches(qs, _) = io.op_type() {
 			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
 			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {
