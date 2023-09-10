@@ -901,6 +901,75 @@ impl Datastore {
 		res
 	}
 
+	/// Evaluates a SQL [`Value`] without checking authenticating config
+	/// This is used in very specific cases, where we do not need to check
+	/// whether authentication is enabled, or guest access is disabled.
+	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// SIGNIN clause, which still needs to work without guest access.
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	/// use surrealdb::sql::Future;
+	/// use surrealdb::sql::Value;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
+	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", skip_all)]
+	pub async fn evaluate(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Value, Error> {
+		// Create a new query options
+		let opt = Options::default()
+			.with_id(self.id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(self.capabilities.clone());
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		// Start an execution context
+		let ctx = sess.context(ctx);
+		// Store the query variables
+		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		// Compute the value
+		let res = val.compute(&ctx, &opt, &txn, None).await;
+		// Store any data
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
+		};
+		// Return result
+		res
+	}
+
 	/// Subscribe to live notifications
 	///
 	/// ```rust,no_run

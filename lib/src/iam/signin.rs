@@ -118,7 +118,7 @@ pub async fn sc(
 					// Setup the system session for finding the signin record
 					let sess = Session::viewer().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars).await {
+					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
