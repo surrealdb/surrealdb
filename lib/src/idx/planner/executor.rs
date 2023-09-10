@@ -6,7 +6,8 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	MatchesThingIterator, NonUniqueEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
+	MatchesThingIterator, StandardEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
+	UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
@@ -154,8 +155,8 @@ impl QueryExecutor {
 					feature: "VectorSearch iterator".to_string(),
 				}),
 			},
-			Some(IteratorEntry::Range(_, ixn, from, to)) => {
-				todo!()
+			Some(IteratorEntry::Range(_, ixn, _from, _to)) => {
+				Ok(Some(self.new_range_iterator(ixn)?))
 			}
 			None => Ok(None),
 		}
@@ -163,14 +164,18 @@ impl QueryExecutor {
 
 	fn new_index_iterator(opt: &Options, io: IndexOption) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperator::Equality(array) => Ok(Some(ThingIterator::NonUniqueEqual(
-				NonUniqueEqualThingIterator::new(opt, io.ix(), array)?,
+			IndexOperator::Equality(array) => Ok(Some(ThingIterator::StandardEqual(
+				StandardEqualThingIterator::new(opt, io.ix(), array)?,
 			))),
 			IndexOperator::RangePart(_, _) => {
 				todo!()
 			}
 			_ => Ok(None),
 		}
+	}
+
+	fn new_range_iterator(&self, _ixn: &String) -> Result<ThingIterator, Error> {
+		todo!()
 	}
 
 	fn new_unique_index_iterator(
@@ -186,6 +191,10 @@ impl QueryExecutor {
 			}
 			_ => Ok(None),
 		}
+	}
+
+	fn new_unique_range_iterator() -> Result<ThingIterator, Error> {
+		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator {}))
 	}
 
 	async fn new_search_index_iterator(

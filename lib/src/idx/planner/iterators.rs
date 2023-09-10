@@ -9,8 +9,10 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing};
 
 pub(crate) enum ThingIterator {
-	NonUniqueEqual(NonUniqueEqualThingIterator),
+	StandardEqual(StandardEqualThingIterator),
+	StandardRange(StandardRangeThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
+	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
 }
 
@@ -21,24 +23,26 @@ impl ThingIterator {
 		size: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		match self {
-			ThingIterator::NonUniqueEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::StandardEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::StandardRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 		}
 	}
 }
 
-pub(crate) struct NonUniqueEqualThingIterator {
+pub(crate) struct StandardEqualThingIterator {
 	beg: Vec<u8>,
 	end: Vec<u8>,
 }
 
-impl NonUniqueEqualThingIterator {
+impl StandardEqualThingIterator {
 	pub(super) fn new(
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		v: &Array,
-	) -> Result<NonUniqueEqualThingIterator, Error> {
+	) -> Result<StandardEqualThingIterator, Error> {
 		let (beg, end) =
 			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, v);
 		Ok(Self {
@@ -61,6 +65,18 @@ impl NonUniqueEqualThingIterator {
 		}
 		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
 		Ok(res)
+	}
+}
+
+pub(crate) struct StandardRangeThingIterator {}
+
+impl StandardRangeThingIterator {
+	async fn next_batch(
+		&mut self,
+		_txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		todo!()
 	}
 }
 
@@ -87,6 +103,18 @@ impl UniqueEqualThingIterator {
 			}
 		}
 		Ok(vec![])
+	}
+}
+
+pub(crate) struct UniqueRangeThingIterator {}
+
+impl UniqueRangeThingIterator {
+	async fn next_batch(
+		&mut self,
+		_txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		todo!()
 	}
 }
 
