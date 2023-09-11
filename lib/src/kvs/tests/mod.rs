@@ -42,6 +42,7 @@ mod mem {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
+	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
@@ -81,6 +82,7 @@ mod rocksdb {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
+	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
@@ -122,6 +124,7 @@ mod speedb {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
+	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
@@ -164,6 +167,7 @@ mod tikv {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
+	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");
@@ -206,6 +210,7 @@ mod fdb {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
+	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");

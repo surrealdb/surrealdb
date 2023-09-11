@@ -56,7 +56,19 @@ async fn live_creates_remote_notification_for_create() {
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
 	let ctx = context::Context::background().with_live_sess(&ses);
-	let (send, _recv) = channel::unbounded();
+
+	// Init as local node, so we do not receive the notification
+	let t1 = Timestamp {
+		value: 0x0102030405060708u64,
+	};
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let mut test = init(local_node, clock).await.unwrap();
+
+	// Bootstrap the remote node, so both nodes are alive
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
+	test.db.bootstrap().await.unwrap();
+
+	let send = test.db.live_sender().unwrap();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(local_node)
@@ -65,17 +77,6 @@ async fn live_creates_remote_notification_for_create() {
 		.with_ns(ses.ns())
 		.with_db(ses.db());
 	let remote_options = local_options.clone().with_id(remote_node);
-	let t1 = Timestamp {
-		value: 0x0102030405060708u64,
-	};
-
-	// Init as local node, so we do not receive the notification
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
-	let mut test = init(local_node, clock).await.unwrap();
-
-	// Bootstrap the remote node, so both nodes are alive
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
-	test.db.bootstrap().await.unwrap();
 
 	// Register a live query on the remote node
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -156,15 +157,12 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	let live_query_id = Uuid::parse_str("0bc4bfc2-4001-40ac-9dc2-6728c974cd68").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
 	let ctx = context::Context::background().with_live_sess(&ses);
-	let (send, _recv) = channel::unbounded();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(local_node)
 		.with_live(true)
-		.new_with_sender(send)
 		.with_ns(ses.ns())
 		.with_db(ses.db());
-	let remote_options = local_options.clone().with_id(remote_node);
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
@@ -176,6 +174,22 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	// Bootstrap the remote node, so both nodes are alive
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
+	let sender = test.db.live_sender().unwrap();
+	let local_options = local_options.new_with_sender(sender);
+	let remote_options = local_options.clone().with_id(remote_node);
+
+	// Create the table before starting live query
+	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let _ = compute_create(
+		&ctx,
+		&local_options,
+		tx.clone(),
+		table,
+		Some(Thing::from((table, Id::String("table_create".to_string())))),
+	)
+	.await;
+	tx.lock().await.commit().await.unwrap();
+	println!("Created table");
 
 	// Register a live query on the local node
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -192,7 +206,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 		&remote_options,
 		tx.clone(),
 		table,
-		Some(Thing::from((table, Id::String("first_create".to_string())))),
+		Some(Thing::from((table, Id::String("first_remote_create".to_string())))),
 	)
 	.await;
 	tx.lock().await.commit().await.unwrap();
@@ -208,7 +222,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 		.is_err());
 
 	// Create a local notification to cause scanning of the lq notifications
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node)).with_notifications();
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node));
 	test.db.bootstrap().await.unwrap();
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let local_create_value = compute_create(
@@ -216,7 +230,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 		&local_options,
 		tx.clone(),
 		table,
-		Some(Thing::from((table, Id::String("local_create".to_string())))),
+		Some(Thing::from((table, Id::String("second_local_create".to_string())))),
 	)
 	.await;
 	tx.lock().await.commit().await.unwrap();
@@ -277,15 +291,6 @@ async fn live_creates_remote_notification_for_update() {
 	let live_query_id = Uuid::parse_str("6d7ccea8-5120-4cb0-9225-62e339ecd832").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
 	let ctx = context::Context::background().with_live_sess(&ses);
-	let (send, _recv) = channel::unbounded();
-	let local_options = Options::new()
-		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
-		.with_id(local_node)
-		.with_live(true)
-		.new_with_sender(send)
-		.with_ns(ses.ns())
-		.with_db(ses.db());
-	let remote_options = local_options.clone().with_id(remote_node);
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
@@ -297,6 +302,15 @@ async fn live_creates_remote_notification_for_update() {
 	// Bootstrap the remote node, so both nodes are alive
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
+	let send = test.db.live_sender().unwrap();
+	let local_options = Options::new()
+		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
+		.with_id(local_node)
+		.with_live(true)
+		.new_with_sender(send)
+		.with_ns(ses.ns())
+		.with_db(ses.db());
+	let remote_options = local_options.clone().with_id(remote_node);
 
 	// Create the record we will update
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
@@ -399,7 +413,18 @@ async fn live_creates_remote_notification_for_delete() {
 	let live_query_id = Uuid::parse_str("1ef4da92-344c-4ce3-b9cf-7cc572956e3f").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
 	let ctx = context::Context::background().with_live_sess(&ses);
-	let (send, _recv) = channel::unbounded();
+	// Init as local node, so we do not receive the notification
+	let t1 = Timestamp {
+		value: 0x0102030405060708u64,
+	};
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let mut test = init(local_node, clock).await.unwrap();
+
+	// Bootstrap the remote node, so both nodes are alive
+	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
+	test.db.bootstrap().await.unwrap();
+
+	let send = test.db.live_sender().unwrap();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(local_node)
@@ -408,17 +433,6 @@ async fn live_creates_remote_notification_for_delete() {
 		.with_ns(ses.ns())
 		.with_db(ses.db());
 	let remote_options = local_options.clone().with_id(remote_node);
-	let t1 = Timestamp {
-		value: 0x0102030405060708u64,
-	};
-
-	// Init as local node, so we do not receive the notification
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
-	let mut test = init(local_node, clock).await.unwrap();
-
-	// Bootstrap the remote node, so both nodes are alive
-	test.db = test.db.with_node_id(sql::uuid::Uuid::from(remote_node)).with_notifications();
-	test.db.bootstrap().await.unwrap();
 
 	// Create a record that we intend to delete for a notification
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();

@@ -6,6 +6,7 @@ use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
 use channel::Sender;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
@@ -51,7 +52,7 @@ pub struct Options {
 	/// The channel over which we send notifications
 	/// Must be set alongside live, and preferably populated via datastore notifications channel
 	/// TODO create ticket to sort this
-	pub sender: Option<Sender<Notification>>,
+	pub sender: Option<Arc<RwLock<Sender<Notification>>>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
 }
@@ -366,7 +367,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_sender(&self, sender: Arc<RwLock<Sender<Notification>>>) -> Self {
 		Self {
 			auth: self.auth.clone(),
 			capabilities: self.capabilities.clone(),

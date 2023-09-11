@@ -1040,6 +1040,10 @@ impl Datastore {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
+	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
+		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
+	}
+
 	/// Performs a full database export as SQL
 	#[instrument(level = "debug", skip(self, sess, chn))]
 	pub async fn export(

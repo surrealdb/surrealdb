@@ -122,7 +122,7 @@ impl<'a> Document<'a> {
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
-									if let Err(e) = chn.send(not).await {
+									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
 								}
@@ -131,7 +131,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.send(notification).await?;
+						chn.write().await.send(notification).await?;
 					} else {
 						tx.putc_tbnt(
 							opt.ns(),
@@ -171,7 +171,7 @@ impl<'a> Document<'a> {
 							Ok(nots) => {
 								println!("Found {} notifications in create", nots.len());
 								for not in nots {
-									if let Err(e) = chn.send(not).await {
+									if let Err(e) = chn.write().await.send(not).await {
 										println!("Error sending scanned notification: {}", e);
 										error!("Error sending scanned notification: {}", e);
 									}
@@ -182,7 +182,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.send(notification).await?;
+						chn.write().await.send(notification).await?;
 					} else {
 						println!(
 							"LV node {} was not same as {}. Putting {}",
@@ -225,7 +225,7 @@ impl<'a> Document<'a> {
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
-									if let Err(e) = chn.send(not).await {
+									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
 								}
@@ -234,7 +234,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.send(notification).await?;
+						chn.write().await.send(notification).await?;
 					} else {
 						tx.putc_tbnt(
 							opt.ns(),
