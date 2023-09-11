@@ -2849,7 +2849,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		into(model),
 		into(edges),
 		into(range),
-		into(thing_raw),
+		into(thing),
 		into(table),
 	))(i)?;
 	reparse_idiom_start(v, i)
