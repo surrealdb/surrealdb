@@ -132,11 +132,29 @@ impl<'a> Index<'a> {
 		beg..end
 	}
 
-	pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
-		let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-		beg.extend_from_slice(&[0x00]);
-		let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-		end.extend_from_slice(&[0xff]);
+	#[allow(clippy::too_many_arguments)]
+	pub fn range_all_ids(
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+		from: &Array,
+		from_incl: bool,
+		to: &Array,
+		to_incl: bool,
+	) -> (Vec<u8>, Vec<u8>) {
+		let mut beg = PrefixIds::new(ns, db, tb, ix, from).encode().unwrap();
+		if from_incl {
+			beg.extend_from_slice(&[0x00]);
+		} else {
+			beg.extend_from_slice(&[0xff]);
+		}
+		let mut end = PrefixIds::new(ns, db, tb, ix, to).encode().unwrap();
+		if to_incl {
+			end.extend_from_slice(&[0xff]);
+		} else {
+			end.extend_from_slice(&[0x00]);
+		}
 		(beg, end)
 	}
 }

@@ -6,8 +6,8 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	MatchesThingIterator, StandardEqualThingIterator, ThingIterator, UniqueEqualThingIterator,
-	UniqueRangeThingIterator,
+	IndexEqualThingIterator, IndexRangeThingIterator, MatchesThingIterator, ThingIterator,
+	UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
@@ -176,7 +176,9 @@ impl QueryExecutor {
 						Ok(None)
 					}
 				}
-				IteratorEntry::Range(_, ir, _from, _to) => Ok(Some(self.new_range_iterator(*ir)?)),
+				IteratorEntry::Range(_, ir, from, to) => {
+					Ok(self.new_range_iterator(opt, *ir, from, to)?)
+				}
 			}
 		} else {
 			Ok(None)
@@ -189,9 +191,9 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperator::Equality(array) => Ok(Some(ThingIterator::StandardEqual(
-				StandardEqualThingIterator::new(opt, ix, array)?,
-			))),
+			IndexOperator::Equality(array) => {
+				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, array)?)))
+			}
 			IndexOperator::RangePart(_, _) => {
 				todo!()
 			}
@@ -199,8 +201,29 @@ impl QueryExecutor {
 		}
 	}
 
-	fn new_range_iterator(&self, _ir: IndexRef) -> Result<ThingIterator, Error> {
-		todo!()
+	fn new_range_iterator(
+		&self,
+		opt: &Options,
+		ir: IndexRef,
+		from: &RangeValue,
+		to: &RangeValue,
+	) -> Result<Option<ThingIterator>, Error> {
+		if let Some(ix) = self.index_definitions.get(&ir) {
+			match ix.index {
+				Index::Idx => {
+					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+						opt, ix, from, to,
+					))))
+				}
+				Index::Uniq => {
+					return Ok(Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+						opt, ix, from, to,
+					))))
+				}
+				_ => {}
+			}
+		}
+		Ok(None)
 	}
 
 	fn new_unique_index_iterator(
@@ -217,10 +240,6 @@ impl QueryExecutor {
 			}
 			_ => Ok(None),
 		}
-	}
-
-	fn _new_unique_range_iterator() -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::_UniqueRange(UniqueRangeThingIterator {}))
 	}
 
 	async fn new_search_index_iterator(

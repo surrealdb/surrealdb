@@ -424,8 +424,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[ignore]
-async fn select_standard_index_range() -> Result<(), Error> {
+async fn select_index_range_from_to() -> Result<(), Error> {
 	let sql = r"
 	DEFINE INDEX year ON TABLE test COLUMNS year;
 	CREATE test:0 SET year = 2000;
@@ -442,9 +441,15 @@ async fn select_standard_index_range() -> Result<(), Error> {
 					{
 						detail: {
 							plan: {
+								from: {
+									inclusive: false,
+									value: 2000
+								},
 								index: 'year',
-								operator: '<',
-								value: 2020
+								to: {
+									inclusive: false,
+									value: 2020
+								}
 							},
 							table: 'test'
 						},
@@ -456,7 +461,199 @@ async fn select_standard_index_range() -> Result<(), Error> {
 	}
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(r#"[{test:test]"#);
+		let val = Value::parse(
+			r"[
+					{
+						id: test:10,
+						year: 2010
+					},
+					{
+						id: test:15,
+						year: 2015
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_index_range_from_incl_to() -> Result<(), Error> {
+	let sql = r"
+	DEFINE INDEX year ON TABLE test COLUMNS year;
+	CREATE test:0 SET year = 2000;
+	CREATE test:10 SET year = 2010;
+	CREATE test:15 SET year = 2015;
+	CREATE test:20 SET year = 2020;
+	SELECT * FROM test WHERE year >= 2000 AND year < 2020 EXPLAIN;
+	SELECT * FROM test WHERE year >= 2000 AND year < 2020";
+	let mut res = execute_test(sql, 7, 5).await?;
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: true,
+									value: 2000
+								},
+								index: 'year',
+								to: {
+									inclusive: false,
+									value: 2020
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						id: test:0,
+						year: 2000
+					},
+					{
+						id: test:10,
+						year: 2010
+					},
+					{
+						id: test:15,
+						year: 2015
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_index_range_from_to_incl() -> Result<(), Error> {
+	let sql = r"
+	DEFINE INDEX year ON TABLE test COLUMNS year;
+	CREATE test:0 SET year = 2000;
+	CREATE test:10 SET year = 2010;
+	CREATE test:15 SET year = 2015;
+	CREATE test:20 SET year = 2020;
+	SELECT * FROM test WHERE year > 2000 AND year <= 2020 EXPLAIN;
+	SELECT * FROM test WHERE year > 2000 AND year <= 2020";
+	let mut res = execute_test(sql, 7, 5).await?;
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2000
+								},
+								index: 'year',
+								to: {
+									inclusive: true,
+									value: 2020
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						id: test:10,
+						year: 2010
+					},
+					{
+						id: test:15,
+						year: 2015
+					},
+					{
+						id: test:20,
+						year: 2020
+					},
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
+	let sql = r"
+	DEFINE INDEX year ON TABLE test COLUMNS year;
+	CREATE test:0 SET year = 2000;
+	CREATE test:10 SET year = 2010;
+	CREATE test:15 SET year = 2015;
+	CREATE test:20 SET year = 2020;
+	SELECT * FROM test WHERE year >= 2000 AND year <= 2020 EXPLAIN;
+	SELECT * FROM test WHERE year >= 2000 AND year <= 2020";
+	let mut res = execute_test(sql, 7, 5).await?;
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: true,
+									value: 2000
+								},
+								index: 'year',
+								to: {
+									inclusive: true,
+									value: 2020
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r"[
+					{
+						id: test:0,
+						year: 2000
+					},
+					{
+						id: test:10,
+						year: 2010
+					},
+					{
+						id: test:15,
+						year: 2015
+					},
+					{
+						id: test:20,
+						year: 2020
+					},
+				]",
+		);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	Ok(())

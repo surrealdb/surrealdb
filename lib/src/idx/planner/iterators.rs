@@ -3,16 +3,17 @@ use crate::err::Error;
 use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
+use crate::idx::planner::plan::RangeValue;
 use crate::key;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing};
 
 pub(crate) enum ThingIterator {
-	StandardEqual(StandardEqualThingIterator),
-	_StandardRange(StandardRangeThingIterator),
+	IndexEqual(IndexEqualThingIterator),
+	IndexRange(IndexRangeThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
-	_UniqueRange(UniqueRangeThingIterator),
+	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
 }
 
@@ -23,28 +24,32 @@ impl ThingIterator {
 		size: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		match self {
-			ThingIterator::StandardEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::_StandardRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::IndexEqual(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::_UniqueRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 		}
 	}
 }
 
-pub(crate) struct StandardEqualThingIterator {
+pub(crate) struct IndexEqualThingIterator {
 	beg: Vec<u8>,
 	end: Vec<u8>,
 }
 
-impl StandardEqualThingIterator {
-	pub(super) fn new(
-		opt: &Options,
-		ix: &DefineIndexStatement,
-		v: &Array,
-	) -> Result<StandardEqualThingIterator, Error> {
-		let (beg, end) =
-			key::index::Index::range_all_ids(opt.ns(), opt.db(), &ix.what, &ix.name, v);
+impl IndexEqualThingIterator {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Array) -> Result<Self, Error> {
+		let (beg, end) = key::index::Index::range_all_ids(
+			opt.ns(),
+			opt.db(),
+			&ix.what,
+			&ix.name,
+			v,
+			true,
+			v,
+			true,
+		);
 		Ok(Self {
 			beg,
 			end,
@@ -68,15 +73,77 @@ impl StandardEqualThingIterator {
 	}
 }
 
-pub(crate) struct StandardRangeThingIterator {}
+pub(crate) struct IndexRangeThingIterator {
+	beg: Vec<u8>,
+	end: Vec<u8>,
+	beg_excl: Option<Vec<u8>>,
+	end_excl: Option<Vec<u8>>,
+}
 
-impl StandardRangeThingIterator {
+impl IndexRangeThingIterator {
+	pub(super) fn new(
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		from: &RangeValue,
+		to: &RangeValue,
+	) -> Self {
+		let (beg, end) = key::index::Index::range_all_ids(
+			opt.ns(),
+			opt.db(),
+			&ix.what,
+			&ix.name,
+			&Array::from(from.value.to_owned()),
+			from.inclusive,
+			&Array::from(to.value.to_owned()),
+			to.inclusive,
+		);
+		let beg_excl = if from.inclusive {
+			Some(beg.clone())
+		} else {
+			None
+		};
+		let end_excl = if to.inclusive {
+			Some(end.clone())
+		} else {
+			None
+		};
+		Self {
+			beg,
+			end,
+			beg_excl,
+			end_excl,
+		}
+	}
+
 	async fn next_batch(
 		&mut self,
-		_txn: &Transaction,
-		_limit: u32,
+		txn: &Transaction,
+		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		todo!()
+		let min = self.beg.clone();
+		let max = self.end.clone();
+		let res = txn.lock().await.scan(min..max, limit).await?;
+		if let Some((key, _)) = res.last() {
+			self.beg = key.clone();
+			self.beg.push(0x00);
+		}
+		let mut r = Vec::with_capacity(res.len());
+		for (k, v) in res {
+			if let Some(b) = &self.beg_excl {
+				if b.eq(&k) {
+					self.beg_excl = None;
+					continue;
+				}
+			}
+			if let Some(e) = &self.end_excl {
+				if e.eq(&k) {
+					self.end_excl = None;
+					continue;
+				}
+			}
+			r.push((v.into(), NO_DOC_ID));
+		}
+		Ok(r)
 	}
 }
 
@@ -109,6 +176,14 @@ impl UniqueEqualThingIterator {
 pub(crate) struct UniqueRangeThingIterator {}
 
 impl UniqueRangeThingIterator {
+	pub(super) fn new(
+		_opt: &Options,
+		_ix: &DefineIndexStatement,
+		_from: &RangeValue,
+		_to: &RangeValue,
+	) -> Self {
+		todo!()
+	}
 	async fn next_batch(
 		&mut self,
 		_txn: &Transaction,
