@@ -165,7 +165,7 @@ impl Datastore {
 		clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
-		let (inner, clock) = match path {
+		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
