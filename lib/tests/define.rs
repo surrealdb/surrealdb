@@ -274,6 +274,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -304,6 +305,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
