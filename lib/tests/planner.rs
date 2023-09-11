@@ -660,3 +660,189 @@ async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
 async fn select_unique_range_from_incl_to_incl() -> Result<(), Error> {
 	select_range(true, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
 }
+
+fn single_range_operator_test(unique: bool, op: &str) -> String {
+	format!(
+		"DEFINE INDEX year ON TABLE test COLUMNS year {};
+		CREATE test:10 SET year = 2010;
+		CREATE test:15 SET year = 2015;
+		CREATE test:20 SET year = 2020;
+		SELECT id FROM test WHERE year {} 2015 EXPLAIN;
+		SELECT id FROM test WHERE year {} 2015;",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		},
+		op,
+		op,
+	)
+}
+
+async fn select_single_range_operator(
+	unique: bool,
+	op: &str,
+	explain: &str,
+	result: &str,
+) -> Result<(), Error> {
+	let mut res = execute_test(&single_range_operator_test(unique, op), 6, 4).await?;
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(explain);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(result);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+const EXPLAIN_LESS: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: None
+						},
+						index: 'year',
+						to: {
+							inclusive: false,
+							value: 2015
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_LESS: &str = r"[
+		{
+			id: test:10,
+		}
+	]";
+#[tokio::test]
+async fn select_index_single_range_operator_less() -> Result<(), Error> {
+	select_single_range_operator(false, "<", EXPLAIN_LESS, RESULT_LESS).await
+}
+
+#[tokio::test]
+async fn select_unique_single_range_operator_less() -> Result<(), Error> {
+	select_single_range_operator(true, "<", EXPLAIN_LESS, RESULT_LESS).await
+}
+
+const EXPLAIN_LESS_OR_EQUAL: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: None
+						},
+						index: 'year',
+						to: {
+							inclusive: true,
+							value: 2015
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_LESS_OR_EQUAL: &str = r"[
+		{
+			id: test:10,
+		},
+		{
+			id: test:15,
+		}
+	]";
+
+#[tokio::test]
+async fn select_index_single_range_operator_less_or_equal() -> Result<(), Error> {
+	select_single_range_operator(false, "<=", EXPLAIN_LESS_OR_EQUAL, RESULT_LESS_OR_EQUAL).await
+}
+
+#[tokio::test]
+async fn select_unique_single_range_operator_less_or_equal() -> Result<(), Error> {
+	select_single_range_operator(true, "<=", EXPLAIN_LESS_OR_EQUAL, RESULT_LESS_OR_EQUAL).await
+}
+
+const EXPLAIN_MORE: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: 2015
+						},
+						index: 'year',
+						to: {
+							inclusive: false,
+							value: None
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_MORE: &str = r"[
+		{
+			id: test:20,
+		}
+	]";
+#[tokio::test]
+async fn select_index_single_range_operator_more() -> Result<(), Error> {
+	select_single_range_operator(false, ">", EXPLAIN_MORE, RESULT_MORE).await
+}
+
+#[tokio::test]
+async fn select_unique_single_range_operator_more() -> Result<(), Error> {
+	select_single_range_operator(true, ">", EXPLAIN_MORE, RESULT_MORE).await
+}
+
+const EXPLAIN_MORE_OR_EQUAL: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: true,
+							value: 2015
+						},
+						index: 'year',
+						to: {
+							inclusive: false,
+							value: None
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_MORE_OR_EQUAL: &str = r"[
+		{
+			id: test:15,
+		},
+		{
+			id: test:20,
+		}
+	]";
+
+#[tokio::test]
+async fn select_index_single_range_operator_more_or_equal() -> Result<(), Error> {
+	select_single_range_operator(false, ">=", EXPLAIN_MORE_OR_EQUAL, RESULT_MORE_OR_EQUAL).await
+}
+
+#[tokio::test]
+async fn select_unique_single_range_operator_more_or_equal() -> Result<(), Error> {
+	select_single_range_operator(true, ">=", EXPLAIN_MORE_OR_EQUAL, RESULT_MORE_OR_EQUAL).await
+}
