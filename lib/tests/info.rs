@@ -140,7 +140,7 @@ async fn info_for_table() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let output_regex = Regex::new(
-		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, tables: \{  \} \}",
+		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, lives: \{  \}, tables: \{  \} \}",
 	)
 	.unwrap();
 	let out_str = out.unwrap().to_string();
@@ -393,8 +393,8 @@ async fn permissions_checks_info_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 	];
 
 	let test_cases = [
