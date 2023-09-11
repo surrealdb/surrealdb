@@ -209,6 +209,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 
 	// Create a local notification to cause scanning of the lq notifications
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node)).with_notifications();
+	test.db.bootstrap().await.unwrap();
 	let tx = test.db.transaction(true, false).await.unwrap().enclose();
 	let local_create_value = compute_create(
 		&ctx,
