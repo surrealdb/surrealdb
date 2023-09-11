@@ -13,7 +13,6 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use revision::revisioned;
@@ -70,7 +69,7 @@ impl DeleteStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				v if v == 1 => Ok(a.remove(0)),
+				1 => Ok(a.remove(0)),
 				// There were no results
 				_ => Err(Error::SingleOnlyOutput),
 			},
@@ -109,13 +108,10 @@ pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
-	let (i, (cond, output, timeout, parallel)) = cut(|i| {
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((i, (cond, output, timeout, parallel)))
-	})(i)?;
+	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
+	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	Ok((
 		i,
 		DeleteStatement {

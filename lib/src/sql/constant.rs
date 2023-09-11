@@ -2,16 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use crate::sql::Datetime;
 use chrono::TimeZone;
 use chrono::Utc;
 use derive::Store;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::value;
-use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -122,71 +117,37 @@ impl fmt::Display for Constant {
 	}
 }
 
-pub fn constant(i: &str) -> IResult<&str, Constant> {
-	alt((constant_math, constant_time))(i)
-}
-
-fn constant_math(i: &str) -> IResult<&str, Constant> {
-	preceded(
-		tag_no_case("math::"),
-		alt((
-			value(Constant::MathE, tag_no_case("E")),
-			value(Constant::MathFrac1Pi, tag_no_case("FRAC_1_PI")),
-			value(Constant::MathFrac1Sqrt2, tag_no_case("FRAC_1_SQRT_2")),
-			value(Constant::MathFrac2Pi, tag_no_case("FRAC_2_PI")),
-			value(Constant::MathFrac2SqrtPi, tag_no_case("FRAC_2_SQRT_PI")),
-			value(Constant::MathFracPi2, tag_no_case("FRAC_PI_2")),
-			value(Constant::MathFracPi3, tag_no_case("FRAC_PI_3")),
-			value(Constant::MathFracPi4, tag_no_case("FRAC_PI_4")),
-			value(Constant::MathFracPi6, tag_no_case("FRAC_PI_6")),
-			value(Constant::MathFracPi8, tag_no_case("FRAC_PI_8")),
-			value(Constant::MathInf, tag_no_case("INF")),
-			value(Constant::MathLn10, tag_no_case("LN_10")),
-			value(Constant::MathLn2, tag_no_case("LN_2")),
-			value(Constant::MathLog102, tag_no_case("LOG10_2")),
-			value(Constant::MathLog10E, tag_no_case("LOG10_E")),
-			value(Constant::MathLog210, tag_no_case("LOG2_10")),
-			value(Constant::MathLog2E, tag_no_case("LOG2_E")),
-			value(Constant::MathPi, tag_no_case("PI")),
-			value(Constant::MathSqrt2, tag_no_case("SQRT_2")),
-			value(Constant::MathTau, tag_no_case("TAU")),
-		)),
-	)(i)
-}
-
-fn constant_time(i: &str) -> IResult<&str, Constant> {
-	preceded(tag_no_case("time::"), alt((value(Constant::TimeEpoch, tag_no_case("EPOCH")),)))(i)
-}
-
 #[cfg(test)]
 mod tests {
+
+	use crate::sql::builtin::{builtin_name, BuiltinName};
 
 	use super::*;
 
 	#[test]
 	fn constant_lowercase() {
 		let sql = "math::pi";
-		let res = constant(sql);
+		let res = builtin_name(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Constant::MathPi);
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
 	}
 
 	#[test]
 	fn constant_uppercase() {
 		let sql = "MATH::PI";
-		let res = constant(sql);
+		let res = builtin_name(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Constant::MathPi);
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
 	}
 
 	#[test]
 	fn constant_mixedcase() {
 		let sql = "math::PI";
-		let res = constant(sql);
+		let res = builtin_name(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Constant::MathPi);
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
 	}
 }

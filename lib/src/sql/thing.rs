@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use super::error::expected;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -120,7 +122,7 @@ impl Thing {
 }
 
 pub fn thing(i: &str) -> IResult<&str, Thing> {
-	alt((thing_raw, thing_single, thing_double))(i)
+	expected("a thing", alt((thing_raw, thing_single, thing_double)))(i)
 }
 
 fn thing_single(i: &str) -> IResult<&str, Thing> {

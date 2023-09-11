@@ -90,6 +90,7 @@ mod tests {
 		}
 	}
 
+	#[allow(clippy::derivable_impls)]
 	impl Default for ShowStatement {
 		fn default() -> Self {
 			ShowStatement {

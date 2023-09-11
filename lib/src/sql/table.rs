@@ -13,6 +13,8 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use super::error::expected;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -89,7 +91,7 @@ impl Display for Table {
 }
 
 pub fn table(i: &str) -> IResult<&str, Table> {
-	let (i, v) = ident_raw(i)?;
+	let (i, v) = expected("a table name", ident_raw)(i)?;
 	Ok((i, Table(v)))
 }
 

@@ -17,7 +17,7 @@ jobs:
     steps:
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -48,16 +48,10 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Test workspace + coverage
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-workspace-coverage
+        run: cargo make ci-workspace-coverage
 
       - name: Debug info
         if: always()
@@ -88,41 +82,26 @@ jobs:
           sudo apt-get -y update
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Check workspace
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-check
+        run: cargo make ci-check
 
       - name: Check format
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-format
+        run: cargo make ci-format
 
       - name: Check wasm
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-check-wasm
+        run: cargo make ci-check-wasm
 
       - name: Check clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: ci-clippy
+        run: cargo make ci-clippy
 
   build:
     name: Build ${{ matrix.arch }}
@@ -186,7 +165,7 @@ jobs:
           rm -rf foundationdb-clients_6.3.23-1_amd64.deb
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
           targets: ${{ matrix.arch }}

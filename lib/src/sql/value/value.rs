@@ -8,19 +8,20 @@ use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
+use crate::sql::builtin::builtin_name;
 use crate::sql::bytes::Bytes;
 use crate::sql::cast::{cast, Cast};
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
-use crate::sql::constant::{constant, Constant};
+use crate::sql::constant::Constant;
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
-use crate::sql::expression::{binary, unary, Expression};
+use crate::sql::expression::{unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{function, Function};
+use crate::sql::function::{builtin_function, defined_function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
@@ -39,7 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, thing_raw, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::{operator, Query};
+use crate::sql::{builtin, operator, Query};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -47,7 +48,7 @@ use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{self, into, opt};
+use nom::combinator::{self, cut, into, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
@@ -2705,28 +2706,24 @@ impl TryNeg for Value {
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
 	let (i, start) = single(i)?;
-	let (i, expr_tail) = opt(|i| {
-		let (i, o) = operator::binary(i)?;
-		let (i, r) = value(i)?;
-		Ok((i, (o, r)))
-	})(i)?;
-	let v = if let Some((o, r)) = expr_tail {
+	if let (i, Some(o)) = opt(operator::binary)(i)? {
+		let (i, r) = cut(value)(i)?;
 		let expr = match r {
 			Value::Expression(r) => r.augment(start, o),
 			_ => Expression::new(start, o, r),
 		};
-		Value::from(expr)
+		let v = Value::from(expr);
+		Ok((i, v))
 	} else {
-		start
-	};
-	Ok((i, v))
+		Ok((i, start))
+	}
 }
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
-	let _diving = crate::sql::parser::depth::dive()?;
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		alt((
 			terminated(
@@ -2743,10 +2740,9 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2770,11 +2766,10 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
-pub fn select(i: &str) -> IResult<&str, Value> {
+pub fn select_start(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		alt((
 			into(unary),
-			into(binary),
 			combinator::value(Value::None, tag_no_case("NONE")),
 			combinator::value(Value::Null, tag_no_case("NULL")),
 			combinator::value(Value::Bool(true), tag_no_case("true")),
@@ -2784,10 +2779,9 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2808,13 +2802,45 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
+pub fn function_or_const(i: &str) -> IResult<&str, Value> {
+	alt((into(defined_function), |i| {
+		let (i, v) = builtin_name(i)?;
+		match v {
+			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
+			builtin::BuiltinName::Function(name) => {
+				builtin_function(name, i).map(|(i, v)| (i, v.into()))
+			}
+		}
+	}))(i)
+}
+
+pub fn select(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive(i)?;
+	let (i, start) = select_start(i)?;
+	if let (i, Some(op)) = opt(operator::binary)(i)? {
+		// In a binary expression single ident's arent tables but paths.
+		let start = match start {
+			Value::Table(Table(x)) => Value::Idiom(Idiom::from(x)),
+			x => x,
+		};
+		let (i, r) = cut(value)(i)?;
+		let expr = match r {
+			Value::Expression(r) => r.augment(start, op),
+			_ => Expression::new(start, op, r),
+		};
+		let v = Value::from(expr);
+		Ok((i, v))
+	} else {
+		Ok((i, start))
+	}
+}
+
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
-		into(function),
+		function_or_const,
 		into(subquery),
-		into(constant),
 		into(datetime),
 		into(duration),
 		into(future),
@@ -2831,7 +2857,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive()?;
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	// Use a specific parser for JSON objects
 	fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;

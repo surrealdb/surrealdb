@@ -49,8 +49,7 @@ pub async fn signin(
 					// Attempt to signin to database
 					super::signin::db(kvs, session, ns, db, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
 		// NS signin
@@ -69,8 +68,7 @@ pub async fn signin(
 					// Attempt to signin to namespace
 					super::signin::ns(kvs, session, ns, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
 		// KV signin
@@ -88,11 +86,10 @@ pub async fn signin(
 					// Attempt to signin to root
 					super::signin::kv(kvs, session, user, pass).await
 				}
-				// There is no username or password
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::MissingUserOrPass),
 			}
 		}
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoSigninTarget),
 	}
 }
 
@@ -119,9 +116,9 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for finding the signin record
-					let sess = Session::viewer().with_ns(&ns).with_db(&db);
+					let sess = Session::editor().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars).await {
+					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
@@ -148,6 +145,8 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Log the authenticated scope info
+								trace!("Signing in to scope `{}`", sc);
 								// Create the authentication token
 								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
@@ -165,23 +164,18 @@ pub async fn sc(
 								match enc {
 									// The auth token was created successfully
 									Ok(tk) => Ok(Some(tk)),
-									// There was an error creating the token
-									_ => Err(Error::InvalidAuth),
+									_ => Err(Error::TokenMakingFailed),
 								}
 							}
-							// No record was returned
-							_ => Err(Error::InvalidAuth),
+							_ => Err(Error::NoRecordFound),
 						},
-						// The signin query failed
-						_ => Err(Error::InvalidAuth),
+						_ => Err(Error::SigninQueryFailed),
 					}
 				}
-				// This scope does not allow signin
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::ScopeNoSignin),
 			}
 		}
-		// The scope does not exists
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoScopeFound),
 	}
 }
 
@@ -209,6 +203,8 @@ pub async fn db(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated database info
+			trace!("Signing in to database `{}`", db);
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -220,11 +216,9 @@ pub async fn db(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		// The password did not verify
 		_ => Err(Error::InvalidAuth),
 	}
 }
@@ -251,6 +245,8 @@ pub async fn ns(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated namespace info
+			trace!("Signing in to namespace `{}`", ns);
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -261,8 +257,7 @@ pub async fn ns(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
 		Err(e) => Err(e),
@@ -289,6 +284,8 @@ pub async fn kv(
 				id: Some(user),
 				..Claims::default()
 			};
+			// Log the authenticated root info
+			trace!("Signing in as root");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -298,8 +295,7 @@ pub async fn kv(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Some(tk)),
-				// There was an error creating the token
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::TokenMakingFailed),
 			}
 		}
 		Err(e) => Err(e),

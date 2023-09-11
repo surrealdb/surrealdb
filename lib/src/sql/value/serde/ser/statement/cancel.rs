@@ -37,7 +37,7 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = CancelStatement::default();
+		let stmt = CancelStatement;
 		let value: CancelStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}

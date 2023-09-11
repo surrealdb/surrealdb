@@ -18,6 +18,7 @@ pub use field::{field, DefineFieldStatement};
 pub use function::{function, DefineFunctionStatement};
 pub use index::{index, DefineIndexStatement};
 pub use namespace::{namespace, DefineNamespaceStatement};
+use nom::bytes::complete::tag_no_case;
 pub use param::{param, DefineParamStatement};
 pub use scope::{scope, DefineScopeStatement};
 pub use table::{table, DefineTableStatement};
@@ -29,6 +30,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use derive::Store;
@@ -105,6 +107,8 @@ impl Display for DefineStatement {
 }
 
 pub fn define(i: &str) -> IResult<&str, DefineStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(namespace, DefineStatement::Namespace),
 		map(database, DefineStatement::Database),
