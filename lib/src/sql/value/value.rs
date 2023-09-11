@@ -2837,6 +2837,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
 		function_or_const,
