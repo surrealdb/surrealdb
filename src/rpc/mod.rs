@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 static CONN_CLOSED_ERR: &str = "Connection closed normally";
 
-// Mapping of WebSocketID to WebSocket
 pub struct WebSocketRef(Sender<Message>, CancellationToken);
+// Mapping of WebSocketID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, WebSocketRef>>;
 // Mapping of LiveQueryID to WebSocketID
 type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
