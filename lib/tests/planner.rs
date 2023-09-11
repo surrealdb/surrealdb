@@ -1,4 +1,5 @@
 mod parse;
+
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
@@ -423,238 +424,233 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_index_range_from_to() -> Result<(), Error> {
-	let sql = r"
-	DEFINE INDEX year ON TABLE test COLUMNS year;
+fn range_test(unique: bool, from_incl: bool, to_incl: bool) -> String {
+	let from_op = if from_incl {
+		">="
+	} else {
+		">"
+	};
+	let to_op = if to_incl {
+		"<="
+	} else {
+		"<"
+	};
+	format!(
+		"DEFINE INDEX year ON TABLE test COLUMNS year {};
 	CREATE test:0 SET year = 2000;
 	CREATE test:10 SET year = 2010;
 	CREATE test:15 SET year = 2015;
 	CREATE test:20 SET year = 2020;
-	SELECT * FROM test WHERE year > 2000 AND year < 2020 EXPLAIN;
-	SELECT * FROM test WHERE year > 2000 AND year < 2020";
-	let mut res = execute_test(sql, 7, 5).await?;
+	SELECT * FROM test WHERE year {} 2000 AND year {} 2020 EXPLAIN;
+	SELECT * FROM test WHERE year {} 2000 AND year {} 2020;",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		},
+		from_op,
+		to_op,
+		from_op,
+		to_op,
+	)
+}
+
+async fn select_range(
+	unique: bool,
+	from_incl: bool,
+	to_incl: bool,
+	explain: &str,
+	result: &str,
+) -> Result<(), Error> {
+	let mut res = execute_test(&range_test(unique, from_incl, to_incl), 7, 5).await?;
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						detail: {
-							plan: {
-								from: {
-									inclusive: false,
-									value: 2000
-								},
-								index: 'year',
-								to: {
-									inclusive: false,
-									value: 2020
-								}
-							},
-							table: 'test'
-						},
-						operation: 'Iterate Index'
-					}
-				]",
-		);
+		let val = Value::parse(explain);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						id: test:10,
-						year: 2010
-					},
-					{
-						id: test:15,
-						year: 2015
-					}
-				]",
-		);
+		let val = Value::parse(result);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	Ok(())
 }
+
+const EXPLAIN_FROM_TO: &str = r"[
+		{
+			detail: {
+				plan: {
+					from: {
+						inclusive: false,
+						value: 2000
+					},
+					index: 'year',
+					to: {
+						inclusive: false,
+						value: 2020
+					}
+				},
+				table: 'test'
+			},
+			operation: 'Iterate Index'
+		}
+	]";
+
+const RESULT_FROM_TO: &str = r"[
+		{
+			id: test:10,
+			year: 2010
+		},
+		{
+			id: test:15,
+			year: 2015
+		}
+	]";
+#[tokio::test]
+async fn select_index_range_from_to() -> Result<(), Error> {
+	select_range(false, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
+}
+
+#[tokio::test]
+async fn select_unique_range_from_to() -> Result<(), Error> {
+	select_range(true, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
+}
+
+const EXPLAIN_FROM_INCL_TO: &str = r"[
+		{
+			detail: {
+				plan: {
+					from: {
+						inclusive: true,
+						value: 2000
+					},
+					index: 'year',
+					to: {
+						inclusive: false,
+						value: 2020
+					}
+				},
+				table: 'test'
+			},
+			operation: 'Iterate Index'
+		}
+	]";
+
+const RESULT_FROM_INCL_TO: &str = r"[
+		{
+			id: test:0,
+			year: 2000
+		},
+		{
+			id: test:10,
+			year: 2010
+		},
+		{
+			id: test:15,
+			year: 2015
+		}
+	]";
 
 #[tokio::test]
 async fn select_index_range_from_incl_to() -> Result<(), Error> {
-	let sql = r"
-	DEFINE INDEX year ON TABLE test COLUMNS year;
-	CREATE test:0 SET year = 2000;
-	CREATE test:10 SET year = 2010;
-	CREATE test:15 SET year = 2015;
-	CREATE test:20 SET year = 2020;
-	SELECT * FROM test WHERE year >= 2000 AND year < 2020 EXPLAIN;
-	SELECT * FROM test WHERE year >= 2000 AND year < 2020";
-	let mut res = execute_test(sql, 7, 5).await?;
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						detail: {
-							plan: {
-								from: {
-									inclusive: true,
-									value: 2000
-								},
-								index: 'year',
-								to: {
-									inclusive: false,
-									value: 2020
-								}
-							},
-							table: 'test'
-						},
-						operation: 'Iterate Index'
-					}
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						id: test:0,
-						year: 2000
-					},
-					{
-						id: test:10,
-						year: 2010
-					},
-					{
-						id: test:15,
-						year: 2015
-					}
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	Ok(())
+	select_range(false, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
 }
+
+#[tokio::test]
+async fn select_unique_range_from_incl_to() -> Result<(), Error> {
+	select_range(true, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
+}
+
+const EXPLAIN_FROM_TO_INCL: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: 2000
+						},
+						index: 'year',
+						to: {
+							inclusive: true,
+							value: 2020
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_FROM_TO_INCL: &str = r"[
+		{
+			id: test:10,
+			year: 2010
+		},
+		{
+			id: test:15,
+			year: 2015
+		},
+		{
+			id: test:20,
+			year: 2020
+		},
+	]";
 
 #[tokio::test]
 async fn select_index_range_from_to_incl() -> Result<(), Error> {
-	let sql = r"
-	DEFINE INDEX year ON TABLE test COLUMNS year;
-	CREATE test:0 SET year = 2000;
-	CREATE test:10 SET year = 2010;
-	CREATE test:15 SET year = 2015;
-	CREATE test:20 SET year = 2020;
-	SELECT * FROM test WHERE year > 2000 AND year <= 2020 EXPLAIN;
-	SELECT * FROM test WHERE year > 2000 AND year <= 2020";
-	let mut res = execute_test(sql, 7, 5).await?;
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						detail: {
-							plan: {
-								from: {
-									inclusive: false,
-									value: 2000
-								},
-								index: 'year',
-								to: {
-									inclusive: true,
-									value: 2020
-								}
-							},
-							table: 'test'
-						},
-						operation: 'Iterate Index'
-					}
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						id: test:10,
-						year: 2010
-					},
-					{
-						id: test:15,
-						year: 2015
-					},
-					{
-						id: test:20,
-						year: 2020
-					},
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	Ok(())
+	select_range(false, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
 }
 
 #[tokio::test]
-async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
-	let sql = r"
-	DEFINE INDEX year ON TABLE test COLUMNS year;
-	CREATE test:0 SET year = 2000;
-	CREATE test:10 SET year = 2010;
-	CREATE test:15 SET year = 2015;
-	CREATE test:20 SET year = 2020;
-	SELECT * FROM test WHERE year >= 2000 AND year <= 2020 EXPLAIN;
-	SELECT * FROM test WHERE year >= 2000 AND year <= 2020";
-	let mut res = execute_test(sql, 7, 5).await?;
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						detail: {
-							plan: {
-								from: {
-									inclusive: true,
-									value: 2000
-								},
-								index: 'year',
-								to: {
-									inclusive: true,
-									value: 2020
-								}
-							},
-							table: 'test'
+async fn select_unique_range_from_to_incl() -> Result<(), Error> {
+	select_range(true, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
+}
+
+const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: true,
+							value: 2000
 						},
-						operation: 'Iterate Index'
-					}
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r"[
-					{
-						id: test:0,
-						year: 2000
+						index: 'year',
+						to: {
+							inclusive: true,
+							value: 2020
+						}
 					},
-					{
-						id: test:10,
-						year: 2010
-					},
-					{
-						id: test:15,
-						year: 2015
-					},
-					{
-						id: test:20,
-						year: 2020
-					},
-				]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	Ok(())
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			}
+		]";
+
+const RESULT_FROM_INCL_TO_INCL: &str = r"[
+		{
+			id: test:0,
+			year: 2000
+		},
+		{
+			id: test:10,
+			year: 2010
+		},
+		{
+			id: test:15,
+			year: 2015
+		},
+		{
+			id: test:20,
+			year: 2020
+		},
+	]";
+
+#[tokio::test]
+async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
+	select_range(false, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
+}
+
+#[tokio::test]
+async fn select_unique_range_from_incl_to_incl() -> Result<(), Error> {
+	select_range(true, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
 }
