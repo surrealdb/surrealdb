@@ -107,9 +107,8 @@ async fn table_change_feeds() -> Result<(), Error> {
 				versionstamp: 65536,
 				changes: [
 					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
+						define_table: {
+							name: 'person'
 						}
 					}
 				]
@@ -120,7 +119,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 					{
 						update: {
 							id: person:test,
-							name: 'Name: Jaime'
+							name: 'Name: Tobie'
 						}
 					}
 				]
@@ -131,13 +130,24 @@ async fn table_change_feeds() -> Result<(), Error> {
 					{
 						update: {
 							id: person:test,
-							name: 'Name: Tobie'
+							name: 'Name: Jaime'
 						}
 					}
 				]
 			},
 			{
 				versionstamp: 262144,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 327680,
 				changes: [
 					{
 						delete: {
@@ -147,7 +157,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 327680,
+				versionstamp: 393216,
 				changes: [
 					{
 						update: {
@@ -227,9 +237,31 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
-	assert_eq!(array.len(), 4);
-	// UPDATE user:amos
+	assert_eq!(array.len(), 5);
+	// DEFINE TABLE
 	let a = array.get(0).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
+		{
+			define_table: {
+				name: 'user'
+			}
+		}
+	]"
+		)
+		.unwrap()
+	);
+	// UPDATE user:amos
+	let a = array.get(1).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -252,7 +284,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:jane
-	let a = array.get(1).unwrap();
+	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -276,7 +308,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(2).unwrap();
+	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -300,7 +332,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = array.get(3).unwrap();
+	let a = array.get(4).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
