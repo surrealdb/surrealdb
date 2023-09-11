@@ -10,9 +10,9 @@ use crate::sql::{Array, Thing};
 
 pub(crate) enum ThingIterator {
 	StandardEqual(StandardEqualThingIterator),
-	StandardRange(StandardRangeThingIterator),
+	_StandardRange(StandardRangeThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
-	UniqueRange(UniqueRangeThingIterator),
+	_UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
 }
 
@@ -24,9 +24,9 @@ impl ThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		match self {
 			ThingIterator::StandardEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::StandardRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::_StandardRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::_UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 		}
 	}

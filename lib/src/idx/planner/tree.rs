@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
+use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value, With};
 use async_recursion::async_recursion;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub(super) struct Tree {}
 
 impl Tree {
-	/// Traverse the all the conditions and extract every expression
+	/// Traverse all the conditions and extract every expression
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
 		ctx: &'a Context<'_>,
@@ -20,18 +20,26 @@ impl Tree {
 		txn: &'a Transaction,
 		table: &'a Table,
 		cond: &'a Option<Cond>,
-	) -> Result<Option<(Node, IndexMap)>, Error> {
+		with: &'a Option<With>,
+	) -> Result<Option<(Node, IndexMap, Vec<IndexRef>)>, Error> {
+		let with_indexes = match with {
+			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
+			_ => vec![],
+		};
 		let mut b = TreeBuilder {
 			ctx,
 			opt,
 			txn,
 			table,
+			with,
 			indexes: None,
+			index_lookup: Default::default(),
 			index_map: IndexMap::default(),
+			with_indexes,
 		};
 		let mut res = None;
 		if let Some(cond) = cond {
-			res = Some((b.eval_value(&cond.0).await?, b.index_map));
+			res = Some((b.eval_value(&cond.0).await?, b.index_map, b.with_indexes));
 		}
 		Ok(res)
 	}
@@ -42,12 +50,18 @@ struct TreeBuilder<'a> {
 	opt: &'a Options,
 	txn: &'a Transaction,
 	table: &'a Table,
+	with: &'a Option<With>,
 	indexes: Option<Arc<[DefineIndexStatement]>>,
+	index_lookup: HashMap<Idiom, IndexRef>,
 	index_map: IndexMap,
+	with_indexes: Vec<IndexRef>,
 }
 
 impl<'a> TreeBuilder<'a> {
-	async fn find_index(&mut self, i: &Idiom) -> Result<Option<DefineIndexStatement>, Error> {
+	async fn find_index(&mut self, i: &Idiom) -> Result<Option<IndexRef>, Error> {
+		if let Some(ir) = self.index_lookup.get(i) {
+			return Ok(Some(*ir));
+		}
 		if self.indexes.is_none() {
 			let indexes = self
 				.txn
@@ -61,7 +75,15 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(indexes) = &self.indexes {
 			for ix in indexes.as_ref() {
 				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
-					return Ok(Some(ix.clone()));
+					let ir = self.index_lookup.len() as IndexRef;
+					if let Some(With::Index(ixs)) = self.with {
+						if ixs.contains(&ix.name.0) {
+							self.with_indexes.push(ir);
+						}
+					}
+					self.index_lookup.insert(i.clone(), ir);
+					self.index_map.definitions.insert(ir, ix.clone());
+					return Ok(Some(ir));
 				}
 			}
 		}
@@ -107,7 +129,7 @@ impl<'a> TreeBuilder<'a> {
 			} => {
 				let left = self.eval_value(l).await?;
 				let right = self.eval_value(r).await?;
-				if let Some(io) = self.index_map.0.get(e) {
+				if let Some(io) = self.index_map.options.get(e) {
 					return Ok(Node::Expression {
 						io: Some(io.clone()),
 						left: Box::new(left),
@@ -133,31 +155,33 @@ impl<'a> TreeBuilder<'a> {
 
 	fn lookup_index_option(
 		&mut self,
-		ix: &DefineIndexStatement,
+		ir: IndexRef,
 		op: &Operator,
 		id: &Idiom,
 		v: &Node,
 		e: &Expression,
 	) -> Option<IndexOption> {
 		if let Some(v) = v.is_scalar() {
-			let op = match &ix.index {
-				Index::Idx => Self::eval_index_operator(op, v),
-				Index::Uniq => Self::eval_index_operator(op, v),
-				Index::Search {
-					..
-				} => {
-					if let Operator::Matches(mr) = op {
-						Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr))
-					} else {
-						None
+			if let Some(ix) = self.index_map.definitions.get(&ir) {
+				let op = match &ix.index {
+					Index::Idx => Self::eval_index_operator(op, v),
+					Index::Uniq => Self::eval_index_operator(op, v),
+					Index::Search {
+						..
+					} => {
+						if let Operator::Matches(mr) = op {
+							Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr))
+						} else {
+							None
+						}
 					}
+					Index::MTree(_) => None,
+				};
+				if let Some(op) = op {
+					let io = IndexOption::new(ir, id.clone(), op);
+					self.index_map.options.insert(Arc::new(e.clone()), io.clone());
+					return Some(io);
 				}
-				Index::MTree(_) => None,
-			};
-			if let Some(op) = op {
-				let io = IndexOption::new(ix.clone(), id.clone(), op);
-				self.index_map.0.insert(Arc::new(e.clone()), io.clone());
-				return Some(io);
 			}
 		}
 		None
@@ -182,9 +206,14 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
+pub(super) type IndexRef = u16;
+
 /// For each expression the a possible index option
 #[derive(Default)]
-pub(super) struct IndexMap(pub(super) HashMap<Arc<Expression>, IndexOption>);
+pub(super) struct IndexMap {
+	pub(super) options: HashMap<Arc<Expression>, IndexOption>,
+	pub(super) definitions: HashMap<IndexRef, DefineIndexStatement>,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) enum Node {
@@ -194,7 +223,7 @@ pub(super) enum Node {
 		right: Box<Node>,
 		exp: Arc<Expression>,
 	},
-	IndexedField(Idiom, DefineIndexStatement),
+	IndexedField(Idiom, IndexRef),
 	NonIndexedField,
 	Scalar(Value),
 	Unsupported(String),
@@ -209,9 +238,9 @@ impl Node {
 		}
 	}
 
-	pub(super) fn is_indexed_field(&self) -> Option<(&Idiom, &DefineIndexStatement)> {
+	pub(super) fn is_indexed_field(&self) -> Option<(&Idiom, IndexRef)> {
 		if let Node::IndexedField(id, ix) = self {
-			Some((id, ix))
+			Some((id, *ix))
 		} else {
 			None
 		}

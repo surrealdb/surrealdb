@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::Node;
-use crate::sql::statements::DefineIndexStatement;
+use crate::idx::planner::tree::{IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Object};
 use crate::sql::{Expression, Idiom, Operator, Value};
@@ -10,25 +9,27 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
-pub(super) struct PlanBuilder<'a> {
+pub(super) struct PlanBuilder {
 	indexes: Vec<(Arc<Expression>, IndexOption)>,
-	range_queries: HashMap<String, RangeQueryBuilder>,
-	with: &'a Option<With>,
+	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
+	with_indexes: Vec<IndexRef>,
 	all_and: bool,
 	all_exp_with_index: bool,
 }
 
-impl<'a> PlanBuilder<'a> {
-	pub(super) fn build(root: Node, with: &'a Option<With>) -> Result<Plan, Error> {
-		if let Some(with) = with {
-			if matches!(with, With::NoIndex) {
-				return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
-			}
+impl PlanBuilder {
+	pub(super) fn build(
+		root: Node,
+		with: &Option<With>,
+		with_indexes: Vec<IndexRef>,
+	) -> Result<Plan, Error> {
+		if let Some(With::NoIndex) = with {
+			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
 		}
 		let mut b = PlanBuilder {
 			indexes: Vec::new(),
 			range_queries: HashMap::new(),
-			with,
+			with_indexes,
 			all_and: true,
 			all_exp_with_index: true,
 		};
@@ -45,8 +46,8 @@ impl<'a> PlanBuilder<'a> {
 		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
-			if let Some((ixn, rq)) = b.range_queries.drain().take(1).next() {
-				return Ok(Plan::SingleIndexMultiExpression(ixn, rq));
+			if let Some((ir, rq)) = b.range_queries.drain().take(1).next() {
+				return Ok(Plan::SingleIndexMultiExpression(ir, rq));
 			}
 			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.indexes.pop() {
@@ -63,10 +64,8 @@ impl<'a> PlanBuilder<'a> {
 	// Check if we have an explicit list of index we can use
 	fn filter_index_option(&self, io: Option<IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = &io {
-			if let Some(With::Index(ixs)) = self.with {
-				if !ixs.contains(&io.ix().name.0) {
-					return None;
-				}
+			if !self.with_indexes.is_empty() && !self.with_indexes.contains(&io.ir()) {
+				return None;
 			}
 		}
 		io
@@ -113,7 +112,7 @@ impl<'a> PlanBuilder<'a> {
 
 	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
 		if let IndexOperator::RangePart(o, v) = io.op() {
-			match self.range_queries.entry(io.ix().name.0.to_owned()) {
+			match self.range_queries.entry(io.ir()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().add(exp.clone(), o, v);
 				}
@@ -132,7 +131,7 @@ pub(super) enum Plan {
 	TableIterator(Option<String>),
 	SingleIndex(Arc<Expression>, IndexOption),
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
-	SingleIndexMultiExpression(String, RangeQueryBuilder),
+	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -140,7 +139,7 @@ pub(crate) struct IndexOption(Arc<Inner>);
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) struct Inner {
-	ix: DefineIndexStatement,
+	ir: IndexRef,
 	id: Idiom,
 	op: IndexOperator,
 }
@@ -153,16 +152,16 @@ pub(super) enum IndexOperator {
 }
 
 impl IndexOption {
-	pub(super) fn new(ix: DefineIndexStatement, id: Idiom, op: IndexOperator) -> Self {
+	pub(super) fn new(ir: IndexRef, id: Idiom, op: IndexOperator) -> Self {
 		Self(Arc::new(Inner {
-			ix,
+			ir,
 			id,
 			op,
 		}))
 	}
 
-	pub(super) fn ix(&self) -> &DefineIndexStatement {
-		&self.0.ix
+	pub(super) fn ir(&self) -> IndexRef {
+		self.0.ir
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
@@ -173,8 +172,7 @@ impl IndexOption {
 		&self.0.id
 	}
 
-	pub(crate) fn explain(&self) -> Value {
-		let mut r = HashMap::from([("index", Value::from(self.ix().name.0.to_owned()))]);
+	pub(crate) fn explain(&self, e: &mut HashMap<&str, Value>) {
 		match self.op() {
 			IndexOperator::Equality(a) => {
 				let v = if a.len() == 1 {
@@ -182,19 +180,18 @@ impl IndexOption {
 				} else {
 					Value::Array(a.clone())
 				};
-				r.insert("operator", Value::from(Operator::Equal.to_string()));
-				r.insert("value", v);
+				e.insert("operator", Value::from(Operator::Equal.to_string()));
+				e.insert("value", v);
 			}
 			IndexOperator::Matches(qs, a) => {
-				r.insert("operator", Value::from(Operator::Matches(a.clone()).to_string()));
-				r.insert("value", Value::from(qs.to_owned()));
+				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
+				e.insert("value", Value::from(qs.to_owned()));
 			}
 			IndexOperator::RangePart(op, v) => {
-				r.insert("operator", Value::from(op.to_string()));
-				r.insert("value", v.to_owned());
+				e.insert("operator", Value::from(op.to_string()));
+				e.insert("value", v.to_owned());
 			}
 		};
-		Value::Object(Object::from(r))
 	}
 }
 
@@ -226,11 +223,9 @@ impl RangeValue {
 			if self.value.lt(v) {
 				self.value = v.clone();
 			}
-		} else {
-			if self.value.le(v) {
-				self.value = v.clone();
-				self.inclusive = true;
-			}
+		} else if self.value.le(v) {
+			self.value = v.clone();
+			self.inclusive = true;
 		}
 	}
 
@@ -255,11 +250,9 @@ impl RangeValue {
 			if self.value.gt(v) {
 				self.value = v.clone();
 			}
-		} else {
-			if self.value.ge(v) {
-				self.value = v.clone();
-				self.inclusive = true;
-			}
+		} else if self.value.ge(v) {
+			self.value = v.clone();
+			self.inclusive = true;
 		}
 	}
 }
@@ -295,22 +288,21 @@ impl RangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::planner::plan::{IndexOperator, IndexOperator, IndexOption, RangeValue};
-	use crate::sql::statements::DefineIndexStatement;
-	use crate::sql::{Array, Idiom, Operator, Value};
+	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+	use crate::sql::{Array, Idiom, Value};
 	use std::collections::HashSet;
 
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
-			DefineIndexStatement::default(),
+			1,
 			Idiom::from("a.b".to_string()),
 			IndexOperator::Equality(Array::from(vec!["test"])),
 		);
 
 		let io2 = IndexOption::new(
-			DefineIndexStatement::default(),
+			1,
 			Idiom::from("a.b".to_string()),
 			IndexOperator::Equality(Array::from(vec!["test"])),
 		);

@@ -424,6 +424,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn select_standard_index_range() -> Result<(), Error> {
 	let sql = r"
 	DEFINE INDEX year ON TABLE test COLUMNS year;

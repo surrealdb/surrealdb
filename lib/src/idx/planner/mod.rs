@@ -42,10 +42,10 @@ impl<'a> QueryPlanner<'a> {
 		t: Table,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
-		match Tree::build(ctx, self.opt, txn, &t, self.cond).await? {
-			Some((node, im)) => {
+		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
+			Some((node, im, with_indexes)) => {
 				let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
-				match PlanBuilder::build(node, self.with)? {
+				match PlanBuilder::build(node, self.with, with_indexes)? {
 					Plan::SingleIndex(exp, io) => {
 						let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 						it.ingest(Iterable::Index(t.clone(), ir));
