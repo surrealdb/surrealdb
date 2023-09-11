@@ -686,8 +686,8 @@ pub enum Error {
 	InvalidSignup,
 
 	/// Auth was expected to be set but was unknown
-	#[error("Auth was expected to be set but was unknown")]
-	UnknownAuth,
+	#[error("Auth was expected to be set but was unknown: {0}")]
+	UnknownAuth(String),
 }
 
 impl From<Error> for String {

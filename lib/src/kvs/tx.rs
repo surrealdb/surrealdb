@@ -1693,14 +1693,12 @@ impl Transaction {
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::table::lq::prefix(ns, db, tb);
 		Ok(if let Some(e) = self.cache.get(&key) {
-			println!("CACHE GET IN TB LIVES");
 			if let Entry::Lvs(v) = e {
 				v
 			} else {
 				unreachable!();
 			}
 		} else {
-			println!("No cache get in tb lives");
 			let beg = crate::key::table::lq::prefix(ns, db, tb);
 			let end = crate::key::table::lq::suffix(ns, db, tb);
 			let val = self.getr(beg..end, u32::MAX).await?;

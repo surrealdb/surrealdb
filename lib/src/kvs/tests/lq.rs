@@ -54,8 +54,8 @@ async fn live_creates_remote_notification_for_create() {
 	let database = Arc::new("test_database".to_string());
 	let table = "f3d4a40b50ba4221ab02fa406edb58cc";
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
-	let ctx = context::Context::background();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
+	let ctx = context::Context::background().with_live_sess(&ses);
 	let (send, _recv) = channel::unbounded();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
@@ -154,8 +154,8 @@ async fn live_creates_remote_notification_for_update() {
 	let database = Arc::new("test_database".to_string());
 	let table = "862dc7a9-285b-4e25-988f-cf21c83127a3";
 	let live_query_id = Uuid::parse_str("6d7ccea8-5120-4cb0-9225-62e339ecd832").unwrap();
-	let ctx = context::Context::background();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
+	let ctx = context::Context::background().with_live_sess(&ses);
 	let (send, _recv) = channel::unbounded();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
@@ -276,8 +276,8 @@ async fn live_creates_remote_notification_for_delete() {
 	let database = Arc::new("test_database".to_string());
 	let table = "9ebc8a9a-46d7-4751-9077-ee1842684d12";
 	let live_query_id = Uuid::parse_str("1ef4da92-344c-4ce3-b9cf-7cc572956e3f").unwrap();
-	let ctx = context::Context::background();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
+	let ctx = context::Context::background().with_live_sess(&ses);
 	let (send, _recv) = channel::unbounded();
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
@@ -398,6 +398,7 @@ async fn compute_live<'a>(
 		cond: None,
 		fetch: None,
 		archived: None,
+		session: Some(Value::None),
 		auth: None,
 	};
 	live_stm.compute(ctx, opt, &tx, None).await.unwrap()

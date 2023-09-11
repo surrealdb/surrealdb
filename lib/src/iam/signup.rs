@@ -59,7 +59,7 @@ pub async fn sc(
 					// Setup the system session for creating the signup record
 					let sess = Session::editor().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars).await {
+					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
@@ -86,6 +86,8 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Log the authenticated scope info
+								trace!("Signing up to scope `{}`", sc);
 								// Create the authentication token
 								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session

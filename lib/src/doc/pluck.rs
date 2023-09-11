@@ -26,13 +26,25 @@ impl<'a> Document<'a> {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
+					// Output a DIFF of any changes applied to the document
 					Ok(self.initial.doc.diff(self.current.doc.as_ref(), Idiom::default()).into())
 				}
-				Output::After => self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await,
+				Output::After => {
+					// Output the full document after all changes were applied
+					self.current.doc.compute(ctx, opt, txn, Some(&self.current)).await
+				}
 				Output::Before => {
+					// Output the full document before any changes were applied
 					self.initial.doc.compute(ctx, opt, txn, Some(&self.initial)).await
 				}
-				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
+				Output::Fields(v) => {
+					// Configure the context
+					let mut ctx = Context::new(ctx);
+					ctx.add_value("after", self.current.doc.as_ref());
+					ctx.add_value("before", self.initial.doc.as_ref());
+					// Output the specified fields
+					v.compute(&ctx, opt, txn, Some(&self.current), false).await
+				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
