@@ -197,7 +197,7 @@ impl InfoStatement {
 				// Process the live queries
 				let mut tmp = Object::default();
 				for v in run.all_tb_lives(opt.ns(), opt.db(), tb).await?.iter() {
-					tmp.insert(v.id.to_string(), v.to_string().into());
+					tmp.insert(v.id.to_raw(), v.to_string().into());
 				}
 				res.insert("lives".to_owned(), tmp.into());
 				// Ok all good
