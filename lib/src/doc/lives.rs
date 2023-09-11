@@ -50,9 +50,15 @@ impl<'a> Document<'a> {
 					false => &self.current,
 				};
 				// Ensure that a session exists on the LIVE query
-				let sess = lv.session.as_ref().ok_or(Error::UnknownAuth)?;
+				let sess = match lv.session.as_ref() {
+					Some(v) => v,
+					None => continue,
+				};
 				// Ensure that auth info exists on the LIVE query
-				let auth = lv.auth.clone().ok_or(Error::UnknownAuth)?;
+				let auth = match lv.auth.clone() {
+					Some(v) => v,
+					None => continue,
+				};
 				// We need to create a new context which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the session
@@ -66,9 +72,7 @@ impl<'a> Document<'a> {
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data
 				// of the user who created the LIVE query.
-				let lqopt = Options::new_with_perms(opt, true)
-					.with_auth_enabled(true)
-					.with_auth(Arc::from(auth));
+				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
 				// Add $before, $after, $value, and $event params
 				// to this LIVE query so that user can use these
 				// within field projections and WHERE clauses.
