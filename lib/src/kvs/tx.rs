@@ -625,7 +625,7 @@ impl Transaction {
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!(
+		println!(
 			"Scan {:?} - {:?}",
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
@@ -1258,10 +1258,12 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
+		lq: sql::Uuid,
 		limit: u32,
-	) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::table::lq::prefix(ns, db, tb);
-		let suff = crate::key::table::lq::suffix(ns, db, tb);
+	) -> Result<Vec<Notification>, Error> {
+		let pref = crate::key::table::nt::prefix(ns, db, tb, lq.clone());
+		let suff = crate::key::table::nt::suffix(ns, db, tb, lq);
+		println!("Scanning tbnt");
 		trace!(
 			"Scanning range from pref={}, suff={}",
 			crate::key::debug::sprint_key(&pref),
@@ -1269,18 +1271,12 @@ impl Transaction {
 		);
 		let rng = pref..suff;
 		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
+		let mut res: Vec<Notification> = vec![];
 		for (key, value) in scanned {
 			trace!("scan_lv: key={:?} value={:?}", &key, &value);
-			let val: LiveStatement = value.into();
-			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
-			res.push(LqValue {
-				nd: val.node,
-				ns: lv.ns.to_string(),
-				db: lv.db.to_string(),
-				tb: lv.tb.to_string(),
-				lq: val.id.clone(),
-			});
+			let val: Notification = value.into();
+			let _nt_key = crate::key::table::nt::Nt::decode(key.as_slice())?;
+			res.push(val);
 		}
 		Ok(res)
 	}
@@ -1323,6 +1319,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
+		println!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
 		trace!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, nt, expected).await
 	}

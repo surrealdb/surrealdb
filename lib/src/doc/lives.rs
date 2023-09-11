@@ -6,6 +6,7 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use std::ops::Deref;
@@ -26,6 +27,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
+		println!("CHECKING LIVES");
 		if let Some(chn) = &opt.sender {
 			// Clone the sending channel
 			let chn = chn.clone();
@@ -108,7 +110,27 @@ impl<'a> Document<'a> {
 						timestamp: ts.clone(),
 					};
 					if opt.id()? == lv.node.0 {
-						// TODO read pending remote notifications
+						let previous_nots = tx
+							.scan_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								sql::uuid::Uuid(lv.node.0),
+								1000,
+							)
+							.await;
+						match previous_nots {
+							Ok(nots) => {
+								for not in nots {
+									if let Err(e) = chn.send(not).await {
+										error!("Error sending scanned notification: {}", e);
+									}
+								}
+							}
+							Err(err) => {
+								error!("Error scanning notifications: {}", err);
+							}
+						}
 						chn.send(notification).await?;
 					} else {
 						tx.putc_tbnt(
@@ -125,6 +147,7 @@ impl<'a> Document<'a> {
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
+					println!("Creating CREATE notification");
 					let notification = Notification {
 						live_id: lv.id.clone(),
 						node_id: lv.node.clone(),
@@ -134,9 +157,39 @@ impl<'a> Document<'a> {
 						timestamp: ts.clone(),
 					};
 					if opt.id()? == lv.node.0 {
-						// TODO read pending remote notifications
+						println!("LV node {} was same as {}", lv.node.0, opt.id()?);
+						let previous_nots = tx
+							.scan_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								lv.node.clone(),
+								1000,
+							)
+							.await;
+						match previous_nots {
+							Ok(nots) => {
+								println!("Found {} notifications in create", nots.len());
+								for not in nots {
+									if let Err(e) = chn.send(not).await {
+										println!("Error sending scanned notification: {}", e);
+										error!("Error sending scanned notification: {}", e);
+									}
+								}
+							}
+							Err(err) => {
+								println!("Error scanning notifications: {}", err);
+								error!("Error scanning notifications: {}", err);
+							}
+						}
 						chn.send(notification).await?;
 					} else {
+						println!(
+							"LV node {} was not same as {}. Putting {}",
+							lv.node.0,
+							opt.id()?,
+							notification
+						);
 						tx.putc_tbnt(
 							opt.ns(),
 							opt.db(),
@@ -160,7 +213,27 @@ impl<'a> Document<'a> {
 						timestamp: ts.clone(),
 					};
 					if opt.id()? == lv.node.0 {
-						// TODO read pending remote notifications
+						let previous_nots = tx
+							.scan_tbnt(
+								opt.ns(),
+								opt.db(),
+								&self.id.unwrap().tb,
+								sql::uuid::Uuid(lv.node.0),
+								1000,
+							)
+							.await;
+						match previous_nots {
+							Ok(nots) => {
+								for not in nots {
+									if let Err(e) = chn.send(not).await {
+										error!("Error sending scanned notification: {}", e);
+									}
+								}
+							}
+							Err(err) => {
+								error!("Error scanning notifications: {}", err);
+							}
+						}
 						chn.send(notification).await?;
 					} else {
 						tx.putc_tbnt(
