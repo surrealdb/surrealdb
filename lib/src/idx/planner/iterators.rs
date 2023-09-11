@@ -25,7 +25,7 @@ impl ThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		match self {
 			ThingIterator::IndexEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueEqual(i) => i.next_batch(tx, size).await,
+			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
@@ -73,15 +73,56 @@ impl IndexEqualThingIterator {
 	}
 }
 
-pub(crate) struct IndexRangeThingIterator {
+struct RangeScan {
 	beg: Vec<u8>,
 	end: Vec<u8>,
 	beg_excl: Option<Vec<u8>>,
 	end_excl: Option<Vec<u8>>,
 }
 
+impl RangeScan {
+	fn new(beg: Vec<u8>, beg_incl: bool, end: Vec<u8>, end_incl: bool) -> Self {
+		let beg_excl = if !beg_incl {
+			Some(beg.clone())
+		} else {
+			None
+		};
+		let end_excl = if !end_incl {
+			Some(end.clone())
+		} else {
+			None
+		};
+		Self {
+			beg,
+			end,
+			beg_excl,
+			end_excl,
+		}
+	}
+
+	fn matches(&mut self, k: &Key) -> bool {
+		if let Some(b) = &self.beg_excl {
+			if b.eq(k) {
+				self.beg_excl = None;
+				return false;
+			}
+		}
+		if let Some(e) = &self.end_excl {
+			if e.eq(k) {
+				self.end_excl = None;
+				return false;
+			}
+		}
+		true
+	}
+}
+
+pub(crate) struct IndexRangeThingIterator {
+	r: RangeScan,
+}
+
 impl IndexRangeThingIterator {
-	pub(super) fn new(
+	pub(super) fn new_index(
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		from: &RangeValue,
@@ -97,21 +138,8 @@ impl IndexRangeThingIterator {
 			&Array::from(to.value.to_owned()),
 			to.inclusive,
 		);
-		let beg_excl = if from.inclusive {
-			Some(beg.clone())
-		} else {
-			None
-		};
-		let end_excl = if to.inclusive {
-			Some(end.clone())
-		} else {
-			None
-		};
 		Self {
-			beg,
-			end,
-			beg_excl,
-			end_excl,
+			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
 		}
 	}
 
@@ -120,28 +148,18 @@ impl IndexRangeThingIterator {
 		txn: &Transaction,
 		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		let min = self.beg.clone();
-		let max = self.end.clone();
+		let min = self.r.beg.clone();
+		let max = self.r.end.clone();
 		let res = txn.lock().await.scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
-			self.beg.push(0x00);
+			self.r.beg = key.clone();
+			self.r.beg.push(0x00);
 		}
 		let mut r = Vec::with_capacity(res.len());
 		for (k, v) in res {
-			if let Some(b) = &self.beg_excl {
-				if b.eq(&k) {
-					self.beg_excl = None;
-					continue;
-				}
+			if self.r.matches(&k) {
+				r.push((v.into(), NO_DOC_ID));
 			}
-			if let Some(e) = &self.end_excl {
-				if e.eq(&k) {
-					self.end_excl = None;
-					continue;
-				}
-			}
-			r.push((v.into(), NO_DOC_ID));
 		}
 		Ok(r)
 	}
@@ -159,11 +177,7 @@ impl UniqueEqualThingIterator {
 		})
 	}
 
-	async fn next_batch(
-		&mut self,
-		txn: &Transaction,
-		_limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	async fn next_batch(&mut self, txn: &Transaction) -> Result<Vec<(Thing, DocId)>, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
 				return Ok(vec![(val.into(), NO_DOC_ID)]);
@@ -173,23 +187,76 @@ impl UniqueEqualThingIterator {
 	}
 }
 
-pub(crate) struct UniqueRangeThingIterator {}
+pub(crate) struct UniqueRangeThingIterator {
+	r: RangeScan,
+	done: bool,
+}
 
 impl UniqueRangeThingIterator {
 	pub(super) fn new(
-		_opt: &Options,
-		_ix: &DefineIndexStatement,
-		_from: &RangeValue,
-		_to: &RangeValue,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		from: &RangeValue,
+		to: &RangeValue,
 	) -> Self {
-		todo!()
+		let beg = key::index::Index::new(
+			opt.ns(),
+			opt.db(),
+			&ix.what,
+			&ix.name,
+			&Array::from(from.value.to_owned()),
+			None,
+		)
+		.encode()
+		.unwrap();
+		let end = key::index::Index::new(
+			opt.ns(),
+			opt.db(),
+			&ix.what,
+			&ix.name,
+			&Array::from(to.value.to_owned()),
+			None,
+		)
+		.encode()
+		.unwrap();
+		Self {
+			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
+			done: false,
+		}
 	}
+
 	async fn next_batch(
 		&mut self,
-		_txn: &Transaction,
-		_limit: u32,
+		txn: &Transaction,
+		mut limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		todo!()
+		if self.done {
+			return Ok(vec![]);
+		}
+		let min = self.r.beg.clone();
+		let max = self.r.end.clone();
+		limit += 1;
+		let mut tx = txn.lock().await;
+		let res = tx.scan(min..max, limit).await?;
+		let mut r = Vec::with_capacity(res.len());
+		for (k, v) in res {
+			limit -= 1;
+			if limit == 0 {
+				self.r.beg = k;
+				return Ok(r);
+			}
+			if self.r.matches(&k) {
+				r.push((v.into(), NO_DOC_ID));
+			}
+		}
+		let end = self.r.end.clone();
+		if self.r.matches(&end) {
+			if let Some(v) = tx.get(end).await? {
+				r.push((v.into(), NO_DOC_ID));
+			}
+		}
+		self.done = true;
+		Ok(r)
 	}
 }
 

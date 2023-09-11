@@ -440,13 +440,19 @@ fn range_test(unique: bool, from_incl: bool, to_incl: bool) -> String {
 	CREATE test:0 SET year = 2000;
 	CREATE test:10 SET year = 2010;
 	CREATE test:15 SET year = 2015;
+	CREATE test:16 SET year = {};
 	CREATE test:20 SET year = 2020;
-	SELECT * FROM test WHERE year {} 2000 AND year {} 2020 EXPLAIN;
-	SELECT * FROM test WHERE year {} 2000 AND year {} 2020;",
+	SELECT id FROM test WHERE year {} 2000 AND year {} 2020 EXPLAIN;
+	SELECT id FROM test WHERE year {} 2000 AND year {} 2020;",
 		if unique {
 			"UNIQUE"
 		} else {
 			""
+		},
+		if unique {
+			"2016"
+		} else {
+			"2015"
 		},
 		from_op,
 		to_op,
@@ -462,7 +468,7 @@ async fn select_range(
 	explain: &str,
 	result: &str,
 ) -> Result<(), Error> {
-	let mut res = execute_test(&range_test(unique, from_incl, to_incl), 7, 5).await?;
+	let mut res = execute_test(&range_test(unique, from_incl, to_incl), 8, 6).await?;
 	{
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(explain);
@@ -499,11 +505,12 @@ const EXPLAIN_FROM_TO: &str = r"[
 const RESULT_FROM_TO: &str = r"[
 		{
 			id: test:10,
-			year: 2010
 		},
 		{
 			id: test:15,
-			year: 2015
+		},
+		{
+			id: test:16,
 		}
 	]";
 #[tokio::test]
@@ -539,15 +546,15 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 const RESULT_FROM_INCL_TO: &str = r"[
 		{
 			id: test:0,
-			year: 2000
 		},
 		{
 			id: test:10,
-			year: 2010
 		},
 		{
 			id: test:15,
-			year: 2015
+		},
+		{
+			id: test:16,
 		}
 	]";
 
@@ -584,15 +591,15 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 const RESULT_FROM_TO_INCL: &str = r"[
 		{
 			id: test:10,
-			year: 2010
 		},
 		{
 			id: test:15,
-			year: 2015
+		},
+		{
+			id: test:16,
 		},
 		{
 			id: test:20,
-			year: 2020
 		},
 	]";
 
@@ -629,19 +636,18 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 const RESULT_FROM_INCL_TO_INCL: &str = r"[
 		{
 			id: test:0,
-			year: 2000
 		},
 		{
 			id: test:10,
-			year: 2010
 		},
 		{
 			id: test:15,
-			year: 2015
+		},
+		{
+			id: test:16,
 		},
 		{
 			id: test:20,
-			year: 2020
 		},
 	]";
 
