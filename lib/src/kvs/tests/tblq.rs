@@ -19,6 +19,7 @@ async fn write_scan_tblq() {
 		cond: None,
 		fetch: None,
 		archived: None,
+		session: Some(Value::None),
 		auth: None,
 	};
 	tx.putc_tblq(ns, db, tb, live_stm, None).await.unwrap();

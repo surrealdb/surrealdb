@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::err::Error::TimestampOverflow;
-use crate::sql;
 use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

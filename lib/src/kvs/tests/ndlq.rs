@@ -18,7 +18,7 @@ async fn write_scan_ndlq() {
 
 	// Verify scan
 	let mut tx = test.db.transaction(true, false).await.unwrap();
-	let res = tx.scan_tblq(ns, db, tb, 100).await.unwrap();
+	let res = tx.scan_ndlq(&nd, 100).await.unwrap();
 	assert_eq!(
 		res,
 		vec![LqValue {
