@@ -181,10 +181,8 @@ pub(crate) async fn matches(
 					// it means that we are using an Iterator::Index
 					// and we are iterating over documents that already matches the expression.
 					if let Some(ir) = doc.ir {
-						if let Some(e) = exe.get_iterator_expression(ir) {
-							if e.eq(exp) {
-								return Ok(Value::Bool(true));
-							}
+						if exe.is_iterator_expression(ir, exp) {
+							return Ok(Value::Bool(true));
 						}
 					}
 					// Evaluate the matches

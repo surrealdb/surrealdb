@@ -743,9 +743,31 @@ async fn changefeed() {
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
-	assert_eq!(array.len(), 4);
-	// UPDATE user:amos
+	assert_eq!(array.len(), 5);
+	// DEFINE TABLE
 	let a = array.get(0).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
+		{
+			define_table: {
+				name: 'user'
+			}
+		}
+	]"
+		)
+		.unwrap()
+	);
+	// UPDATE user:amos
+	let a = array.get(1).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -768,7 +790,7 @@ async fn changefeed() {
 		.unwrap()
 	);
 	// UPDATE user:jane
-	let a = array.get(1).unwrap();
+	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -792,7 +814,7 @@ async fn changefeed() {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(2).unwrap();
+	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -816,7 +838,7 @@ async fn changefeed() {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = array.get(3).unwrap();
+	let a = array.get(4).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
