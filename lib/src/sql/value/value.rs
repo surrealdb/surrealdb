@@ -2707,6 +2707,7 @@ impl TryNeg for Value {
 pub fn value(i: &str) -> IResult<&str, Value> {
 	let (i, start) = single(i)?;
 	if let (i, Some(o)) = opt(operator::binary)(i)? {
+		let _diving = crate::sql::parser::depth::dive(i)?;
 		let (i, r) = cut(value)(i)?;
 		let expr = match r {
 			Value::Expression(r) => r.augment(start, o),
@@ -2837,6 +2838,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
 		function_or_const,
