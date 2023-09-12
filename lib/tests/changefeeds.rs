@@ -487,7 +487,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	assert!(versionstamp1 == versionstamp1b);
+	assert!(versionstamp2 == versionstamp1b);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
