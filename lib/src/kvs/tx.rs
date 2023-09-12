@@ -2444,6 +2444,17 @@ impl Transaction {
 		self.cf.update(ns, db, tb, id.clone(), v)
 	}
 
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn record_table_change(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		dt: &DefineTableStatement,
+	) {
+		self.cf.define_table(ns, db, tb, dt)
+	}
+
 	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
