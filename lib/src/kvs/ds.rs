@@ -353,6 +353,11 @@ impl Datastore {
 
 	// Initialise bootstrap with implicit values intended for runtime
 	pub async fn bootstrap(&self) -> Result<(), Error> {
+		trace!("Clearing cluster");
+		let mut tx = self.transaction(true, false).await?;
+		self.nuke_whole_cluster(&mut tx).await?;
+		tx.commit().await?;
+
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
@@ -406,7 +411,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(node_id.0).await?;
+		tx.set_cl(node_id.0).await?;
 		tx.set_hb(timestamp.clone(), node_id.0).await?;
 		Ok(())
 	}
@@ -423,7 +428,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			// TODO should be delr in case of nested entries
-			tx.del_nd(hb.nd).await?;
+			tx.del_cl(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
@@ -475,6 +480,38 @@ impl Datastore {
 		Ok(())
 	}
 
+	pub async fn nuke_whole_cluster(&self, tx: &mut Transaction) -> Result<(), Error> {
+		// Scan nodes
+		let cls = tx.scan_cl(1000).await?;
+		trace!("Found {} nodes", cls.len());
+		for cl in cls {
+			tx.del_cl(cl.node_id).await?;
+		}
+		// Scan heartbeats
+		let hbs = tx
+			.scan_hb(
+				&Timestamp {
+					value: 0,
+				},
+				1000,
+			)
+			.await?;
+		trace!("Found {} heartbeats", hbs.len());
+		// Scan node live queries
+		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
+		trace!("Found {} node live queries", ndlqs.len());
+		for ndlq in ndlqs {
+			tx.del_ndlq(&ndlq.nd).await?;
+			// Scan table live queries
+			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
+			trace!("Found {} table live queries", tblqs.len());
+			for tblq in tblqs {
+				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+			}
+		}
+		Ok(())
+	}
+
 	pub async fn _garbage_collect(
 		// TODO not invoked
 		// But this is garbage collection outside of bootstrap
@@ -490,7 +527,7 @@ impl Datastore {
 			let new_archived = self
 				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
 				.await?;
-			tx.del_nd(hb.nd).await?;
+			tx.del_cl(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
 			for lq_value in new_archived {
 				archived.push(lq_value);
@@ -568,7 +605,7 @@ impl Datastore {
 		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_nd(dead_node.nd).await?;
+			tx.del_cl(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}

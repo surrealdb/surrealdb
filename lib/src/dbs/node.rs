@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::err::Error::TimestampOverflow;
+use crate::sql;
 use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use std::time::Duration;
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store)]
 #[revisioned(revision = 1)]
 pub struct ClusterMembership {
-	pub name: String,
+	pub node_id: uuid::Uuid,
 	// TiKV = TiKV TSO Timestamp as u64
 	// not TiKV = local nanos as u64
 	pub heartbeat: Timestamp,
