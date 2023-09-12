@@ -27,8 +27,8 @@ use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
-use crate::sql::ml_model::{ml_model, MlModel};
 use crate::sql::mock::{mock, Mock};
+use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
@@ -154,7 +154,7 @@ pub enum Value {
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
-	MlModel(Box<MlModel>),
+	MlModel(Box<Model>),
 	// Add new variants here
 }
 
@@ -305,8 +305,8 @@ impl From<Function> for Value {
 	}
 }
 
-impl From<MlModel> for Value {
-	fn from(v: MlModel) -> Self {
+impl From<Model> for Value {
+	fn from(v: Model) -> Self {
 		Value::MlModel(Box::new(v))
 	}
 }
@@ -2817,7 +2817,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 
 /// A path like production: Constants, predefined functions, user defined functions and ml models.
 pub fn path_like(i: &str) -> IResult<&str, Value> {
-	alt((into(defined_function), into(ml_model), |i| {
+	alt((into(defined_function), into(model), |i| {
 		let (i, v) = builtin_name(i)?;
 		match v {
 			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),

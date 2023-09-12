@@ -27,19 +27,19 @@ use super::{
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
-pub struct MlModel {
+pub struct Model {
 	pub name: String,
 	pub version: String,
 	pub parameters: Value,
 }
 
-impl fmt::Display for MlModel {
+impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ml::{}<{}>({})", self.name, self.version, self.parameters)
 	}
 }
 
-impl MlModel {
+impl Model {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
@@ -49,11 +49,11 @@ impl MlModel {
 		_txn: &Transaction,
 		_doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Unimplemented("Ml model evaluation not yet implemented".to_string()))
+		Err(Error::Unimplemented("ML model evaluation not yet implemented".to_string()))
 	}
 }
 
-pub fn ml_model(i: &str) -> IResult<&str, MlModel> {
+pub fn model(i: &str) -> IResult<&str, Model> {
 	let (i, _) = tag("ml::")(i)?;
 
 	cut(|i| {
@@ -69,7 +69,7 @@ pub fn ml_model(i: &str) -> IResult<&str, MlModel> {
 
 		Ok((
 			i,
-			MlModel {
+			Model {
 				name: name.to_owned(),
 				version,
 				parameters,
@@ -106,7 +106,7 @@ mod test {
 				purchased_before: true
 			})
 		"#;
-		let res = ml_model(sql);
+		let res = model(sql);
 		let out = res.unwrap().1.to_string();
 		assert_eq!("ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",out);
 	}
