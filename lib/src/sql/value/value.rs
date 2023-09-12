@@ -28,7 +28,7 @@ use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::ml_model::{ml_model, MlModel};
-use crate::sql::model::{model, Model};
+use crate::sql::mock::{mock, Mock};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
@@ -141,7 +141,7 @@ pub enum Value {
 	Param(Param),
 	Idiom(Idiom),
 	Table(Table),
-	Model(Model),
+	Mock(Mock),
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
@@ -191,9 +191,9 @@ impl From<Idiom> for Value {
 	}
 }
 
-impl From<Model> for Value {
-	fn from(v: Model) -> Self {
-		Value::Model(v)
+impl From<Mock> for Value {
+	fn from(v: Mock) -> Self {
+		Value::Mock(v)
 	}
 }
 
@@ -862,9 +862,9 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
-	/// Check if this Value is a Model
-	pub fn is_model(&self) -> bool {
-		matches!(self, Value::Model(_))
+	/// Check if this Value is a Mock
+	pub fn is_mock(&self) -> bool {
+		matches!(self, Value::Mock(_))
 	}
 
 	/// Check if this Value is a Range
@@ -1144,7 +1144,6 @@ impl Value {
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
-			// TODO: add? Self::MlModel(_) => "model"
 			_ => "incorrect type",
 		}
 	}
@@ -2540,7 +2539,7 @@ impl fmt::Display for Value {
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
-			Value::Model(v) => write!(f, "{v}"),
+			Value::Mock(v) => write!(f, "{v}"),
 			Value::Number(v) => write!(f, "{v}"),
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Param(v) => write!(f, "{v}"),
@@ -2769,7 +2768,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			into(block),
 			into(param),
 			into(regex),
-			into(model),
+			into(mock),
 			into(edges),
 			into(range),
 			into(thing),
@@ -2805,7 +2804,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 			into(block),
 			into(param),
 			into(regex),
-			into(model),
+			into(mock),
 			into(edges),
 			into(range),
 			into(thing),
@@ -2862,7 +2861,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		into(future),
 		into(block),
 		into(param),
-		into(model),
+		into(mock),
 		into(edges),
 		into(range),
 		into(thing),
@@ -3009,7 +3008,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
 		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

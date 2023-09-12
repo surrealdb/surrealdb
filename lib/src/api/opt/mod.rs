@@ -394,7 +394,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Param(param) => json!(param),
 		Value::Idiom(idiom) => json!(idiom),
 		Value::Table(table) => json!(table),
-		Value::Model(model) => json!(model),
+		Value::Mock(mock) => json!(mock),
 		Value::Regex(regex) => json!(regex),
 		Value::Block(block) => json!(block),
 		Value::Range(range) => json!(range),

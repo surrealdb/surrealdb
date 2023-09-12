@@ -143,7 +143,7 @@ impl Iterator {
 				// Add the record to the iterator
 				self.ingest(Iterable::Thing(v));
 			}
-			Value::Model(v) => {
+			Value::Mock(v) => {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified

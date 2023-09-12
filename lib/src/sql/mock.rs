@@ -11,10 +11,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
 
 pub struct IntoIter {
-	model: Model,
+	model: Mock,
 	index: u64,
 }
 
@@ -22,7 +22,7 @@ impl Iterator for IntoIter {
 	type Item = Thing;
 	fn next(&mut self) -> Option<Thing> {
 		match &self.model {
-			Model::Count(tb, c) => {
+			Mock::Count(tb, c) => {
 				if self.index < *c {
 					self.index += 1;
 					Some(Thing {
@@ -33,7 +33,7 @@ impl Iterator for IntoIter {
 					None
 				}
 			}
-			Model::Range(tb, b, e) => {
+			Mock::Range(tb, b, e) => {
 				if self.index == 0 {
 					self.index = *b - 1;
 				}
@@ -52,15 +52,15 @@ impl Iterator for IntoIter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Model")]
+#[serde(rename = "$surrealdb::private::sql::Mock")]
 #[revisioned(revision = 1)]
-pub enum Model {
+pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
 	// Add new variants here
 }
 
-impl IntoIterator for Model {
+impl IntoIterator for Mock {
 	type Item = Thing;
 	type IntoIter = IntoIter;
 	fn into_iter(self) -> Self::IntoIter {
@@ -71,38 +71,37 @@ impl IntoIterator for Model {
 	}
 }
 
-impl fmt::Display for Model {
+impl fmt::Display for Mock {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Model::Count(tb, c) => {
+			Mock::Count(tb, c) => {
 				write!(f, "|{}:{}|", escape_ident(tb), c)
 			}
-			Model::Range(tb, b, e) => {
+			Mock::Range(tb, b, e) => {
 				write!(f, "|{}:{}..{}|", escape_ident(tb), b, e)
 			}
 		}
 	}
 }
 
-pub fn model(i: &str) -> IResult<&str, Model> {
+pub fn mock(i: &str) -> IResult<&str, Mock> {
 	let (i, _) = char('|')(i)?;
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, c) = take_u64(i)?;
-	let (i, e) = alt((value(None, char('|')), map(model_range, Some)))(i)?;
+	let (i, e) = alt((value(None, char('|')), map(mock_range, Some)))(i)?;
 	if let Some(e) = e {
-		Ok((i, Model::Range(t, c, e)))
+		Ok((i, Mock::Range(t, c, e)))
 	} else {
-		Ok((i, Model::Count(t, c)))
+		Ok((i, Mock::Count(t, c)))
 	}
 }
 
-fn model_range(i: &str) -> IResult<&str, u64> {
+fn mock_range(i: &str) -> IResult<&str, u64> {
 	let (i, _) = char('.')(i)?;
 	let (i, _) = char('.')(i)?;
 	let (i, e) = take_u64(i)?;
 	let (i, _) = char('|')(i)?;
-	//Ok((i, Model::Range(t, b, e)))
 	Ok((i, e))
 }
 
@@ -112,20 +111,20 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn model_count() {
+	fn mock_count() {
 		let sql = "|test:1000|";
-		let res = model(sql);
+		let res = mock(sql);
 		let out = res.unwrap().1;
 		assert_eq!("|test:1000|", format!("{}", out));
-		assert_eq!(out, Model::Count(String::from("test"), 1000));
+		assert_eq!(out, Mock::Count(String::from("test"), 1000));
 	}
 
 	#[test]
-	fn model_range() {
+	fn mock_range() {
 		let sql = "|test:1..1000|";
-		let res = model(sql);
+		let res = mock(sql);
 		let out = res.unwrap().1;
 		assert_eq!("|test:1..1000|", format!("{}", out));
-		assert_eq!(out, Model::Range(String::from("test"), 1, 1000));
+		assert_eq!(out, Mock::Range(String::from("test"), 1, 1000));
 	}
 }
