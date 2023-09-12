@@ -194,9 +194,7 @@ impl QueryExecutor {
 			IndexOperator::Equality(array) => {
 				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, array)?)))
 			}
-			IndexOperator::RangePart(_, _) => {
-				todo!()
-			}
+			IndexOperator::RangePart(_, _) => Ok(None), // TODO
 			_ => Ok(None),
 		}
 	}
