@@ -182,6 +182,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 pub fn distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIST")(i)?;
+	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
 		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),

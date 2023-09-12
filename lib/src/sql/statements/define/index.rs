@@ -278,7 +278,7 @@ mod tests {
 
 	#[test]
 	fn check_create_mtree_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col MTREE DIMENSION 4";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col MTREE DIMENSION 4";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
