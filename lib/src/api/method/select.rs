@@ -5,6 +5,7 @@ use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::method::Live;
 use crate::sql::Id;
 use crate::sql::Value;
 use serde::de::DeserializeOwned;
@@ -34,7 +35,7 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let param = match range {
-					Some(range) => resource?.with_range(range)?,
+					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Select);
@@ -76,7 +77,7 @@ where
 	into_future! {execute_vec}
 }
 
-impl<C> Select<'_, C, Value>
+impl<'r, C> Select<'r, C, Value>
 where
 	C: Connection,
 {
@@ -87,7 +88,7 @@ where
 	}
 }
 
-impl<C, R> Select<'_, C, Vec<R>>
+impl<'r, C, R> Select<'r, C, Vec<R>>
 where
 	C: Connection,
 {
@@ -95,5 +96,21 @@ where
 	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
 		self.range = Some(bounds.into());
 		self
+	}
+}
+
+impl<'r, C, R> Select<'r, C, R>
+where
+	C: Connection,
+	R: DeserializeOwned,
+{
+	/// Listen to real-time changes of a select query
+	pub fn live(self) -> Live<'r, C, R> {
+		Live {
+			router: self.router,
+			resource: self.resource,
+			range: self.range,
+			response_type: self.response_type,
+		}
 	}
 }

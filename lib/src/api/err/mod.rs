@@ -164,6 +164,23 @@ pub enum Error {
 		server_metadata: semver::BuildMetadata,
 		supported_metadata: semver::BuildMetadata,
 	},
+
+	/// The protocol or storage engine being used does not support live queries on the architecture
+	/// it's running on
+	#[error("The protocol or storage engine does not support live queries on this architecture")]
+	LiveQueriesNotSupported,
+
+	/// Tried to use a range query on an object
+	#[error("Live queries on objects not supported: {0}")]
+	LiveOnObject(Object),
+
+	/// Tried to use a range query on an array
+	#[error("Live queries on arrays not supported: {0}")]
+	LiveOnArray(Array),
+
+	/// Tried to use a range query on an edge or edges
+	#[error("Live queries on edges not supported: {0}")]
+	LiveOnEdges(Edges),
 }
 
 #[cfg(feature = "protocol-http")]

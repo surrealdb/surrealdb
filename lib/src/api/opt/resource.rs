@@ -27,14 +27,13 @@ pub enum Resource {
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<Id>) -> Result<Value> {
+	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Range> {
 		match self {
 			Resource::Table(Table(table)) => Ok(sql::Range {
 				tb: table,
 				beg: range.start,
 				end: range.end,
-			}
-			.into()),
+			}),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),

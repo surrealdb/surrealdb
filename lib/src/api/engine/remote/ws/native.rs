@@ -13,12 +13,18 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Notification;
+use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
+use crate::opt::from_value;
 use crate::sql::serde::{deserialize, serialize};
+use crate::sql::Object;
 use crate::sql::Strand;
+use crate::sql::Uuid;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::stream::SplitSink;
@@ -130,9 +136,12 @@ impl Connection for Client {
 
 			router(url, maybe_connector, capacity, config, socket, route_rx);
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
+
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
+					features,
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -157,6 +166,12 @@ impl Connection for Client {
 			Ok(receiver)
 		})
 	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+enum LiveQueryKey {
+	Int(i64),
+	Uuid(Uuid),
 }
 
 #[allow(clippy::too_many_lines)]
@@ -189,6 +204,7 @@ pub(crate) fn router(
 					0 => HashMap::new(),
 					capacity => HashMap::with_capacity(capacity),
 				};
+				let mut live_queries = HashMap::new();
 
 				let mut interval = time::interval(PING_INTERVAL);
 				// don't bombard the server with pings if we miss some ticks
@@ -231,6 +247,11 @@ pub(crate) fn router(
 										vars.remove(key);
 									}
 								}
+								Method::Kill => {
+									if let [Value::Uuid(uuid)] = &params[..1] {
+										live_queries.remove(&LiveQueryKey::Uuid(*uuid));
+									}
+								}
 								_ => {}
 							}
 							let method_str = match method {
@@ -262,7 +283,12 @@ pub(crate) fn router(
 									last_activity = Instant::now();
 									match routes.entry(id) {
 										Entry::Vacant(entry) => {
+											// Register query route
 											entry.insert((method, response));
+											// Register live query listener, if applicable
+											if let Some(sender) = param.notification_sender {
+												live_queries.insert(LiveQueryKey::Int(id), sender);
+											}
 										}
 										Entry::Occupied(..) => {
 											let error = Error::DuplicateRequestId(id);
@@ -288,53 +314,102 @@ pub(crate) fn router(
 						Either::Response(result) => {
 							last_activity = Instant::now();
 							match result {
-								Ok(message) => match Response::try_from(&message) {
-									Ok(option) => {
-										if let Some(response) = option {
-											trace!("{response:?}");
-											if let Some(Ok(id)) =
-												response.id.map(Value::coerce_to_i64)
-											{
-												if let Some((_method, sender)) = routes.remove(&id)
-												{
-													let _res = sender
-														.into_send_async(DbResponse::from(
-															response.result,
-														))
-														.await;
-												}
-											}
-										}
-									}
-									Err(error) => {
-										#[derive(Deserialize)]
-										struct Response {
-											id: Option<Value>,
-										}
-
-										// Let's try to find out the ID of the response that failed to deserialise
-										if let Message::Binary(binary) = message {
-											if let Ok(Response {
-												id,
-											}) = deserialize(&binary)
-											{
-												// Return an error if an ID was returned
-												if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
-													if let Some((_method, sender)) =
-														routes.remove(&id)
-													{
-														let _res = sender
-															.into_send_async(Err(error))
-															.await;
+								Ok(message) => {
+									match Response::try_from(&message) {
+										Ok(option) => {
+											// We are only interested in responses that are not empty
+											if let Some(response) = option {
+												trace!("{response:?}");
+												match response.id {
+													// If `id` is set this is a normal response
+													Some(id) => {
+														if let Ok(id) = id.coerce_to_i64() {
+															// We can only route responses with IDs
+															if let Some((_method, sender)) =
+																routes.remove(&id)
+															{
+																// If this is a live query, replace the client ID with the live query ID from the database
+																if let Some(sender) = live_queries
+																	.remove(&LiveQueryKey::Int(id))
+																{
+																	if let Ok(Data::Other(
+																		Value::Uuid(uuid),
+																	)) = &response.result
+																	{
+																		live_queries.insert(
+																			LiveQueryKey::Uuid(
+																				*uuid,
+																			),
+																			sender,
+																		);
+																	}
+																}
+																// Send the response back to the caller
+																let _res = sender
+																	.into_send_async(
+																		DbResponse::from(
+																			response.result,
+																		),
+																	)
+																	.await;
+															}
+														}
 													}
+													// If `id` is not set, this may be a live query notification
+													None => match response.result {
+														Ok(Data::Live(notification)) => {
+															// Check if this live query is registered
+															if let Some(sender) = live_queries.get(
+																&LiveQueryKey::Uuid(
+																	notification.id,
+																),
+															) {
+																// Send the notification back to the caller if it is
+																let _res =
+																	sender.send(notification).await;
+															}
+														}
+														Ok(..) => { /* Ignored responses like pings */
+														}
+														Err(error) => error!("{error:?}"),
+													},
 												}
-											} else {
-												// Unfortunately, we don't know which response failed to deserialize
-												warn!("Failed to deserialise message; {error:?}");
+											}
+										}
+										Err(error) => {
+											#[derive(Deserialize)]
+											struct Response {
+												id: Option<Value>,
+											}
+
+											// Let's try to find out the ID of the response that failed to deserialise
+											if let Message::Binary(binary) = message {
+												if let Ok(Response {
+													id,
+												}) = deserialize(&binary)
+												{
+													// Return an error if an ID was returned
+													if let Some(Ok(id)) =
+														id.map(Value::coerce_to_i64)
+													{
+														if let Some((_method, sender)) =
+															routes.remove(&id)
+														{
+															let _res = sender
+																.into_send_async(Err(error))
+																.await;
+														}
+													}
+												} else {
+													// Unfortunately, we don't know which response failed to deserialize
+													warn!(
+														"Failed to deserialise message; {error:?}"
+													);
+												}
 											}
 										}
 									}
-								},
+								}
 								Err(error) => {
 									match error {
 										WsError::ConnectionClosed => {
@@ -410,6 +485,30 @@ impl Response {
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
+				// Live queries currently don't support the binary protocol
+				// This is a workaround until live queries add support to send messages over binary
+				if let Ok(value) = crate::sql::json(text) {
+					if let Value::Object(Object(mut response)) = value {
+						if let Some(Value::Object(Object(mut map))) = response.remove("result") {
+							if let Some(Value::Uuid(id)) = map.remove("id") {
+								if let Some(value) = map.remove("action") {
+									if let Ok(action) = from_value(value) {
+										if let Some(result) = map.remove("result") {
+											return Ok(Some(Self {
+												id: None,
+												result: Ok(Data::Live(Notification {
+													id,
+													action,
+													result,
+												})),
+											}));
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}

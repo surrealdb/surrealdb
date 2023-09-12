@@ -59,6 +59,7 @@ impl Connection for Db {
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
+			features.insert(ExtraFeatures::LiveQueries);
 
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
