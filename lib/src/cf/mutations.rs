@@ -1,12 +1,13 @@
 use crate::sql::array::Array;
 use crate::sql::object::Object;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::vs::to_u128_be;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
@@ -17,6 +18,19 @@ pub enum TableMutation {
 	// we do include it in the first field for convenience.
 	Set(Thing, Value),
 	Del(Thing),
+	Def(DefineTableStatement),
+}
+
+impl From<DefineTableStatement> for Value {
+	#[inline]
+	fn from(v: DefineTableStatement) -> Self {
+		let mut h = HashMap::<&str, Value>::new();
+		if let Some(id) = v.id {
+			h.insert("id", id.into());
+		}
+		h.insert("name", v.name.0.into());
+		Value::Object(Object::from(h))
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -59,6 +73,7 @@ impl TableMutation {
 				let o = Object::from(h);
 				("delete".to_string(), Value::Object(o))
 			}
+			TableMutation::Def(t) => ("define_table".to_string(), Value::from(t)),
 		};
 
 		let mut h = BTreeMap::<String, Value>::new();
@@ -96,6 +111,7 @@ impl Display for TableMutation {
 		match self {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
+			TableMutation::Def(t) => write!(f, "{}", t),
 		}
 	}
 }
@@ -164,6 +180,10 @@ mod tests {
 						])))),
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::Def(DefineTableStatement {
+						name: "mytb".into(),
+						..DefineTableStatement::default()
+					}),
 				],
 			)]),
 		);
@@ -171,7 +191,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}}],"versionstamp":1}"#
+			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
 		);
 	}
 }

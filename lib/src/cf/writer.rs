@@ -1,5 +1,6 @@
 use crate::cf::{TableMutation, TableMutations};
 use crate::kvs::Key;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
@@ -69,6 +70,15 @@ impl Writer {
 		} else {
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
+	}
+
+	pub(crate) fn define_table(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
+		self.buf.push(
+			ns.to_string(),
+			db.to_string(),
+			tb.to_string(),
+			TableMutation::Def(dt.to_owned()),
+		)
 	}
 
 	// get returns all the mutations buffered for this transaction,

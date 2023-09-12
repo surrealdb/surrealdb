@@ -184,10 +184,8 @@ fn get_index_option<'a>(
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					if let Some(ir) = doc.ir {
-						if let Some(e) = exe.get_iterator_expression(ir) {
-							if e.eq(exp) {
-								return IndexOption::PreMatch;
-							}
+						if exe.is_iterator_expression(ir, exp) {
+							return IndexOption::PreMatch;
 						}
 					}
 					return IndexOption::Execute(exe, thg);

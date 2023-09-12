@@ -38,7 +38,6 @@ use sql::statements::DefineTokenStatement;
 use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -55,7 +54,6 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
-	pub(super) write_buffer: HashMap<Key, ()>,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
@@ -2446,6 +2444,17 @@ impl Transaction {
 		self.cf.update(ns, db, tb, id.clone(), v)
 	}
 
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn record_table_change(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		dt: &DefineTableStatement,
+	) {
+		self.cf.define_table(ns, db, tb, dt)
+	}
+
 	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -2485,9 +2494,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2500,9 +2509,9 @@ impl Transaction {
 
 		seq.remove_id(db);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2514,9 +2523,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2529,9 +2538,9 @@ impl Transaction {
 
 		seq.remove_id(tb);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2556,9 +2565,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2571,9 +2580,9 @@ impl Transaction {
 
 		seq.remove_id(ns);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2595,20 +2604,6 @@ impl Transaction {
 	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
 	// non-FDB backends.
 	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
-		let mut buf = self.write_buffer.clone();
-		let writes = buf.drain();
-		for (k, _) in writes {
-			let v = self.cache.get(&k).unwrap();
-			let mut seq = if let Entry::Seq(v) = v {
-				v
-			} else {
-				unreachable!();
-			};
-			if let Some((k, v)) = seq.finish() {
-				self.set(k, v).await?
-			}
-		}
-
 		let changes = self.cf.get();
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
