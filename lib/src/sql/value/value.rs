@@ -151,10 +151,10 @@ pub enum Value {
 	Constant(Constant),
 	// Closure(Box<Closure>),
 	Function(Box<Function>),
-	MlModel(Box<MlModel>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
+	MlModel(Box<MlModel>),
 	// Add new variants here
 }
 
