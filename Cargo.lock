@@ -5629,6 +5629,7 @@ dependencies = [
 [[package]]
 name = "surrealml"
 version = "0.1.0"
+source = "git+https://github.com/surrealdb/surrealml.git?branch=main#91c00a079fae060671596c17263f984f36c04530"
 dependencies = [
  "once_cell",
  "pyo3",
