@@ -66,7 +66,7 @@ pub mod distance {
 
 	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::mahalanobis() function",
+			feature: "vector::distance::mahalanobis() function".to_string(),
 		})
 	}
 
@@ -99,7 +99,7 @@ pub mod similarity {
 
 	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::similarity::spearman() function",
+			feature: "vector::similarity::spearman() function".to_string(),
 		})
 	}
 }

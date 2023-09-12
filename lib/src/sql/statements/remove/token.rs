@@ -5,11 +5,13 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::base::{base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -78,15 +80,13 @@ impl Display for RemoveTokenStatement {
 }
 
 pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TOKEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = expect_tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base_or_scope(i)?;
+	let (i, base) = cut(base_or_scope)(i)?;
 	Ok((
 		i,
 		RemoveTokenStatement {

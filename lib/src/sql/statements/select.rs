@@ -8,6 +8,9 @@ use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
@@ -30,6 +33,7 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::combinator::opt;
+use nom::combinator::peek;
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -74,6 +78,7 @@ impl SelectStatement {
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -138,7 +143,7 @@ impl SelectStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				v if v == 1 => Ok(a.remove(0)),
+				1 => Ok(a.remove(0)),
 				// There were no results
 				_ => Err(Error::SingleOnlyOutput),
 			},
@@ -205,7 +210,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, expr) = fields(i)?;
 	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
 	let (i, _) = cut(shouldbespace)(i)?;
-	let (i, _) = cut(tag_no_case("FROM"))(i)?;
+	let (i, _) = expect_tag_no_case("FROM")(i)?;
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = cut(shouldbespace)(i)?;
 	let (i, what) = cut(selects)(i)?;
@@ -224,6 +229,11 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
+	let (i, _) = expected(
+		"one of WITH, WHERE, SPLIT, GROUP, ORDER, LIMIT, START, FETCH, VERSION, TIMEOUT, PARELLEL, or EXPLAIN",
+		cut(peek(ending::query))
+	)(i)?;
+
 	Ok((
 		i,
 		SelectStatement {

@@ -71,6 +71,10 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
 
+/// We always want to be circulating the live query information
+/// And we will sometimes have an error attached but still not want to lose the LQ.
+pub(crate) type BootstrapOperationResult = (LqValue, Option<Error>);
+
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]
@@ -352,6 +356,10 @@ impl Datastore {
 	}
 
 	// Initialise bootstrap with implicit values intended for runtime
+	// An error indicates that a failure happened, but that does not mean that the bootstrap
+	// completely failed. It may have partially completed. It certainly has side-effects
+	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
+	// ability.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Clearing cluster");
 		let mut tx = self.transaction(true, false).await?;
@@ -372,9 +380,26 @@ impl Datastore {
 				return Err(e);
 			}
 		};
+		// Filtered includes all lqs that should be used in subsequent step
+		// Currently that is all of them, no matter the error encountered
+		let mut filtered: Vec<LqValue> = vec![];
+		// err is used to aggregate all errors across all stages
+		let mut err = vec![];
+		for res in archived {
+			match res {
+				(lq, Some(e)) => {
+					filtered.push(lq);
+					err.push(e);
+				}
+				(lq, None) => {
+					filtered.push(lq);
+				}
+			}
+		}
 
 		let mut tx = self.transaction(true, false).await?;
-		match self.remove_archived(&mut tx, archived).await {
+		let val = self.remove_archived(&mut tx, filtered).await;
+		let resolve_err = match val {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
 				error!("Error bootstrapping sweep phase: {:?}", e);
@@ -386,7 +411,15 @@ impl Datastore {
 					}
 				}
 			}
+		};
+		if resolve_err.is_err() {
+			err.push(resolve_err.unwrap_err());
 		}
+		if !err.is_empty() {
+			error!("Error bootstrapping sweep phase: {:?}", err);
+			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
+		}
+		Ok(())
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -395,7 +428,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
@@ -445,7 +478,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
@@ -455,7 +488,14 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await?;
+					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+						Ok(lq) => lq,
+						Err(e) => {
+							error!("Error archiving lqs during bootstrap phase: {:?}", e);
+							vec![]
+						}
+					};
+				// We need to add lv nodes not found so that they can be deleted in second stage
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
@@ -469,6 +509,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		archived: Vec<LqValue>,
 	) -> Result<(), Error> {
+		trace!("Gone into removing archived");
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
 			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
@@ -507,30 +548,6 @@ impl Datastore {
 			trace!("Found {} table live queries", tblqs.len());
 			for tblq in tblqs {
 				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
-			}
-		}
-		Ok(())
-	}
-
-	pub async fn _garbage_collect(
-		// TODO not invoked
-		// But this is garbage collection outside of bootstrap
-		&self,
-		tx: &mut Transaction,
-		watermark: &Timestamp,
-		this_node_id: &Uuid,
-	) -> Result<(), Error> {
-		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
-		trace!("Found dead hbs: {:?}", dead_heartbeats);
-		let mut archived: Vec<LqValue> = vec![];
-		for hb in dead_heartbeats {
-			let new_archived = self
-				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
-				.await?;
-			tx.del_cl(hb.nd).await?;
-			trace!("Deleted node {}", hb.nd);
-			for lq_value in new_archived {
-				archived.push(lq_value);
 			}
 		}
 		Ok(())
@@ -579,16 +596,22 @@ impl Datastore {
 		tx: &mut Transaction,
 		nd: &Uuid,
 		this_node_id: Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let lqs = tx.all_lq(nd).await?;
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
-		let mut ret = vec![];
+		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		for lq in lqs {
-			let lvs =
-				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
-			let archived_lvs = lvs.clone().archive(this_node_id.clone());
-			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
-			ret.push(lq);
+			let lv_res =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
+			if let Err(e) = lv_res {
+				error!("Error getting live query for node {}: {:?}", nd, e);
+				ret.push((lq, Some(e)));
+				continue;
+			}
+			let lv = lv_res.unwrap();
+			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
+			ret.push((lq, None));
 		}
 		Ok(ret)
 	}
@@ -763,7 +786,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -793,7 +816,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -801,7 +824,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authoritzation layer
+		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
@@ -817,8 +840,8 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -858,7 +881,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -866,7 +889,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Value, Error> {
 		// Check if anonymous actors can compute values when auth is enabled
-		// TODO(sgirones): Check this as part of the authoritzation layer
+		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
@@ -882,8 +905,77 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(self.capabilities.clone());
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		// Start an execution context
+		let ctx = sess.context(ctx);
+		// Store the query variables
+		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		// Compute the value
+		let res = val.compute(&ctx, &opt, &txn, None).await;
+		// Store any data
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
+		};
+		// Return result
+		res
+	}
+
+	/// Evaluates a SQL [`Value`] without checking authenticating config
+	/// This is used in very specific cases, where we do not need to check
+	/// whether authentication is enabled, or guest access is disabled.
+	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// SIGNIN clause, which still needs to work without guest access.
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	/// use surrealdb::sql::Future;
+	/// use surrealdb::sql::Value;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
+	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", skip_all)]
+	pub async fn evaluate(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Value, Error> {
+		// Create a new query options
+		let opt = Options::default()
+			.with_id(self.id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
 		let mut ctx = Context::default();
 		// Set context capabilities
@@ -934,13 +1026,13 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(skip(self, sess, chn))]
+	#[instrument(level = "debug", skip(self, sess, chn))]
 	pub async fn export(
 		&self,
 		sess: &Session,
@@ -965,7 +1057,7 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(skip(self, sess, sql))]
+	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();

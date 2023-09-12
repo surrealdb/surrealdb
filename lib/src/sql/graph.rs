@@ -19,6 +19,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 
+use super::util::expect_delimited;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Graph {
@@ -107,22 +109,26 @@ fn simple(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
 }
 
 fn custom(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
-	let (i, _) = openparentheses(i)?;
-	let (i, w) = alt((any, tables))(i)?;
-	let (i, c) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, v) = cond(i)?;
-		Ok((i, v))
-	})(i)?;
-	let (i, a) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("AS")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, v) = idiom(i)?;
-		Ok((i, v))
-	})(i)?;
-	let (i, _) = closeparentheses(i)?;
-	Ok((i, (w, c, a)))
+	expect_delimited(
+		openparentheses,
+		|i| {
+			let (i, w) = alt((any, tables))(i)?;
+			let (i, c) = opt(|i| {
+				let (i, _) = shouldbespace(i)?;
+				let (i, v) = cond(i)?;
+				Ok((i, v))
+			})(i)?;
+			let (i, a) = opt(|i| {
+				let (i, _) = shouldbespace(i)?;
+				let (i, _) = tag_no_case("AS")(i)?;
+				let (i, _) = shouldbespace(i)?;
+				let (i, v) = idiom(i)?;
+				Ok((i, v))
+			})(i)?;
+			Ok((i, (w, c, a)))
+		},
+		closeparentheses,
+	)(i)
 }
 
 fn one(i: &str) -> IResult<&str, Tables> {

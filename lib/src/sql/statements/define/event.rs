@@ -7,6 +7,9 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::strand::{strand, Strand};
@@ -14,6 +17,7 @@ use crate::sql::value::{value, values, Value, Values};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::multi::many0;
 use nom::sequence::tuple;
@@ -75,17 +79,19 @@ impl Display for DefineEventStatement {
 }
 
 pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("EVENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
-	let (i, opts) = many0(event_opts)(i)?;
+	let (i, (name, what, opts)) = cut(|i| {
+		let (i, name) = ident(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = ident(i)?;
+		let (i, opts) = many0(event_opts)(i)?;
+		let (i, _) = expected("WHEN, THEN, or COMMENT", ending::query)(i)?;
+		Ok((i, (name, what, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineEventStatement {
 		name,
@@ -129,7 +135,7 @@ fn event_when(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("WHEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineEventOption::When(v)))
 }
 
@@ -137,7 +143,7 @@ fn event_then(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("THEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = values(i)?;
+	let (i, v) = cut(values)(i)?;
 	Ok((i, DefineEventOption::Then(v)))
 }
 
@@ -145,6 +151,6 @@ fn event_comment(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineEventOption::Comment(v)))
 }

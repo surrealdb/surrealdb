@@ -32,3 +32,6 @@ pub const ID_CHARS: [char; 36] = [
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
+
+/// Datastore processor batch size for scan operations
+pub const PROCESSOR_BATCH_SIZE: u32 = 50;

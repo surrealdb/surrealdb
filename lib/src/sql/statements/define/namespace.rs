@@ -7,6 +7,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::strand::{strand, Strand};
@@ -14,6 +16,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -68,12 +71,11 @@ impl Display for DefineNamespaceStatement {
 }
 
 pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(namespace_opts)(i)?;
+	let (i, _) = expected("COMMENT", ending::query)(i)?;
 	// Create the base statement
 	let mut res = DefineNamespaceStatement {
 		name,
@@ -103,6 +105,6 @@ fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COMMENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
+	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineNamespaceOption::Comment(v)))
 }

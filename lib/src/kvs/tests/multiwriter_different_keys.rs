@@ -3,7 +3,7 @@
 async fn multiwriter_different_keys() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("7f0153b0-79cf-4922-85ef-61e390970514").unwrap();
-	let ds = new_ds(node_id).await;
+	let (ds, _) = new_ds(node_id).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(true, false).await.unwrap();
 	tx.set("test", "some text").await.unwrap();

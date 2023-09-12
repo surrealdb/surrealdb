@@ -484,8 +484,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
-		// The password did not verify
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::InvalidPass),
 	}
 }
 

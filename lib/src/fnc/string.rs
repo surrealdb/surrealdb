@@ -140,13 +140,13 @@ pub mod distance {
 
 	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::hamming() function",
+			feature: "string::distance::hamming() function".to_string(),
 		})
 	}
 
 	pub fn levenshtein((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::levenshtein() function",
+			feature: "string::distance::levenshtein() function".to_string(),
 		})
 	}
 }
@@ -234,7 +234,7 @@ pub mod similarity {
 
 	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::similarity::jaro() function",
+			feature: "string::similarity::jaro() function".to_string(),
 		})
 	}
 

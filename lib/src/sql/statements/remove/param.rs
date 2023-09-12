@@ -11,6 +11,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -50,12 +51,10 @@ impl Display for RemoveParamStatement {
 }
 
 pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PARAM")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = char('$')(i)?;
-	let (i, name) = ident(i)?;
+	let (i, _) = cut(char('$'))(i)?;
+	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveParamStatement {
