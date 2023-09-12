@@ -27,6 +27,7 @@ use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
+use crate::sql::ml_model::{ml_model, MlModel};
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
@@ -150,6 +151,7 @@ pub enum Value {
 	Constant(Constant),
 	// Closure(Box<Closure>),
 	Function(Box<Function>),
+	MlModel(Box<MlModel>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
@@ -300,6 +302,12 @@ impl From<Cast> for Value {
 impl From<Function> for Value {
 	fn from(v: Function) -> Self {
 		Value::Function(Box::new(v))
+	}
+}
+
+impl From<MlModel> for Value {
+	fn from(v: MlModel) -> Self {
+		Value::MlModel(Box::new(v))
 	}
 }
 
@@ -1055,7 +1063,8 @@ impl Value {
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
 			Value::Function(x) => !x.is_script(),
-			Value::Subquery(_)
+			Value::MlModel(_)
+			| Value::Subquery(_)
 			| Value::Constant(_)
 			| Value::Datetime(_)
 			| Value::Duration(_)
@@ -2526,6 +2535,7 @@ impl fmt::Display for Value {
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
+			Value::MlModel(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
@@ -2741,7 +2751,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			function_or_const,
+			path_like,
 			into(geometry),
 			into(subquery),
 			into(datetime),
@@ -2780,7 +2790,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			function_or_const,
+			path_like,
 			into(geometry),
 			into(subquery),
 			into(datetime),
@@ -2803,8 +2813,9 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
-pub fn function_or_const(i: &str) -> IResult<&str, Value> {
-	alt((into(defined_function), |i| {
+/// A path like production: Constants, predefined functions, user defined functions and ml models.
+pub fn path_like(i: &str) -> IResult<&str, Value> {
+	alt((into(defined_function), into(ml_model), |i| {
 		let (i, v) = builtin_name(i)?;
 		match v {
 			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
@@ -2841,7 +2852,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
-		function_or_const,
+		path_like,
 		into(subquery),
 		into(datetime),
 		into(duration),

@@ -4,6 +4,7 @@ mod event;
 mod field;
 mod function;
 mod index;
+mod ml_model;
 mod namespace;
 mod param;
 mod scope;
@@ -17,6 +18,7 @@ pub use event::{event, DefineEventStatement};
 pub use field::{field, DefineFieldStatement};
 pub use function::{function, DefineFunctionStatement};
 pub use index::{index, DefineIndexStatement};
+pub use ml_model::DefineModelStatement;
 pub use namespace::{namespace, DefineNamespaceStatement};
 use nom::bytes::complete::tag_no_case;
 pub use param::{param, DefineParamStatement};
@@ -55,6 +57,7 @@ pub enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	MlModel(DefineModelStatement),
 }
 
 impl DefineStatement {
@@ -83,6 +86,7 @@ impl DefineStatement {
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::MlModel(_) => todo!(),
 		}
 	}
 }
@@ -102,6 +106,7 @@ impl Display for DefineStatement {
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
+			Self::MlModel(v) => Display::fmt(v, f),
 		}
 	}
 }

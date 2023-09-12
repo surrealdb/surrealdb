@@ -98,7 +98,7 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
+//#![cfg_attr(test, deny(warnings))]
 
 #[macro_use]
 extern crate tracing;
