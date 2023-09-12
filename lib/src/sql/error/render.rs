@@ -40,7 +40,7 @@ pub struct Snippet {
 	truncation: Truncation,
 	/// The location of the snippet in the orignal source code.
 	location: Location,
-	/// The offset into the snippet where the location is.
+	/// The offset, in chars, into the snippet where the location is.
 	offset: usize,
 	/// A possible explanation for this snippet.
 	explain: Option<String>,
@@ -58,7 +58,7 @@ impl Snippet {
 		explain: Option<&'static str>,
 	) -> Self {
 		let line = source.split('\n').nth(location.line - 1).unwrap();
-		let (line, truncation, offset) = Self::truncate_line(line, location.column);
+		let (line, truncation, offset) = Self::truncate_line(line, location.column - 1);
 
 		Snippet {
 			source: line.to_owned(),
@@ -71,9 +71,9 @@ impl Snippet {
 
 	/// Trims whitespace of an line and additionally truncates a string if it is too long.
 	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
-		let full_line_length = line.len();
+		let full_line_length = line.chars().count();
 		line = line.trim_start();
-		let mut offset = around_offset - (full_line_length - line.len());
+		let mut offset = around_offset - (full_line_length - line.chars().count());
 		line = line.trim_end();
 		let mut truncation = Truncation::None;
 

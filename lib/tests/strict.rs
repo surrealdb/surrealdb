@@ -270,6 +270,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			fields: { extra: 'DEFINE FIELD extra ON test VALUE true' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
