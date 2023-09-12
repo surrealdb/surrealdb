@@ -1034,6 +1034,12 @@ impl Transaction {
 		Ok(())
 	}
 
+	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		self.del(key).await?;
+		Ok(())
+	}
+
 	// Delete a cluster registration entry
 	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);

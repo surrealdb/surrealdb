@@ -363,8 +363,14 @@ impl Datastore {
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Clearing cluster");
 		let mut tx = self.transaction(true, false).await?;
-		self.nuke_whole_cluster(&mut tx).await?;
-		tx.commit().await?;
+		match self.nuke_whole_cluster(&mut tx).await {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error nuking cluster at bootstrap: {:?}", e);
+				tx.cancel().await?;
+				Err(Error::Tx(format!("Error nuking cluster at bootstrap: {:?}", e).to_owned()))
+			}
+		}?;
 
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
@@ -538,6 +544,9 @@ impl Datastore {
 			)
 			.await?;
 		trace!("Found {} heartbeats", hbs.len());
+		for hb in hbs {
+			tx.del_hb(hb.hb, hb.nd).await?;
+		}
 		// Scan node live queries
 		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
 		trace!("Found {} node live queries", ndlqs.len());
@@ -550,6 +559,7 @@ impl Datastore {
 				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
 			}
 		}
+		trace!("Successfully completed nuke");
 		Ok(())
 	}
 
