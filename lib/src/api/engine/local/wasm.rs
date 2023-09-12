@@ -91,7 +91,6 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	spawn_local(async move {
-		let url = address.endpoint;
 		let configured_root = match address.config.auth {
 			Level::Root => Some(Root {
 				username: &address.config.username,
@@ -100,12 +99,7 @@ pub(crate) fn router(
 			_ => None,
 		};
 
-		let path = match url.scheme() {
-			"mem" => "memory",
-			_ => url.as_str(),
-		};
-
-		let kvs = match Datastore::new(path).await {
+		let kvs = match Datastore::new(&address.path).await {
 			Ok(kvs) => {
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {

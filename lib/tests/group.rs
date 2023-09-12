@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -20,7 +21,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 		SELECT *, time::year(time) AS year FROM temperature;
 		SELECT count(), time::year(time) AS year, country FROM temperature GROUP BY country, year;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
@@ -244,7 +245,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 		SELECT group, math::sum(one) AS one, math::sum(two) AS two FROM test GROUP BY group;
 		SELECT group, math::sum(two) AS two, math::sum(one) AS one FROM test GROUP BY group;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -349,7 +350,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 		SELECT group, math::sum(math::round(one)) AS one, math::sum(math::round(two)) AS two FROM test GROUP BY group;
 		SELECT group, math::sum(math::ceil(one)) AS one, math::sum(math::ceil(two)) AS two FROM test GROUP BY group;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);

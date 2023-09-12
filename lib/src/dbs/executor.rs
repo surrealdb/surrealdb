@@ -61,10 +61,7 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Commits the transaction if it is local.
-	/// This function takes two additional parameters that are not present in the underlying kvs::Transaction::commit() function:
-	/// ns: The namespace of the transaction
-	/// db: The database of the transaction
-	/// These parameters are used updating the changefeed.
+	///
 	/// # Return
 	///
 	/// An `Err` if the transaction could not be commited;
@@ -172,7 +169,7 @@ impl<'a> Executor<'a> {
 		opt.set_db(Some(db.into()));
 	}
 
-	#[instrument(name = "executor", skip_all)]
+	#[instrument(level = "debug", name = "executor", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,

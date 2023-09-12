@@ -8,6 +8,7 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
+use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::connect;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
@@ -51,6 +52,8 @@ pub async fn init(
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("warn").init();
+	// Default datastore configuration for local engines
+	let config = Config::new().capabilities(Capabilities::all());
 
 	let client = if let Some((username, password)) = username.zip(password) {
 		let root = Root {
@@ -63,7 +66,7 @@ pub async fn init(
 		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
 		// * For remote engines, we connect to the endpoint and then signin.
 		#[cfg(feature = "has-storage")]
-		let address = (endpoint, Config::new().user(root));
+		let address = (endpoint, config.user(root));
 		#[cfg(not(feature = "has-storage"))]
 		let address = endpoint;
 		let client = connect(address).await?;
@@ -72,7 +75,7 @@ pub async fn init(
 		client.signin(root).await?;
 		client
 	} else {
-		connect(endpoint).await?
+		connect((endpoint, config)).await?
 	};
 
 	// Create a new terminal REPL

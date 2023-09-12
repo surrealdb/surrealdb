@@ -21,12 +21,14 @@ use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
+use super::error::expected;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
 #[revisioned(revision = 1)]
-pub struct Datetime(#[serde(with = "ts_binary")] pub DateTime<Utc>);
+pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -108,7 +110,7 @@ impl ops::Sub<Self> for Datetime {
 }
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
-	alt((datetime_single, datetime_double))(i)
+	expected("a datetime", alt((datetime_single, datetime_double)))(i)
 }
 
 fn datetime_single(i: &str) -> IResult<&str, Datetime> {
@@ -272,57 +274,6 @@ fn sign(i: &str) -> IResult<&str, i32> {
 		'-' => -1,
 		_ => 1,
 	})(i)
-}
-
-/// Lexicographic, relatively size efficient binary serialization
-pub mod ts_binary {
-	use chrono::{offset::TimeZone, DateTime, Utc};
-	use core::fmt;
-	use serde::{
-		de::{self, SeqAccess},
-		ser::{self, SerializeTuple},
-	};
-
-	/// Serialize a UTC datetime into an integer number of nanoseconds since the epoch
-	pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: ser::Serializer,
-	{
-		let mut tuple = serializer.serialize_tuple(2)?;
-		tuple.serialize_element(&dt.timestamp())?;
-		tuple.serialize_element(&dt.timestamp_subsec_nanos())?;
-		tuple.end()
-	}
-
-	/// Deserialize a [`DateTime`] from a nanosecond timestamp
-	pub fn deserialize<'de, D>(d: D) -> Result<DateTime<Utc>, D::Error>
-	where
-		D: de::Deserializer<'de>,
-	{
-		d.deserialize_tuple(2, TimestampVisitor)
-	}
-
-	struct TimestampVisitor;
-
-	impl<'de> de::Visitor<'de> for TimestampVisitor {
-		type Value = DateTime<Utc>;
-
-		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-			formatter.write_str("a unix timestamp tuple")
-		}
-
-		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-		where
-			A: SeqAccess<'de>,
-		{
-			let secs = seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
-			let nanos =
-				seq.next_element()?.ok_or_else(|| de::Error::custom("invalid timestamp"))?;
-			Utc.timestamp_opt(secs, nanos)
-				.single()
-				.ok_or_else(|| de::Error::custom("invalid timestamp"))
-		}
-	}
 }
 
 #[cfg(test)]

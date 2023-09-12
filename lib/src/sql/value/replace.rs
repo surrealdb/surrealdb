@@ -3,9 +3,14 @@ use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn replace(&mut self, val: Value) -> Result<(), Error> {
-		if val.is_object() {
-			*self = val;
+		// If this value is not an object, then error
+		if !val.is_object() {
+			return Err(Error::InvalidContent {
+				value: val,
+			});
 		}
+		// Otherwise replace the current value
+		*self = val;
 		Ok(())
 	}
 }

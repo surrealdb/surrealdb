@@ -23,7 +23,7 @@ args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "r
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["test", "--workspace"]
+args = ["test", "--workspace", "--no-fail-fast"]
 
 # Check
 [tasks.cargo-check]
@@ -65,11 +65,17 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting"]
 
+# Run
+[tasks.run]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "${@}"]
+
 # Serve
 [tasks.serve]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "start", "${@}"]
+args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "start", "--allow-all", "${@}"]
 
 # SQL
 [tasks.sql]

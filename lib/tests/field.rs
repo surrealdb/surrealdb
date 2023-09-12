@@ -1,8 +1,9 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
@@ -11,7 +12,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
-		DEFINE FIELD email ON person TYPE string ASSERT is::email($value);
+		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NONE;
@@ -19,7 +20,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 0;
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 13;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -98,11 +99,11 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
-		DEFINE FIELD email ON person TYPE string ASSERT is::email($value);
+		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -151,7 +152,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -205,7 +206,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -257,7 +258,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 		};
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -306,6 +307,140 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_selection_variable_field_projection() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET title = 'Mr', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
+		LET $param = 'name.first';
+		SELECT type::field($param), type::field('name.last') FROM person;
+		SELECT VALUE { 'firstname': type::field($param), lastname: type::field('name.last') } FROM person;
+		SELECT VALUE [type::field($param), type::field('name.last')] FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				firstname: 'Tobie',
+				lastname: 'Morgan Hitchcock',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			['Tobie', 'Morgan Hitchcock']
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_selection_variable_fields_projection() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET title = 'Mr', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
+		LET $param = ['name.first', 'name.last'];
+		SELECT type::fields($param), type::fields(['title']) FROM person;
+		SELECT VALUE { 'names': type::fields($param) } FROM person;
+		SELECT VALUE type::fields($param) FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				title: 'Mr',
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				names: ['Tobie', 'Morgan Hitchcock']
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			['Tobie', 'Morgan Hitchcock']
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_default_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE product SCHEMAFULL;
@@ -322,7 +457,7 @@ async fn field_definition_default_value() -> Result<(), Error> {
 		UPDATE product:test SET secondary = false;
 		UPDATE product:test SET tertiary = 'something';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
@@ -435,7 +570,7 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -536,7 +671,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -638,7 +773,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
-	let dbs = Datastore::new("memory").await?.with_auth_enabled(true);
+	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);

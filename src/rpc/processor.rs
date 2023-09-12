@@ -34,7 +34,7 @@ impl Processor {
 	}
 
 	pub async fn process_request(&mut self, method: &str, params: Array) -> Result<Data, Failure> {
-		info!("Process RPC request");
+		debug!("Process RPC request");
 
 		// Match the method to a function
 		match method {
@@ -125,13 +125,13 @@ impl Processor {
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `MERGE`
-			"change" | "merge" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.change(v, o).await.map(Into::into).map_err(Into::into),
+			"merge" => match params.needs_one_or_two() {
+				Ok((v, o)) => self.merge(v, o).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Update a value or values in the database using `PATCH`
-			"modify" | "patch" => match params.needs_one_or_two() {
-				Ok((v, o)) => self.modify(v, o).await.map(Into::into).map_err(Into::into),
+			"patch" => match params.needs_one_two_or_three() {
+				Ok((v, o, d)) => self.patch(v, o, d).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
 			// Delete a value or values from the database
@@ -202,6 +202,7 @@ impl Processor {
 			.map(Into::into)
 			.map_err(Into::into)
 	}
+
 	async fn invalidate(&mut self) -> Result<Value, Error> {
 		surrealdb::iam::clear::clear(&mut self.session)?;
 		Ok(Value::None)
@@ -235,7 +236,12 @@ impl Processor {
 	// ------------------------------
 
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
-		match val {
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the query parameters
+		let var = Some(self.vars.to_owned());
+		// Compute the specified parameter
+		match kvs.compute(val, &self.session, var).await? {
 			// Remove the variable if undefined
 			Value::None => self.vars.remove(&key.0),
 			// Store the variable if defined
@@ -357,7 +363,11 @@ impl Processor {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "CREATE $what CONTENT $data RETURN AFTER";
+		let sql = if data.is_none_or_null() {
+			"CREATE $what RETURN AFTER"
+		} else {
+			"CREATE $what CONTENT $data RETURN AFTER"
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
@@ -385,7 +395,11 @@ impl Processor {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
+		let sql = if data.is_none_or_null() {
+			"UPDATE $what RETURN AFTER"
+		} else {
+			"UPDATE $what CONTENT $data RETURN AFTER"
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
@@ -404,16 +418,20 @@ impl Processor {
 	}
 
 	// ------------------------------
-	// Methods for changing
+	// Methods for merging
 	// ------------------------------
 
-	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
+	async fn merge(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what MERGE $data RETURN AFTER";
+		let sql = if data.is_none_or_null() {
+			"UPDATE $what RETURN AFTER"
+		} else {
+			"UPDATE $what MERGE $data RETURN AFTER"
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
@@ -432,16 +450,19 @@ impl Processor {
 	}
 
 	// ------------------------------
-	// Methods for modifying
+	// Methods for patching
 	// ------------------------------
 
-	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
+	async fn patch(&self, what: Value, data: Value, diff: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what PATCH $data RETURN AFTER";
+		let sql = match diff.is_true() {
+			true => "UPDATE $what PATCH $data RETURN DIFF",
+			false => "UPDATE $what PATCH $data RETURN AFTER",
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),

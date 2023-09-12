@@ -7,6 +7,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
@@ -19,6 +21,7 @@ use crate::sql::value::{Value, Values};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::multi::many0;
 use nom::sequence::tuple;
@@ -98,17 +101,19 @@ impl Display for DefineIndexStatement {
 }
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("INDEX")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
-	let (i, opts) = many0(index_opts)(i)?;
+	let (i, (name, what, opts)) = cut(|i| {
+		let (i, name) = ident(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = ident(i)?;
+		let (i, opts) = many0(index_opts)(i)?;
+		let (i, _) = ending::query(i)?;
+		Ok((i, (name, what, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineIndexStatement {
 		name,
@@ -173,6 +178,7 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
+	use crate::sql::index::SearchParams;
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
 	use crate::sql::Idioms;
@@ -182,7 +188,7 @@ mod tests {
 
 	#[test]
 	fn check_create_non_unique_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -199,7 +205,7 @@ mod tests {
 
 	#[test]
 	fn check_create_unique_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -216,7 +222,7 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -224,25 +230,27 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: true,
 					sc: Scoring::Bm {
 						k1: 1.2,
 						b: 0.75,
 					},
-					order: 1000
-				},
+					doc_ids_order: 1000,
+					doc_lengths_order: 1000,
+					postings_order: 1000,
+					terms_order: 1000,
+				}),
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
 	}
 
 	#[test]
 	fn check_create_search_index() {
-		let sql =
-			"DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -250,18 +258,21 @@ mod tests {
 				name: Ident("my_index".to_string()),
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
-				index: Index::Search {
+				index: Index::Search(SearchParams {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
-					order: 100
-				},
+					doc_ids_order: 100,
+					doc_lengths_order: 100,
+					postings_order: 100,
+					terms_order: 100,
+				}),
 				comment: None,
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
 		);
 	}
 }

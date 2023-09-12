@@ -1,10 +1,81 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
+
+#[tokio::test]
+async fn update_merge_and_content() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test CONTENT { name: 'Tobie' };
+		UPDATE person:test CONTENT { name: 'Jaime' };
+		UPDATE person:test CONTENT 'some content';
+		UPDATE person:test REPLACE 'some content';
+		UPDATE person:test MERGE { age: 50 };
+		UPDATE person:test MERGE 'some content';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Jaime',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Jaime',
+				age: 50,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a MERGE clause"#
+	));
+	//
+	Ok(())
+}
 
 #[tokio::test]
 async fn update_simple_with_input() -> Result<(), Error> {
@@ -30,7 +101,7 @@ async fn update_simple_with_input() -> Result<(), Error> {
 		UPDATE person:test SET name = 'Tobie';
 		SELECT * FROM person:test;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -110,7 +181,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 		;
 		CREATE product:test SET images = [' test.png '];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -127,6 +198,81 @@ async fn update_complex_with_input() -> Result<(), Error> {
 			{
 				id: product:test,
 				images: ['test.png'],
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn update_with_return_clause() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET age = 18, name = 'John';
+		UPDATE person:test SET age = 25 RETURN VALUE $before;
+		UPDATE person:test SET age = 30 RETURN VALUE { old_age: $before.age, new_age: $after.age };
+		UPDATE person:test SET age = 35 RETURN age, name;
+		DELETE person:test RETURN VALUE $before;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				new_age: 30,
+				old_age: 25
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 35,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 35,
+				id: person:test,
+				name: 'John'
 			}
 		]",
 	);
@@ -173,7 +319,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		// Test the statement when the table has to be created
 
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
@@ -196,7 +342,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the statement when the table already exists
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			// Prepare datastore
 			let mut resp = ds
@@ -294,7 +440,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -312,7 +458,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -360,7 +506,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -424,7 +570,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -441,7 +587,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -489,7 +635,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(

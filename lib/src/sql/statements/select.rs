@@ -8,6 +8,9 @@ use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::explain::{explain, Explain};
 use crate::sql::fetch::{fetch, Fetchs};
@@ -30,16 +33,19 @@ use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::combinator::opt;
+use nom::combinator::peek;
 use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
+	#[revision(start = 2)]
+	pub only: bool,
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
@@ -72,14 +78,7 @@ impl SelectStatement {
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match self.what.len() {
-			1 if self.what[0].is_object() => true,
-			1 if self.what[0].is_thing() => true,
-			_ => false,
-		}
-	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -93,8 +92,7 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
-
+		let opt = &opt.new_with_futures(false).with_projections(true);
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Loop over the select targets
@@ -115,6 +113,9 @@ impl SelectStatement {
 				Value::Array(v) => {
 					for v in v {
 						match v {
+							Value::Table(t) => {
+								planner.add_iterables(ctx, txn, t, &mut i).await?;
+							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 							Value::Model(v) => {
@@ -129,17 +130,25 @@ impl SelectStatement {
 				v => i.ingest(Iterable::Value(v)),
 			};
 		}
+		// Create a new context
+		let mut ctx = Context::new(ctx);
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Add query executors if any
 		if planner.has_executors() {
-			let mut ctx = Context::new(ctx);
 			ctx.set_query_planner(&planner);
-			// Output the results
-			i.output(&ctx, opt, txn, &stm).await
-		} else {
-			// Output the results
-			i.output(ctx, opt, txn, &stm).await
+		}
+		// Output the results
+		match i.output(&ctx, opt, txn, &stm).await? {
+			// This is a single record result
+			Value::Array(mut a) if self.only => match a.len() {
+				// There was exactly one result
+				1 => Ok(a.remove(0)),
+				// There were no results
+				_ => Err(Error::SingleOnlyOutput),
+			},
+			// This is standard query result
+			v => Ok(v),
 		}
 	}
 }
@@ -150,7 +159,11 @@ impl fmt::Display for SelectStatement {
 		if let Some(ref v) = self.omit {
 			write!(f, " OMIT {v}")?
 		}
-		write!(f, " FROM {}", self.what)?;
+		write!(f, " FROM")?;
+		if self.only {
+			f.write_str(" ONLY")?
+		}
+		write!(f, " {}", self.what)?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -197,7 +210,8 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, expr) = fields(i)?;
 	let (i, omit) = opt(preceded(shouldbespace, omit))(i)?;
 	let (i, _) = cut(shouldbespace)(i)?;
-	let (i, _) = cut(tag_no_case("FROM"))(i)?;
+	let (i, _) = expect_tag_no_case("FROM")(i)?;
+	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = cut(shouldbespace)(i)?;
 	let (i, what) = cut(selects)(i)?;
 	let (i, with) = opt(preceded(shouldbespace, with))(i)?;
@@ -215,11 +229,17 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
+	let (i, _) = expected(
+		"one of WITH, WHERE, SPLIT, GROUP, ORDER, LIMIT, START, FETCH, VERSION, TIMEOUT, PARELLEL, or EXPLAIN",
+		cut(peek(ending::query))
+	)(i)?;
+
 	Ok((
 		i,
 		SelectStatement {
 			expr,
 			omit,
+			only: only.is_some(),
 			what,
 			with,
 			cond,
@@ -290,4 +310,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
+
+	#[test]
+	fn select_with_function() {}
 }

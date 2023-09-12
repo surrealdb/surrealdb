@@ -7,6 +7,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::expected;
+use crate::sql::error::ExplainResultExt;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::object::Object;
@@ -86,7 +88,7 @@ impl InfoStatement {
 				res.insert("users".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
-				for v in run.all_nt(opt.ns()).await?.iter() {
+				for v in run.all_ns_tokens(opt.ns()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tokens".to_owned(), tmp.into());
@@ -108,19 +110,19 @@ impl InfoStatement {
 				res.insert("users".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
-				for v in run.all_dt(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_tokens(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tokens".to_owned(), tmp.into());
 				// Process the functions
 				let mut tmp = Object::default();
-				for v in run.all_fc(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_functions(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("functions".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
-				for v in run.all_pa(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_params(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("params".to_owned(), tmp.into());
@@ -138,7 +140,7 @@ impl InfoStatement {
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the analyzers
 				let mut tmp = Object::default();
-				for v in run.all_az(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_analyzers(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("analyzers".to_owned(), tmp.into());
@@ -154,7 +156,7 @@ impl InfoStatement {
 				let mut res = Object::default();
 				// Process the tokens
 				let mut tmp = Object::default();
-				for v in run.all_st(opt.ns(), opt.db(), sc).await?.iter() {
+				for v in run.all_sc_tokens(opt.ns(), opt.db(), sc).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tokens".to_owned(), tmp.into());
@@ -170,28 +172,34 @@ impl InfoStatement {
 				let mut res = Object::default();
 				// Process the events
 				let mut tmp = Object::default();
-				for v in run.all_ev(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_events(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("events".to_owned(), tmp.into());
 				// Process the fields
 				let mut tmp = Object::default();
-				for v in run.all_fd(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_fields(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("fields".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
-				for v in run.all_ft(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_views(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the indexes
 				let mut tmp = Object::default();
-				for v in run.all_ix(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("indexes".to_owned(), tmp.into());
+				// Process the live queries
+				let mut tmp = Object::default();
+				for v in run.all_tb_lives(opt.ns(), opt.db(), tb).await?.iter() {
+					tmp.insert(v.id.to_raw(), v.to_string().into());
+				}
+				res.insert("lives".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -236,10 +244,11 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = tag_no_case("INFO")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
-	cut(|i| {
-		let (i, _) = shouldbespace(i)?;
-		alt((root, ns, db, sc, tb, user))(i)
-	})(i)
+	let (i, _) = cut(shouldbespace)(i)?;
+	expected(
+		"ROOT, NAMESPACE, DATABASE, SCOPE, TABLE or USER",
+		cut(alt((root, ns, db, sc, tb, user))),
+	)(i)
 }
 
 fn root(i: &str) -> IResult<&str, InfoStatement> {
@@ -260,19 +269,15 @@ fn db(i: &str) -> IResult<&str, InfoStatement> {
 fn sc(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, scope) = ident(i)?;
-		Ok((i, InfoStatement::Sc(scope)))
-	})(i)
+	let (i, scope) = cut(ident)(i)?;
+	Ok((i, InfoStatement::Sc(scope)))
 }
 
 fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, table) = ident(i)?;
-		Ok((i, InfoStatement::Tb(table)))
-	})(i)
+	let (i, table) = cut(ident)(i)?;
+	Ok((i, InfoStatement::Tb(table)))
 }
 
 fn user(i: &str) -> IResult<&str, InfoStatement> {
@@ -285,7 +290,8 @@ fn user(i: &str) -> IResult<&str, InfoStatement> {
 			let (i, _) = tag_no_case("ON")(i)?;
 			cut(|i| {
 				let (i, _) = shouldbespace(i)?;
-				let (i, base) = base(i)?;
+				let (i, base) =
+					base(i).explain("scopes are not allowed here", tag_no_case("SCOPE"))?;
 				Ok((i, base))
 			})(i)
 		})(i)?;

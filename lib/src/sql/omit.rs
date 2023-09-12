@@ -2,11 +2,12 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{locals as idioms, Idioms};
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 
 pub fn omit(i: &str) -> IResult<&str, Idioms> {
 	let (i, _) = tag_no_case("OMIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = idioms(i)?;
+	let (i, v) = cut(idioms)(i)?;
 	Ok((i, v))
 }
 

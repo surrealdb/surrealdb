@@ -1,4 +1,5 @@
 mod parse;
+use parse::Parse;
 
 mod helpers;
 use helpers::*;
@@ -8,11 +9,9 @@ mod util;
 
 use std::collections::HashMap;
 
-use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -22,7 +21,7 @@ async fn remove_statement_table() -> Result<(), Error> {
 		REMOVE TABLE test;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -56,7 +55,7 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 		REMOVE ANALYZER english;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -96,7 +95,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 		REMOVE INDEX ft_title ON book;
 		INFO FOR TABLE book;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -112,6 +111,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 			fields: {},
 			indexes: {},
 			tables: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -641,8 +641,8 @@ async fn permissions_checks_remove_event() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [
@@ -683,8 +683,8 @@ async fn permissions_checks_remove_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [
@@ -725,8 +725,8 @@ async fn permissions_checks_remove_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [

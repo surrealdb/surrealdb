@@ -95,7 +95,10 @@ use crate::api::opt::Endpoint;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::opt::replace_tilde;
+use path_clean::PathClean;
 use std::marker::PhantomData;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use url::Url;
@@ -108,12 +111,24 @@ pub trait IntoEndpoint {
 
 impl IntoEndpoint for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = match self {
-			"memory" => "mem://",
-			_ => self,
+		let (url, path) = match self {
+			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
+			url if url.starts_with("ws") | url.starts_with("http") => {
+				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
+			}
+			_ => {
+				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
+				let path = replace_tilde(self);
+				(
+					Url::parse(&format!("{scheme}://"))
+						.map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					Path::new(&path).clean().display().to_string(),
+				)
+			}
 		};
 		Ok(Endpoint {
-			endpoint: Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+			url,
+			path,
 			config: Default::default(),
 		})
 	}
@@ -228,6 +243,7 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use super::*;
+	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
 	use crate::sql::{test::Parse, value::Value};
 
@@ -264,7 +280,9 @@ mod tests {
 			username: "root",
 			password: "root",
 		};
-		let db = connect(("memory", Config::new().user(creds))).await.unwrap();
+		let db = connect(("memory", Config::new().user(creds).capabilities(Capabilities::all())))
+			.await
+			.unwrap();
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything

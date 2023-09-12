@@ -6,7 +6,6 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
-use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
@@ -95,7 +94,6 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	tokio::spawn(async move {
-		let url = address.endpoint;
 		let configured_root = match address.config.auth {
 			Level::Root => Some(Root {
 				username: &address.config.username,
@@ -104,43 +102,29 @@ pub(crate) fn router(
 			_ => None,
 		};
 
-		let kvs = {
-			let path = match url.scheme() {
-				"mem" => "memory".to_owned(),
-				"fdb" | "rocksdb" | "speedb" | "file" => match url.to_file_path() {
-					Ok(path) => format!("{}://{}", url.scheme(), path.display()),
-					Err(_) => {
-						let error = Error::InvalidUrl(url.as_str().to_owned());
+		let kvs = match Datastore::new(&address.path).await {
+			Ok(kvs) => {
+				// If a root user is specified, setup the initial datastore credentials
+				if let Some(root) = configured_root {
+					if let Err(error) = kvs.setup_initial_creds(root).await {
 						let _ = conn_tx.into_send_async(Err(error.into())).await;
 						return;
 					}
-				},
-				_ => url.as_str().to_owned(),
-			};
-
-			match Datastore::new(&path).await {
-				Ok(kvs) => {
-					// If a root user is specified, setup the initial datastore credentials
-					if let Some(root) = configured_root {
-						if let Err(error) = kvs.setup_initial_creds(root).await {
-							let _ = conn_tx.into_send_async(Err(error.into())).await;
-							return;
-						}
-					}
-					let _ = conn_tx.into_send_async(Ok(())).await;
-					kvs.with_auth_enabled(configured_root.is_some())
 				}
-				Err(error) => {
-					let _ = conn_tx.into_send_async(Err(error.into())).await;
-					return;
-				}
+				let _ = conn_tx.into_send_async(Ok(())).await;
+				kvs.with_auth_enabled(configured_root.is_some())
+			}
+			Err(error) => {
+				let _ = conn_tx.into_send_async(Err(error.into())).await;
+				return;
 			}
 		};
 
 		let kvs = kvs
 			.with_strict_mode(address.config.strict)
 			.with_query_timeout(address.config.query_timeout)
-			.with_transaction_timeout(address.config.transaction_timeout);
+			.with_transaction_timeout(address.config.transaction_timeout)
+			.with_capabilities(address.config.capabilities);
 
 		let kvs = match address.config.notifications {
 			true => kvs.with_notifications(),

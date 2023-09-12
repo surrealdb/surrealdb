@@ -8,26 +8,26 @@ use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
+use crate::sql::builtin::builtin_name;
 use crate::sql::bytes::Bytes;
 use crate::sql::cast::{cast, Cast};
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
-use crate::sql::constant::{constant, Constant};
+use crate::sql::constant::Constant;
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::ending::keyword;
 use crate::sql::error::IResult;
-use crate::sql::expression::{binary, unary, Expression};
+use crate::sql::expression::{unary, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{function, Function};
+use crate::sql::function::{builtin_function, defined_function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
-use crate::sql::number::decimal_is_integer;
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
@@ -40,7 +40,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::{operator, Query};
+use crate::sql::{builtin, operator, Query};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -48,7 +48,7 @@ use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::{self, into, opt};
+use nom::combinator::{self, cut, into, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
@@ -61,7 +61,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-use std::ops::Neg;
 use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
@@ -815,7 +814,7 @@ impl Value {
 
 	/// Check if this Value is a boolean value
 	pub fn is_bool(&self) -> bool {
-		self.is_true() || self.is_false()
+		matches!(self, Value::Bool(_))
 	}
 
 	/// Check if this Value is TRUE or 'true'
@@ -1098,7 +1097,7 @@ impl Value {
 	}
 
 	// -----------------------------------
-	// Simple conversion of value
+	// Simple conversion of values
 	// -----------------------------------
 
 	/// Treat a string as a table name
@@ -1225,7 +1224,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an i64
 				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
@@ -1250,7 +1249,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as u64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an u64
 				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
@@ -1326,7 +1325,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) if decimal_is_integer(v) => match v.to_i64() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.to_i64() {
 				// The Decimal can be represented as an Int
 				Some(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
@@ -1800,7 +1799,7 @@ impl Value {
 			// Attempt to convert an float number
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if decimal_is_integer(&v) => match v.try_into() {
+			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an Int
 				Ok(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
@@ -2572,6 +2571,9 @@ impl Value {
 		txn: &Transaction,
 		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		// Prevent infinite recursion due to casting, expressions, etc.
+		let opt = &opt.dive(1)?;
+
 		match self {
 			Value::Cast(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
@@ -2601,28 +2603,14 @@ pub(crate) trait TryAdd<Rhs = Self> {
 impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_add(w.to_decimal()).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_add(w).is_none() => {
-					Err(Error::TryAdd(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v + w)),
-			},
-			(Value::Strand(v), Value::Strand(w)) => Ok(Value::Strand(v + w)),
-			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w + v)),
-			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v + w)),
-			(Value::Duration(v), Value::Duration(w)) => Ok(Value::Duration(v + w)),
-			(v, w) => Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2636,28 +2624,14 @@ pub(crate) trait TrySub<Rhs = Self> {
 impl TrySub for Value {
 	type Output = Self;
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_sub(w.to_decimal()).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_sub(w).is_none() => {
-					Err(Error::TrySub(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v - w)),
-			},
-			(Value::Datetime(v), Value::Datetime(w)) => Ok(Value::Duration(v - w)),
-			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w - v)),
-			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v - w)),
-			(Value::Duration(v), Value::Duration(w)) => Ok(Value::Duration(v - w)),
-			(v, w) => Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2671,24 +2645,10 @@ pub(crate) trait TryMul<Rhs = Self> {
 impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w)) if v.checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), w) if v.checked_mul(w.to_decimal()).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(v, Number::Decimal(w)) if v.to_decimal().checked_mul(w).is_none() => {
-					Err(Error::TryMul(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v * w)),
-			},
-			(v, w) => Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
+			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2702,17 +2662,10 @@ pub(crate) trait TryDiv<Rhs = Self> {
 impl TryDiv for Value {
 	type Output = Self;
 	fn try_div(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(_, Number::Int(0)) => Ok(Value::None),
-				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
-					// Divided a large number by a small number, got an overflowing number
-					Err(Error::TryDiv(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v / w)),
-			},
-			(v, w) => Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2726,20 +2679,10 @@ pub(crate) trait TryPow<Rhs = Self> {
 impl TryPow for Value {
 	type Output = Self;
 	fn try_pow(self, other: Self) -> Result<Self, Error> {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => match (v, w) {
-				(Number::Int(v), Number::Int(w))
-					if w.try_into().ok().and_then(|w| v.checked_pow(w)).is_none() =>
-				{
-					Err(Error::TryPow(v.to_string(), w.to_string()))
-				}
-				(Number::Decimal(v), Number::Int(w)) if v.checked_powi(w).is_none() => {
-					Err(Error::TryPow(v.to_string(), w.to_string()))
-				}
-				(v, w) => Ok(Value::Number(v.pow(w))),
-			},
-			(v, w) => Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
-		}
+		Ok(match (self, other) {
+			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
+			(v, w) => return Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
+		})
 	}
 }
 
@@ -2753,38 +2696,34 @@ pub(crate) trait TryNeg<Rhs = Self> {
 impl TryNeg for Value {
 	type Output = Self;
 	fn try_neg(self) -> Result<Self, Error> {
-		match self {
-			Self::Number(n) if !matches!(n, Number::Int(i64::MIN)) => Ok(Self::Number(n.neg())),
-			v => Err(Error::TryNeg(v.to_string())),
-		}
+		Ok(match self {
+			Self::Number(n) => Self::Number(n.try_neg()?),
+			v => return Err(Error::TryNeg(v.to_string())),
+		})
 	}
 }
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
 	let (i, start) = single(i)?;
-	let (i, expr_tail) = opt(|i| {
-		let (i, o) = operator::binary(i)?;
-		let (i, r) = value(i)?;
-		Ok((i, (o, r)))
-	})(i)?;
-	let v = if let Some((o, r)) = expr_tail {
+	if let (i, Some(o)) = opt(operator::binary)(i)? {
+		let (i, r) = cut(value)(i)?;
 		let expr = match r {
 			Value::Expression(r) => r.augment(start, o),
 			_ => Expression::new(start, o, r),
 		};
-		Value::from(expr)
+		let v = Value::from(expr);
+		Ok((i, v))
 	} else {
-		start
-	};
-	Ok((i, v))
+		Ok((i, start))
+	}
 }
 
 /// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
-	let _diving = crate::sql::parser::depth::dive()?;
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		alt((
 			terminated(
@@ -2801,10 +2740,9 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2828,11 +2766,10 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
-pub fn select(i: &str) -> IResult<&str, Value> {
+pub fn select_start(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		alt((
 			into(unary),
-			into(binary),
 			combinator::value(Value::None, tag_no_case("NONE")),
 			combinator::value(Value::Null, tag_no_case("NULL")),
 			combinator::value(Value::Bool(true), tag_no_case("true")),
@@ -2842,10 +2779,9 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			into(function),
+			function_or_const,
 			into(geometry),
 			into(subquery),
-			into(constant),
 			into(datetime),
 			into(duration),
 			into(unique),
@@ -2866,13 +2802,45 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
+pub fn function_or_const(i: &str) -> IResult<&str, Value> {
+	alt((into(defined_function), |i| {
+		let (i, v) = builtin_name(i)?;
+		match v {
+			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
+			builtin::BuiltinName::Function(name) => {
+				builtin_function(name, i).map(|(i, v)| (i, v.into()))
+			}
+		}
+	}))(i)
+}
+
+pub fn select(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive(i)?;
+	let (i, start) = select_start(i)?;
+	if let (i, Some(op)) = opt(operator::binary)(i)? {
+		// In a binary expression single ident's arent tables but paths.
+		let start = match start {
+			Value::Table(Table(x)) => Value::Idiom(Idiom::from(x)),
+			x => x,
+		};
+		let (i, r) = cut(value)(i)?;
+		let expr = match r {
+			Value::Expression(r) => r.augment(start, op),
+			_ => Expression::new(start, op, r),
+		};
+		let v = Value::from(expr);
+		Ok((i, v))
+	} else {
+		Ok((i, start))
+	}
+}
+
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
-		into(function),
+		function_or_const,
 		into(subquery),
-		into(constant),
 		into(datetime),
 		into(duration),
 		into(future),
@@ -2889,7 +2857,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive()?;
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	// Use a specific parser for JSON objects
 	fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;

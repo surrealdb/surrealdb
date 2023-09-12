@@ -7,10 +7,9 @@ use crate::idx::ft::FtIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::sql::array::Array;
-use crate::sql::index::Index;
-use crate::sql::scoring::Scoring;
+use crate::sql::index::{Index, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Ident, Part, Thing, Value};
+use crate::sql::{Part, Thing, Value};
 use crate::{key, kvs};
 
 impl<'a> Document<'a> {
@@ -55,12 +54,12 @@ impl<'a> Document<'a> {
 				match &ix.index {
 					Index::Uniq => ic.index_unique(&mut run).await?,
 					Index::Idx => ic.index_non_unique(&mut run).await?,
-					Index::Search {
-						az,
-						sc,
-						hl,
-						order,
-					} => ic.index_full_text(&mut run, az, *order, sc, *hl).await?,
+					Index::Search(p) => ic.index_full_text(&mut run, p).await?,
+					Index::MTree(_) => {
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "MTree indexing".to_string(),
+						})
+					}
 				};
 			}
 		}
@@ -335,14 +334,11 @@ impl<'a> IndexOperation<'a> {
 	async fn index_full_text(
 		&self,
 		run: &mut kvs::Transaction,
-		az: &Ident,
-		order: u32,
-		scoring: &Scoring,
-		hl: bool,
+		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, order, scoring, hl, TreeStoreType::Write).await?;
+		let az = run.get_db_analyzer(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
+		let mut ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Write).await?;
 		if let Some(n) = &self.n {
 			ft.index_document(run, self.rid, n).await?;
 		} else {

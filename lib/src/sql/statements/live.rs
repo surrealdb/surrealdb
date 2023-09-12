@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
+use crate::sql::error::expect_tag_no_case;
 use crate::sql::error::IResult;
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
@@ -34,15 +35,24 @@ pub struct LiveStatement {
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
-
-	// Non-query properties that are necessary for storage or otherwise carrying information
-
-	// When a live query is archived, this should be the node ID that archived the query.
-	pub archived: Option<Uuid>,
-	// A live query is run with permissions, and we must validate that during the run.
-	// It is optional, because the live query may be constructed without it being set.
-	// It is populated during compute.
-	pub auth: Option<Auth>,
+	// When a live query is marked for archiving, this will
+	// be set to the node ID that archived the query. This
+	// is an internal property, set by the database runtime.
+	// This is optional, and os only set when archived.
+	pub(crate) archived: Option<Uuid>,
+	// When a live query is created, we must also store the
+	// authenticated session of the user who made the query,
+	// so we can chack it later when sending notifications.
+	// This is optional as it is only set by the database
+	// runtime when storing the live query to storage.
+	#[revision(start = 2)]
+	pub(crate) session: Option<Value>,
+	// When a live query is created, we must also store the
+	// authenticated session of the user who made the query,
+	// so we can chack it later when sending notifications.
+	// This is optional as it is only set by the database
+	// runtime when storing the live query to storage.
+	pub(crate) auth: Option<Auth>,
 }
 
 impl LiveStatement {
@@ -58,33 +68,33 @@ impl LiveStatement {
 		opt.realtime()?;
 		// Valid options?
 		opt.valid_for_db()?;
+		// Get the Node ID
+		let nid = opt.id()?;
 		// Check that auth has been set
-		let self_override = LiveStatement {
-			auth: match self.auth {
-				Some(ref auth) => Some(auth.clone()),
-				None => Some(opt.auth.as_ref().clone()),
-			},
+		let mut stm = LiveStatement {
+			// Use the current session authentication
+			// for when we store the LIVE Statement
+			session: ctx.value("session").cloned(),
+			// Use the current session authentication
+			// for when we store the LIVE Statement
+			auth: Some(opt.auth.as_ref().clone()),
+			// Clone the rest of the original fields
+			// from the LIVE statement to the new one
 			..self.clone()
 		};
-		trace!("Evaluated live query auth to {:?}", self_override.auth);
+		let id = stm.id.0;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Process the live query table
-		match self_override.what.compute(ctx, opt, txn, doc).await? {
+		match stm.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
-				// Clone the current statement
-				let mut stm = self_override.clone();
 				// Store the current Node ID
-				if let Err(e) = opt.id() {
-					trace!("No ID for live query {:?}, error={:?}", stm, e)
-				}
-				stm.node = Uuid(opt.id()?);
+				stm.node = nid.into();
 				// Insert the node live query
-				let key =
-					crate::key::node::lq::new(opt.id()?, self_override.id.0, opt.ns(), opt.db());
+				let key = crate::key::node::lq::new(opt.id()?, id, opt.ns(), opt.db());
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self_override.id.0);
+				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, id);
 				run.putc(key, stm, None).await?;
 			}
 			v => {
@@ -94,8 +104,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		trace!("Live query after processing: {:?}", self_override);
-		Ok(self_override.id.clone().into())
+		Ok(id.into())
 	}
 
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
@@ -125,7 +134,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	cut(|i| {
 		let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
 		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("FROM")(i)?;
+		let (i, _) = expect_tag_no_case("FROM")(i)?;
 		let (i, _) = shouldbespace(i)?;
 		let (i, what) = alt((into(param), into(table)))(i)?;
 		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
@@ -139,8 +148,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 				what,
 				cond,
 				fetch,
-				archived: None,
-				auth: None, // Auth is set via options in compute()
+				..Default::default()
 			},
 		))
 	})(i)

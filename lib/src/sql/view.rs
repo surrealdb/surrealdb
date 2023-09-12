@@ -12,6 +12,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::error::{expect_tag_no_case, expected};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct View {
@@ -41,7 +43,7 @@ pub fn view(i: &str) -> IResult<&str, View> {
 			let (i, _) = shouldbespace(i)?;
 			let (i, expr) = fields(i)?;
 			let (i, _) = shouldbespace(i)?;
-			let (i, _) = tag_no_case("FROM")(i)?;
+			let (i, _) = expect_tag_no_case("FROM")(i)?;
 			let (i, _) = shouldbespace(i)?;
 			let (i, what) = tables(i)?;
 			let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
@@ -61,7 +63,8 @@ pub fn view(i: &str) -> IResult<&str, View> {
 
 	let (i, _) = tag_no_case("AS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, (expr, what, cond, group)) = alt((select_view, select_view_delimited))(i)?;
+	let (i, (expr, what, cond, group)) =
+		expected("SELECT or `(`", cut(alt((select_view, select_view_delimited))))(i)?;
 	Ok((
 		i,
 		View {

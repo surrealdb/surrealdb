@@ -592,6 +592,7 @@ dependencies = [
  "matchit",
  "memchr",
  "mime",
+ "multer",
  "percent-encoding",
  "pin-project-lite",
  "rustversion",
@@ -1332,17 +1333,16 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "constant_time_eq"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
-=======
 name = "const-oid"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28c122c3980598d243d63d9a704629a2d748d101f278052ff068be5a4423ab6f"
->>>>>>> daf6743c4e44c1f02aafcf271674f079056ef24f
+
+[[package]]
+name = "constant_time_eq"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "convert_case"
@@ -1646,11 +1646,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "deranged"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-=======
 name = "der"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1665,7 +1660,6 @@ dependencies = [
 name = "deranged"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
->>>>>>> daf6743c4e44c1f02aafcf271674f079056ef24f
 checksum = "f2696e8a945f658fd14dc3b87242e6b80cd0f36ff04ea560fa39082368847946"
 dependencies = [
  "serde",
@@ -3236,6 +3230,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "multer"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
+dependencies = [
+ "bytes 1.4.0",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "log",
+ "memchr",
+ "mime",
+ "spin 0.9.8",
+ "version_check",
+]
+
+[[package]]
 name = "nanoid"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3362,14 +3374,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "num-complex"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ba157ca0885411de85d6ca030ba7e2a83a28636056c7c699b07c8b6f7383214"
-dependencies = [
- "num-traits",
-=======
 name = "num-bigint-dig"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3384,7 +3388,15 @@ dependencies = [
  "rand 0.8.5",
  "smallvec 1.11.0",
  "zeroize",
->>>>>>> daf6743c4e44c1f02aafcf271674f079056ef24f
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba157ca0885411de85d6ca030ba7e2a83a28636056c7c699b07c8b6f7383214"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -3676,6 +3688,12 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+
+[[package]]
+name = "path-clean"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17359afc20d7ab31fdb42bb844c8b3bb1dabd7dcf7e68428492da7f16966fcef"
 
 [[package]]
 name = "pbkdf2"
@@ -4435,15 +4453,16 @@ checksum = "8c31b5c4033f8fdde8700e4657be2c497e7288f01515be52168c631e2e4d4086"
 
 [[package]]
 name = "revision"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20d0f37a3d9dc17b8bb06c277896acc3e06cbcb45ba009c4a931b9db1e35526e"
+checksum = "87eb86913082f8976b06d07a59f17df9120e6f38b882cf3fc5a45b4499e224b6"
 dependencies = [
  "bincode",
  "chrono",
  "geo 0.26.0",
  "regex",
  "revision-derive",
+ "roaring",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -4452,9 +4471,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c2baf0b4340639a19502bd2cbec8d6f45e9085d77281288a2e0b16a413c785"
+checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -4791,7 +4810,7 @@ checksum = "1d1feddffcfcc0b33f5c6ce9a29e341e4cd59c3f78e7ee45f4a40c038b1d6cbb"
 dependencies = [
  "log",
  "ring",
- "rustls-webpki",
+ "rustls-webpki 0.101.4",
  "sct",
 ]
 
@@ -4802,6 +4821,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
  "base64 0.21.2",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.100.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e98ff011474fa39949b7e5c0428f9b4937eda7da7848bbb947786b7be0b27dab"
+dependencies = [
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -5397,7 +5426,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.11"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5433,6 +5462,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealml",
+ "tch",
  "temp-env",
  "tempfile",
  "test-log",
@@ -5455,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.11"
 dependencies = [
  "addr",
  "any_ascii",
@@ -5491,6 +5521,7 @@ dependencies = [
  "native-tls",
  "nom",
  "once_cell",
+ "path-clean",
  "pbkdf2 0.12.2",
  "pharos",
  "pin-project-lite",
@@ -5604,6 +5635,7 @@ dependencies = [
  "regex",
  "tch",
  "tempfile",
+ "torch-sys",
  "uuid",
 ]
 
@@ -6279,6 +6311,9 @@ dependencies = [
  "anyhow",
  "cc",
  "libc",
+ "serde",
+ "serde_json",
+ "ureq",
  "zip",
 ]
 
@@ -6582,6 +6617,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
+name = "ureq"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b11c96ac7ee530603dcdf68ed1557050f374ce55a5a07193ebf8cbc9f8927e9"
+dependencies = [
+ "base64 0.21.2",
+ "flate2",
+ "log",
+ "once_cell",
+ "rustls 0.21.6",
+ "rustls-webpki 0.100.2",
+ "serde",
+ "serde_json",
+ "url",
+ "webpki-roots 0.23.1",
+]
+
+[[package]]
 name = "url"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6805,6 +6858,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c71e40d7d2c34a5106301fb632274ca37242cd0c9d3e64dbece371a40a2d87"
 dependencies = [
  "webpki",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b03058f88386e5ff5310d9111d53f48b17d732b401aeb83a8d5190f2ac459338"
+dependencies = [
+ "rustls-webpki 0.100.2",
 ]
 
 [[package]]

@@ -1,9 +1,10 @@
 mod parse;
 use chrono::DateTime;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -33,7 +34,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
@@ -179,7 +180,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
-	let db = Datastore::new("memory").await?;
+	let db = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Enable change feeds
 	let sql = "
@@ -188,7 +189,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	db.execute(sql, &ses, None).await?.remove(0).result?;
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
-	let ts1 = DateTime::parse_from_rfc3339(ts1_dt.clone()).unwrap();
+	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
 	db.tick_at(ts1.timestamp().try_into().unwrap()).await.unwrap();
 	// Create and update users
 	let sql = "
@@ -330,7 +331,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	);
 	// Save timestamp 2
 	let ts2_dt = "2023-08-01T00:00:05Z";
-	let ts2 = DateTime::parse_from_rfc3339(ts2_dt.clone()).unwrap();
+	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
 	db.tick_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 1
@@ -371,7 +372,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	);
 	// Save timestamp 3
 	let ts3_dt = "2023-08-01T00:00:10Z";
-	let ts3 = DateTime::parse_from_rfc3339(ts3_dt.clone()).unwrap();
+	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
 	db.tick_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 3

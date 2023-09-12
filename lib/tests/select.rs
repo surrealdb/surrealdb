@@ -1,9 +1,10 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -14,7 +15,7 @@ async fn select_field_value() -> Result<(), Error> {
 		SELECT VALUE name FROM person;
 		SELECT name FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -74,7 +75,7 @@ async fn select_field_and_omit() -> Result<(), Error> {
 		SELECT * OMIT password, opts.security FROM person;
 		SELECT * FROM person;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -161,7 +162,7 @@ async fn select_expression_value() -> Result<(), Error> {
 		SELECT VALUE !boolean FROM thing;
 		SELECT VALUE !boolean FROM thing EXPLAIN FULL;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -260,7 +261,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 		-- Selecting an object or array index value using the value of another document field as a key
 		SELECT languages[primarylang] AS content FROM documentation;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -359,7 +360,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 		LET $id = (SELECT VALUE id FROM (UPDATE tester:test))[0];
 		RETURN $id;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -369,9 +370,11 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
-			id: tester:test
-		}",
+		"[
+			{
+				id: tester:test
+			}
+		]",
 	);
 	assert_eq!(tmp, val);
 	//
@@ -379,7 +382,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("tester:test");
+	let val = Value::parse("[tester:test]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -403,7 +406,7 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 		SELECT * FROM test WHERE active = true;
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -495,7 +498,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 		SELECT * FROM post WHERE author = person:tobie EXPLAIN;
 		SELECT * FROM post WHERE author = person:tobie EXPLAIN FULL;
 		SELECT * FROM post WHERE author = person:tobie;";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -572,7 +575,7 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 		DEFINE INDEX person_name ON TABLE person COLUMNS name;
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm' EXPLAIN;
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -619,7 +622,7 @@ async fn select_where_and_with_unique_index() -> Result<(), Error> {
 		DEFINE INDEX person_name ON TABLE person COLUMNS name UNIQUE;
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm' EXPLAIN;
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm';";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -667,7 +670,7 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 		DEFINE INDEX ft_name ON TABLE person COLUMNS name SEARCH ANALYZER simple BM25(1.2,0.75);
 		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm' EXPLAIN;
 		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm';";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -715,7 +718,7 @@ async fn select_where_explain() -> Result<(), Error> {
 		CREATE software:surreal SET name = 'SurrealDB';
 		SELECT * FROM person,software EXPLAIN;
 		SELECT * FROM person,software EXPLAIN FULL;";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -771,6 +774,18 @@ async fn select_where_explain() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn select_with_function_field() -> Result<(), Error> {
+	let sql = "SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ a: 1, b: 1 }]");
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
 //
 // Permissions
 //
@@ -807,7 +822,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			// Prepare datastore
 			let mut resp = ds
@@ -869,7 +884,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -897,7 +912,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -939,7 +954,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -967,7 +982,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(

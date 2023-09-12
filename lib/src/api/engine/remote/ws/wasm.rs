@@ -69,7 +69,7 @@ impl Connection for Client {
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
-			address.endpoint = address.endpoint.join(PATH)?;
+			address.url = address.url.join(PATH)?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => flume::unbounded(),
@@ -118,7 +118,7 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	spawn_local(async move {
-		let (mut ws, mut socket) = match WsMeta::connect(&address.endpoint, None).await {
+		let (mut ws, mut socket) = match WsMeta::connect(&address.url, None).await {
 			Ok(pair) => pair,
 			Err(error) => {
 				let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -330,7 +330,7 @@ pub(crate) fn router(
 
 			'reconnect: loop {
 				trace!("Reconnecting...");
-				match WsMeta::connect(&address.endpoint, None).await {
+				match WsMeta::connect(&address.url, None).await {
 					Ok((mut meta, stream)) => {
 						socket = stream;
 						events = {

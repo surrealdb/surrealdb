@@ -145,7 +145,7 @@ dependencies = ["build-surrealdb"]
 script = """
    #!/bin/bash -ex
 
-   target/debug/surreal start ${_START_SURREALDB_PATH} &>/tmp/surrealdb.log &
+   target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb.log &
 
    echo $! > /tmp/surreal.pid
 

@@ -3,7 +3,10 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 use super::{u16_u64_to_versionstamp, u64_to_versionstamp, u64_u16_to_versionstamp, Versionstamp};
 
@@ -144,9 +147,10 @@ fn now() -> Versionstamp {
 #[allow(unused)]
 // Returns the number of seconds since the Unix Epoch (January 1st, 1970 at UTC).
 fn secs_since_unix_epoch() -> u64 {
-	let start = SystemTime::now();
-	let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
-	since_the_epoch.as_secs()
+	match SystemTime::now().duration_since(UNIX_EPOCH) {
+		Ok(duration) => duration.as_secs(),
+		Err(error) => panic!("Clock may have gone backwards: {:?}", error.duration()),
+	}
 }
 
 mod tests {

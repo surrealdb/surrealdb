@@ -1,6 +1,6 @@
 use crate::cli::CF;
 use crate::err::Error;
-use clap::{ArgAction, Args};
+use clap::Args;
 use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
@@ -39,19 +39,19 @@ struct DbsCapabilities {
 	//
 	#[arg(help = "Allow all capabilities")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
-	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
-	#[arg(default_value_t = false, hide_default_value = true)]
 	allow_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Allow execution of scripting functions")]
+	#[arg(help = "Allow execution of embedded scripting functions")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
-	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
-	#[arg(default_value_t = true, hide_default_value = true)]
 	allow_scripting: bool,
 
+	#[arg(help = "Allow guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with = "allow_all")]
+	allow_guests: bool,
+
 	#[arg(
-		help = "Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow",
+		help = "Allow execution of all functions. Optionally, you can provide a comma-separated list of function names to allow",
 		long_help = r#"Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
@@ -60,7 +60,8 @@ Function names must be in the form <family>[::<name>]. For example:
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
-	#[arg(default_value_os = "", default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_value_os = "")] // Allow all functions by default
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
@@ -75,7 +76,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
-	#[arg(default_value_os = "", default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	allow_net: Option<Targets<NetTarget>>,
 
@@ -84,19 +85,19 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	//
 	#[arg(help = "Deny all capabilities")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
-	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
-	#[arg(default_value_t = false, hide_default_value = true)]
 	deny_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Deny execution of scripting functions")]
+	#[arg(help = "Deny execution of embedded scripting functions")]
 	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with = "deny_all")]
-	#[arg(default_missing_value_os = "true", action = ArgAction::Set, num_args = 0..)]
-	#[arg(default_value_t = false, hide_default_value = true)]
 	deny_scripting: bool,
 
+	#[arg(help = "Deny guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with = "deny_all")]
+	deny_guests: bool,
+
 	#[arg(
-		help = "Deny execution of functions. Optionally, you can provide a comma-separated list of function names to deny",
+		help = "Deny execution of all functions. Optionally, you can provide a comma-separated list of function names to deny",
 		long_help = r#"Deny execution of functions. Optionally, you can provide a comma-separated list of function names to deny.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
@@ -121,8 +122,6 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long, conflicts_with = "deny_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	// If deny_all is true, disable this arg and assume a default of Targets::All
-	#[arg(conflicts_with = "deny_all", default_value_if("deny_all", "true", ""))]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	deny_net: Option<Targets<NetTarget>>,
 }
@@ -136,6 +135,10 @@ impl DbsCapabilities {
 	#[cfg(not(feature = "scripting"))]
 	fn get_scripting(&self) -> bool {
 		false
+	}
+
+	fn get_allow_guests(&self) -> bool {
+		(self.allow_all || self.allow_guests) && !(self.deny_all || self.deny_guests)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
@@ -187,10 +190,11 @@ impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
 		Capabilities::default()
 			.with_scripting(caps.get_scripting())
-			.with_allow_funcs(caps.get_allow_funcs())
-			.with_deny_funcs(caps.get_deny_funcs())
-			.with_allow_net(caps.get_allow_net())
-			.with_deny_net(caps.get_deny_net())
+			.with_guest_access(caps.get_allow_guests())
+			.with_functions(caps.get_allow_funcs())
+			.without_functions(caps.get_deny_funcs())
+			.with_network_targets(caps.get_allow_net())
+			.without_network_targets(caps.get_deny_net())
 	}
 }
 
@@ -215,12 +219,16 @@ pub async fn init(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
-
+	// Log whether authentication is enabled
 	if auth_enabled {
 		info!("✅🔒 Authentication is enabled 🔒✅");
 	} else {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
+
+	let caps = caps.into();
+	debug!("Server capabilities: {caps}");
+
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path)
 		.await?
@@ -229,7 +237,7 @@ pub async fn init(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(auth_enabled)
-		.with_capabilities(caps.into());
+		.with_capabilities(caps);
 
 	dbs.bootstrap().await?;
 
@@ -314,12 +322,8 @@ mod tests {
 			let get = Mock::given(method("GET"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
-			let head =
-				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(1);
 
 			s.register(get).await;
-			s.register(head).await;
-
 			s
 		};
 
@@ -337,13 +341,18 @@ mod tests {
 			s
 		};
 
-		// (Capabilities, Query, Succeeds, Response Contains)
+		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
 			// Functions and Networking are allowed
 			//
 			(
-				Capabilities::default(),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				true,
 				"SUCCESS".to_string(),
@@ -352,7 +361,11 @@ mod tests {
 			// Scripting is allowed
 			//
 			(
-				Capabilities::default(),
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_capabilities(Capabilities::default().with_scripting(true)),
+				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				true,
 				"1".to_string(),
@@ -361,108 +374,198 @@ mod tests {
 			// Scripting is not allowed
 			//
 			(
-				Capabilities::default().with_scripting(false),
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_capabilities(Capabilities::default().with_scripting(false)),
+				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				false,
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
+			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_guest_access(true)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
+			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				false,
+				"Not enough permissions to perform this action".to_string(),
+			),
+			//
+			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(false)
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
+				Session::default(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
+			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
+			//
+			(
+				Datastore::new("memory")
+					.await
+					.unwrap()
+					.with_auth_enabled(true)
+					.with_capabilities(Capabilities::default().with_guest_access(false)),
+				Session::viewer(),
+				"RETURN 1".to_string(),
+				true,
+				"1".to_string(),
+			),
+			//
 			// Some functions are not allowed
 			//
 			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
-				format!("RETURN http::get('{}')", server1.uri()),
-				false,
-				"Function 'http::get' is not allowed".to_string(),
-			),
-			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
-				format!("RETURN http::head('{}')", server1.uri()),
-				true,
-				"NONE".to_string(),
-			),
-			(
-				Capabilities::default()
-					.with_allow_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::*").unwrap()].into(),
-					))
-					.with_deny_funcs(Targets::<FuncTarget>::Some(
-						[FuncTarget::from_str("http::get").unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				"RETURN string::len('a')".to_string(),
 				false,
 				"Function 'string::len' is not allowed".to_string(),
+			),
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN string::lowercase('A')".to_string(),
+				true,
+				"a".to_string(),
+			),
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN time::now()".to_string(),
+				false,
+				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
 			// Some net targets are not allowed
 			//
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
 				format!("Access to network target '{}/' is not allowed", server1.uri()),
 			),
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
 				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
 			),
 			(
-				Capabilities::default()
-					.with_allow_net(Targets::<NetTarget>::Some(
-						[
-							NetTarget::from_str(&server1.address().to_string()).unwrap(),
-							NetTarget::from_str(&server2.address().to_string()).unwrap(),
-						]
-						.into(),
-					))
-					.with_deny_net(Targets::<NetTarget>::Some(
-						[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-					)),
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str(&server1.address().to_string()).unwrap(),
+								NetTarget::from_str(&server2.address().to_string()).unwrap(),
+							]
+							.into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
 				true,
 				"SUCCESS".to_string(),
 			),
 		];
 
-		for (idx, (caps, query, succeeds, contains)) in cases.into_iter().enumerate() {
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(caps);
-
-			let sess = Session::owner();
+		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
+			info!("Test case {idx}: query={query}, succeeds={succeeds}");
 			let res = ds.execute(&query, &sess, None).await;
+
+			if !succeeds && res.is_err() {
+				let res = res.unwrap_err();
+				assert!(
+					res.to_string().contains(&contains),
+					"Unexpected error for test case {}: {:?}",
+					idx,
+					res.to_string()
+				);
+				continue;
+			}
 
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {

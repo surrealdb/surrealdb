@@ -1,15 +1,14 @@
 mod parse;
+use parse::Parse;
 
 mod helpers;
 use helpers::*;
 
 use std::collections::HashMap;
 
-use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
 
@@ -19,7 +18,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -45,7 +44,7 @@ async fn define_statement_database() -> Result<(), Error> {
 		DEFINE DATABASE test;
 		INFO FOR NS;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -74,7 +73,7 @@ async fn define_statement_function() -> Result<(), Error> {
 		};
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -107,7 +106,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		DEFINE TABLE test DROP;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -138,7 +137,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		DEFINE TABLE test SCHEMALESS;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -170,7 +169,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		DEFINE TABLE test SCHEMAFULL;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -204,7 +203,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		DEFINE TABLE test SCHEMAFUL;
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -240,7 +239,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		INFO FOR DB;
 		INFO FOR TB test;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -275,6 +274,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -305,6 +305,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -327,7 +328,7 @@ async fn define_statement_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -345,6 +346,7 @@ async fn define_statement_event() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -384,7 +386,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -402,6 +404,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -441,7 +444,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -459,6 +462,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -490,7 +494,7 @@ async fn define_statement_field() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -508,6 +512,7 @@ async fn define_statement_field() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -522,7 +527,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user TYPE string;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -540,6 +545,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user TYPE string' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -554,7 +560,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user VALUE $value OR 'GBR';
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -572,6 +578,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -586,7 +593,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -604,6 +611,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -618,7 +626,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -636,6 +644,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -654,7 +663,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 		UPDATE user:1 SET age = 24;
 		UPDATE user:2 SET age = 11;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -678,6 +687,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -702,7 +712,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		CREATE user:1 SET email = 'test@surrealdb.com';
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -720,6 +730,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -746,7 +757,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -764,6 +775,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -798,7 +810,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		DELETE user:1;
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -816,6 +828,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -856,7 +869,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		DELETE user:2;
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 12);
@@ -874,6 +887,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -931,7 +945,7 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 		DEFINE INDEX test ON user COLUMNS email UNIQUE;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -960,6 +974,7 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -978,7 +993,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 		DEFINE INDEX test ON user COLUMNS account, email UNIQUE;
 		INFO FOR TABLE user;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -1007,6 +1022,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1023,7 +1039,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 		CREATE user:1 SET tags = ['one', 'two'];
 		CREATE user:2 SET tags = ['two', 'three'];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -1041,6 +1057,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1073,7 +1090,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		CREATE user:3 SET account = 'apple', tags = ['two', 'three'];
 		CREATE user:4 SET account = 'tesla', tags = ['two', 'three'];
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -1091,6 +1108,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1133,7 +1151,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
 		INFO FOR DB;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1177,7 +1195,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 		ANALYZE INDEX blog_title ON blog;
 	"#;
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -1193,7 +1211,8 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) ORDER 100 HIGHLIGHTS' },
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 HIGHLIGHTS' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1230,7 +1249,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 
 		INFO FOR ROOT;
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner();
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
@@ -1252,7 +1271,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 
 #[tokio::test]
 async fn define_statement_user_ns() -> Result<(), Error> {
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -1308,7 +1327,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 
 #[tokio::test]
 async fn define_statement_user_db() -> Result<(), Error> {
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -1887,8 +1906,8 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [
@@ -1929,8 +1948,8 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [
@@ -1971,8 +1990,8 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [

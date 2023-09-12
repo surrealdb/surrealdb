@@ -7,7 +7,12 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::base::Base;
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending;
+use crate::sql::error::expect_tag_no_case;
+use crate::sql::error::expected;
 use crate::sql::error::IResult;
+use crate::sql::fmt::is_pretty;
+use crate::sql::fmt::pretty_indent;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
@@ -18,12 +23,13 @@ use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::cut;
 use nom::combinator::opt;
 use nom::multi::many0;
 use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -78,6 +84,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.kind {
 			write!(f, " TYPE {v}")?
 		}
+		if let Some(ref v) = self.default {
+			write!(f, " DEFAULT {v}")?
+		}
 		if let Some(ref v) = self.value {
 			write!(f, " VALUE {v}")?
 		}
@@ -88,24 +97,35 @@ impl Display for DefineFieldStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		if !self.permissions.is_full() {
-			write!(f, " {}", self.permissions)?;
+			let _indent = if is_pretty() {
+				Some(pretty_indent())
+			} else {
+				f.write_char(' ')?;
+				None
+			};
+			write!(f, "{}", self.permissions)?;
 		}
 		Ok(())
 	}
 }
 
 pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = idiom::local(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = ident(i)?;
-	let (i, opts) = many0(field_opts)(i)?;
+	let (i, (name, what, opts)) = cut(|i| {
+		let (i, name) = idiom::local(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = expect_tag_no_case("ON")(i)?;
+		let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, what) = ident(i)?;
+		let (i, opts) = many0(field_opts)(i)?;
+		let (i, _) = expected(
+			"one of FLEX(IBLE), TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
+			cut(ending::query),
+		)(i)?;
+		Ok((i, (name, what, opts)))
+	})(i)?;
 	// Create the base statement
 	let mut res = DefineFieldStatement {
 		name,
@@ -174,7 +194,7 @@ fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = kind(i)?;
+	let (i, v) = cut(kind)(i)?;
 	Ok((i, DefineFieldOption::Kind(v)))
 }
 
@@ -182,7 +202,7 @@ fn field_value(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Value(v)))
 }
 
@@ -190,7 +210,7 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ASSERT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Assert(v)))
 }
 
@@ -198,7 +218,7 @@ fn field_default(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("DEFAULT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineFieldOption::Default(v)))
 }
 

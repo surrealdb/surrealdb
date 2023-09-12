@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.71.1
 
@@ -32,31 +32,19 @@ jobs:
           ref: ${{ github.base_ref }}
 
       - name: Install cargo-make
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: --debug cargo-make
+        run: cargo install --debug cargo-make
 
       - name: Benchmark baseline
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: bench-baseline
+        run: cargo make bench-baseline
 
       - name: Checkout changes
         uses: actions/checkout@v3
 
       - name: Benchmark changes
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: bench-changes
+        run: cargo make bench-changes
 
       - name: Benchmark results
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: bench-compare
+        run: cargo make bench-compare
 
       - name: Save results as artifact
         uses: actions/upload-artifact@v1

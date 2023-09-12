@@ -44,6 +44,9 @@ DEFINE FUNCTION fn::my::custom::namespaced::lowercase($name: string) {
 	RETURN string::lowercase($name);
 };
 
+-- Use a scripting function in SELECT-statement field projections
+SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];
+
 -- A really complex query
 SELECT
     *,

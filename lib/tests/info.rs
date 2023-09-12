@@ -1,5 +1,3 @@
-mod parse;
-
 mod helpers;
 use helpers::*;
 
@@ -8,7 +6,6 @@ use std::collections::HashMap;
 use regex::Regex;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 
 #[tokio::test]
 async fn info_for_root() {
@@ -17,7 +14,7 @@ async fn info_for_root() {
         DEFINE USER user ON ROOT PASSWORD 'pass';
         INFO FOR ROOT
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner();
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -45,7 +42,7 @@ async fn info_for_ns() {
         DEFINE TOKEN token ON NS TYPE HS512 VALUE 'secret';
         INFO FOR NS
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -79,7 +76,7 @@ async fn info_for_db() {
         DEFINE ANALYZER analyzer TOKENIZERS BLANK;
         INFO FOR DB
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -105,7 +102,7 @@ async fn info_for_scope() {
         DEFINE TOKEN token ON SCOPE account TYPE HS512 VALUE 'secret';
         INFO FOR SCOPE account;
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -133,7 +130,7 @@ async fn info_for_table() {
         DEFINE INDEX index ON TABLE TB FIELDS field;
         INFO FOR TABLE TB;
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -143,7 +140,7 @@ async fn info_for_table() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let output_regex = Regex::new(
-		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, tables: \{  \} \}",
+		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, lives: \{  \}, tables: \{  \} \}",
 	)
 	.unwrap();
 	let out_str = out.unwrap().to_string();
@@ -162,7 +159,7 @@ async fn info_for_user() {
         DEFINE USER user ON NS PASSWORD 'pass';
         DEFINE USER user ON DB PASSWORD 'pass';
     "#;
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -396,8 +393,8 @@ async fn permissions_checks_info_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 	];
 
 	let test_cases = [

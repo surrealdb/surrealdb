@@ -12,7 +12,6 @@ use bytes::Bytes;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
-use surrealml::storage::surml_file::SurMlFile;
 
 use super::headers::Accept;
 

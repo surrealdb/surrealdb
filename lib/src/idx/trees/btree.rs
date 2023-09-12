@@ -1,15 +1,15 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
-use crate::idx::SerdeState;
+use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
-
 pub type Payload = u64;
 
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
@@ -26,13 +26,14 @@ where
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
 
-impl SerdeState for BState {}
+impl VersionedSerdeState for BState {}
 
 impl BState {
 	pub fn new(minimum_degree: u32) -> Self {
@@ -680,7 +681,7 @@ mod tests {
 	use crate::idx::trees::store::{
 		NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 	};
-	use crate::idx::SerdeState;
+	use crate::idx::VersionedSerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;

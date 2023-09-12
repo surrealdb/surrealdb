@@ -12,7 +12,7 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Role};
+use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::opt::auth::Root;
 use crate::sql;
@@ -20,7 +20,7 @@ use crate::sql::statements::DefineUserStatement;
 use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
-use crate::vs;
+use crate::vs::Oracle;
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
@@ -29,8 +29,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 use tracing::trace;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -52,20 +56,24 @@ pub struct Datastore {
 	id: Uuid,
 	// Whether this datastore runs in strict mode by default
 	strict: bool,
+	// Whether authentication is enabled on this datastore.
+	auth_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
 	transaction_timeout: Option<Duration>,
-	// The versionstamp oracle for this datastore.
-	// Used only in some datastores, such as tikv.
-	vso: Arc<Mutex<vs::Oracle>>,
-	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Whether this datastore authentication is enabled. When disabled, anonymous actors have owner-level access.
-	auth_enabled: bool,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
+	// The versionstamp oracle for this datastore.
+	// Used only in some datastores, such as tikv.
+	versionstamp_oracle: Arc<Mutex<Oracle>>,
+	// Whether this datastore enables live query notifications to subscribers
+	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 }
+
+/// We always want to be circulating the live query information
+/// And we will sometimes have an error attached but still not want to lose the LQ.
+pub(crate) type BootstrapOperationResult = (LqValue, Option<Error>);
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
@@ -144,12 +152,6 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		let id = Uuid::new_v4();
-		Self::new_full(path, id).await
-	}
-
-	// For testing
-	pub async fn new_full(path: &str, node_id: Uuid) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
 		let inner = match path {
 			"memory" => {
@@ -255,16 +257,22 @@ impl Datastore {
 		};
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
-			id: node_id,
+			id: Uuid::new_v4(),
 			inner,
 			strict: false,
+			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			vso: Arc::new(Mutex::new(vs::Oracle::systime_counter())),
 			notification_channel: None,
-			auth_enabled: false,
 			capabilities: Capabilities::default(),
+			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 		})
+	}
+
+	/// Specify whether this Datastore should run in strict mode
+	pub fn with_node_id(mut self, id: Uuid) -> Self {
+		self.id = id;
+		self
 	}
 
 	/// Specify whether this Datastore should run in strict mode
@@ -285,82 +293,128 @@ impl Datastore {
 		self
 	}
 
-	/// Enabled authentication for this Datastore?
-	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
-		self.auth_enabled = enabled;
-		self
-	}
-
-	pub fn is_auth_enabled(&self) -> bool {
-		self.auth_enabled
-	}
-
-	/// Setup the initial credentials
-	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
-		let txn = Arc::new(Mutex::new(self.transaction(true, false).await?));
-		let root_users = txn.lock().await.all_root_users().await;
-		match root_users {
-			Ok(val) if val.is_empty() => {
-				info!(
-					"Initial credentials were provided and no existing root-level users were found: create the initial user '{}'.", creds.username
-				);
-				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
-				let ctx = Context::default();
-				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _result = stm.compute(&ctx, &opt, &txn, None).await?;
-				txn.lock().await.commit().await?;
-				Ok(())
-			}
-			Ok(_) => {
-				warn!("Initial credentials were provided but existing root-level users were found. Skip the initial user creation.");
-				warn!("Consider removing the --user/--pass arguments from the server start.");
-				txn.lock().await.commit().await?;
-				Ok(())
-			}
-			Err(e) => {
-				txn.lock().await.cancel().await?;
-				Err(e)
-			}
-		}
-	}
-
 	/// Set a global transaction timeout for this Datastore
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
 		self
 	}
 
-	/// Configure Datastore capabilities
+	/// Set whether authentication is enabled for this Datastore
+	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
+		self.auth_enabled = enabled;
+		self
+	}
+
+	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
 		self
 	}
 
-	/// Creates a new datastore instance
-	///
-	/// Use this for clustered environments.
-	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
-		let ds = Datastore::new(path).await?;
-		ds.bootstrap().await?;
-		Ok(ds)
+	/// Is authentication enabled for this Datastore?
+	pub fn is_auth_enabled(&self) -> bool {
+		self.auth_enabled
+	}
+
+	/// Setup the initial credentials
+	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();
+		// Fetch the root users from the storage
+		let users = txn.lock().await.all_root_users().await;
+		// Process credentials, depending on existing users
+		match users {
+			Ok(v) if v.is_empty() => {
+				// Display information in the logs
+				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", creds.username);
+				// Create and save a new root users
+				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+				let ctx = Context::default();
+				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+				// We added a new user, so commit the transaction
+				txn.lock().await.commit().await?;
+				// Everything ok
+				Ok(())
+			}
+			Ok(_) => {
+				// Display warnings in the logs
+				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", creds.username);
+				warn!("Consider removing the --user and --pass arguments from the server start command");
+				// We didn't write anything, so just rollback
+				txn.lock().await.cancel().await?;
+				// Everything ok
+				Ok(())
+			}
+			Err(e) => {
+				// There was an unexpected error, so rollback
+				txn.lock().await.cancel().await?;
+				// Return any error
+				Err(e)
+			}
+		}
 	}
 
 	// Initialise bootstrap with implicit values intended for runtime
+	// An error indicates that a failure happened, but that does not mean that the bootstrap
+	// completely failed. It may have partially completed. It certainly has side-effects
+	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
+	// ability.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
-		self.bootstrap_full(&self.id).await
-	}
-
-	// Initialise bootstrap with artificial values, intended for testing
-	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
-		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
-		tx.commit().await?;
+		let archived = match self.register_remove_and_archive(&mut tx, &self.id, now).await {
+			Ok(archived) => {
+				tx.commit().await?;
+				archived
+			}
+			Err(e) => {
+				error!("Error bootstrapping mark phase: {:?}", e);
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
+		// Filtered includes all lqs that should be used in subsequent step
+		// Currently that is all of them, no matter the error encountered
+		let mut filtered: Vec<LqValue> = vec![];
+		// err is used to aggregate all errors across all stages
+		let mut err = vec![];
+		for res in archived {
+			match res {
+				(lq, Some(e)) => {
+					filtered.push(lq);
+					err.push(e);
+				}
+				(lq, None) => {
+					filtered.push(lq);
+				}
+			}
+		}
 
 		let mut tx = self.transaction(true, false).await?;
-		self.remove_archived(&mut tx, archived).await?;
-		tx.commit().await
+		let val = self.remove_archived(&mut tx, filtered).await;
+		let resolve_err = match val {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error bootstrapping sweep phase: {:?}", e);
+				match tx.cancel().await {
+					Ok(_) => Err(e),
+					Err(e) => {
+						// We have a nested error
+						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
+					}
+				}
+			}
+		};
+		if resolve_err.is_err() {
+			err.push(resolve_err.unwrap_err());
+		}
+		if !err.is_empty() {
+			error!("Error bootstrapping sweep phase: {:?}", err);
+			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
+		}
+		Ok(())
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -369,7 +423,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
@@ -401,6 +455,7 @@ impl Datastore {
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
+			// TODO should be delr in case of nested entries
 			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
@@ -418,7 +473,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
@@ -428,7 +483,14 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await?;
+					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+						Ok(lq) => lq,
+						Err(e) => {
+							error!("Error archiving lqs during bootstrap phase: {:?}", e);
+							vec![]
+						}
+					};
+				// We need to add lv nodes not found so that they can be deleted in second stage
 				for lq_value in node_archived_lqs {
 					archived.push(lq_value);
 				}
@@ -442,6 +504,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		archived: Vec<LqValue>,
 	) -> Result<(), Error> {
+		trace!("Gone into removing archived");
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
 			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
@@ -449,30 +512,6 @@ impl Datastore {
 			// Delete the table key, used for finding LQ associated with a table
 			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
 			tx.del(key).await?;
-		}
-		Ok(())
-	}
-
-	pub async fn _garbage_collect(
-		// TODO not invoked
-		// But this is garbage collection outside of bootstrap
-		&self,
-		tx: &mut Transaction,
-		watermark: &Timestamp,
-		this_node_id: &Uuid,
-	) -> Result<(), Error> {
-		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
-		trace!("Found dead hbs: {:?}", dead_heartbeats);
-		let mut archived: Vec<LqValue> = vec![];
-		for hb in dead_heartbeats {
-			let new_archived = self
-				.archive_lv_for_node(tx, &crate::sql::uuid::Uuid::from(hb.nd), this_node_id.clone())
-				.await?;
-			tx.del_nd(hb.nd).await?;
-			trace!("Deleted node {}", hb.nd);
-			for lq_value in new_archived {
-				archived.push(lq_value);
-			}
 		}
 		Ok(())
 	}
@@ -520,15 +559,22 @@ impl Datastore {
 		tx: &mut Transaction,
 		nd: &Uuid,
 		this_node_id: Uuid,
-	) -> Result<Vec<LqValue>, Error> {
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let lqs = tx.all_lq(nd).await?;
 		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
-		let mut ret = vec![];
+		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		for lq in lqs {
-			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
-			let archived_lvs = lvs.clone().archive(this_node_id.clone());
-			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
-			ret.push(lq);
+			let lv_res =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
+			if let Err(e) = lv_res {
+				error!("Error getting live query for node {}: {:?}", nd, e);
+				ret.push((lq, Some(e)));
+				continue;
+			}
+			let lv = lv_res.unwrap();
+			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
+			ret.push((lq, None));
 		}
 		Ok(ret)
 	}
@@ -542,6 +588,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(ts, limit).await?;
+		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
@@ -552,9 +599,9 @@ impl Datastore {
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
-		let now = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
 		Ok(())
@@ -640,14 +687,6 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		#[cfg(debug_assertions)]
-		if lock {
-			warn!("There are issues with pessimistic locking in TiKV");
-		}
-		self.transaction_inner(write, lock).await
-	}
-
-	pub async fn transaction_inner(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
@@ -690,7 +729,7 @@ impl Datastore {
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
 			write_buffer: HashMap::new(),
-			vso: self.vso.clone(),
+			vso: self.versionstamp_oracle.clone(),
 		})
 	}
 
@@ -710,7 +749,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -740,13 +779,23 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			}
+			.into());
+		}
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -754,8 +803,8 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -795,13 +844,23 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if anonymous actors can compute values when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		if self.auth_enabled && !self.capabilities.allows_guest_access() {
+			return Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "compute".to_string(),
+				resource: "value".to_string(),
+			}
+			.into());
+		}
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -809,12 +868,8 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
-			.with_strict(self.strict);
-		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?;
-		//
-		let txn = Arc::new(Mutex::new(txn));
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
 		let mut ctx = Context::default();
 		// Set context capabilities
@@ -831,15 +886,88 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
-		match val.writeable() {
-			true => txn.lock().await.commit().await?,
-			false => txn.lock().await.cancel().await?,
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
 		};
 		// Return result
-		Ok(res)
+		res
+	}
+
+	/// Evaluates a SQL [`Value`] without checking authenticating config
+	/// This is used in very specific cases, where we do not need to check
+	/// whether authentication is enabled, or guest access is disabled.
+	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// SIGNIN clause, which still needs to work without guest access.
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	/// use surrealdb::sql::Future;
+	/// use surrealdb::sql::Value;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
+	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", skip_all)]
+	pub async fn evaluate(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Value, Error> {
+		// Create a new query options
+		let opt = Options::default()
+			.with_id(self.id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(self.capabilities.clone());
+		// Set the global query timeout
+		if let Some(timeout) = self.query_timeout {
+			ctx.add_timeout(timeout);
+		}
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		// Start an execution context
+		let ctx = sess.context(ctx);
+		// Store the query variables
+		let ctx = vars.attach(ctx)?;
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		// Compute the value
+		let res = val.compute(&ctx, &opt, &txn, None).await;
+		// Store any data
+		match (res.is_ok(), val.writeable()) {
+			// If the compute was successful, then commit if writeable
+			(true, true) => txn.lock().await.commit().await?,
+			// Cancel if the compute was an error, or if readonly
+			(_, _) => txn.lock().await.cancel().await?,
+		};
+		// Return result
+		res
 	}
 
 	/// Subscribe to live notifications
@@ -861,33 +989,30 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip_all)]
+	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(skip(self, sess, chn))]
-	pub async fn prepare_export(
+	#[instrument(level = "debug", skip(self, sess, chn))]
+	pub async fn export(
 		&self,
 		sess: &Session,
 		ns: String,
 		db: String,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-		let mut txn = self.transaction(false, false).await?;
-
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
 			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
 		}
-
+		// Create a new readonly transaction
+		let mut txn = self.transaction(false, false).await?;
+		// Return an async export job
 		Ok(async move {
-			// Start a new transaction
 			// Process the export
-			let ns = ns.to_owned();
-			let db = db.to_owned();
 			txn.export(&ns, &db, chn).await?;
 			// Everything ok
 			Ok(())
@@ -895,7 +1020,7 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(skip(self, sess, sql))]
+	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
@@ -905,7 +1030,7 @@ impl Datastore {
 				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
 			)?;
 		}
-
+		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
 }

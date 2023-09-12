@@ -47,13 +47,7 @@ impl QueryExecutor {
 		// Build the FtEntries and map them to Expressions and MatchRef
 		for (exp, io) in index_map.consume() {
 			let mut entry = None;
-			if let Index::Search {
-				az,
-				order,
-				sc,
-				hl,
-			} = &io.ix().index
-			{
+			if let Index::Search(p) = &io.ix().index {
 				let ixn = &io.ix().name.0;
 				if let Some(ft) = ft_map.get(ixn) {
 					if entry.is_none() {
@@ -61,9 +55,8 @@ impl QueryExecutor {
 					}
 				} else {
 					let ikb = IndexKeyBase::new(opt, io.ix());
-					let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-					let ft = FtIndex::new(&mut run, az, ikb, *order, sc, *hl, TreeStoreType::Read)
-						.await?;
+					let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
+					let ft = FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
 					let ixn = ixn.to_owned();
 					if entry.is_none() {
 						entry = FtEntry::new(&mut run, &ft, io).await?;
@@ -128,6 +121,9 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(ir, io).await,
+			_ => Err(Error::FeatureNotYetImplemented {
+				feature: "VectorSearch iterator".to_string(),
+			}),
 		}
 	}
 

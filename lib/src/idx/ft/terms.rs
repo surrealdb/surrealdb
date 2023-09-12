@@ -2,13 +2,13 @@ use crate::err::Error;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use crate::idx::{IndexKeyBase, SerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
 pub(crate) type TermId = u64;
 
 pub(super) struct Terms {
@@ -135,13 +135,14 @@ impl Terms {
 }
 
 #[derive(Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 struct State {
 	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
 
-impl SerdeState for State {}
+impl VersionedSerdeState for State {}
 
 impl State {
 	fn new(default_btree_order: u32) -> Self {

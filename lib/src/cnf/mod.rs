@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 /// Specifies how deep various forms of computation will go before the query fails
-/// with [`Error::ComputationDepthExceeded`].
+/// with [`crate::error::Db::ComputationDepthExceeded`].
 ///
 /// For reference, use ~15 per MiB of stack in release mode.
 ///
@@ -32,3 +32,6 @@ pub const ID_CHARS: [char; 36] = [
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
+
+/// Datastore processor batch size for scan operations
+pub const PROCESSOR_BATCH_SIZE: u32 = 50;

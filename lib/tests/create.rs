@@ -1,9 +1,10 @@
 mod parse;
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Part;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
@@ -29,7 +30,7 @@ async fn create_with_id() -> Result<(), Error> {
 		CREATE person:other SET id = 'tobie';
 		CREATE person:other CONTENT { id: 'tobie', name: 'Tester' };
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 14);
@@ -172,12 +173,12 @@ async fn create_with_id() -> Result<(), Error> {
 async fn create_with_custom_function() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::record::create($data: any) {
-			RETURN CREATE person:ulid() CONTENT { data: $data } RETURN AFTER;
+			RETURN CREATE ONLY person:ulid() CONTENT { data: $data } RETURN AFTER;
 		};
 		RETURN fn::record::create({ test: true, name: 'Tobie' });
 		RETURN fn::record::create({ test: true, name: 'Jaime' });
 	";
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -214,7 +215,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
 	";
-	let dbs = Datastore::new("memory").await?.with_auth_enabled(true);
+	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -272,7 +273,7 @@ async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 		CREATE foo SET name = 'Jane Doe';
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -293,7 +294,7 @@ async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Erro
 		CREATE user:4 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -326,7 +327,7 @@ async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = ['a@example.com', 'b@example.com'];
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -352,7 +353,7 @@ async fn create_with_unique_index_on_one_field_with_flattened_sub_values() -> Re
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'three'], emails = [ { value:'a@example.com'} , { value:'b@example.com' } ];
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -378,7 +379,7 @@ async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
 		CREATE user:2 SET account = 'Apple', tags = ['two', 'one'], emails = ['b@example.com', 'c@example.com'];
 	";
 
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -433,7 +434,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
@@ -458,7 +459,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the CREATE statement when the table already exists
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
 				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
@@ -528,7 +529,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
@@ -546,7 +547,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -570,7 +571,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -607,7 +608,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
@@ -624,7 +625,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -647,7 +648,7 @@ async fn check_permissions_auth_disabled() {
 	}
 
 	{
-		let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		// When the table exists and grants full permissions
 		let mut resp = ds

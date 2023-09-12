@@ -1,9 +1,9 @@
 mod parse;
-
 use parse::Parse;
+mod helpers;
+use helpers::new_ds;
 use surrealdb::dbs::{Response, Session};
 use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -110,15 +110,15 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 	let mut res = execute_test(&two_multi_index_query("WITH NOINDEX", ""), 9).await?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
-	check_result(&mut res, &table_explain(2))?;
+	check_result(&mut res, &table_explain_no_index(2))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &table_explain(1))?;
+	check_result(&mut res, &table_explain_no_index(1))?;
 	Ok(())
 }
 
 async fn execute_test(sql: &str, expected_result: usize) -> Result<Vec<Response>, Error> {
-	let dbs = Datastore::new("memory").await?;
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
@@ -174,6 +174,31 @@ fn table_explain(fetch_count: usize) -> String {
 					table: 'person'
 				}},
 				operation: 'Iterate Table'
+			}},
+			{{
+				detail: {{
+					count: {fetch_count}
+				}},
+				operation: 'Fetch'
+			}}
+		]"
+	)
+}
+
+fn table_explain_no_index(fetch_count: usize) -> String {
+	format!(
+		"[
+			{{
+				detail: {{
+					table: 'person'
+				}},
+				operation: 'Iterate Table'
+			}},
+			{{
+				detail: {{
+					reason: 'WITH NOINDEX'
+				}},
+				operation: 'Fallback'
 			}},
 			{{
 				detail: {{
@@ -332,3 +357,60 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 					operation: 'Fetch'
 				}
 			]";
+
+#[tokio::test]
+async fn select_with_no_index_unary_operator() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = dbs
+		.execute("SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN", &ses, None)
+		.await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'WITH NOINDEX'
+					},
+					operation: 'Fallback'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_unsupported_unary_operator() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res =
+		dbs.execute("SELECT * FROM table WHERE !param.subparam EXPLAIN", &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'unary expressions not supported'
+					},
+					operation: 'Fallback'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}

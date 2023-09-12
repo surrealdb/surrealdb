@@ -140,14 +140,85 @@ pub mod distance {
 
 	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::hamming() function",
+			feature: "string::distance::hamming() function".to_string(),
 		})
 	}
 
 	pub fn levenshtein((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::levenshtein() function",
+			feature: "string::distance::levenshtein() function".to_string(),
 		})
+	}
+}
+
+pub mod is {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use chrono::NaiveDateTime;
+	use once_cell::sync::Lazy;
+	use regex::Regex;
+	use semver::Version;
+	use std::char;
+	use url::Url;
+	use uuid::Uuid;
+
+	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+
+	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.chars().all(char::is_alphanumeric).into())
+	}
+
+	pub fn alpha((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.chars().all(char::is_alphabetic).into())
+	}
+
+	pub fn ascii((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.is_ascii().into())
+	}
+
+	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
+		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
+	}
+	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
+		Ok(addr::parse_domain_name(arg.as_str()).is_ok().into())
+	}
+
+	pub fn email((arg,): (String,)) -> Result<Value, Error> {
+		Ok(addr::parse_email_address(arg.as_str()).is_ok().into())
+	}
+
+	pub fn hexadecimal((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+	}
+
+	pub fn latitude((arg,): (String,)) -> Result<Value, Error> {
+		Ok(LATITUDE_RE.is_match(arg.as_str()).into())
+	}
+
+	pub fn longitude((arg,): (String,)) -> Result<Value, Error> {
+		Ok(LONGITUDE_RE.is_match(arg.as_str()).into())
+	}
+
+	pub fn numeric((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.chars().all(char::is_numeric).into())
+	}
+
+	pub fn semver((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Version::parse(arg.as_str()).is_ok().into())
+	}
+
+	pub fn url((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Url::parse(&arg).is_ok().into())
+	}
+
+	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(match arg {
+			Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
+			Value::Uuid(_) => true,
+			_ => false,
+		}
+		.into())
 	}
 }
 
@@ -163,7 +234,7 @@ pub mod similarity {
 
 	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
 		Err(Error::FeatureNotYetImplemented {
-			feature: "string::similarity::jaro() function",
+			feature: "string::similarity::jaro() function".to_string(),
 		})
 	}
 
@@ -215,5 +286,108 @@ mod tests {
 		test("abcde", "cbcd", false);
 		test("好世界", "世", true);
 		test("好世界", "你好", false);
+	}
+
+	#[test]
+	fn is_alphanum() {
+		let value = super::is::alphanum((String::from("abc123"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::alphanum((String::from("y%*"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_alpha() {
+		let value = super::is::alpha((String::from("abc"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::alpha((String::from("1234"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ascii() {
+		let value = super::is::ascii((String::from("abc"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ascii((String::from("中国"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_domain() {
+		let value = super::is::domain((String::from("食狮.中国"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::domain((String::from("example-.com"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_email() {
+		let input = (String::from("user@[fd79:cdcb:38cc:9dd:f686:e06d:32f3:c123]"),);
+		let value = super::is::email(input).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let input = (String::from("john..doe@example.com"),);
+		let value = super::is::email(input).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_hexadecimal() {
+		let value = super::is::hexadecimal((String::from("00FF00"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::hexadecimal((String::from("SurrealDB"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_latitude() {
+		let value = super::is::latitude((String::from("-0.118092"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::latitude((String::from("12345"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_longitude() {
+		let value = super::is::longitude((String::from("51.509865"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("12345"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_numeric() {
+		let value = super::is::numeric((String::from("12345"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::numeric((String::from("abcde"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_semver() {
+		let value = super::is::semver((String::from("1.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::semver((String::from("1.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_uuid() {
+		let input = (String::from("123e4567-e89b-12d3-a456-426614174000").into(),);
+		let value = super::is::uuid(input).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let input = (String::from("foo-bar").into(),);
+		let value = super::is::uuid(input).unwrap();
+		assert_eq!(value, Value::Bool(false));
 	}
 }

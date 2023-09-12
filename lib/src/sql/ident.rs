@@ -18,6 +18,8 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use super::error::expected;
+
 const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
 const BRACKET_END_NUL: &str = "⟩\0";
@@ -78,7 +80,7 @@ impl Display for Ident {
 }
 
 pub fn ident(i: &str) -> IResult<&str, Ident> {
-	let (i, v) = ident_raw(i)?;
+	let (i, v) = expected("an identifier", ident_raw)(i)?;
 	Ok((i, Ident::from(v)))
 }
 

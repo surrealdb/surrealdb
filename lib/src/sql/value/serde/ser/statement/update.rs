@@ -40,6 +40,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeUpdateStatement {
+	only: Option<bool>,
 	what: Option<Values>,
 	data: Option<Data>,
 	cond: Option<Cond>,
@@ -57,6 +58,9 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
+			"only" => {
+				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"what" => {
 				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
 			}
@@ -87,6 +91,7 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.what, self.parallel) {
 			(Some(what), Some(parallel)) => Ok(UpdateStatement {
+				only: self.only.is_some_and(|v| v),
 				what,
 				parallel,
 				data: self.data,

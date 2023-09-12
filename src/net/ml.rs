@@ -16,13 +16,10 @@ use surrealml::execution::compute::ModelComputation;
 use surrealdb::sql::{Value, Part};
 use serde::Deserialize;
 use tch::Tensor;
-// use surrealdb::sql::statements::OutputStatement;
-// use surrealdb::sql::Thing;
 use std::collections::HashMap;
 
 use super::headers::Accept;
 
-// const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 
 pub(super) fn router<S, B>() -> Router<S, B>
@@ -37,7 +34,6 @@ where
 		.route("/ml/compute/raw", get(raw_compute))
 		.route("/ml/compute/buffered", get(buffered_compute))
 		.route_layer(DefaultBodyLimit::disable())
-		// .layer(RequestBodyLimitLayer::new(MAX))
 }
 
 

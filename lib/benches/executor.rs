@@ -1,6 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use pprof::criterion::{Output, PProfProfiler};
-use surrealdb::{dbs::Session, kvs::Datastore};
+use surrealdb::{
+	dbs::{Capabilities, Session},
+	kvs::Datastore,
+};
 
 macro_rules! query {
 	($c: expr, $name: ident, $query: expr) => {
@@ -9,7 +12,8 @@ macro_rules! query {
 	($c: expr, $name: ident, $setup: expr, $query: expr) => {
 		$c.bench_function(stringify!($name), |b| {
 			let (dbs, ses) = futures::executor::block_on(async {
-				let dbs = Datastore::new("memory").await.unwrap();
+				let dbs =
+					Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 				let ses = Session::owner().with_ns("test").with_db("test");
 				let setup = $setup;
 				if !setup.is_empty() {

@@ -159,7 +159,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				None => Value::None,
 			};
 			// Get the scope token
-			let de = tx.get_st(&ns, &db, &sc, &tk).await?;
+			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -224,7 +224,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the database token
-			let de = tx.get_dt(&ns, &db, &tk).await?;
+			let de = tx.get_db_token(&ns, &db, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -293,7 +293,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
 			// Get the namespace token
-			let de = tx.get_nt(&ns, &tk).await?;
+			let de = tx.get_ns_token(&ns, &tk).await?;
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -435,12 +435,14 @@ async fn verify_root_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-	let user_res = tx.get_root_user(user).await?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_root_user(user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 async fn verify_ns_creds(
@@ -449,16 +451,14 @@ async fn verify_ns_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-
-	let user_res = match tx.get_ns_user(ns, user).await {
-		Ok(u) => Ok(u),
-		Err(e) => Err(e),
-	}?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_ns_user(ns, user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 async fn verify_db_creds(
@@ -468,16 +468,14 @@ async fn verify_db_creds(
 	user: &str,
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
+	// Create a new readonly transaction
 	let mut tx = ds.transaction(false, false).await?;
-
-	let user_res = match tx.get_db_user(ns, db, user).await {
-		Ok(u) => Ok(u),
-		Err(e) => Err(e),
-	}?;
-
-	verify_pass(pass, user_res.hash.as_ref())?;
-
-	Ok(user_res)
+	// Fetch the specified user from storage
+	let user = tx.get_db_user(ns, db, user).await?;
+	// Verify the specified password for the user
+	verify_pass(pass, user.hash.as_ref())?;
+	// Return the verified user object
+	Ok(user)
 }
 
 fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
@@ -486,8 +484,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
-		// The password did not verify
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::InvalidPass),
 	}
 }
 

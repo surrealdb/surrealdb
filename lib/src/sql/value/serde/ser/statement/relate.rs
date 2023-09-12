@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeRelateStatement {
+	only: Option<bool>,
 	kind: Option<Value>,
 	from: Option<Value>,
 	with: Option<Value>,
@@ -57,6 +58,9 @@ impl serde::ser::SerializeStruct for SerializeRelateStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
+			"only" => {
+				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"kind" => {
 				self.kind = Some(value.serialize(ser::value::Serializer.wrap())?);
 			}
@@ -92,6 +96,7 @@ impl serde::ser::SerializeStruct for SerializeRelateStatement {
 		match (self.kind, self.from, self.with, self.uniq, self.parallel) {
 			(Some(kind), Some(from), Some(with), Some(uniq), Some(parallel)) => {
 				Ok(RelateStatement {
+					only: self.only.is_some_and(|v| v),
 					kind,
 					from,
 					with,
