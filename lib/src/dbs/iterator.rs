@@ -8,7 +8,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;

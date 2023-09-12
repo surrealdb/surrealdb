@@ -102,10 +102,10 @@ impl<'a> TreeBuilder<'a> {
 		match v {
 			Value::Expression(e) => self.eval_expression(e).await,
 			Value::Idiom(i) => self.eval_idiom(i).await,
-			Value::Strand(_) => Ok(Node::Scalar(v.to_owned())),
-			Value::Number(_) => Ok(Node::Scalar(v.to_owned())),
-			Value::Bool(_) => Ok(Node::Scalar(v.to_owned())),
-			Value::Thing(_) => Ok(Node::Scalar(v.to_owned())),
+			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
+				Ok(Node::Scalar(v.to_owned()))
+			}
+			Value::Array(a) => Ok(self.eval_array(a)),
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
@@ -113,6 +113,16 @@ impl<'a> TreeBuilder<'a> {
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
+	}
+
+	fn eval_array(&mut self, a: &Array) -> Node {
+		// Check if it is a numeric vector
+		for v in &a.0 {
+			if !v.is_number() {
+				return Node::Unsupported(format!("Unsupported array: {}", a));
+			}
+		}
+		Node::Vector(a.to_owned())
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
@@ -165,45 +175,61 @@ impl<'a> TreeBuilder<'a> {
 		irs: &[IndexRef],
 		op: &Operator,
 		id: &Idiom,
-		v: &Node,
+		n: &Node,
 		e: &Expression,
 	) -> Option<IndexOption> {
-		if let Some(v) = v.is_scalar() {
-			for ir in irs {
-				if let Some(ix) = self.index_map.definitions.get(ir) {
-					let op = match &ix.index {
-						Index::Idx => Self::eval_index_operator(op, v),
-						Index::Uniq => Self::eval_index_operator(op, v),
-						Index::Search {
-							..
-						} => {
+		for ir in irs {
+			if let Some(ix) = self.index_map.definitions.get(ir) {
+				let op = match &ix.index {
+					Index::Idx => Self::eval_index_operator(op, n),
+					Index::Uniq => Self::eval_index_operator(op, n),
+					Index::Search {
+						..
+					} => {
+						if let Some(v) = n.is_scalar() {
 							if let Operator::Matches(mr) = op {
 								Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr))
 							} else {
 								None
 							}
+						} else {
+							None
 						}
-						Index::MTree(_) => None,
-					};
-					if let Some(op) = op {
-						let io = IndexOption::new(*ir, id.clone(), op);
-						self.index_map.options.insert(Arc::new(e.clone()), io.clone());
-						return Some(io);
 					}
+					Index::MTree(_) => {
+						if let Operator::Knn(k) = op {
+							if let Node::Vector(a) = n {
+								Some(IndexOperator::Knn(a.clone(), *k))
+							} else {
+								None
+							}
+						} else {
+							None
+						}
+					}
+				};
+				if let Some(op) = op {
+					let io = IndexOption::new(*ir, id.clone(), op);
+					self.index_map.options.insert(Arc::new(e.clone()), io.clone());
+					return Some(io);
 				}
 			}
 		}
 		None
 	}
 
-	fn eval_index_operator(op: &Operator, v: &Value) -> Option<IndexOperator> {
-		match op {
-			Operator::Equal => Some(IndexOperator::Equality(Array::from(v.clone()))),
-			Operator::LessThan
-			| Operator::LessThanOrEqual
-			| Operator::MoreThan
-			| Operator::MoreThanOrEqual => Some(IndexOperator::RangePart(op.clone(), v.clone())),
-			_ => None,
+	fn eval_index_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
+		if let Some(v) = n.is_scalar() {
+			match op {
+				Operator::Equal => Some(IndexOperator::Equality(Array::from(v.clone()))),
+				Operator::LessThan
+				| Operator::LessThanOrEqual
+				| Operator::MoreThan
+				| Operator::MoreThanOrEqual => Some(IndexOperator::RangePart(op.clone(), v.clone())),
+				_ => None,
+			}
+		} else {
+			None
 		}
 	}
 
@@ -235,6 +261,7 @@ pub(super) enum Node {
 	IndexedField(Idiom, Arc<Vec<IndexRef>>),
 	NonIndexedField,
 	Scalar(Value),
+	Vector(Array),
 	Unsupported(String),
 }
 

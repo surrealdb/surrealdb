@@ -64,7 +64,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		field_content: &[Value],
+		field_content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -101,7 +101,7 @@ impl Analyzer {
 		&self,
 		terms: &mut Terms,
 		tx: &mut Transaction,
-		content: &[Value],
+		content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
@@ -135,25 +135,25 @@ impl Analyzer {
 		Ok((dl, tfid, osid))
 	}
 
-	fn analyze_content(&self, content: &[Value], tks: &mut Vec<Tokens>) -> Result<(), Error> {
+	fn analyze_content(&self, content: Vec<Value>, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		for v in content {
 			self.analyze_value(v, tks)?;
 		}
 		Ok(())
 	}
 
-	fn analyze_value(&self, val: &Value, tks: &mut Vec<Tokens>) -> Result<(), Error> {
+	fn analyze_value(&self, val: Value, tks: &mut Vec<Tokens>) -> Result<(), Error> {
 		match val {
-			Value::Strand(s) => tks.push(self.analyze(s.0.clone())?),
+			Value::Strand(s) => tks.push(self.analyze(s.0)?),
 			Value::Number(n) => tks.push(self.analyze(n.to_string())?),
 			Value::Bool(b) => tks.push(self.analyze(b.to_string())?),
 			Value::Array(a) => {
-				for v in &a.0 {
+				for v in a.0 {
 					self.analyze_value(v, tks)?;
 				}
 			}
 			Value::Object(o) => {
-				for v in o.0.values() {
+				for (_, v) in o.0 {
 					self.analyze_value(v, tks)?;
 				}
 			}

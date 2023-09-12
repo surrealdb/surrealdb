@@ -11,6 +11,7 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod vm;
 
 use crate::sql::array::Array;
 use crate::sql::id::Id;

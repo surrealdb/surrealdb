@@ -1,25 +1,27 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::{DocId, DocIds};
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexRangeThingIterator, MatchesThingIterator, ThingIterator,
-	UniqueEqualThingIterator, UniqueRangeThingIterator,
+	IndexEqualThingIterator, IndexRangeThingIterator, KnnThingIterator, MatchesThingIterator,
+	ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexMap, IndexRef};
+use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Expression, Object, Table, Thing, Value};
-use std::collections::{HashMap, HashSet};
+use crate::sql::{Array, Expression, Object, Table, Thing, Value};
+use roaring::RoaringTreemap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -30,6 +32,7 @@ pub(crate) struct QueryExecutor {
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: HashMap<IndexRef, DefineIndexStatement>,
+	mt_exp: HashMap<Arc<Expression>, MtEntry>,
 }
 
 pub(crate) type IteratorRef = u16;
@@ -66,39 +69,59 @@ impl QueryExecutor {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
+		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
+		let mut mt_exp = HashMap::default();
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Expressions and MatchRef
 		for (exp, io) in im.options {
-			let mut entry = None;
 			let ir = io.ir();
 			if let Some(idx_def) = im.definitions.get(&ir) {
-				if let Index::Search(p) = &idx_def.index {
-					if let Some(ft) = ft_map.get(&ir) {
-						if entry.is_none() {
-							entry = FtEntry::new(&mut run, ft, io).await?;
+				match &idx_def.index {
+					Index::Search(p) => {
+						let mut ft_entry = None;
+						if let Some(ft) = ft_map.get(&ir) {
+							if ft_entry.is_none() {
+								ft_entry = FtEntry::new(&mut run, ft, io).await?;
+							}
+						} else {
+							let ikb = IndexKeyBase::new(opt, idx_def);
+							let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
+							let ft =
+								FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
+							if ft_entry.is_none() {
+								ft_entry = FtEntry::new(&mut run, &ft, io).await?;
+							}
+							ft_map.insert(ir, ft);
 						}
-					} else {
-						let ikb = IndexKeyBase::new(opt, idx_def);
-						let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
-						let ft = FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
-						if entry.is_none() {
-							entry = FtEntry::new(&mut run, &ft, io).await?;
+						if let Some(e) = ft_entry {
+							if let Matches(_, Some(mr)) = e.0.index_option.op() {
+								if mr_entries.insert(*mr, e.clone()).is_some() {
+									return Err(Error::DuplicatedMatchRef {
+										mr: *mr,
+									});
+								}
+							}
+							exp_entries.insert(exp, e);
 						}
-						ft_map.insert(ir, ft);
 					}
-				}
-			}
-
-			if let Some(e) = entry {
-				if let Matches(_, Some(mr)) = e.0.index_option.op() {
-					if mr_entries.insert(*mr, e.clone()).is_some() {
-						return Err(Error::DuplicatedMatchRef {
-							mr: *mr,
-						});
+					Index::MTree(p) => {
+						if let IndexOperator::Knn(a, k) = io.op() {
+							let entry = if let Some(mt) = mt_map.get(&ir) {
+								MtEntry::new(&mut run, mt, a.clone(), *k).await?
+							} else {
+								let ikb = IndexKeyBase::new(opt, idx_def);
+								let mt =
+									MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Read).await?;
+								let entry = MtEntry::new(&mut run, &mt, a.clone(), *k).await?;
+								mt_map.insert(ir, mt);
+								entry
+							};
+							mt_exp.insert(exp, entry);
+						}
 					}
+					_ => {}
 				}
-				exp_entries.insert(exp, e);
 			}
 		}
 
@@ -109,6 +132,19 @@ impl QueryExecutor {
 			exp_entries,
 			it_entries: Vec::new(),
 			index_definitions: im.definitions,
+			mt_exp,
+		})
+	}
+
+	pub(crate) async fn knn(
+		&self,
+		_txn: &Transaction,
+		_thg: &Thing,
+		exp: &Expression,
+	) -> Result<Value, Error> {
+		// If no previous case were successful, we end up with a user error
+		Err(Error::NoIndexFoundForMatch {
+			value: exp.to_string(),
 		})
 	}
 
@@ -168,9 +204,7 @@ impl QueryExecutor {
 							Index::Search {
 								..
 							} => self.new_search_index_iterator(ir, io.clone()).await,
-							Index::MTree(_) => Err(Error::FeatureNotYetImplemented {
-								feature: "VectorSearch iterator".to_string(),
-							}),
+							Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(ir)),
 						}
 					} else {
 						Ok(None)
@@ -256,6 +290,16 @@ impl QueryExecutor {
 			}
 		}
 		Ok(None)
+	}
+
+	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(ir as usize) {
+			if let Some(mte) = self.mt_exp.get(exp.as_ref()) {
+				let it = KnnThingIterator::new(mte.doc_ids.clone(), mte.res.clone());
+				return Some(ThingIterator::Knn(it));
+			}
+		}
+		None
 	}
 
 	pub(crate) async fn matches(
@@ -404,5 +448,26 @@ impl FtEntry {
 		} else {
 			Ok(None)
 		}
+	}
+}
+
+#[derive(Clone)]
+pub(super) struct MtEntry {
+	doc_ids: Arc<RwLock<DocIds>>,
+	res: VecDeque<RoaringTreemap>,
+}
+
+impl MtEntry {
+	async fn new(
+		tx: &mut kvs::Transaction,
+		mt: &MTreeIndex,
+		a: Array,
+		k: u32,
+	) -> Result<Self, Error> {
+		let res = mt.knn_search(tx, a, k as usize).await?;
+		Ok(Self {
+			res,
+			doc_ids: mt.doc_ids(),
+		})
 	}
 }

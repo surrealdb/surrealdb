@@ -1,6 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::docids::{DocId, NO_DOC_ID};
+use crate::idx::docids::{DocId, DocIds, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
@@ -8,6 +8,10 @@ use crate::key::index::Index;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing, Value};
+use roaring::RoaringTreemap;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
@@ -15,6 +19,7 @@ pub(crate) enum ThingIterator {
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
+	Knn(KnnThingIterator),
 }
 
 impl ThingIterator {
@@ -29,6 +34,7 @@ impl ThingIterator {
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
+			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
 		}
 	}
 }
@@ -302,6 +308,55 @@ impl MatchesThingIterator {
 					break;
 				}
 				limit -= 1;
+			}
+		}
+		Ok(res)
+	}
+}
+
+pub(crate) struct KnnThingIterator {
+	doc_ids: Arc<RwLock<DocIds>>,
+	res: VecDeque<RoaringTreemap>,
+	current: Option<RoaringTreemap>,
+	skip: RoaringTreemap,
+}
+
+impl KnnThingIterator {
+	pub(super) fn new(doc_ids: Arc<RwLock<DocIds>>, mut res: VecDeque<RoaringTreemap>) -> Self {
+		let current = res.pop_front();
+		Self {
+			doc_ids,
+			res,
+			current,
+			skip: RoaringTreemap::new(),
+		}
+	}
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		mut limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		let mut res = vec![];
+		let mut tx = txn.lock().await;
+		while self.current.is_some() && limit > 0 {
+			if let Some(docs) = &mut self.current {
+				if let Some(doc_id) = docs.iter().next() {
+					docs.remove(doc_id);
+					if self.skip.insert(doc_id) {
+						if let Some(doc_key) =
+							self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
+						{
+							res.push((doc_key.into(), doc_id));
+							limit -= 1;
+						}
+					}
+					if docs.is_empty() {
+						self.current = None;
+					}
+				}
+			}
+			if self.current.is_none() {
+				self.current = self.res.pop_front();
 			}
 		}
 		Ok(res)

@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
@@ -72,9 +72,8 @@ impl DocLengths {
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.lock().await.finish(tx).await? {
-			tx.set(self.state_key.clone(), self.btree.get_state().try_to_val()?).await?;
-		}
+		self.store.lock().await.finish(tx).await?;
+		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}
 }

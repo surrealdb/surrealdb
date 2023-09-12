@@ -316,6 +316,9 @@ impl Datastore {
 	}
 
 	/// Setup the initial credentials
+	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
+	/// https://github.com/rust-lang/rust/issues/111370
+	#[allow(unreachable_code, unused_variables)]
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();

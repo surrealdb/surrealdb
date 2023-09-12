@@ -594,7 +594,7 @@ impl<'a> Processor<'a> {
 			}
 		}
 		Err(Error::QueryNotExecutedDetail {
-			message: "No QueryExecutor has not been found.".to_string(),
+			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}
 }

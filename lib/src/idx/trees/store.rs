@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 pub type NodeId = u64;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum TreeStoreType {
 	Write,
 	Read,
@@ -151,7 +151,7 @@ where
 		#[cfg(debug_assertions)]
 		self.out.insert(id);
 		StoredNode {
-			node,
+			n: node,
 			id,
 			key: self.np.get_key(id),
 			size: 0,
@@ -238,6 +238,7 @@ pub enum TreeNodeProvider {
 	DocLengths(IndexKeyBase),
 	Postings(IndexKeyBase),
 	Terms(IndexKeyBase),
+	Vector(IndexKeyBase),
 	Debug,
 }
 
@@ -248,6 +249,7 @@ impl TreeNodeProvider {
 			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
 			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
 			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
+			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(Some(node_id)),
 			TreeNodeProvider::Debug => node_id.to_be_bytes().to_vec(),
 		}
 	}
@@ -261,7 +263,7 @@ impl TreeNodeProvider {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode {
-				node,
+				n: node,
 				id,
 				key,
 				size,
@@ -275,17 +277,28 @@ impl TreeNodeProvider {
 	where
 		N: TreeNode,
 	{
-		let val = node.node.try_into_val()?;
+		let val = node.n.try_into_val()?;
 		tx.set(node.key, val).await?;
 		Ok(())
 	}
 }
 
 pub(super) struct StoredNode<N> {
-	pub(super) node: N,
+	pub(super) n: N,
 	pub(super) id: NodeId,
 	pub(super) key: Key,
 	pub(super) size: u32,
+}
+
+impl<N> StoredNode<N> {
+	pub(super) fn new(n: N, id: NodeId, key: Key, size: u32) -> Self {
+		Self {
+			n,
+			id,
+			key,
+			size,
+		}
+	}
 }
 
 pub trait TreeNode
