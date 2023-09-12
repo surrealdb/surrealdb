@@ -91,11 +91,9 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Insert the node live query
-				run.putc_ndlq(opt.id()?, id.clone(), opt.ns(), opt.db(), tb.as_str(), None).await?;
+				run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
 				// Insert the table live query
-				run.putc_tblq(opt.ns(), opt.db(), &tb, self.clone(), None).await?;
-				trace!("Stored live query: {}", stm);
-				println!("Stored live query: {}", stm);
+				run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {
