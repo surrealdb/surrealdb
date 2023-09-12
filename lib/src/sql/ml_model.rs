@@ -1,5 +1,4 @@
-use std::fmt;
-
+use async_recursion::async_recursion;
 use derive::Store;
 use nom::{
 	bytes::complete::{tag, take_while1},
@@ -9,8 +8,15 @@ use nom::{
 };
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
-use crate::sql::error::IResult;
+use crate::{
+	ctx::Context,
+	dbs::{Options, Transaction},
+	doc::CursorDoc,
+	err::Error,
+	sql::{error::IResult, value::Value},
+};
 
 use super::{
 	common::{closechevron, closeparentheses, openchevron, openparentheses, val_char},
@@ -23,14 +29,28 @@ use super::{
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct MlModel {
-	name: String,
-	version: String,
-	parameters: Object,
+	pub name: String,
+	pub version: String,
+	pub parameters: Object,
 }
 
 impl fmt::Display for MlModel {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ml::{}<{}>({})", self.name, self.version, self.parameters)
+	}
+}
+
+impl MlModel {
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		_doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		Err(Error::Unimplemented("Ml model evaluation not yet implemented".to_string()))
 	}
 }
 

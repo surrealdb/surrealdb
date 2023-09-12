@@ -1144,6 +1144,7 @@ impl Value {
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
+			// TODO: add? Self::MlModel(_) => "model"
 			_ => "incorrect type",
 		}
 	}
@@ -2566,6 +2567,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
+			Value::MlModel(m) => m.parameters.iter().any(|(_, v)| v.writeable()),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2596,6 +2598,7 @@ impl Value {
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::MlModel(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),

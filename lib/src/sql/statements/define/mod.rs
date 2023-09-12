@@ -86,7 +86,7 @@ impl DefineStatement {
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::MlModel(_) => todo!(),
+			Self::MlModel(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
