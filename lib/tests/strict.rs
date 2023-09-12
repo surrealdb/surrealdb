@@ -277,3 +277,19 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn strict_define_in_transaction() -> Result<(), Error> {
+	let sql = r"
+		DEFINE NS test; DEFINE DB test;
+		USE NS test DB test;
+		BEGIN;
+		DEFINE TABLE test;
+		DEFINE FIELD test ON test; -- Panic used to be caused when you add this query within the transaction
+		COMMIT;
+	";
+	let dbs = new_ds().await?.with_strict_mode(true);
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}

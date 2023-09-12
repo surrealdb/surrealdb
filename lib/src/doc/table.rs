@@ -282,23 +282,23 @@ impl<'a> Document<'a> {
 				// Process the field projection
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
-						"count" => {
+						Some("count") => {
 							let val = f.compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
-						"math::sum" => {
+						Some("math::sum") => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
-						"math::min" | "time::min" => {
+						Some("math::min") | Some("time::min") => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.min(&mut ops, &act, idiom, val);
 						}
-						"math::max" | "time::max" => {
+						Some("math::max") | Some("time::max") => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.max(&mut ops, &act, idiom, val);
 						}
-						"math::mean" => {
+						Some("math::mean") => {
 							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
 							self.mean(&mut ops, &act, idiom, val);
 						}

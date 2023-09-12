@@ -25,7 +25,6 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -780,7 +779,6 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
-			write_buffer: HashMap::new(),
 			vso: self.versionstamp_oracle.clone(),
 		})
 	}
