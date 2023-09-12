@@ -25,6 +25,9 @@ mod mem {
 	include!("tb.rs");
 	include!("multireader.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -61,6 +64,9 @@ mod rocksdb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
@@ -97,6 +103,9 @@ mod speedb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -137,6 +146,9 @@ mod tikv {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -177,4 +189,7 @@ mod fdb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_allow.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
 }

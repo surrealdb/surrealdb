@@ -80,12 +80,17 @@ impl LiveStatement {
 				}
 				stm.node = Uuid(opt.id()?);
 				// Insert the node live query
-				let key =
-					crate::key::node::lq::new(opt.id()?, self_override.id.0, opt.ns(), opt.db());
-				run.putc(key, tb.as_str(), None).await?;
+				run.putc_ndlq(
+					opt.id()?,
+					self_override.id.0.clone(),
+					opt.ns(),
+					opt.db(),
+					tb.as_str(),
+					None,
+				)
+				.await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, self_override.id.0);
-				run.putc(key, stm, None).await?;
+				run.putc_tblq(opt.ns(), opt.db(), &tb, self_override.clone(), None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {

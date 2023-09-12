@@ -1237,6 +1237,19 @@ impl Transaction {
 		self.putc(key_enc, live_stm, expected).await
 	}
 
+	pub async fn putc_ndlq(
+		&mut self,
+		nd: Uuid,
+		lq: Uuid,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		chk: Option<&str>,
+	) -> Result<(), Error> {
+		let key = crate::key::node::lq::new(nd, lq, ns, db);
+		self.putc(key, tb, chk).await
+	}
+
 	/// Retrieve all ROOT users.
 	pub async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
 		let beg = crate::key::root::us::prefix();
