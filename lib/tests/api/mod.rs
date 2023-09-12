@@ -192,6 +192,18 @@ async fn query() {
 }
 
 #[tokio::test]
+async fn query_decimals() {
+	let db = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let sql = "
+	    DEFINE TABLE foo;
+	    DEFINE FIELD bar ON foo TYPE decimal;
+	    CREATE foo CONTENT { bar: 42.69 };
+    ";
+	let _ = db.query(sql).await.unwrap().check().unwrap();
+}
+
+#[tokio::test]
 async fn query_binds() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
