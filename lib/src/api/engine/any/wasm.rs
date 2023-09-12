@@ -50,6 +50,7 @@ impl Connection for Any {
 				"fdb" => {
 					#[cfg(feature = "kv-fdb")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -63,6 +64,7 @@ impl Connection for Any {
 				"indxdb" => {
 					#[cfg(feature = "kv-indxdb")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -76,6 +78,7 @@ impl Connection for Any {
 				"mem" => {
 					#[cfg(feature = "kv-mem")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -89,6 +92,7 @@ impl Connection for Any {
 				"file" | "rocksdb" => {
 					#[cfg(feature = "kv-rocksdb")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -103,6 +107,7 @@ impl Connection for Any {
 				"speedb" => {
 					#[cfg(feature = "kv-speedb")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -117,6 +122,7 @@ impl Connection for Any {
 				"tikv" => {
 					#[cfg(feature = "kv-tikv")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::wasm::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
@@ -143,6 +149,7 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						let mut address = address;
 						address.url = address.url.join(engine::remote::ws::PATH)?;
 						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
