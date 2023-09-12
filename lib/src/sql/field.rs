@@ -174,6 +174,14 @@ impl Fields {
 								}
 							}
 						}
+						Value::Function(f) if f.is_script() => {
+							let expr = expr.compute(ctx, opt, txn, Some(doc)).await?;
+							// Check if this is a single VALUE field expression
+							match self.single().is_some() {
+								false => out.set(ctx, opt, txn, name.as_ref(), expr).await?,
+								true => out = expr,
+							}
+						},
 						// This expression is a variable fields expression
 						Value::Function(f) if f.name() == "type::fields" => {
 							// Process the function using variable field projections
