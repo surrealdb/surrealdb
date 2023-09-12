@@ -9,7 +9,7 @@ use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[revisioned(revision = 1)]
-pub struct Bytes(pub(crate) Vec<u8>);
+pub struct Bytes(pub Vec<u8>);
 
 impl Bytes {
 	pub fn into_inner(self) -> Vec<u8> {

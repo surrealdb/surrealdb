@@ -79,11 +79,7 @@ indexmap = { version = "1.9.3", features = ["serde"] }
 indxdb = { version = "0.3.0", optional = true }
 ipnet = "2.8.0"
 js = { version = "=0.4.0-beta.4", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
-<<<<<<< HEAD
-jsonwebtoken = "8.3.0"
-=======
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
->>>>>>> daf6743c4e44c1f02aafcf271674f079056ef24f
 lexicmp = "0.1.0"
 lru = "0.10.1"
 md-5 = "0.10.5"

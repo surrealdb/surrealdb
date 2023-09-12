@@ -129,6 +129,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router())
+		.merge(ml::router())
 		.layer(service);
 
 	// Setup the graceful shutdown
