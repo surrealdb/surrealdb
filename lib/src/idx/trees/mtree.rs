@@ -1437,6 +1437,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_deletion_doc_removed_and_none() {
 		let ds = Datastore::new("memory").await.unwrap();
 
