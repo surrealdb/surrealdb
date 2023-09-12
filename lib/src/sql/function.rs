@@ -51,11 +51,11 @@ impl PartialOrd for Function {
 
 impl Function {
 	/// Get function name if applicable
-	pub fn name(&self) -> &str {
+	pub fn name(&self) -> Option<&str> {
 		match self {
-			Self::Normal(n, _) => n.as_str(),
-			Self::Custom(n, _) => n.as_str(),
-			_ => unreachable!(),
+			Self::Normal(n, _) => Some(n.as_str()),
+			Self::Custom(n, _) => Some(n.as_str()),
+			_ => None,
 		}
 	}
 	/// Get function arguments if applicable
