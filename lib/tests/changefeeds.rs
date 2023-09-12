@@ -366,7 +366,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
@@ -389,10 +389,10 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	assert!(versionstamp1 < versionstamp2);
+	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
@@ -413,10 +413,10 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	assert!(versionstamp2 < versionstamp3);
+	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
@@ -437,10 +437,10 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp5) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	assert!(versionstamp3 < versionstamp4);
+	assert!(versionstamp4 < versionstamp5);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,

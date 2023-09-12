@@ -179,7 +179,7 @@ impl<'a> TreeBuilder<'a> {
 		e: &Expression,
 	) -> Option<IndexOption> {
 		for ir in irs {
-			if let Some(ix) = self.index_map.definitions.get(&ir) {
+			if let Some(ix) = self.index_map.definitions.get(ir) {
 				let op = match &ix.index {
 					Index::Idx => Self::eval_index_operator(op, n),
 					Index::Uniq => Self::eval_index_operator(op, n),
