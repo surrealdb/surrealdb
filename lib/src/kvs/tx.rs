@@ -630,6 +630,8 @@ impl Transaction {
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
 		);
+		let backtrace = std::backtrace::Backtrace::force_capture();
+		println!("{}", backtrace);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -765,10 +767,15 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		println!(
+			"Getr {:?}..{:?} (limit: {limit})",
+			debug::sprint_key(&rng.start.clone().into()),
+			debug::sprint_key(&rng.end.clone().into())
+		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -1319,7 +1326,11 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
-		println!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
+		println!(
+			"putc_tbnt key={:?}, encode={:?}",
+			crate::key::debug::sprint_key(&key_enc),
+			crate::key::debug::sprint_key(&key_enc)
+		);
 		trace!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, nt, expected).await
 	}
@@ -1689,20 +1700,21 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::table::lq::prefix(ns, db, tb);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Lvs(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::table::lq::prefix(ns, db, tb);
-			let end = crate::key::table::lq::suffix(ns, db, tb);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-			val
-		})
+		// Ok(if let Some(e) = self.cache.get(&key) {
+		// 	if let Entry::Lvs(v) = e {
+		// 		v
+		// 	} else {
+		// 		unreachable!();
+		// 	}
+		// } else {
+		let beg = crate::key::table::lq::prefix(ns, db, tb);
+		let end = crate::key::table::lq::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+		// val
+		// })
+		Ok(val)
 	}
 
 	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {

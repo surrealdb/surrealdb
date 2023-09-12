@@ -6,7 +6,7 @@ mod distinct;
 mod executor;
 mod explanation;
 mod iterator;
-mod notification;
+pub(crate) mod notification;
 mod options;
 mod response;
 mod session;
