@@ -111,6 +111,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 			fields: {},
 			indexes: {},
 			tables: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -640,8 +641,8 @@ async fn permissions_checks_remove_event() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [
@@ -682,8 +683,8 @@ async fn permissions_checks_remove_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [
@@ -724,8 +725,8 @@ async fn permissions_checks_remove_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [

@@ -802,7 +802,6 @@ impl Transaction {
 					nxt = Some(k.clone());
 				}
 				// Delete
-				trace!("Found getr {:?} {:?}", crate::key::debug::sprint_key(&k), v);
 				out.push((k, v));
 				// Count
 				num -= 1;
