@@ -1,8 +1,12 @@
+use crate::sql::fmt::is_pretty;
+use crate::sql::fmt::pretty_indent;
+use crate::sql::permission::Permission;
 use async_recursion::async_recursion;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write;
 
 use crate::{
 	ctx::Context,
@@ -18,7 +22,7 @@ pub struct DefineModelStatement {
 	pub name: Ident,
 	pub version: String,
 	pub comment: Option<Strand>,
-	pub model: Vec<u8>, // TODO
+	pub permissions: Permission,
 }
 
 impl fmt::Display for DefineModelStatement {
@@ -26,6 +30,15 @@ impl fmt::Display for DefineModelStatement {
 		write!(f, "DEFINE MODEL ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
 			write!(f, "COMMENT {}", comment)?;
+		}
+		if !self.permissions.is_full() {
+			let _indent = if is_pretty() {
+				Some(pretty_indent())
+			} else {
+				f.write_char(' ')?;
+				None
+			};
+			write!(f, "PERMISSIONS {}", self.permissions)?;
 		}
 		Ok(())
 	}
