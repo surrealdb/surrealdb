@@ -66,7 +66,7 @@ where
 			let ExportDestination::Memory = self.target else {
 				unreachable!();
 			};
-			conn.execute_unit(router, Param::sender(tx)).await?;
+			conn.execute_unit(router, Param::bytes_sender(tx)).await?;
 			Ok(Backup {
 				rx,
 			})

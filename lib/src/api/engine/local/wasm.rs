@@ -57,9 +57,12 @@ impl Connection for Db {
 
 			conn_rx.into_recv_async().await??;
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
+
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
+					features,
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),

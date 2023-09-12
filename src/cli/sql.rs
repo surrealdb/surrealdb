@@ -58,7 +58,7 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("warn").init();
 	// Default datastore configuration for local engines
-	let config = Config::new().capabilities(Capabilities::all());
+	let config = Config::new().capabilities(Capabilities::all()).notifications();
 
 	let client = if let Some((username, password)) = username.zip(password) {
 		let root = Root {

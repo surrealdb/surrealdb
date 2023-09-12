@@ -546,7 +546,7 @@ async fn router(
 			let db = session.db.clone().unwrap_or_default();
 			let (tx, rx) = channel::new(1);
 
-			match (param.file, param.sender) {
+			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {
 					let (mut writer, mut reader) = io::duplex(10_240);
 

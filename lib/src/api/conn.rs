@@ -5,6 +5,7 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Notification;
 use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -113,49 +114,49 @@ pub enum DbResponse {
 }
 
 /// Holds the parameters given to the caller
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Param {
 	pub(crate) query: Option<(Query, BTreeMap<String, Value>)>,
 	pub(crate) other: Vec<Value>,
 	pub(crate) file: Option<PathBuf>,
-	pub(crate) sender: Option<channel::Sender<Result<Vec<u8>>>>,
+	pub(crate) bytes_sender: Option<channel::Sender<Result<Vec<u8>>>>,
+	pub(crate) notification_sender: Option<channel::Sender<Notification>>,
 }
 
 impl Param {
 	pub(crate) fn new(other: Vec<Value>) -> Self {
 		Self {
-			query: None,
 			other,
-			file: None,
-			sender: None,
+			..Default::default()
 		}
 	}
 
 	pub(crate) fn query(query: Query, bindings: BTreeMap<String, Value>) -> Self {
 		Self {
 			query: Some((query, bindings)),
-			other: Vec::new(),
-			file: None,
-			sender: None,
+			..Default::default()
 		}
 	}
 
 	pub(crate) fn file(file: PathBuf) -> Self {
 		Self {
-			query: None,
-			other: Vec::new(),
 			file: Some(file),
-			sender: None,
+			..Default::default()
 		}
 	}
 
-	pub(crate) fn sender(send: channel::Sender<Result<Vec<u8>>>) -> Self {
+	pub(crate) fn bytes_sender(send: channel::Sender<Result<Vec<u8>>>) -> Self {
 		Self {
-			query: None,
-			other: Vec::new(),
-			file: None,
-			sender: Some(send),
+			bytes_sender: Some(send),
+			..Default::default()
+		}
+	}
+
+	pub(crate) fn notification_sender(send: channel::Sender<Notification>) -> Self {
+		Self {
+			notification_sender: Some(send),
+			..Default::default()
 		}
 	}
 }
