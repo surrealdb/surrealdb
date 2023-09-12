@@ -2567,7 +2567,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
-			Value::MlModel(m) => m.parameters.iter().any(|(_, v)| v.writeable()),
+			Value::MlModel(m) => m.parameters.writeable(),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,

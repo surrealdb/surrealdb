@@ -21,9 +21,8 @@ use crate::{
 use super::{
 	common::{closechevron, closeparentheses, openchevron, openparentheses, val_char},
 	error::{expect_tag_no_case, expected},
-	object::object,
 	util::expect_delimited,
-	Object,
+	value::value,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -31,7 +30,7 @@ use super::{
 pub struct MlModel {
 	pub name: String,
 	pub version: String,
-	pub parameters: Object,
+	pub parameters: Value,
 }
 
 impl fmt::Display for MlModel {
@@ -65,7 +64,7 @@ pub fn ml_model(i: &str) -> IResult<&str, MlModel> {
 
 		let (i, parameters) = expected(
 			"model parameters",
-			expect_delimited(openparentheses, object, closeparentheses),
+			expect_delimited(openparentheses, value, closeparentheses),
 		)(i)?;
 
 		Ok((
