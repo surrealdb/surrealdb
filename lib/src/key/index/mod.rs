@@ -124,38 +124,40 @@ impl<'a> Index<'a> {
 		}
 	}
 
-	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
-		let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
-		beg.extend_from_slice(&[0x00]);
-		let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
-		end.extend_from_slice(&[0xff]);
-		beg..end
+	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		Prefix::new(ns, db, tb, ix).encode().unwrap()
 	}
 
-	#[allow(clippy::too_many_arguments)]
-	pub fn range_all_ids(
-		ns: &str,
-		db: &str,
-		tb: &str,
-		ix: &str,
-		from: &Array,
-		from_incl: bool,
-		to: &Array,
-		to_incl: bool,
-	) -> (Vec<u8>, Vec<u8>) {
-		let mut beg = PrefixIds::new(ns, db, tb, ix, from).encode().unwrap();
-		if from_incl {
-			beg.extend_from_slice(&[0x00]);
-		} else {
-			beg.extend_from_slice(&[0xff]);
-		}
-		let mut end = PrefixIds::new(ns, db, tb, ix, to).encode().unwrap();
-		if to_incl {
-			end.extend_from_slice(&[0xff]);
-		} else {
-			end.extend_from_slice(&[0x00]);
-		}
-		(beg, end)
+	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		let mut beg = Self::prefix(ns, db, tb, ix);
+		beg.extend_from_slice(&[0x00]);
+		beg
+	}
+
+	pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		let mut beg = Self::prefix(ns, db, tb, ix);
+		beg.extend_from_slice(&[0xff]);
+		beg
+	}
+
+	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+		Self::prefix_beg(ns, db, tb, ix)..Self::prefix_end(ns, db, tb, ix)
+	}
+
+	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap()
+	}
+
+	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		beg.extend_from_slice(&[0x00]);
+		beg
+	}
+
+	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		beg.extend_from_slice(&[0xff]);
+		beg
 	}
 }
 

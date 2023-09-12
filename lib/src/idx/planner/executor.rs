@@ -211,7 +211,7 @@ impl QueryExecutor {
 		if let Some(ix) = self.index_definitions.get(&ir) {
 			match ix.index {
 				Index::Idx => {
-					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new_index(
+					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
 						opt, ix, from, to,
 					))))
 				}

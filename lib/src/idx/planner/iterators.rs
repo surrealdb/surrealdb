@@ -4,10 +4,10 @@ use crate::idx::ft::docids::{DocId, NO_DOC_ID};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
-use crate::key;
+use crate::key::index::Index;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Thing};
+use crate::sql::{Array, Thing, Value};
 
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
@@ -40,16 +40,8 @@ pub(crate) struct IndexEqualThingIterator {
 
 impl IndexEqualThingIterator {
 	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Array) -> Result<Self, Error> {
-		let (beg, end) = key::index::Index::range_all_ids(
-			opt.ns(),
-			opt.db(),
-			&ix.what,
-			&ix.name,
-			v,
-			true,
-			v,
-			true,
-		);
+		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, v);
+		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, v);
 		Ok(Self {
 			beg,
 			end,
@@ -122,24 +114,40 @@ pub(crate) struct IndexRangeThingIterator {
 }
 
 impl IndexRangeThingIterator {
-	pub(super) fn new_index(
+	pub(super) fn new(
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Self {
-		let (beg, end) = key::index::Index::range_all_ids(
-			opt.ns(),
-			opt.db(),
-			&ix.what,
-			&ix.name,
-			&Array::from(from.value.to_owned()),
-			from.inclusive,
-			&Array::from(to.value.to_owned()),
-			to.inclusive,
-		);
+		let beg = Self::compute_beg(opt, ix, from);
+		let end = Self::compute_end(opt, ix, to);
 		Self {
 			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
+		}
+	}
+
+	fn compute_beg(opt: &Options, ix: &DefineIndexStatement, from: &RangeValue) -> Vec<u8> {
+		if from.value == Value::None {
+			return Index::prefix_beg(opt.ns(), opt.db(), &ix.what, &ix.name);
+		}
+		let fd = Array::from(from.value.to_owned());
+		if from.inclusive {
+			Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &fd)
+		} else {
+			Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &fd)
+		}
+	}
+
+	fn compute_end(opt: &Options, ix: &DefineIndexStatement, to: &RangeValue) -> Vec<u8> {
+		if to.value == Value::None {
+			return Index::prefix_end(opt.ns(), opt.db(), &ix.what, &ix.name);
+		}
+		let fd = Array::from(to.value.to_owned());
+		if to.inclusive {
+			Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &fd)
+		} else {
+			Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &fd)
 		}
 	}
 
@@ -171,7 +179,7 @@ pub(crate) struct UniqueEqualThingIterator {
 
 impl UniqueEqualThingIterator {
 	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Result<Self, Error> {
-		let key = key::index::Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, a, None).into();
+		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, a, None).into();
 		Ok(Self {
 			key: Some(key),
 		})
@@ -199,7 +207,19 @@ impl UniqueRangeThingIterator {
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Self {
-		let beg = key::index::Index::new(
+		let beg = Self::compute_beg(opt, ix, from);
+		let end = Self::compute_end(opt, ix, to);
+		Self {
+			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
+			done: false,
+		}
+	}
+
+	fn compute_beg(opt: &Options, ix: &DefineIndexStatement, from: &RangeValue) -> Vec<u8> {
+		if from.value == Value::None {
+			return Index::prefix_beg(opt.ns(), opt.db(), &ix.what, &ix.name);
+		}
+		Index::new(
 			opt.ns(),
 			opt.db(),
 			&ix.what,
@@ -208,21 +228,16 @@ impl UniqueRangeThingIterator {
 			None,
 		)
 		.encode()
-		.unwrap();
-		let end = key::index::Index::new(
-			opt.ns(),
-			opt.db(),
-			&ix.what,
-			&ix.name,
-			&Array::from(to.value.to_owned()),
-			None,
-		)
-		.encode()
-		.unwrap();
-		Self {
-			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
-			done: false,
+		.unwrap()
+	}
+
+	fn compute_end(opt: &Options, ix: &DefineIndexStatement, to: &RangeValue) -> Vec<u8> {
+		if to.value == Value::None {
+			return Index::prefix_end(opt.ns(), opt.db(), &ix.what, &ix.name);
 		}
+		Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &Array::from(to.value.to_owned()), None)
+			.encode()
+			.unwrap()
 	}
 
 	async fn next_batch(
