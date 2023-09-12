@@ -742,7 +742,10 @@ impl MTree {
 								self.calculate_distance(e.center.as_ref(), s_child_center.as_ref());
 							s_child_node.push(e);
 						}
-						todo!()
+						//TODO
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "MTREE deletions".to_string(),
+						});
 					}
 					MTreeNode::Leaf(n) => {
 						let mut s_child_node = s_child_node.n.leaf()?;
@@ -751,7 +754,10 @@ impl MTree {
 								self.calculate_distance(o.as_ref(), s_child_center.as_ref());
 							s_child_node.insert(o, p);
 						}
-						todo!()
+						//TODO
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "MTREE deletions".to_string(),
+						});
 					}
 				}
 			} else {
