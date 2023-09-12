@@ -94,6 +94,8 @@ impl LiveStatement {
 				run.putc_ndlq(opt.id()?, id.clone(), opt.ns(), opt.db(), tb.as_str(), None).await?;
 				// Insert the table live query
 				run.putc_tblq(opt.ns(), opt.db(), &tb, self.clone(), None).await?;
+				trace!("Stored live query: {}", stm);
+				println!("Stored live query: {}", stm);
 			}
 			v => {
 				return Err(Error::LiveStatement {

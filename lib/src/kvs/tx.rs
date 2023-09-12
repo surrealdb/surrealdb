@@ -989,7 +989,7 @@ impl Transaction {
 			}),
 			None => {
 				let value = ClusterMembership {
-					node_id: id,
+					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
 				self.put(key, value).await?;
@@ -1026,7 +1026,7 @@ impl Transaction {
 		self.put(
 			key,
 			ClusterMembership {
-				node_id: id,
+				name: id.to_string(),
 				heartbeat: timestamp,
 			},
 		)

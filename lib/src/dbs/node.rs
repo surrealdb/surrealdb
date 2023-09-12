@@ -11,7 +11,7 @@ use std::time::Duration;
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store)]
 #[revisioned(revision = 1)]
 pub struct ClusterMembership {
-	pub node_id: uuid::Uuid,
+	pub name: String,
 	// TiKV = TiKV TSO Timestamp as u64
 	// not TiKV = local nanos as u64
 	pub heartbeat: Timestamp,

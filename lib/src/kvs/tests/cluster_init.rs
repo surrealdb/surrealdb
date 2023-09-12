@@ -43,7 +43,7 @@ async fn expired_nodes_are_garbage_collected() {
 	let scanned = tx.scan_cl(100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for cl in scanned.iter() {
-		assert_eq!(&cl.node_id, &new_node);
+		assert_eq!(&cl.name, &new_node.to_string());
 	}
 
 	tx.commit().await.unwrap();

@@ -532,7 +532,12 @@ impl Datastore {
 		let cls = tx.scan_cl(1000).await?;
 		trace!("Found {} nodes", cls.len());
 		for cl in cls {
-			tx.del_cl(cl.node_id).await?;
+			tx.del_cl(
+				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
+				})?,
+			)
+			.await?;
 		}
 		// Scan heartbeats
 		let hbs = tx
