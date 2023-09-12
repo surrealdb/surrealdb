@@ -310,4 +310,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out))
 	}
+
+	#[test]
+	fn select_with_function() {}
 }
