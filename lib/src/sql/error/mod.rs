@@ -137,32 +137,35 @@ impl<I: Clone> ParseError<I> {
 #[derive(Clone, Copy, Debug)]
 pub struct Location {
 	pub line: usize,
+	/// In chars.
 	pub column: usize,
 }
 
 impl Location {
-	/// Returns the location of a substring in the larger string.
-	pub fn of_in(substr: &str, s: &str) -> Self {
-		let offset = s
-			.len()
-			.checked_sub(substr.len())
+	/// Returns the location of the start of substring in the larger input string.
+	///
+	/// Assumption: substr must be a subslice of input.
+	pub fn of_in(substr: &str, input: &str) -> Self {
+		// Bytes of input before substr.
+		let offset = (substr.as_ptr() as usize)
+			.checked_sub(input.as_ptr() as usize)
 			.expect("tried to find location of substring in unrelated string");
-		let lines = s.split('\n').enumerate();
-		let mut total = 0;
-		for (idx, line) in lines {
+		// Bytes of input prior to line being iteratated.
+		let mut bytes_prior = 0;
+		for (line_idx, line) in input.split('\n').enumerate() {
 			// +1 for the '\n'
-			let new_total = total + line.len() + 1;
-			if new_total > offset {
+			let bytes_so_far = bytes_prior + line.len() + 1;
+			if bytes_so_far > offset {
 				// found line.
-				let line_offset = offset - total;
+				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
 				// +1 because line and column are 1 index.
 				return Self {
-					line: idx + 1,
+					line: line_idx + 1,
 					column: column + 1,
 				};
 			}
-			total = new_total;
+			bytes_prior = bytes_so_far;
 		}
 		unreachable!()
 	}
