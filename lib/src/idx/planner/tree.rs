@@ -248,8 +248,8 @@ impl Node {
 	}
 
 	pub(super) fn is_indexed_field(&self) -> Option<(&Idiom, Arc<Vec<IndexRef>>)> {
-		if let Node::IndexedField(id, ix) = self {
-			Some((id, ix.clone()))
+		if let Node::IndexedField(id, irs) = self {
+			Some((id, irs.clone()))
 		} else {
 			None
 		}
