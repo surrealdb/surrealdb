@@ -979,7 +979,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -1032,15 +1032,21 @@ impl Transaction {
 		Ok(())
 	}
 
+	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		self.del(key).await?;
+		Ok(())
+	}
+
 	// Delete a cluster registration entry
-	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
 		self.del(key).await
 	}
 
 	// Delete the live query notification registry on the table
 	// Return the Table ID
-	pub async fn del_ndlv(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
+	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
 		// This isn't implemented because it is covered by del_nd
 		// Will add later for remote node kill
 		Err(Error::NdNotFound {
@@ -1159,7 +1165,7 @@ impl Transaction {
 		Ok(())
 	}
 
-	pub async fn del_lv(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
+	pub async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
 		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
 		let key = crate::key::table::lq::new(ns, db, tb, lv);
 		self.cache.del(&key.clone().into());
@@ -1237,6 +1243,19 @@ impl Transaction {
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
+	}
+
+	pub async fn putc_ndlq(
+		&mut self,
+		nd: Uuid,
+		lq: Uuid,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		chk: Option<&str>,
+	) -> Result<(), Error> {
+		let key = crate::key::node::lq::new(nd, lq, ns, db);
+		self.putc(key, tb, chk).await
 	}
 
 	/// Retrieve all ROOT users.
