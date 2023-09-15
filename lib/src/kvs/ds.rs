@@ -564,9 +564,25 @@ impl Datastore {
 		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
 		trace!("Found {} node live queries", ndlqs.len());
 		println!("Found {} node live queries", ndlqs.len());
+		// We now bundle the live queries by table. We need the table mapping for lookup
+		// TODO If there is a node query without any table queries then the node query should be deleted
+		// TODO If there is a table query without a node query, then tblq should be deleted
+		let mut map_tblq_nodes: BTreeMap<String, Vec<LqValue>> = BTreeMap::new();
+		// Node+LqID -> LqValue, it gets drained when there is a tblq hit
+		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), LqValue> = BTreeMap::new();
+		// Table+LqID -> LqValue, it gets populated when there is a tblq miss
+		let mut tblq_to_delete: BTreeMap<(String, Uuid), LqValue> = BTreeMap::new();
+		for ndlq in ndlqs {
+			if !map_tblq_nodes.contains_key(&ndlq.tb) {
+				map_tblq_nodes.insert(ndlq.tb.clone(), vec![]);
+			}
+			let mut tblqs = map_tblq_nodes.get(&ndlq.tb).ok_or(Error::Unreachable)?;
+			tblqs.push(ndlq.clone());
+			ndlq_to_delete.insert((ndlq.nd, ndlq.lq), ndlq.clone());
+		}
+		// For each table, we check
 		for ndlq in ndlqs {
 			tx.del_ndlq(&ndlq.nd).await?;
-			// Scan table live queries, knowing that there is at least 1 table
 			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
 			trace!("Found {} table live queries", tblqs.len());
 			println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);

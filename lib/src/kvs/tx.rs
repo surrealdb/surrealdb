@@ -1227,7 +1227,8 @@ impl Transaction {
 		let scanned = self.scan(rng, limit).await?;
 		let mut res: Vec<LqValue> = vec![];
 		for (key, value) in scanned {
-			trace!("scan_lv: key={:?} value={:?}", &key, &value);
+			trace!("scan_tblq: key={:?} value={:?}", &key, &value);
+			println!("scan_tblq: key={:?} value={:?}", &debug::sprint_key(&key), &value);
 			let val: LiveStatement = value.into();
 			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 			res.push(LqValue {
