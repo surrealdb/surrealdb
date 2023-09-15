@@ -6,6 +6,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::character::complete::u32 as uint32;
 use nom::character::complete::u8 as uint8;
 use nom::combinator::cut;
 use nom::combinator::opt;
@@ -67,6 +68,8 @@ pub enum Operator {
 	//
 	Outside,
 	Intersects,
+	//
+	Knn(u32), // <{k}>
 }
 
 impl Default for Operator {
@@ -141,6 +144,7 @@ impl fmt::Display for Operator {
 					f.write_str("@@")
 				}
 			}
+			Self::Knn(k) => write!(f, "<{}>", k),
 		}
 	}
 }
@@ -191,12 +195,14 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::AnyLike, tag("?~")),
 			value(Operator::Like, char('~')),
 			matches,
+			knn,
 		)),
 		alt((
 			value(Operator::LessThanOrEqual, tag("<=")),
 			value(Operator::LessThan, char('<')),
 			value(Operator::MoreThanOrEqual, tag(">=")),
 			value(Operator::MoreThan, char('>')),
+			knn,
 		)),
 		alt((
 			value(Operator::Pow, tag("**")),
@@ -257,12 +263,18 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 
 pub fn matches(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('@')(i)?;
-	// let (i, reference) = opt(|i| uint8(i))(i)?;
 	cut(|i| {
 		let (i, reference) = opt(uint8)(i)?;
 		let (i, _) = char('@')(i)?;
 		Ok((i, Operator::Matches(reference)))
 	})(i)
+}
+
+pub fn knn(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = char('<')(i)?;
+	let (i, k) = uint32(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, Operator::Knn(k)))
 }
 
 #[cfg(test)]
@@ -289,5 +301,14 @@ mod tests {
 	fn matches_with_invalid_reference() {
 		let res = matches("@256@");
 		res.unwrap_err();
+	}
+
+	#[test]
+	fn test_knn() {
+		let res = knn("<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5));
 	}
 }

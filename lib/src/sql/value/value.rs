@@ -27,6 +27,7 @@ use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::{Gen, Id};
 use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
 use crate::sql::kind::Kind;
+use crate::sql::mock::{mock, Mock};
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{key, object, Object};
@@ -140,7 +141,7 @@ pub enum Value {
 	Param(Param),
 	Idiom(Idiom),
 	Table(Table),
-	Model(Model),
+	Mock(Mock),
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
@@ -153,6 +154,7 @@ pub enum Value {
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
+	MlModel(Box<Model>),
 	// Add new variants here
 }
 
@@ -189,9 +191,9 @@ impl From<Idiom> for Value {
 	}
 }
 
-impl From<Model> for Value {
-	fn from(v: Model) -> Self {
-		Value::Model(v)
+impl From<Mock> for Value {
+	fn from(v: Mock) -> Self {
+		Value::Mock(v)
 	}
 }
 
@@ -300,6 +302,12 @@ impl From<Cast> for Value {
 impl From<Function> for Value {
 	fn from(v: Function) -> Self {
 		Value::Function(Box::new(v))
+	}
+}
+
+impl From<Model> for Value {
+	fn from(v: Model) -> Self {
+		Value::MlModel(Box::new(v))
 	}
 }
 
@@ -854,9 +862,9 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
-	/// Check if this Value is a Model
-	pub fn is_model(&self) -> bool {
-		matches!(self, Value::Model(_))
+	/// Check if this Value is a Mock
+	pub fn is_mock(&self) -> bool {
+		matches!(self, Value::Mock(_))
 	}
 
 	/// Check if this Value is a Range
@@ -1055,7 +1063,8 @@ impl Value {
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
 			Value::Function(x) => !x.is_script(),
-			Value::Subquery(_)
+			Value::MlModel(_)
+			| Value::Subquery(_)
 			| Value::Constant(_)
 			| Value::Datetime(_)
 			| Value::Duration(_)
@@ -2526,10 +2535,11 @@ impl fmt::Display for Value {
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
+			Value::MlModel(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
-			Value::Model(v) => write!(f, "{v}"),
+			Value::Mock(v) => write!(f, "{v}"),
 			Value::Number(v) => write!(f, "{v}"),
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Param(v) => write!(f, "{v}"),
@@ -2556,6 +2566,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
+			Value::MlModel(m) => m.parameters.writeable(),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2586,6 +2597,7 @@ impl Value {
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::MlModel(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
@@ -2707,6 +2719,7 @@ impl TryNeg for Value {
 pub fn value(i: &str) -> IResult<&str, Value> {
 	let (i, start) = single(i)?;
 	if let (i, Some(o)) = opt(operator::binary)(i)? {
+		let _diving = crate::sql::parser::depth::dive(i)?;
 		let (i, r) = cut(value)(i)?;
 		let expr = match r {
 			Value::Expression(r) => r.augment(start, o),
@@ -2740,7 +2753,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			function_or_const,
+			path_like,
 			into(geometry),
 			into(subquery),
 			into(datetime),
@@ -2755,7 +2768,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			into(block),
 			into(param),
 			into(regex),
-			into(model),
+			into(mock),
 			into(edges),
 			into(range),
 			into(thing_raw),
@@ -2779,7 +2792,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 		alt((
 			into(future),
 			into(cast),
-			function_or_const,
+			path_like,
 			into(geometry),
 			into(subquery),
 			into(datetime),
@@ -2791,7 +2804,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 			into(block),
 			into(param),
 			into(regex),
-			into(model),
+			into(mock),
 			into(edges),
 			into(range),
 			into(thing_raw),
@@ -2802,8 +2815,9 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 	reparse_idiom_start(v, i)
 }
 
-pub fn function_or_const(i: &str) -> IResult<&str, Value> {
-	alt((into(defined_function), |i| {
+/// A path like production: Constants, predefined functions, user defined functions and ml models.
+pub fn path_like(i: &str) -> IResult<&str, Value> {
+	alt((into(defined_function), into(model), |i| {
 		let (i, v) = builtin_name(i)?;
 		match v {
 			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
@@ -2837,16 +2851,17 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive(i)?;
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
-		function_or_const,
+		path_like,
 		into(subquery),
 		into(datetime),
 		into(duration),
 		into(future),
 		into(block),
 		into(param),
-		into(model),
+		into(mock),
 		into(edges),
 		into(range),
 		into(thing),
@@ -2993,7 +3008,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
 		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

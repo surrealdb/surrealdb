@@ -49,7 +49,7 @@ pub struct MTreeParams {
 	pub doc_ids_order: u32,
 }
 
-#[derive(Default, Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Distance {
 	#[default]
@@ -182,6 +182,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 pub fn distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIST")(i)?;
+	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
 		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
@@ -200,7 +201,7 @@ pub fn minkowski(i: &str) -> IResult<&str, Distance> {
 }
 
 pub fn dimension(i: &str) -> IResult<&str, u16> {
-	let (i, _) = shouldbespace(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIMENSION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, dim) = uint16(i)?;
