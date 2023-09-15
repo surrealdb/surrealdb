@@ -979,8 +979,9 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
+		println!("Setting node {:?}", debug::sprint_key(&key.encode()?));
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
@@ -1041,7 +1042,9 @@ impl Transaction {
 	// Delete a cluster registration entry
 	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
-		self.del(key).await
+		let key_enc = key.encode()?;
+		println!("Deleting node {:?}", debug::sprint_key(&key_enc.clone().into()));
+		self.del(key_enc).await
 	}
 
 	// Delete the live query notification registry on the table
