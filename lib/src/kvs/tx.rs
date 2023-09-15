@@ -625,6 +625,11 @@ impl Transaction {
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
 		);
+		println!(
+			"Scan {:?} - {:?}",
+			debug::sprint_key(&rng.start.clone().into()),
+			debug::sprint_key(&rng.end.clone().into())
+		);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -1067,8 +1072,8 @@ impl Transaction {
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		let beg = crate::key::root::hb::Hb::prefix();
 		let end = crate::key::root::hb::Hb::suffix(time_to);
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
+		println!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
+		println!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
@@ -1154,7 +1159,7 @@ impl Transaction {
 				num -= 1;
 			}
 		}
-		trace!("scan_hb: {:?}", out);
+		trace!("scan_nd: {:?}", out);
 		Ok(out)
 	}
 

@@ -543,14 +543,8 @@ impl Datastore {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
 		}
 		// Scan heartbeats
-		let hbs = tx
-			.scan_hb(
-				&Timestamp {
-					value: 0,
-				},
-				1000,
-			)
-			.await?;
+		let now = tx.clock();
+		let hbs = tx.scan_hb(&now, 1000).await?;
 		println!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
