@@ -25,6 +25,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -537,13 +538,9 @@ impl Datastore {
 		let cls = tx.scan_cl(1000).await?;
 		trace!("Found {} nodes", cls.len());
 		println!("Found {} nodes", cls.len());
+		let mut unreachable_nodes = BTreeMap::new();
 		for cl in cls {
-			tx.del_cl(
-				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
-				})?,
-			)
-			.await?;
+			unreachable_nodes.insert(cl.name.clone(), cl.clone());
 		}
 		// Scan heartbeats
 		let hbs = tx
@@ -554,18 +551,31 @@ impl Datastore {
 				1000,
 			)
 			.await?;
-		trace!("Found {} heartbeats", hbs.len());
+		println!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
-			tx.del_hb(hb.hb, hb.nd).await?;
+			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
+		}
+		// Remove unreachable nodes
+		for (_, cl) in unreachable_nodes {
+			trace!("Removing unreachable node {}", cl.name);
+			println!("Removing unreachable node {}", cl.name);
+			tx.del_cl(
+				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
+				})?,
+			)
+			.await?;
 		}
 		// Scan node live queries
 		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
 		trace!("Found {} node live queries", ndlqs.len());
+		println!("Found {} node live queries", ndlqs.len());
 		for ndlq in ndlqs {
 			tx.del_ndlq(&ndlq.nd).await?;
-			// Scan table live queries
+			// Scan table live queries, knowing that there is at least 1 table
 			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
 			trace!("Found {} table live queries", tblqs.len());
+			println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);
 			for tblq in tblqs {
 				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
 			}

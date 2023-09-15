@@ -1023,8 +1023,9 @@ impl Transaction {
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
 		// We do not need to do a read, we always want to overwrite
+		let key_enc = key.encode()?;
 		self.put(
-			key,
+			key_enc,
 			ClusterMembership {
 				name: id.to_string(),
 				heartbeat: timestamp,
