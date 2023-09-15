@@ -1007,7 +1007,8 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) fn clock(&self) -> Timestamp {
+	// Public for tests, but we might not want to expose this
+	pub fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
 			Ok(duration) => duration.as_millis(),

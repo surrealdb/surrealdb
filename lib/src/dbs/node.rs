@@ -24,6 +24,13 @@ pub struct ClusterMembership {
 pub struct Timestamp {
 	pub value: u64,
 }
+
+impl From<u64> for Timestamp {
+	fn from(ts: u64) -> Self {
+		Timestamp { value: ts }
+	}
+}
+
 // This struct is to be used only when storing keys as the macro currently
 // conflicts when you have Store and Key derive macros.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Key)]
