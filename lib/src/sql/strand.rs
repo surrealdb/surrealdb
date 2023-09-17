@@ -1,5 +1,4 @@
 use crate::sql::error::IResult;
-use crate::sql::escape::quote_str;
 use crate::sql::ParseError;
 use nom::branch::alt;
 use nom::bytes::complete::{escaped_transform, is_not, tag, take, take_while_m_n};
@@ -77,7 +76,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_str(&self.0), f)
+		Display::fmt(&self.0, f)
 	}
 }
 
