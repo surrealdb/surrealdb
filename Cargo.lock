@@ -5271,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "addr",
  "any_ascii",

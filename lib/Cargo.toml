@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.0.0"
+version = "1.0.1"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -10,7 +10,13 @@ description = "A scalable, distributed, collaborative, document-graph database, 
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
-keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
+keywords = [
+	"database",
+	"embedded-database",
+	"key-value",
+	"key-value-store",
+	"kv-store",
+]
 categories = ["database-implementations", "data-structures", "embedded"]
 license-file = "../LICENSE"
 resolver = "2"
@@ -35,18 +41,31 @@ kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
+native-tls = [
+	"dep:native-tls",
+	"reqwest?/native-tls",
+	"tokio-tungstenite?/native-tls",
+]
+rustls = [
+	"dep:rustls",
+	"reqwest?/rustls-tls",
+	"tokio-tungstenite?/rustls-tls-webpki-roots",
+]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
-    "protocol-ws", "protocol-http",
-    "kv-mem", "kv-indxdb", "kv-rocksdb",
-    "rustls", "native-tls",
-    "http", "scripting"
+	"protocol-ws",
+	"protocol-http",
+	"kv-mem",
+	"kv-indxdb",
+	"kv-rocksdb",
+	"rustls",
+	"native-tls",
+	"http",
+	"scripting",
 ]
 targets = []
 
@@ -68,7 +87,9 @@ dmp = "0.2.0"
 echodb = { version = "0.4.0", optional = true }
 executor = { version = "1.5.1", package = "async-executor" }
 flume = "0.10.14"
-foundationdb = { version = "0.8.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
+foundationdb = { version = "0.8.0", default-features = false, features = [
+	"embedded-fdb-include",
+], optional = true }
 fst = "0.4.7"
 futures = "0.3.28"
 futures-concurrency = "7.3.0"
@@ -77,7 +98,17 @@ geo = { version = "0.25.1", features = ["use-serde"] }
 indexmap = { version = "1.9.3", features = ["serde"] }
 indxdb = { version = "0.3.0", optional = true }
 ipnet = "2.8.0"
-js = { version = "=0.4.0-beta.4", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
+js = { version = "=0.4.0-beta.4", package = "rquickjs", features = [
+	"array-buffer",
+	"bindgen",
+	"classes",
+	"futures",
+	"loader",
+	"macro",
+	"parallel",
+	"properties",
+	"rust-alloc",
+], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
 lru = "0.10.1"
@@ -92,7 +123,11 @@ pin-project-lite = "0.2.12"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 regex = "1.9.3"
-reqwest = { version = "0.11.18", default-features = false, features = ["json", "stream", "multipart"], optional = true }
+reqwest = { version = "0.11.18", default-features = false, features = [
+	"json",
+	"stream",
+	"multipart",
+], optional = true }
 revision = "0.5.0"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", optional = true }
@@ -117,12 +152,12 @@ ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.4.0"
 
 [dev-dependencies]
-criterion = { version="0.4", features= ["async_futures"] }
+criterion = { version = "0.4", features = ["async_futures"] }
 env_logger = "0.10.0"
 pprof = { version = "0.11.1", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
-test-log = { version="0.2.12", features = ["trace"] }
+test-log = { version = "0.2.12", features = ["trace"] }
 time = { version = "0.3.25", features = ["serde"] }
 tokio = { version = "1.31.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
@@ -130,14 +165,27 @@ wiremock = "0.5.19"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
-tokio = { version = "1.31.0", default-features = false, features = ["rt", "sync"] }
+tokio = { version = "1.31.0", default-features = false, features = [
+	"rt",
+	"sync",
+] }
 uuid = { version = "1.4.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.37"
-wasmtimer = { version = "0.2.0", default-features = false, features = ["tokio"] }
+wasmtimer = { version = "0.2.0", default-features = false, features = [
+	"tokio",
+] }
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.31.0", default-features = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1.31.0", default-features = false, features = [
+	"macros",
+	"io-util",
+	"io-std",
+	"fs",
+	"rt-multi-thread",
+	"time",
+	"sync",
+] }
 tokio-tungstenite = { version = "0.18.0", optional = true }
 uuid = { version = "1.4.1", features = ["serde", "v4", "v7"] }
 
