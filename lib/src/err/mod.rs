@@ -498,9 +498,10 @@ pub enum Error {
 	},
 
 	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the id field, but a specific record has been specified")]
+	#[error("Found {derived_id_value} for the id field, but a differing specific record has been specified: {provided_id_value}")]
 	IdMismatch {
-		value: String,
+		derived_id_value: String,
+		provided_id_value: String,
 	},
 
 	/// Found a record id for the record but this is not a valid id

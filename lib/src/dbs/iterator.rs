@@ -133,7 +133,8 @@ impl Iterator {
 							// The id does not match
 							id => {
 								return Err(Error::IdMismatch {
-									value: id.to_string(),
+									derived_id_value: id.to_string(),
+									provided_id_value: v.to_string(),
 								});
 							}
 						}
@@ -148,7 +149,8 @@ impl Iterator {
 					// Check if there is an id field specified
 					if let Some(id) = data.rid(ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
-							value: id.to_string(),
+							derived_id_value: id.to_string(),
+							provided_id_value: v.to_string(),
 						});
 					}
 				}
@@ -169,7 +171,8 @@ impl Iterator {
 					// Check if there is an id field specified
 					if let Some(id) = data.rid(ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
-							value: id.to_string(),
+							derived_id_value: id.to_string(),
+							provided_id_value: v.to_string(),
 						});
 					}
 				}
@@ -188,7 +191,8 @@ impl Iterator {
 					// Check if there is an id field specified
 					if let Some(id) = data.rid(ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
-							value: id.to_string(),
+							derived_id_value: id.to_string(),
+							provided_id_value: v.to_string(),
 						});
 					}
 				}
@@ -201,7 +205,8 @@ impl Iterator {
 					// Check if there is an id field specified
 					if let Some(id) = data.rid(ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
-							value: id.to_string(),
+							derived_id_value: id.to_string(),
+							provided_id_value: v.to_string(),
 						});
 					}
 				}
@@ -224,7 +229,8 @@ impl Iterator {
 					// Check if there is an id field specified
 					if let Some(id) = data.rid(ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
-							value: id.to_string(),
+							derived_id_value: id.to_string(),
+							provided_id_value: v.to_string(),
 						});
 					}
 				}
