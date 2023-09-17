@@ -130,11 +130,17 @@ impl Iterator {
 						match id {
 							// The id is a match, so don't error
 							Value::Thing(id) if id == v => (),
-							Value::Strand(id) if id.to_string() == v.to_string() => (),
+							Value::Strand(id)
+								if remove_surrounding_quotes(&id.to_string()).to_string()
+									== v.to_string() =>
+							{
+								()
+							}
 							// The id does not match
 							id => {
 								return Err(Error::IdMismatch {
-									derived_id_value: id.to_string(),
+									derived_id_value: remove_surrounding_quotes(&id.to_string())
+										.to_string(),
 									provided_id_value: v.to_string(),
 								});
 							}
@@ -710,5 +716,12 @@ impl Iterator {
 				}
 			}
 		}
+	}
+}
+fn remove_surrounding_quotes(s: &str) -> &str {
+	if s.starts_with('\'') && s.ends_with('\'') {
+		&s[1..s.len() - 1]
+	} else {
+		s
 	}
 }
