@@ -421,7 +421,7 @@ pub(crate) fn from_value<T>(value: Value) -> Result<T, Error>
 where
 	T: DeserializeOwned,
 {
-	let json = into_json(value.clone(), true);
+	let json = into_json(value.clone(), false);
 	serde_json::from_value(json).map_err(|error| Error::FromValue {
 		value,
 		error: error.to_string(),
