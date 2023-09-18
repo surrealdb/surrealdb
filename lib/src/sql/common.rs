@@ -1,14 +1,14 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
-use crate::sql::error::Error::Parser;
-use crate::sql::error::IResult;
+use crate::sql::error::{IResult, ParseError};
 use nom::branch::alt;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::complete::char;
 use nom::character::is_alphanumeric;
+use nom::combinator::map_res;
 use nom::multi::many1;
-use nom::Err::Error;
+use nom::Err;
 use std::ops::RangeBounds;
 
 pub fn colons(i: &str) -> IResult<&str, ()> {
@@ -36,52 +36,52 @@ pub fn commasorspace(i: &str) -> IResult<&str, ()> {
 	alt((commas, shouldbespace))(i)
 }
 
-pub fn openparentheses(i: &str) -> IResult<&str, ()> {
-	let (i, _) = char('(')(i)?;
+pub fn openparentheses(s: &str) -> IResult<&str, &str> {
+	let (i, _) = char('(')(s)?;
 	let (i, _) = mightbespace(i)?;
-	Ok((i, ()))
+	Ok((i, s))
 }
 
-pub fn closeparentheses(i: &str) -> IResult<&str, ()> {
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
-	Ok((i, ()))
+pub fn closeparentheses(i: &str) -> IResult<&str, &str> {
+	let (s, _) = mightbespace(i)?;
+	let (i, _) = char(')')(s)?;
+	Ok((i, s))
 }
 
-pub fn openbraces(i: &str) -> IResult<&str, ()> {
-	let (i, _) = char('{')(i)?;
+pub fn openbraces(s: &str) -> IResult<&str, &str> {
+	let (i, _) = char('{')(s)?;
 	let (i, _) = mightbespace(i)?;
-	Ok((i, ()))
+	Ok((i, s))
 }
 
-pub fn closebraces(i: &str) -> IResult<&str, ()> {
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, ()))
+pub fn closebraces(i: &str) -> IResult<&str, &str> {
+	let (s, _) = mightbespace(i)?;
+	let (i, _) = char('}')(s)?;
+	Ok((i, s))
 }
 
-pub fn openbracket(i: &str) -> IResult<&str, ()> {
-	let (i, _) = char('[')(i)?;
+pub fn openbracket(s: &str) -> IResult<&str, &str> {
+	let (i, _) = char('[')(s)?;
 	let (i, _) = mightbespace(i)?;
-	Ok((i, ()))
+	Ok((i, s))
 }
 
-pub fn closebracket(i: &str) -> IResult<&str, ()> {
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
-	Ok((i, ()))
+pub fn closebracket(i: &str) -> IResult<&str, &str> {
+	let (s, _) = mightbespace(i)?;
+	let (i, _) = char(']')(s)?;
+	Ok((i, s))
 }
 
-pub fn openchevron(i: &str) -> IResult<&str, ()> {
-	let (i, _) = char('<')(i)?;
+pub fn openchevron(s: &str) -> IResult<&str, &str> {
+	let (i, _) = char('<')(s)?;
 	let (i, _) = mightbespace(i)?;
-	Ok((i, ()))
+	Ok((i, s))
 }
 
-pub fn closechevron(i: &str) -> IResult<&str, ()> {
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('>')(i)?;
-	Ok((i, ()))
+pub fn closechevron(i: &str) -> IResult<&str, &str> {
+	let (s, _) = mightbespace(i)?;
+	let (i, _) = char('>')(s)?;
+	Ok((i, s))
 }
 
 #[inline]
@@ -105,33 +105,34 @@ pub fn val_char(chr: char) -> bool {
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
-	let (i, v) = take_while(is_digit)(i)?;
-	match v.parse::<u64>() {
-		Ok(v) => Ok((i, v)),
-		_ => Err(Error(Parser(i))),
-	}
+	map_res(take_while(is_digit), |s: &str| s.parse::<u64>())(i)
 }
 
 pub fn take_u32_len(i: &str) -> IResult<&str, (u32, usize)> {
-	let (i, v) = take_while(is_digit)(i)?;
-	match v.parse::<u32>() {
-		Ok(n) => Ok((i, (n, v.len()))),
-		_ => Err(Error(Parser(i))),
-	}
+	map_res(take_while(is_digit), |s: &str| s.parse::<u32>().map(|x| (x, s.len())))(i)
 }
 
 pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
-	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
-	match v.parse::<u32>() {
-		Ok(v) => Ok((i, v)),
-		_ => Err(Error(Parser(i))),
-	}
+	map_res(take_while_m_n(n, n, is_digit), |s: &str| s.parse::<u32>())(i)
 }
 
 pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IResult<&str, u32> {
 	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
 	match v.parse::<u32>() {
-		Ok(v) if range.contains(&v) => Ok((i, v)),
-		_ => Err(Error(Parser(i))),
+		Ok(v) => {
+			if range.contains(&v) {
+				Ok((i, v))
+			} else {
+				Result::Err(Err::Error(ParseError::RangeError {
+					tried: i,
+					lower: range.start_bound().cloned(),
+					upper: range.end_bound().cloned(),
+				}))
+			}
+		}
+		Err(error) => Result::Err(Err::Error(ParseError::ParseInt {
+			tried: v,
+			error,
+		})),
 	}
 }

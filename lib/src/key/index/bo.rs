@@ -1,5 +1,5 @@
 //! Stores the offsets
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;

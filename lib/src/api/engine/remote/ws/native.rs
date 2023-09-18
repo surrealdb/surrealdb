@@ -104,7 +104,7 @@ impl Connection for Client {
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
-			let url = address.endpoint.join(PATH)?;
+			let url = address.url.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			let maybe_connector = address.config.tls_config.map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]

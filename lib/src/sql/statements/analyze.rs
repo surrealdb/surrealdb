@@ -5,6 +5,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::ft::FtIndex;
+use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::sql::comment::shouldbespace;
@@ -56,9 +57,14 @@ impl AnalyzeStatement {
 							FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Traversal).await?;
 						ft.statistics(&mut run).await?.into()
 					}
+					Index::MTree(p) => {
+						let mt =
+							MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Traversal).await?;
+						mt.statistics(&mut run).await?.into()
+					}
 					_ => {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "Statistics on unique and non-unique indexes.",
+							feature: "Statistics on unique and non-unique indexes.".to_string(),
 						})
 					}
 				};

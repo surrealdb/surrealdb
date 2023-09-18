@@ -4,10 +4,11 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
+use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::sql::array::Array;
-use crate::sql::index::{Index, SearchParams};
+use crate::sql::index::{Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
 use crate::{key, kvs};
@@ -55,11 +56,7 @@ impl<'a> Document<'a> {
 					Index::Uniq => ic.index_unique(&mut run).await?,
 					Index::Idx => ic.index_non_unique(&mut run).await?,
 					Index::Search(p) => ic.index_full_text(&mut run, p).await?,
-					Index::MTree(_) => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "MTree indexing",
-						})
-					}
+					Index::MTree(p) => ic.index_mtree(&mut run, p).await?,
 				};
 			}
 		}
@@ -332,18 +329,36 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_full_text(
-		&self,
+		&mut self,
 		run: &mut kvs::Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_db_analyzer(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
 		let mut ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Write).await?;
-		if let Some(n) = &self.n {
+		if let Some(n) = self.n.take() {
 			ft.index_document(run, self.rid, n).await?;
 		} else {
 			ft.remove_document(run, self.rid).await?;
 		}
 		ft.finish(run).await
+	}
+
+	async fn index_mtree(
+		&mut self,
+		run: &mut kvs::Transaction,
+		p: &MTreeParams,
+	) -> Result<(), Error> {
+		let ikb = IndexKeyBase::new(self.opt, self.ix);
+		let mut mt = MTreeIndex::new(run, ikb, p, TreeStoreType::Write).await?;
+		// Delete the old index data
+		if let Some(o) = self.o.take() {
+			mt.remove_document(run, self.rid, o).await?;
+		}
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			mt.index_document(run, self.rid, n).await?;
+		}
+		mt.finish(run).await
 	}
 }

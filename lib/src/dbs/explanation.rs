@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::Iterable;
 use crate::sql::{Explain, Object, Value};
 use std::collections::HashMap;
@@ -6,25 +7,38 @@ use std::collections::HashMap;
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
-	pub(super) fn new(e: Option<&Explain>, iterables: &Vec<Iterable>) -> (bool, Option<Self>) {
+	pub(super) fn new(
+		ctx: &Context<'_>,
+		e: Option<&Explain>,
+		iterables: &Vec<Iterable>,
+	) -> (bool, Option<Self>) {
 		match e {
 			None => (true, None),
 			Some(e) => {
 				let mut exp = Self::default();
 				for i in iterables {
-					exp.add_iter(i);
+					exp.add_iter(ctx, i);
+				}
+				if let Some(qp) = ctx.get_query_planner() {
+					for reason in qp.fallbacks() {
+						exp.add_fallback(reason.to_string());
+					}
 				}
 				(e.0, Some(exp))
 			}
 		}
 	}
 
-	fn add_iter(&mut self, iter: &Iterable) {
-		self.0.push(ExplainItem::new_iter(iter));
+	fn add_iter(&mut self, ctx: &Context<'_>, iter: &Iterable) {
+		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
 
 	pub(super) fn add_fetch(&mut self, count: usize) {
 		self.0.push(ExplainItem::new_fetch(count));
+	}
+
+	fn add_fallback(&mut self, reason: String) {
+		self.0.push(ExplainItem::new_fallback(reason));
 	}
 
 	pub(super) fn output(self, results: &mut Vec<Value>) {
@@ -47,7 +61,14 @@ impl ExplainItem {
 		}
 	}
 
-	fn new_iter(iter: &Iterable) -> Self {
+	fn new_fallback(reason: String) -> Self {
+		Self {
+			name: "Fallback".into(),
+			details: vec![("reason", reason.into())],
+		}
+	}
+
+	fn new_iter(ctx: &Context<'_>, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(v) => Self {
 				name: "Iterate Value".into(),
@@ -81,10 +102,18 @@ impl ExplainItem {
 					("thing-3", Value::Thing(t3.to_owned())),
 				],
 			},
-			Iterable::Index(t, _, io) => Self {
-				name: "Iterate Index".into(),
-				details: vec![("table", Value::from(t.0.to_owned())), ("plan", io.explain())],
-			},
+			Iterable::Index(t, ir) => {
+				let mut details = vec![("table", Value::from(t.0.to_owned()))];
+				if let Some(qp) = ctx.get_query_planner() {
+					if let Some(exe) = qp.get_query_executor(&t.0) {
+						details.push(("plan", exe.explain(*ir)));
+					}
+				}
+				Self {
+					name: "Iterate Index".into(),
+					details,
+				}
+			}
 		}
 	}
 }

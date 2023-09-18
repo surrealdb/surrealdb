@@ -8,6 +8,76 @@ use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
+async fn update_merge_and_content() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test CONTENT { name: 'Tobie' };
+		UPDATE person:test CONTENT { name: 'Jaime' };
+		UPDATE person:test CONTENT 'some content';
+		UPDATE person:test REPLACE 'some content';
+		UPDATE person:test MERGE { age: 50 };
+		UPDATE person:test MERGE 'some content';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Jaime',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+				name: 'Jaime',
+				age: 50,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use 'some content' in a MERGE clause"#
+	));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn update_simple_with_input() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD name ON TABLE person
@@ -128,6 +198,81 @@ async fn update_complex_with_input() -> Result<(), Error> {
 			{
 				id: product:test,
 				images: ['test.png'],
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn update_with_return_clause() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test SET age = 18, name = 'John';
+		UPDATE person:test SET age = 25 RETURN VALUE $before;
+		UPDATE person:test SET age = 30 RETURN VALUE { old_age: $before.age, new_age: $after.age };
+		UPDATE person:test SET age = 35 RETURN age, name;
+		DELETE person:test RETURN VALUE $before;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				new_age: 30,
+				old_age: 25
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 35,
+				name: 'John'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 35,
+				id: person:test,
+				name: 'John'
 			}
 		]",
 	);

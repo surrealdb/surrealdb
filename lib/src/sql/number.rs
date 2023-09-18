@@ -1,14 +1,14 @@
+use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub};
 use crate::err::Error;
 use crate::sql::ending::number as ending;
-use crate::sql::error::Error::Parser;
-use crate::sql::error::IResult;
+use crate::sql::error::{IResult, ParseError};
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::i64;
 use nom::combinator::{opt, value};
 use nom::number::complete::recognize_float;
-use nom::Err::Failure;
+use nom::Err;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
-use std::ops::{self, Neg};
+use std::ops::{self, Add, Div, Mul, Neg, Sub};
 use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
@@ -474,6 +474,96 @@ impl PartialOrd for Number {
 	}
 }
 
+macro_rules! impl_simple_try_op {
+	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
+		impl $trt for Number {
+			type Output = Self;
+			fn $fn(self, other: Self) -> Result<Self, Error> {
+				Ok(match (self, other) {
+					(Number::Int(v), Number::Int(w)) => Number::Int(
+						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+					),
+					(Number::Float(v), Number::Float(w)) => Number::Float(v.$unchecked(w)),
+					(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
+						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+					),
+					(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).$unchecked(w)),
+					(Number::Float(v), Number::Int(w)) => Number::Float(v.$unchecked(w as f64)),
+					(v, w) => Number::Decimal(
+						v.to_decimal()
+							.$checked(w.to_decimal())
+							.ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+					),
+				})
+			}
+		}
+	};
+}
+
+impl_simple_try_op!(TryAdd, try_add, add, checked_add);
+impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
+impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
+impl_simple_try_op!(TryDiv, try_div, div, checked_div);
+
+impl TryPow for Number {
+	type Output = Self;
+	fn try_pow(self, power: Self) -> Result<Self, Error> {
+		Ok(match (self, power) {
+			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
+				0 => match p.cmp(&0) {
+					// 0^(-x)
+					Ordering::Less => return Err(Error::TryPow(v.to_string(), p.to_string())),
+					// 0^0
+					Ordering::Equal => 1,
+					// 0^x
+					Ordering::Greater => 0,
+				},
+				// 1^p
+				1 => 1,
+				-1 => {
+					if p % 2 == 0 {
+						// (-1)^even
+						1
+					} else {
+						// (-1)^odd
+						-1
+					}
+				}
+				// try_into may cause an error, which would be wrong for the above cases.
+				_ => p
+					.try_into()
+					.ok()
+					.and_then(|p| v.checked_pow(p))
+					.ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
+			}),
+			(Self::Decimal(v), Self::Int(p)) => Self::Decimal(
+				v.checked_powi(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
+			),
+			(Self::Decimal(v), Self::Float(p)) => Self::Decimal(
+				v.checked_powf(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
+			),
+			(Self::Decimal(v), Self::Decimal(p)) => Self::Decimal(
+				v.checked_powd(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
+			),
+			(v, p) => v.as_float().powf(p.as_float()).into(),
+		})
+	}
+}
+
+impl TryNeg for Number {
+	type Output = Self;
+
+	fn try_neg(self) -> Result<Self::Output, Error> {
+		Ok(match self {
+			Self::Int(n) => {
+				Number::Int(n.checked_neg().ok_or_else(|| Error::TryNeg(n.to_string()))?)
+			}
+			Self::Float(n) => Number::Float(-n),
+			Self::Decimal(n) => Number::Decimal(-n),
+		})
+	}
+}
+
 impl ops::Add for Number {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
@@ -656,9 +746,43 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
 	let number = match suffix {
-		Suffix::None => Number::try_from(v).map_err(|_| Failure(Parser(i)))?,
-		Suffix::Float => Number::from(f64::from_str(v).map_err(|_| Failure(Parser(i)))?),
-		Suffix::Decimal => Number::from(Decimal::from_str(v).map_err(|_| Failure(Parser(i)))?),
+		Suffix::None => {
+			// Manually check for int or float for better parsing errors
+			if v.contains(['e', 'E', '.']) {
+				let float = f64::from_str(v)
+					.map_err(|e| ParseError::ParseFloat {
+						tried: v,
+						error: e,
+					})
+					.map_err(Err::Failure)?;
+				Number::from(float)
+			} else {
+				let int = i64::from_str(v)
+					.map_err(|e| ParseError::ParseInt {
+						tried: v,
+						error: e,
+					})
+					.map_err(Err::Failure)?;
+				Number::from(int)
+			}
+		}
+		Suffix::Float => {
+			let float = f64::from_str(v)
+				.map_err(|e| ParseError::ParseFloat {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?;
+			Number::from(float)
+		}
+		Suffix::Decimal => Number::from(
+			Decimal::from_str(v)
+				.map_err(|e| ParseError::ParseDecimal {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?,
+		),
 	};
 	Ok((i, number))
 }

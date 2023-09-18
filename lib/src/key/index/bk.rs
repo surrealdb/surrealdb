@@ -1,5 +1,5 @@
 //! Stores the term list for doc_ids
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;

@@ -4,6 +4,7 @@ mod event;
 mod field;
 mod function;
 mod index;
+mod model;
 mod namespace;
 mod param;
 mod scope;
@@ -17,7 +18,9 @@ pub use event::{event, DefineEventStatement};
 pub use field::{field, DefineFieldStatement};
 pub use function::{function, DefineFunctionStatement};
 pub use index::{index, DefineIndexStatement};
+pub use model::DefineModelStatement;
 pub use namespace::{namespace, DefineNamespaceStatement};
+use nom::bytes::complete::tag_no_case;
 pub use param::{param, DefineParamStatement};
 pub use scope::{scope, DefineScopeStatement};
 pub use table::{table, DefineTableStatement};
@@ -29,6 +32,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use derive::Store;
@@ -53,6 +57,7 @@ pub enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	MlModel(DefineModelStatement),
 }
 
 impl DefineStatement {
@@ -81,6 +86,7 @@ impl DefineStatement {
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::MlModel(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -100,11 +106,14 @@ impl Display for DefineStatement {
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
+			Self::MlModel(v) => Display::fmt(v, f),
 		}
 	}
 }
 
 pub fn define(i: &str) -> IResult<&str, DefineStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(namespace, DefineStatement::Namespace),
 		map(database, DefineStatement::Database),

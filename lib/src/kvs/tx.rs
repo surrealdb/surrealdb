@@ -7,6 +7,7 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+use crate::key::debug;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
@@ -39,7 +40,6 @@ use sql::statements::DefineTokenStatement;
 use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -56,7 +56,6 @@ pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
-	pub(super) write_buffer: HashMap<Key, ()>,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 }
 
@@ -623,7 +622,11 @@ impl Transaction {
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		trace!(
+			"Scan {:?} - {:?}",
+			debug::sprint_key(&rng.start.clone().into()),
+			debug::sprint_key(&rng.end.clone().into())
+		);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -799,7 +802,6 @@ impl Transaction {
 					nxt = Some(k.clone());
 				}
 				// Delete
-				trace!("Found getr {:?} {:?}", crate::key::debug::sprint_key(&k), v);
 				out.push((k, v));
 				// Count
 				num -= 1;
@@ -979,7 +981,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -1033,15 +1035,21 @@ impl Transaction {
 		Ok(())
 	}
 
+	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		self.del(key).await?;
+		Ok(())
+	}
+
 	// Delete a cluster registration entry
-	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
 		self.del(key).await
 	}
 
 	// Delete the live query notification registry on the table
 	// Return the Table ID
-	pub async fn del_ndlv(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
+	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
 		// This isn't implemented because it is covered by del_nd
 		// Will add later for remote node kill
 		Err(Error::NdNotFound {
@@ -1160,7 +1168,7 @@ impl Transaction {
 		Ok(())
 	}
 
-	pub async fn del_lv(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
+	pub async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
 		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
 		let key = crate::key::table::lq::new(ns, db, tb, lv);
 		self.cache.del(&key.clone().into());
@@ -1238,6 +1246,19 @@ impl Transaction {
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
+	}
+
+	pub async fn putc_ndlq(
+		&mut self,
+		nd: Uuid,
+		lq: Uuid,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		chk: Option<&str>,
+	) -> Result<(), Error> {
+		let key = crate::key::node::lq::new(nd, lq, ns, db);
+		self.putc(key, tb, chk).await
 	}
 
 	/// Retrieve all ROOT users.
@@ -2445,6 +2466,17 @@ impl Transaction {
 		self.cf.update(ns, db, tb, id.clone(), v)
 	}
 
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn record_table_change(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		dt: &DefineTableStatement,
+	) {
+		self.cf.define_table(ns, db, tb, dt)
+	}
+
 	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -2484,9 +2516,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2499,9 +2531,9 @@ impl Transaction {
 
 		seq.remove_id(db);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2513,9 +2545,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2528,9 +2560,9 @@ impl Transaction {
 
 		seq.remove_id(tb);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2555,9 +2587,9 @@ impl Transaction {
 
 		let id = seq.get_next_id();
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(id)
 	}
@@ -2570,9 +2602,9 @@ impl Transaction {
 
 		seq.remove_id(ns);
 
-		self.cache.set(key.clone(), Entry::Seq(seq));
-
-		self.write_buffer.insert(key.clone(), ());
+		self.cache.set(key.clone(), Entry::Seq(seq.clone()));
+		let (k, v) = seq.finish().unwrap();
+		self.set(k, v).await?;
 
 		Ok(())
 	}
@@ -2594,20 +2626,6 @@ impl Transaction {
 	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
 	// non-FDB backends.
 	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
-		let mut buf = self.write_buffer.clone();
-		let writes = buf.drain();
-		for (k, _) in writes {
-			let v = self.cache.get(&k).unwrap();
-			let mut seq = if let Entry::Seq(v) = v {
-				v
-			} else {
-				unreachable!();
-			};
-			if let Some((k, v)) = seq.finish() {
-				self.set(k, v).await?
-			}
-		}
-
 		let changes = self.cf.get();
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?

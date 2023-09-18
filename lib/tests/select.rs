@@ -370,9 +370,11 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
-			id: tester:test
-		}",
+		"[
+			{
+				id: tester:test
+			}
+		]",
 	);
 	assert_eq!(tmp, val);
 	//
@@ -380,7 +382,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("tester:test");
+	let val = Value::parse("[tester:test]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -769,6 +771,18 @@ async fn select_where_explain() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_function_field() -> Result<(), Error> {
+	let sql = "SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ a: 1, b: 1 }]");
+	assert_eq!(tmp, val);
 	Ok(())
 }
 

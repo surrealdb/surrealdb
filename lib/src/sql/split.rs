@@ -57,11 +57,9 @@ impl Display for Split {
 pub fn split(i: &str) -> IResult<&str, Splits> {
 	let (i, _) = tag_no_case("SPLIT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, _) = opt(terminated(tag_no_case("ON"), shouldbespace))(i)?;
-		let (i, v) = separated_list1(commas, split_raw)(i)?;
-		Ok((i, Splits(v)))
-	})(i)
+	let (i, _) = opt(terminated(tag_no_case("ON"), shouldbespace))(i)?;
+	let (i, v) = cut(separated_list1(commas, split_raw))(i)?;
+	Ok((i, Splits(v)))
 }
 
 fn split_raw(i: &str) -> IResult<&str, Split> {

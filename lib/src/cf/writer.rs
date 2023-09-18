@@ -1,5 +1,6 @@
 use crate::cf::{TableMutation, TableMutations};
 use crate::kvs::Key;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
@@ -69,6 +70,15 @@ impl Writer {
 		} else {
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
+	}
+
+	pub(crate) fn define_table(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
+		self.buf.push(
+			ns.to_string(),
+			db.to_string(),
+			tb.to_string(),
+			TableMutation::Def(dt.to_owned()),
+		)
 	}
 
 	// get returns all the mutations buffered for this transaction,
@@ -144,8 +154,7 @@ mod tests {
 		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
 		let db_root = crate::key::namespace::db::new(ns, db);
 		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
-		let tb = tb.clone();
-		let tb_root = crate::key::database::tb::new(ns, db, tb.as_ref());
+		let tb_root = crate::key::database::tb::new(ns, db, tb);
 		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
@@ -201,7 +210,6 @@ mod tests {
 		let start: u64 = 0;
 
 		let mut tx4 = ds.transaction(true, false).await.unwrap();
-		let tb = tb.clone();
 		let r =
 			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
@@ -256,7 +264,6 @@ mod tests {
 
 		// Now we should see the gc_all results
 		let mut tx6 = ds.transaction(true, false).await.unwrap();
-		let tb = tb.clone();
 		let r =
 			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await

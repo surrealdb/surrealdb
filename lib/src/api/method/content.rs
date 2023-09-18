@@ -47,7 +47,11 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(method);
-				conn.$method(router?, Param::new(vec![param, content?])).await
+				let params = match content? {
+					Value::None | Value::Null => vec![param],
+					content => vec![param, content],
+				};
+				conn.$method(router?, Param::new(params)).await
 			})
 		}
 	};

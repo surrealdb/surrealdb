@@ -3,6 +3,8 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 use js::prelude::Async;
 
+mod is;
+
 pub struct Package;
 
 impl_module_def!(
@@ -16,6 +18,7 @@ impl_module_def!(
 	"fields" => fut Async,
 	"float" => run,
 	"int" => run,
+	"is" => (is::Package),
 	"number" => run,
 	"point" => run,
 	"regex" => run,

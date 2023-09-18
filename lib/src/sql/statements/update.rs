@@ -21,8 +21,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct UpdateStatement {
+	#[revision(start = 2)]
+	pub only: bool,
 	pub what: Values,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
@@ -35,14 +37,6 @@ impl UpdateStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
-	}
-	/// Check if this statement is for a single record
-	pub(crate) fn single(&self) -> bool {
-		match self.what.len() {
-			1 if self.what[0].is_object() => true,
-			1 if self.what[0].is_thing() => true,
-			_ => false,
-		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -73,13 +67,27 @@ impl UpdateStatement {
 			})?;
 		}
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		match i.output(ctx, opt, txn, &stm).await? {
+			// This is a single record result
+			Value::Array(mut a) if self.only => match a.len() {
+				// There was exactly one result
+				1 => Ok(a.remove(0)),
+				// There were no results
+				_ => Err(Error::SingleOnlyOutput),
+			},
+			// This is standard query result
+			v => Ok(v),
+		}
 	}
 }
 
 impl fmt::Display for UpdateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPDATE {}", self.what)?;
+		write!(f, "UPDATE")?;
+		if self.only {
+			f.write_str(" ONLY")?
+		}
+		write!(f, " {}", self.what)?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}
@@ -101,6 +109,7 @@ impl fmt::Display for UpdateStatement {
 
 pub fn update(i: &str) -> IResult<&str, UpdateStatement> {
 	let (i, _) = tag_no_case("UPDATE")(i)?;
+	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
@@ -111,6 +120,7 @@ pub fn update(i: &str) -> IResult<&str, UpdateStatement> {
 	Ok((
 		i,
 		UpdateStatement {
+			only: only.is_some(),
 			what,
 			data,
 			cond,

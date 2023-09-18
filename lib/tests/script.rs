@@ -252,7 +252,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 async fn script_query_from_script() -> Result<(), Error> {
 	let sql = r#"
 		RETURN function() {
-			return await surrealdb.query(`CREATE article:test SET name = "The daily news", issue_number = 3`)
+			return await surrealdb.query(`CREATE ONLY article:test SET name = "The daily news", issue_number = 3`)
 		}
 	"#;
 	let dbs = new_ds().await?;
@@ -289,7 +289,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 #[tokio::test]
 async fn script_value_function_params() -> Result<(), Error> {
 	let sql = r#"
-		LET $test = CREATE article:test SET name = "The daily news", issue_number = 3;
+		LET $test = CREATE ONLY article:test SET name = "The daily news", issue_number = 3;
 		RETURN function() {
 			return await surrealdb.value(`$test.name`)
 		}

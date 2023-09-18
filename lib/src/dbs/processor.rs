@@ -1,3 +1,4 @@
+use crate::cnf::PROCESSOR_BATCH_SIZE;
 use crate::ctx::Context;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
@@ -5,7 +6,6 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
-use crate::idx::planner::plan::IndexOption;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
@@ -96,9 +96,7 @@ impl<'a> Processor<'a> {
 				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, ir, io) => {
-					self.process_index(ctx, opt, txn, stm, t, ir, io).await?
-				}
+				Iterable::Index(t, ir) => self.process_index(ctx, opt, txn, stm, t, ir).await?,
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
 				}
@@ -248,18 +246,18 @@ impl<'a> Processor<'a> {
 			if ctx.is_done() {
 				break;
 			}
-			// Get the next 1000 key-value entries
+			// Get the next batch of key-value entries
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, 1000).await?
+					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, 1000).await?
+					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 			};
 			// If there are key-value entries then fetch them
@@ -337,18 +335,18 @@ impl<'a> Processor<'a> {
 			if ctx.is_done() {
 				break;
 			}
-			// Get the next 1000 key-value entries
+			// Get the next batch of key-value entries
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, 1000).await?
+					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, 1000).await?
+					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 			};
 			// If there are key-value entries then fetch them
@@ -474,18 +472,18 @@ impl<'a> Processor<'a> {
 				if ctx.is_done() {
 					break;
 				}
-				// Get the next 1000 key-value entries
+				// Get the next batch key-value entries
 				let res = match nxt {
 					None => {
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, 1000).await?
+						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 					}
 					Some(ref mut beg) => {
 						beg.push(0x00);
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, 1000).await?
+						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
 					}
 				};
 				// If there are key-value entries then fetch them
@@ -544,14 +542,13 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		table: Table,
 		ir: IteratorRef,
-		io: IndexOption,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(pla) = ctx.get_query_planner() {
 			if let Some(exe) = pla.get_query_executor(&table.0) {
-				if let Some(mut iterator) = exe.new_iterator(opt, ir, io).await? {
-					let mut things = iterator.next_batch(txn, 1000).await?;
+				if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
+					let mut things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
 					while !things.is_empty() {
 						// Check if the context is finished
 						if ctx.is_done() {
@@ -589,7 +586,7 @@ impl<'a> Processor<'a> {
 						}
 
 						// Collect the next batch of ids
-						things = iterator.next_batch(txn, 1000).await?;
+						things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
 					}
 					// Everything ok
 					return Ok(());
@@ -597,7 +594,7 @@ impl<'a> Processor<'a> {
 			}
 		}
 		Err(Error::QueryNotExecutedDetail {
-			message: "No QueryExecutor has not been found.".to_string(),
+			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}
 }

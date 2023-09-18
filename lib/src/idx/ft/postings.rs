@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
@@ -81,10 +81,8 @@ impl Postings {
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.lock().await.finish(tx).await?;
-		if self.btree.is_updated() || updated {
-			tx.set(self.state_key.clone(), self.btree.get_state().try_to_val()?).await?;
-		}
+		self.store.lock().await.finish(tx).await?;
+		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}
 }

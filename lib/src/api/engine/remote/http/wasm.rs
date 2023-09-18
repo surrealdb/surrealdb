@@ -94,7 +94,7 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	spawn_local(async move {
-		let base_url = address.endpoint;
+		let base_url = address.url;
 
 		let client = match client(&base_url).await {
 			Ok(client) => {

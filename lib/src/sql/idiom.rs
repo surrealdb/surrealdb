@@ -21,6 +21,9 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use super::dir::dir;
+use super::error::{expected, ExplainResultExt};
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -191,31 +194,37 @@ impl Display for Idiom {
 
 /// Used in DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
-	let (i, p) = first(i)?;
-	let (i, mut v) = many0(local_part)(i)?;
-	// Flatten is only allowed at the end
-	let (i, flat) = opt(flatten)(i)?;
-	if let Some(p) = flat {
-		v.push(p);
-	}
-	v.insert(0, p);
-	Ok((i, Idiom::from(v)))
+	expected("a local idiom", |i| {
+		let (i, p) = first(i).explain("graphs are not allowed in a local idioms.", dir)?;
+		let (i, mut v) = many0(local_part)(i)?;
+		// Flatten is only allowed at the end
+		let (i, flat) = opt(flatten)(i)?;
+		if let Some(p) = flat {
+			v.push(p);
+		}
+		v.insert(0, p);
+		Ok((i, Idiom::from(v)))
+	})(i)
 }
 
 /// Used in a SPLIT, ORDER, and GROUP clauses
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
-	let (i, p) = first(i)?;
-	let (i, mut v) = many0(basic_part)(i)?;
-	v.insert(0, p);
-	Ok((i, Idiom::from(v)))
+	expected("a basic idiom", |i| {
+		let (i, p) = first(i).explain("graphs are not allowed in a basic idioms.", dir)?;
+		let (i, mut v) = many0(basic_part)(i)?;
+		v.insert(0, p);
+		Ok((i, Idiom::from(v)))
+	})(i)
 }
 
 /// A simple idiom with one or more parts
 pub fn plain(i: &str) -> IResult<&str, Idiom> {
-	let (i, p) = alt((first, graph))(i)?;
-	let (i, mut v) = many0(part)(i)?;
-	v.insert(0, p);
-	Ok((i, Idiom::from(v)))
+	expected("a idiom", |i| {
+		let (i, p) = alt((first, graph))(i)?;
+		let (i, mut v) = many0(part)(i)?;
+		v.insert(0, p);
+		Ok((i, Idiom::from(v)))
+	})(i)
 }
 
 /// Reparse a value which might part of an idiom.

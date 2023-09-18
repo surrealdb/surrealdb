@@ -1,5 +1,4 @@
 pub(crate) mod analyzer;
-pub(crate) mod docids;
 mod doclength;
 mod highlighter;
 mod offsets;
@@ -9,8 +8,8 @@ pub(super) mod termdocs;
 pub(crate) mod terms;
 
 use crate::err::Error;
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
@@ -198,7 +197,7 @@ impl FtIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: &[Value],
+		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
@@ -481,7 +480,7 @@ mod tests {
 			}
 			assert_eq!(map.len(), e.len());
 			for (k, p) in e {
-				assert_eq!(map.get(k), Some(&p));
+				assert_eq!(map.get(k), Some(&p), "{}", k);
 			}
 		} else {
 			panic!("hits is none");
@@ -537,7 +536,7 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
 
 		let btree_order = 5;
 
@@ -549,9 +548,7 @@ mod tests {
 			// Add one document
 			let (mut tx, mut fti) =
 				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc1, &vec![Value::from("hello the world")])
-				.await
-				.unwrap();
+			fti.index_document(&mut tx, &doc1, vec![Value::from("hello the world")]).await.unwrap();
 			finish(tx, fti).await;
 		}
 
@@ -559,8 +556,8 @@ mod tests {
 			// Add two documents
 			let (mut tx, mut fti) =
 				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc2, &vec![Value::from("a yellow hello")]).await.unwrap();
-			fti.index_document(&mut tx, &doc3, &vec![Value::from("foo bar")]).await.unwrap();
+			fti.index_document(&mut tx, &doc2, vec![Value::from("a yellow hello")]).await.unwrap();
+			fti.index_document(&mut tx, &doc3, vec![Value::from("foo bar")]).await.unwrap();
 			finish(tx, fti).await;
 		}
 
@@ -575,7 +572,13 @@ mod tests {
 
 			// Search & score
 			let (hits, scr) = search(&mut tx, &fti, "hello").await;
-			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+			check_hits(
+				&mut tx,
+				hits,
+				scr,
+				vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))],
+			)
+			.await;
 
 			let (hits, scr) = search(&mut tx, &fti, "world").await;
 			check_hits(&mut tx, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
@@ -597,7 +600,7 @@ mod tests {
 			// Reindex one document
 			let (mut tx, mut fti) =
 				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
-			fti.index_document(&mut tx, &doc3, &vec![Value::from("nobar foo")]).await.unwrap();
+			fti.index_document(&mut tx, &doc3, vec![Value::from("nobar foo")]).await.unwrap();
 			finish(tx, fti).await;
 
 			let (mut tx, fti) = tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
@@ -641,7 +644,7 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
-			let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
 
 			let doc1: Thing = ("t", "doc1").into();
 			let doc2: Thing = ("t", "doc2").into();
@@ -655,28 +658,28 @@ mod tests {
 				fti.index_document(
 					&mut tx,
 					&doc1,
-					&vec![Value::from("the quick brown fox jumped over the lazy dog")],
+					vec![Value::from("the quick brown fox jumped over the lazy dog")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc2,
-					&vec![Value::from("the fast fox jumped over the lazy dog")],
+					vec![Value::from("the fast fox jumped over the lazy dog")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc3,
-					&vec![Value::from("the dog sat there and did nothing")],
+					vec![Value::from("the dog sat there and did nothing")],
 				)
 				.await
 				.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc4,
-					&vec![Value::from("the other animals sat there watching")],
+					vec![Value::from("the other animals sat there watching")],
 				)
 				.await
 				.unwrap();
@@ -698,10 +701,10 @@ mod tests {
 					hits,
 					scr,
 					vec![
-						(&doc1, Some(0.0)),
-						(&doc2, Some(0.0)),
-						(&doc3, Some(0.0)),
-						(&doc4, Some(0.0)),
+						(&doc1, Some(-3.4388628)),
+						(&doc2, Some(-3.621457)),
+						(&doc3, Some(-2.258829)),
+						(&doc4, Some(-2.393017)),
 					],
 				)
 				.await;
@@ -711,7 +714,11 @@ mod tests {
 					&mut tx,
 					hits,
 					scr,
-					vec![(&doc1, Some(0.0)), (&doc2, Some(0.0)), (&doc3, Some(0.0))],
+					vec![
+						(&doc1, Some(-0.7832165)),
+						(&doc2, Some(-0.8248031)),
+						(&doc3, Some(-0.87105393)),
+					],
 				)
 				.await;
 

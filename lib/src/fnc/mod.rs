@@ -15,7 +15,6 @@ pub mod duration;
 pub mod encoding;
 pub mod geo;
 pub mod http;
-pub mod is;
 pub mod math;
 pub mod meta;
 pub mod not;
@@ -162,20 +161,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
 		//
-		"is::alphanum" => is::alphanum,
-		"is::alpha" => is::alpha,
-		"is::ascii" => is::ascii,
-		"is::datetime" => is::datetime,
-		"is::domain" => is::domain,
-		"is::email" => is::email,
-		"is::hexadecimal" => is::hexadecimal,
-		"is::latitude" => is::latitude,
-		"is::longitude" => is::longitude,
-		"is::numeric" => is::numeric,
-		"is::semver" => is::semver,
-		"is::url" => is::url,
-		"is::uuid" => is::uuid,
-		//
 		"math::abs" => math::abs,
 		"math::bottom" => math::bottom,
 		"math::ceil" => math::ceil,
@@ -257,6 +242,19 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::words" => string::words,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::is::alphanum" => string::is::alphanum,
+		"string::is::alpha" => string::is::alpha,
+		"string::is::ascii" => string::is::ascii,
+		"string::is::datetime" => string::is::datetime,
+		"string::is::domain" => string::is::domain,
+		"string::is::email" => string::is::email,
+		"string::is::hexadecimal" => string::is::hexadecimal,
+		"string::is::latitude" => string::is::latitude,
+		"string::is::longitude" => string::is::longitude,
+		"string::is::numeric" => string::is::numeric,
+		"string::is::semver" => string::is::semver,
+		"string::is::url" => string::is::url,
+		"string::is::uuid" => string::is::uuid,
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
@@ -297,6 +295,28 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		"type::is::array" => r#type::is::array,
+		"type::is::bool" => r#type::is::bool,
+		"type::is::bytes" => r#type::is::bytes,
+		"type::is::collection" => r#type::is::collection,
+		"type::is::datetime" => r#type::is::datetime,
+		"type::is::decimal" => r#type::is::decimal,
+		"type::is::duration" => r#type::is::duration,
+		"type::is::float" => r#type::is::float,
+		"type::is::geometry" => r#type::is::geometry,
+		"type::is::int" => r#type::is::int,
+		"type::is::line" => r#type::is::line,
+		"type::is::null" => r#type::is::null,
+		"type::is::multiline" => r#type::is::multiline,
+		"type::is::multipoint" => r#type::is::multipoint,
+		"type::is::multipolygon" => r#type::is::multipolygon,
+		"type::is::number" => r#type::is::number,
+		"type::is::object" => r#type::is::object,
+		"type::is::point" => r#type::is::point,
+		"type::is::polygon" => r#type::is::polygon,
+		"type::is::record" => r#type::is::record,
+		"type::is::string" => r#type::is::string,
+		"type::is::uuid" => r#type::is::uuid,
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
@@ -399,7 +419,8 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			if crate::sql::function::function_names(name).is_err() {
+			let builtin_name = crate::sql::builtin::builtin_name(name);
+			if builtin_name.is_err() {
 				problems.push(format!("couldn't parse {name} function"));
 			}
 

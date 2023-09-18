@@ -175,7 +175,7 @@ impl Fields {
 							}
 						}
 						// This expression is a variable fields expression
-						Value::Function(f) if f.name() == "type::fields" => {
+						Value::Function(f) if f.name() == Some("type::fields") => {
 							// Process the function using variable field projections
 							let expr = expr.compute(ctx, opt, txn, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
@@ -204,7 +204,7 @@ impl Fields {
 							}
 						}
 						// This expression is a variable field expression
-						Value::Function(f) if f.name() == "type::field" => {
+						Value::Function(f) if f.name() == Some("type::field") => {
 							// Process the function using variable field projections
 							let expr = expr.compute(ctx, opt, txn, Some(doc)).await?;
 							// Check if this is a single VALUE field expression

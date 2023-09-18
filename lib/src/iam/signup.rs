@@ -30,7 +30,7 @@ pub async fn signup(
 			// Attempt to signup to specified scope
 			super::signup::sc(kvs, session, ns, db, sc, vars).await
 		}
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::InvalidSignup),
 	}
 }
 
@@ -59,7 +59,7 @@ pub async fn sc(
 					// Setup the system session for creating the signup record
 					let sess = Session::editor().with_ns(&ns).with_db(&db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars).await {
+					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
@@ -86,6 +86,8 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Log the authenticated scope info
+								trace!("Signing up to scope `{}`", sc);
 								// Create the authentication token
 								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
@@ -103,22 +105,17 @@ pub async fn sc(
 								match enc {
 									// The auth token was created successfully
 									Ok(tk) => Ok(Some(tk)),
-									// There was an error creating the token
-									_ => Err(Error::InvalidAuth),
+									_ => Err(Error::TokenMakingFailed),
 								}
 							}
-							// No record was returned
-							_ => Err(Error::InvalidAuth),
+							_ => Err(Error::NoRecordFound),
 						},
-						// The signup query failed
-						Err(_) => Err(Error::InvalidAuth),
+						Err(_) => Err(Error::SignupQueryFailed),
 					}
 				}
-				// This scope does not allow signup
-				_ => Err(Error::InvalidAuth),
+				_ => Err(Error::ScopeNoSignup),
 			}
 		}
-		// The scope does not exists
-		_ => Err(Error::InvalidAuth),
+		_ => Err(Error::NoScopeFound),
 	}
 }

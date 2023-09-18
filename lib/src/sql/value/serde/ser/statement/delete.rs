@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeDeleteStatement {
+	only: Option<bool>,
 	what: Option<Values>,
 	cond: Option<Cond>,
 	output: Option<Output>,
@@ -54,6 +55,9 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
+			"only" => {
+				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"what" => {
 				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
 			}
@@ -79,6 +83,7 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.what, self.parallel) {
 			(Some(what), Some(parallel)) => Ok(DeleteStatement {
+				only: self.only.is_some_and(|v| v),
 				what,
 				parallel,
 				cond: self.cond,

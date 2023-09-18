@@ -1,6 +1,5 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::TiKv;
-use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -17,7 +16,8 @@ macro_rules! endpoints {
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("tikv://{self}");
 					Ok(Endpoint {
-						endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
+						url: Url::parse(&url).unwrap(),
+						path: url,
 						config: Default::default(),
 					})
 				}
