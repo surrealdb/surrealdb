@@ -567,13 +567,19 @@ impl Datastore {
 		println!("Found {} node live queries", ndlqs.len());
 		// We now bundle the live queries by table. We need the table mapping for lookup
 		// TODO we need Arc instead of Rc because this is a future; Can that be fixed?
-		let mut map_tblq_source: BTreeMap<String, Vec<Arc<LqValue>>> = BTreeMap::new();
+		#[derive(Eq, PartialEq, Ord, PartialOrd)]
+		struct QualifiedTb {
+			ns: String,
+			db: String,
+			tb: String,
+		};
+		let mut map_tblq_source: BTreeMap<QualifiedTb, Vec<Arc<LqValue>>> = BTreeMap::new();
 		// Node+LqID -> LqValue, it gets drained when there is a tblq hit
 		// TODO If there is a node query without any table queries then the node query should be deleted
 		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), Arc<LqValue>> = BTreeMap::new();
 		// Table+LqID -> LqValue, it gets populated when there is a tblq miss
 		// TODO If there is a table query without a node query, then tblq should be deleted
-		let mut tblq_to_delete: BTreeMap<(String, Uuid), Arc<LqValue>> = BTreeMap::new();
+		let mut tblq_to_delete: BTreeMap<(QualifiedTb, Uuid), Arc<LqValue>> = BTreeMap::new();
 
 		// Aggregate and group the data necessary
 		for ndlq in ndlqs {
@@ -585,18 +591,27 @@ impl Datastore {
 			// table <> live query list mapping derived from nd <> lq mapping. This is our main
 			// source of tracking mappings, as it will be correlated with the actual table <> lq
 			// mapping from storage
-			map_tblq_source.entry(pushed_ndlq.tb.clone()).or_default().push(pushed_ndlq);
+			map_tblq_source
+				.entry(QualifiedTb {
+					ns: pushed_ndlq.ns.clone(),
+					db: pushed_ndlq.db.clone(),
+					tb: pushed_ndlq.tb.clone(),
+				})
+				.or_default()
+				.push(pushed_ndlq);
 		}
 		// For each table, we check
 		for (tb, ndlq_vec) in map_tblq_source {
 			for ndlq in &ndlq_vec {
-				tx.del_ndlq(&ndlq.nd.0).await?;
+				// What we expect in this part of the code is for the 2 sets to match:
+				// ndlq == tblq
+				// when there is no tblq for a ndlq, ndlq_to_delete will retain that value
+				// when there is no ndlq for a tblq, this will be added to tblq_to_delete
+				// After the scan, it is values of those 2 sets that get removed from storage
 				let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
 				trace!("Found {} table live queries", tblqs.len());
 				println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);
-				for tblq in tblqs {
-					tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
-				}
+				for tblq in tblqs {}
 			}
 		}
 		trace!("Successfully completed nuke");
