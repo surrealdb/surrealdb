@@ -2,7 +2,8 @@
 #[serial]
 async fn write_scan_tblq() {
 	let node_id = uuid::Uuid::parse_str("0bee25e0-34d7-448c-abc0-48cdf3db3a53").unwrap();
-	let test = init(node_id).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(node_id, clock).await.unwrap();
 
 	// Write some data
 	let mut tx = test.db.transaction(true, false).await.unwrap();
