@@ -27,6 +27,7 @@ use futures::lock::Mutex;
 use futures::Future;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -565,29 +566,36 @@ impl Datastore {
 		trace!("Found {} node live queries", ndlqs.len());
 		println!("Found {} node live queries", ndlqs.len());
 		// We now bundle the live queries by table. We need the table mapping for lookup
-		// TODO If there is a node query without any table queries then the node query should be deleted
-		// TODO If there is a table query without a node query, then tblq should be deleted
-		let mut map_tblq_nodes: BTreeMap<String, Vec<LqValue>> = BTreeMap::new();
+		let mut map_tblq_source: BTreeMap<String, Vec<Rc<LqValue>>> = BTreeMap::new();
 		// Node+LqID -> LqValue, it gets drained when there is a tblq hit
-		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), LqValue> = BTreeMap::new();
+		// TODO If there is a node query without any table queries then the node query should be deleted
+		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), Rc<LqValue>> = BTreeMap::new();
 		// Table+LqID -> LqValue, it gets populated when there is a tblq miss
-		let mut tblq_to_delete: BTreeMap<(String, Uuid), LqValue> = BTreeMap::new();
+		// TODO If there is a table query without a node query, then tblq should be deleted
+		let mut tblq_to_delete: BTreeMap<(String, Uuid), Rc<LqValue>> = BTreeMap::new();
+
+		// Aggregate and group the data necessary
 		for ndlq in ndlqs {
-			if !map_tblq_nodes.contains_key(&ndlq.tb) {
-				map_tblq_nodes.insert(ndlq.tb.clone(), vec![]);
-			}
-			let mut tblqs = map_tblq_nodes.get(&ndlq.tb).ok_or(Error::Unreachable)?;
-			tblqs.push(ndlq.clone());
-			ndlq_to_delete.insert((ndlq.nd, ndlq.lq), ndlq.clone());
+			let pushed_ndlq = Rc::new(ndlq);
+			// We record this entry as unvisited. If it remains unvisited after traversing the
+			// tblq range, then we know it is unreachable
+			ndlq_to_delete
+				.insert((pushed_ndlq.nd.clone(), pushed_ndlq.lq.clone()), pushed_ndlq.clone());
+			// table <> live query list mapping derived from nd <> lq mapping. This is our main
+			// source of tracking mappings, as it will be correlated with the actual table <> lq
+			// mapping from storage
+			map_tblq_source.entry(pushed_ndlq.tb.clone()).or_default().push(pushed_ndlq);
 		}
 		// For each table, we check
-		for ndlq in ndlqs {
-			tx.del_ndlq(&ndlq.nd).await?;
-			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
-			trace!("Found {} table live queries", tblqs.len());
-			println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);
-			for tblq in tblqs {
-				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+		for (tb, ndlq_vec) in map_tblq_source {
+			for ndlq in &ndlq_vec {
+				tx.del_ndlq(&ndlq.nd.0).await?;
+				let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
+				trace!("Found {} table live queries", tblqs.len());
+				println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);
+				for tblq in tblqs {
+					tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+				}
 			}
 		}
 		trace!("Successfully completed nuke");
