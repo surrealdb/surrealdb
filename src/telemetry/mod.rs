@@ -6,12 +6,13 @@ use std::time::Duration;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
+use opentelemetry::global::{set_error_handler, Error};
 use opentelemetry::metrics::MetricsError;
 use opentelemetry::sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry::sdk::Resource;
-use opentelemetry::{Context as TelemetryContext, KeyValue};
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -83,8 +84,19 @@ impl Builder {
 		Box::new(registry)
 	}
 
-	/// Install the tracing dispatcher globally
+	/// Initialize the tracing configuration
 	pub fn init(self) {
+		// Setup global opentelemetry error handler
+		// Used for errors triggered internally by the opentelemetry crate and not returned to the user
+		set_error_handler(|e| {
+			match e {
+				// TODO: There's a race condition in the opentelemetry crate that can cause this error to be triggered during the initialization of the tracing layer
+				// See https://github.com/open-telemetry/opentelemetry-rust/issues/1244
+				_ => error!("{}", e),
+			}
+		}).unwrap();
+
+		// Install the `tracing` dispatcher globally
 		self.build().init();
 	}
 }
@@ -92,7 +104,6 @@ impl Builder {
 pub fn shutdown() -> Result<(), MetricsError> {
 	// Flush all telemetry data
 	opentelemetry::global::shutdown_tracer_provider();
-	metrics::shutdown(&TelemetryContext::current())?;
 
 	Ok(())
 }

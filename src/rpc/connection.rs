@@ -17,6 +17,9 @@ use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
+use tokio::sync::RwLock;
+use tracing::{Instrument, Span};
+
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::args::Take;
@@ -311,16 +314,13 @@ impl Connection {
 						Connection::process_message(rpc.clone(), &req.method, req.params).await;
 					// Process the response
 					res.into_response(req.id)
-						.send(otel_cx.clone(), fmt, &chn)
+						.send(fmt, &chn)
 						.with_context(otel_cx.as_ref().clone())
 						.await
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err)
-						.send(otel_cx.clone(), fmt, &chn)
-						.with_context(otel_cx.as_ref().clone())
-						.await
+					failure(None, err).send(fmt, &chn).with_context(otel_cx.as_ref().clone()).await
 				}
 			}
 		}
