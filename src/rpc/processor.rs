@@ -202,6 +202,7 @@ impl Processor {
 			.map(Into::into)
 			.map_err(Into::into)
 	}
+
 	async fn invalidate(&mut self) -> Result<Value, Error> {
 		surrealdb::iam::clear::clear(&mut self.session)?;
 		Ok(Value::None)

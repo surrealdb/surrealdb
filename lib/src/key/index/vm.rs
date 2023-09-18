@@ -1,11 +1,10 @@
-//! Stores Term/Doc frequency
-use crate::idx::docids::DocId;
-use crate::idx::ft::terms::TermId;
+//! Stores MTree state and nodes
+use crate::idx::trees::store::NodeId;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Bf<'a> {
+pub struct Vm<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -18,18 +17,16 @@ pub struct Bf<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term_id: TermId,
-	pub doc_id: DocId,
+	pub node_id: Option<NodeId>,
 }
 
-impl<'a> Bf<'a> {
+impl<'a> Vm<'a> {
 	pub fn new(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		term_id: TermId,
-		doc_id: DocId,
+		node_id: Option<NodeId>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -42,36 +39,30 @@ impl<'a> Bf<'a> {
 			_d: b'+',
 			ix,
 			_e: b'!',
-			_f: b'b',
-			_g: b'f',
-			term_id,
-			doc_id,
+			_f: b'v',
+			_g: b'm',
+			node_id,
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::key::index::bf::Bf;
-
 	#[test]
 	fn key() {
+		use super::*;
 		#[rustfmt::skip]
-		let val = Bf::new(
+		let val = Vm::new(
 			"testns",
 			"testdb",
 			"testtb",
 			"testix",
-			7,
-			13
+			Some(8)
 		);
-		let enc = Bf::encode(&val).unwrap();
-		assert_eq!(
-			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!bf\0\0\0\0\0\0\0\x07\0\0\0\0\0\0\0\x0d"
-		);
+		let enc = Vm::encode(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!vm\x01\0\0\0\0\0\0\0\x08");
 
-		let dec = Bf::decode(&enc).unwrap();
+		let dec = Vm::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

@@ -274,6 +274,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -304,6 +305,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -344,6 +346,7 @@ async fn define_statement_event() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -401,6 +404,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -458,6 +462,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -507,6 +512,7 @@ async fn define_statement_field() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -539,6 +545,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user TYPE string' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -571,6 +578,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -603,6 +611,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -635,6 +644,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
 			tables: {},
 			indexes: {},
+			lives: {},
 		}"#,
 	);
 	assert_eq!(tmp, val);
@@ -677,6 +687,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -719,6 +730,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -763,6 +775,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -815,6 +828,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -873,6 +887,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -959,6 +974,7 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1006,6 +1022,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 			fields: {},
 			tables: {},
 			indexes: {},
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1040,6 +1057,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1090,6 +1108,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			fields: {},
 			tables: {},
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1192,7 +1211,10 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 HIGHLIGHTS' },
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
+			SEARCH ANALYZER simple BM25(1.2,0.75) \
+			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 HIGHLIGHTS' },
+			lives: {},
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -1886,8 +1908,8 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [
@@ -1928,8 +1950,8 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [
@@ -1970,8 +1992,8 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, tables: {  } }"]
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
 	let test_cases = [

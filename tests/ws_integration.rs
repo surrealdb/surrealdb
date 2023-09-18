@@ -610,7 +610,6 @@ mod ws_integration {
 			"method": "query",
 			"params": [query],
 		});
-
 		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 		// Wait some time for all messages to arrive, and then search for the notification message

@@ -1,10 +1,11 @@
+pub(crate) mod docids;
 pub(crate) mod ft;
 pub(crate) mod planner;
 pub mod trees;
 
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::store::NodeId;
 use crate::key::index::bc::Bc;
@@ -18,6 +19,7 @@ use crate::key::index::bp::Bp;
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
+use crate::key::index::vm::Vm;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
 use revision::Revisioned;
@@ -168,6 +170,17 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			term_id,
+		)
+		.into()
+	}
+
+	fn new_vm_key(&self, node_id: Option<NodeId>) -> Key {
+		Vm::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			node_id,
 		)
 		.into()
 	}

@@ -92,11 +92,9 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Insert the node live query
-				let key = crate::key::node::lq::new(opt.id()?, id, opt.ns(), opt.db());
-				run.putc(key, tb.as_str(), None).await?;
+				run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(opt.ns(), opt.db(), &tb, id);
-				run.putc(key, stm, None).await?;
+				run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {

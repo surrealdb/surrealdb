@@ -26,7 +26,6 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -358,6 +357,9 @@ impl Datastore {
 	}
 
 	/// Setup the initial credentials
+	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
+	/// https://github.com/rust-lang/rust/issues/111370
+	#[allow(unreachable_code, unused_variables)]
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();
@@ -406,6 +408,17 @@ impl Datastore {
 	// In tests, it should be outside any other transaction - in isolation.
 	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
+		trace!("Clearing cluster");
+		let mut tx = self.transaction(true, false).await?;
+		match self.nuke_whole_cluster(&mut tx).await {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error nuking cluster at bootstrap: {:?}", e);
+				tx.cancel().await?;
+				Err(Error::Tx(format!("Error nuking cluster at bootstrap: {:?}", e).to_owned()))
+			}
+		}?;
+
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
@@ -483,7 +496,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(node_id.0).await?;
+		tx.set_cl(node_id.0).await?;
 		tx.set_hb(timestamp.clone(), node_id.0).await?;
 		Ok(())
 	}
@@ -501,7 +514,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			// TODO should be delr in case of nested entries
-			tx.del_nd(hb.nd).await?;
+			tx.del_cl(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
@@ -558,6 +571,47 @@ impl Datastore {
 			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
 			tx.del(key).await?;
 		}
+		Ok(())
+	}
+
+	pub async fn nuke_whole_cluster(&self, tx: &mut Transaction) -> Result<(), Error> {
+		// Scan nodes
+		let cls = tx.scan_cl(1000).await?;
+		trace!("Found {} nodes", cls.len());
+		for cl in cls {
+			tx.del_cl(
+				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
+				})?,
+			)
+			.await?;
+		}
+		// Scan heartbeats
+		let hbs = tx
+			.scan_hb(
+				&Timestamp {
+					value: 0,
+				},
+				1000,
+			)
+			.await?;
+		trace!("Found {} heartbeats", hbs.len());
+		for hb in hbs {
+			tx.del_hb(hb.hb, hb.nd).await?;
+		}
+		// Scan node live queries
+		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
+		trace!("Found {} node live queries", ndlqs.len());
+		for ndlq in ndlqs {
+			tx.del_ndlq(&ndlq.nd).await?;
+			// Scan table live queries
+			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
+			trace!("Found {} table live queries", tblqs.len());
+			for tblq in tblqs {
+				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+			}
+		}
+		trace!("Successfully completed nuke");
 		Ok(())
 	}
 
@@ -636,7 +690,7 @@ impl Datastore {
 		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_nd(dead_node.nd).await?;
+			tx.del_cl(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}
@@ -773,7 +827,6 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
-			write_buffer: HashMap::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 		})

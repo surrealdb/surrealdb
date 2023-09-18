@@ -341,7 +341,7 @@ mod cli_integration {
 				common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output(),
-				Ok("[{ changes: [{ update: { id: thing:one } }], versionstamp: 65536 }]\n\n"
+				Ok("[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]\n\n"
 					.to_owned()),
 				"failed to send sql: {args}"
 			);

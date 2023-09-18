@@ -132,11 +132,11 @@ impl ManhattanDistance for Vec<Number> {
 }
 
 pub trait MinkowskiDistance {
-	fn minkowski_distance(&self, other: &Self, order: Number) -> Result<Number, Error>;
+	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number, Error>;
 }
 
 impl MinkowskiDistance for Vec<Number> {
-	fn minkowski_distance(&self, other: &Self, order: Number) -> Result<Number, Error> {
+	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number, Error> {
 		check_same_dimension("vector::distance::minkowski", self, other)?;
 		let p = order.to_float();
 		let dist: f64 = self

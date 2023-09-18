@@ -59,13 +59,15 @@ impl DefineTableStatement {
 		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
 		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
+		let dt = if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
 			let mut tb = self.clone();
 			tb.id = Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?);
-			run.set(key, tb).await?;
+			run.set(key, &tb).await?;
+			tb
 		} else {
 			run.set(key, self).await?;
-		}
+			self.to_owned()
+		};
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -99,6 +101,8 @@ impl DefineTableStatement {
 				};
 				stm.compute(ctx, opt, txn, doc).await?;
 			}
+		} else if dt.changefeed.is_some() {
+			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}
 		// Ok all good
 		Ok(Value::None)
