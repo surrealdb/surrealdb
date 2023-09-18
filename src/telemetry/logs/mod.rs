@@ -4,7 +4,7 @@ use tracing_subscriber::Layer;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 
-pub fn new<S>(filter: CustomEnvFilter) -> Box<dyn Layer<S> + Send + Sync>
+pub(super) fn new<S>(filter: CustomEnvFilter) -> Box<dyn Layer<S> + Send + Sync>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
