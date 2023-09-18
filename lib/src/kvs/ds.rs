@@ -25,7 +25,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -562,123 +562,40 @@ impl Datastore {
 			.await?;
 		}
 		// Scan node live queries for every node
-		let mut cluster_lq_values: Vec<Arc<LqValue>> = vec![];
+		let mut nd_lqs: Vec<Arc<LqValue>> = vec![];
 		for cl in &cluster {
 			let ndlqs = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
 			})?, 1000).await?;
 			for ndlq in ndlqs {
-				cluster_lq_values.push(Arc::new(ndlq));
+				nd_lqs.push(Arc::new(ndlq));
 			}
 		}
-		trace!("Found {} node live queries", ndlqs.len());
-		println!("Found {} node live queries", ndlqs.len());
-		// We now bundle the live queries by table. We need the table mapping for lookup
-		// TODO we need Arc instead of Rc because this is a future; Can that be fixed?
-		let mut map_tblq_source: BTreeMap<QualifiedLivePath, Vec<Arc<LqValue>>> = BTreeMap::new();
-		// Node+LqID -> LqValue, it gets drained when there is a tblq hit
-		// TODO If there is a node query without any table queries then the node query should be deleted
-		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), Arc<LqValue>> = BTreeMap::new();
-		// Table+LqID -> LqValue, it gets populated when there is a tblq miss
-		// TODO If there is a table query without a node query, then tblq should be deleted
-		let mut tblq_to_delete: Vec<Arc<LqValue>> = Vec::new();
-
-		// Aggregate and group the data necessary
-		for ndlq in ndlqs {
-			let pushed_ndlq = Arc::new(ndlq);
-			// We record this entry as unvisited. If it remains unvisited after traversing the
-			// tblq range, then we know it is unreachable
-			ndlq_to_delete
-				.insert((pushed_ndlq.nd.clone(), pushed_ndlq.lq.clone()), pushed_ndlq.clone());
-			// table <> live query list mapping derived from nd <> lq mapping. This is our main
-			// source of tracking mappings, as it will be correlated with the actual table <> lq
-			// mapping from storage
-			map_tblq_source
-				.entry(QualifiedLivePath {
-					ns: pushed_ndlq.ns.clone(),
-					db: pushed_ndlq.db.clone(),
-					tb: pushed_ndlq.tb.clone(),
-				})
-				.or_default()
-				.push(pushed_ndlq);
-		}
-		// For each table, we check
-		for (tb_path, ndlq_vec) in map_tblq_source {
-			// What we expect in this part of the code is for the 2 sets to match:
-			// ndlq == tblq
-			// when there is no tblq for a ndlq, ndlq_to_delete will retain that value
-			// when there is no ndlq for a tblq, this will be added to tblq_to_delete
-			// After the scan, it is values of those 2 sets that get removed from storage
-			let tblqs = tx.scan_tblq(&tb_path.ns, &tb_path.db, &tb_path.tb, 1000).await?;
-			trace!("Found {} table live queries", tblqs.len());
-			println!("Found {} table live queries: {:?}", tblqs.len(), tblqs);
-			for tblq in tblqs {
-				// find the nd lq
-				let mut found = false;
-				for known_ndlq in &ndlq_vec {
-					if known_ndlq.lq == tblq.lq {
-						// We found a match, so it doesn't need to be removed
-						// We filter it out of the to_delete set
-						ndlq_to_delete.remove(&(known_ndlq.nd.clone(), known_ndlq.lq.clone()));
-						found = true;
-						println!("Found match for table live query {:?}", tblq);
-					}
-				}
-				if !found {
-					// No match, we must add it to the tb_lq delete set
-					tblq_to_delete.push(Arc::new(tblq.clone()));
-				}
-			}
-			// Now we delete everything we detected to be bad
-			for lq in &tblq_to_delete {
-				trace!("Deleting table live query {:?}", lq);
-				println!("Deleting table live query {:?}", lq);
-				tx.del_tblq(&lq.ns, &lq.db, &lq.tb, lq.lq.0.clone()).await?;
-			}
-			for (_, lq) in &ndlq_to_delete {
-				trace!("Deleting node live query {:?}", lq);
-				println!("Deleting node live query {:?}", lq);
-				tx.del_ndlq(lq.nd.0.clone(), lq.lq.0.clone(), &lq.ns, &lq.db).await?;
+		println!("Found {} node live queries", nd_lqs.len());
+		// Scan tables for all live queries
+		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
+		for lq in &nd_lqs {
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 1000).await?;
+			for tb in tbs {
+				tb_lqs.push(Arc::new(tb));
 			}
 		}
-		trace!("Successfully completed nuke");
+		println!("Found {} table live queries", tb_lqs.len());
+		// Find missing
+		let (broken_node_lqs, broken_table_lqs) = find_missing(nd_lqs, tb_lqs);
+		println!("Found {} broken node live queries", broken_node_lqs.len());
+		println!("Found {} broken table live queries", broken_table_lqs.len());
+		// Delete broken node live queries
+		for ndlq in broken_node_lqs {
+			println!("Deleting ndlq {:?}", &ndlq);
+			tx.del_ndlq(ndlq.nd.0.clone(), ndlq.lq.0.clone(), &ndlq.ns, &ndlq.db).await?;
+		}
+		for tblq in broken_table_lqs {
+			println!("Deleting tblq {:?}", &tblq);
+			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0.clone()).await?;
+		}
+		trace!("Successfully cleared cluster of unreachable state");
 		Ok(())
-	}
-
-	/// Given a list of node LqValues and table LqValues
-	/// return the list of LqValues for nodes that aren't in tables
-	/// and the list of LqValues for tables that aren't in nodes
-	fn find_missing<'a>(
-		source_node: Vec<&'a QualifiedLivePath>,
-		source_table: Vec<&'a Quali>,
-	) -> (Vec<&'a LqValue>, Vec<&'a LqValue>) {
-		let mut missing_node = vec![];
-		let mut missing_table = vec![];
-		for node in source_node {
-			let mut found = false;
-			for table in source_table {
-				if node.lq == table.lq {
-					found = true;
-					break;
-				}
-			}
-			if !found {
-				missing_node.push(node);
-			}
-		}
-		for table in source_table {
-			let mut found = false;
-			for node in &source_node {
-				if node.lq == table.lq {
-					found = true;
-					break;
-				}
-			}
-			if !found {
-				missing_table.push(table);
-			}
-		}
-		(missing_node, missing_table)
 	}
 
 	// Garbage collection task to run when a client disconnects from a surrealdb node
@@ -1197,4 +1114,39 @@ impl Datastore {
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
+}
+/// Given a list of node LqValues and table LqValues
+/// return the list of LqValues for nodes that aren't in tables
+/// and the list of LqValues for tables that aren't in nodes
+fn find_missing(
+	source_node: Vec<Arc<LqValue>>,
+	source_table: Vec<Arc<LqValue>>,
+) -> (Vec<Arc<LqValue>>, Vec<Arc<LqValue>>) {
+	let mut missing_node = vec![];
+	let mut missing_table = vec![];
+	for node in &source_node {
+		let mut found = false;
+		for table in &source_table {
+			if node.lq == table.lq {
+				found = true;
+				break;
+			}
+		}
+		if !found {
+			missing_node.push(node.clone());
+		}
+	}
+	for table in &source_table {
+		let mut found = false;
+		for node in &source_node {
+			if node.lq == table.lq {
+				found = true;
+				break;
+			}
+		}
+		if !found {
+			missing_table.push(table.clone());
+		}
+	}
+	(missing_node, missing_table)
 }
