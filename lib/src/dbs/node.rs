@@ -27,7 +27,9 @@ pub struct Timestamp {
 
 impl From<u64> for Timestamp {
 	fn from(ts: u64) -> Self {
-		Timestamp { value: ts }
+		Timestamp {
+			value: ts,
+		}
 	}
 }
 

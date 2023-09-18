@@ -42,7 +42,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 
 	// Verify the incorrect node is deleted, but self and valid still exist
 	let mut tx = dbs.transaction(true, false).await.unwrap();
-	let res = tx.scan_cl(1000).await.unwrap();
+	let res = tx.scan_nd(1000).await.unwrap();
 	tx.cancel().await.unwrap();
 	for node in &res {
 		assert_ne!(node.name, bad_node.to_string());

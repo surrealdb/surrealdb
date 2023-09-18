@@ -25,9 +25,8 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -536,7 +535,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_cl(1000).await?;
+		let cluster = tx.scan_nd(1000).await?;
 		trace!("Found {} nodes", cluster.len());
 		println!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
@@ -546,14 +545,13 @@ impl Datastore {
 		// Scan heartbeats
 		let now = tx.clock();
 		let hbs = tx.scan_hb(&now, 1000).await?;
-		println!("Found {} heartbeats", hbs.len());
+		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
 		}
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
 			trace!("Removing unreachable node {}", cl.name);
-			println!("Removing unreachable node {}", cl.name);
 			tx.del_cl(
 				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
@@ -571,7 +569,7 @@ impl Datastore {
 				nd_lqs.push(Arc::new(ndlq));
 			}
 		}
-		println!("Found {} node live queries", nd_lqs.len());
+		trace!("Found {} node live queries", nd_lqs.len());
 		// Scan tables for all live queries
 		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
 		for lq in &nd_lqs {
@@ -580,19 +578,19 @@ impl Datastore {
 				tb_lqs.push(Arc::new(tb));
 			}
 		}
-		println!("Found {} table live queries", tb_lqs.len());
+		trace!("Found {} table live queries", tb_lqs.len());
 		// Find missing
 		let (broken_node_lqs, broken_table_lqs) = find_missing(nd_lqs, tb_lqs);
-		println!("Found {} broken node live queries", broken_node_lqs.len());
-		println!("Found {} broken table live queries", broken_table_lqs.len());
+		trace!("Found {} broken node live queries", broken_node_lqs.len());
+		trace!("Found {} broken table live queries", broken_table_lqs.len());
 		// Delete broken node live queries
 		for ndlq in broken_node_lqs {
-			println!("Deleting ndlq {:?}", &ndlq);
-			tx.del_ndlq(ndlq.nd.0.clone(), ndlq.lq.0.clone(), &ndlq.ns, &ndlq.db).await?;
+			warn!("Deleting ndlq {:?}", &ndlq);
+			tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 		}
 		for tblq in broken_table_lqs {
-			println!("Deleting tblq {:?}", &tblq);
-			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0.clone()).await?;
+			warn!("Deleting tblq {:?}", &tblq);
+			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 		}
 		trace!("Successfully cleared cluster of unreachable state");
 		Ok(())

@@ -625,11 +625,6 @@ impl Transaction {
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
 		);
-		println!(
-			"Scan {:?} - {:?}",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -986,7 +981,6 @@ impl Transaction {
 	// Remember to set the heartbeat as well
 	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
-		println!("Setting node {:?}", debug::sprint_key(&key.encode()?));
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
@@ -1050,7 +1044,6 @@ impl Transaction {
 	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
 		let key_enc = key.encode()?;
-		println!("Deleting node {:?}", debug::sprint_key(&key_enc.clone().into()));
 		self.del(key_enc).await
 	}
 
@@ -1069,8 +1062,8 @@ impl Transaction {
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		let beg = crate::key::root::hb::Hb::prefix();
 		let end = crate::key::root::hb::Hb::suffix(time_to);
-		println!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		println!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
+		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
+		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
@@ -1113,7 +1106,7 @@ impl Transaction {
 		Ok(out)
 	}
 
-	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
@@ -1225,7 +1218,6 @@ impl Transaction {
 		let mut res: Vec<LqValue> = vec![];
 		for (key, value) in scanned {
 			trace!("scan_tblq: key={:?} value={:?}", &key, &value);
-			println!("scan_tblq: key={:?} value={:?}", &debug::sprint_key(&key), &value);
 			let val: LiveStatement = value.into();
 			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 			res.push(LqValue {
