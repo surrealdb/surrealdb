@@ -566,17 +566,18 @@ impl Datastore {
 		trace!("Found {} node live queries", ndlqs.len());
 		println!("Found {} node live queries", ndlqs.len());
 		// We now bundle the live queries by table. We need the table mapping for lookup
-		let mut map_tblq_source: BTreeMap<String, Vec<Rc<LqValue>>> = BTreeMap::new();
+		// TODO we need Arc instead of Rc because this is a future; Can that be fixed?
+		let mut map_tblq_source: BTreeMap<String, Vec<Arc<LqValue>>> = BTreeMap::new();
 		// Node+LqID -> LqValue, it gets drained when there is a tblq hit
 		// TODO If there is a node query without any table queries then the node query should be deleted
-		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), Rc<LqValue>> = BTreeMap::new();
+		let mut ndlq_to_delete: BTreeMap<(Uuid, Uuid), Arc<LqValue>> = BTreeMap::new();
 		// Table+LqID -> LqValue, it gets populated when there is a tblq miss
 		// TODO If there is a table query without a node query, then tblq should be deleted
-		let mut tblq_to_delete: BTreeMap<(String, Uuid), Rc<LqValue>> = BTreeMap::new();
+		let mut tblq_to_delete: BTreeMap<(String, Uuid), Arc<LqValue>> = BTreeMap::new();
 
 		// Aggregate and group the data necessary
 		for ndlq in ndlqs {
-			let pushed_ndlq = Rc::new(ndlq);
+			let pushed_ndlq = Arc::new(ndlq);
 			// We record this entry as unvisited. If it remains unvisited after traversing the
 			// tblq range, then we know it is unreachable
 			ndlq_to_delete
