@@ -1055,13 +1055,10 @@ impl Transaction {
 	}
 
 	// Delete the live query notification registry on the table
-	// Return the Table ID
-	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
-		// This isn't implemented because it is covered by del_nd
-		// Will add later for remote node kill
-		Err(Error::NdNotFound {
-			value: format!("Missing cluster node {:?}", nd),
-		})
+	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
+		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
