@@ -136,6 +136,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 		.scan_tblq(&valid_data.req.namesapce, &valid_data.req.database, &valid_data.req.table, 1000)
 		.await
 		.unwrap();
+	tx.cancel().await.unwrap();
 	assert_eq!(res.len(), 1, "Expected 1 table live query: {:?}", res);
 	let tested_entry = res.get(0).unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id);
