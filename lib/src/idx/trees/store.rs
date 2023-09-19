@@ -127,7 +127,10 @@ where
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
-		self.out.insert(node_id);
+		{
+			debug!("GET: {}", node_id);
+			self.out.insert(node_id);
+		}
 		if let Some(n) = self.nodes.remove(&node_id) {
 			return Ok(n);
 		}
@@ -136,7 +139,10 @@ where
 
 	fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		self.out.remove(&node.id);
+		{
+			debug!("SET: {} {}", node.id, updated);
+			self.out.remove(&node.id);
+		}
 		if updated {
 			self.updated.insert(node.id);
 		}
@@ -149,7 +155,10 @@ where
 
 	fn new_node(&mut self, id: NodeId, node: N) -> StoredNode<N> {
 		#[cfg(debug_assertions)]
-		self.out.insert(id);
+		{
+			debug!("NEW: {}", id);
+			self.out.insert(id);
+		}
 		StoredNode {
 			n: node,
 			id,
@@ -161,6 +170,7 @@ where
 	fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
+			debug!("REMOVE: {}", node_id);
 			if self.nodes.contains_key(&node_id) {
 				return Err(Error::Unreachable);
 			}
@@ -176,6 +186,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
+				debug!("OUT: {:?}", self.out);
 				return Err(Error::Unreachable);
 			}
 		}
