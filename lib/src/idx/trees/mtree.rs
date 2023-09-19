@@ -744,9 +744,10 @@ impl MTree {
 			}
 		}
 		Self::set_internal_node(store, node_id, node_key, n_node, false)?;
-		return Ok(DeletionResult::NotFound);
+		Ok(DeletionResult::NotFound)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn delete_node_internal_check_underflown(
 		&mut self,
 		store: &mut MTreeNodeStore,
@@ -766,7 +767,7 @@ impl MTree {
 		let max_dist =
 			self.compute_internal_max_distance(&n_node, parent_center) + n_node[on_idx].radius;
 		Self::set_internal_node(store, node_id, node_key, n_node, n_updated)?;
-		return Ok(DeletionResult::CoveringRadius(max_dist));
+		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
 	fn set_internal_node(
