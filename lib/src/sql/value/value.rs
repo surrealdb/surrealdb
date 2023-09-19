@@ -922,6 +922,14 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a Thing, and belongs to a certain table
+	pub fn is_record_of_table(&self, table: String) -> bool {
+		match self {
+			Value::Thing(Thing { tb, .. }) => tb.to_string() == table,
+			_ => false,
+		}
+	}
+
 	/// Check if this Value is a Geometry
 	pub fn is_geometry(&self) -> bool {
 		matches!(self, Value::Geometry(_))
