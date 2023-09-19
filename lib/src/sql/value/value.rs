@@ -925,7 +925,10 @@ impl Value {
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
-			Value::Thing(Thing { tb, .. }) => tb.to_string() == table,
+			Value::Thing(Thing {
+				tb,
+				..
+			}) => *tb == table,
 			_ => false,
 		}
 	}
