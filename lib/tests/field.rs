@@ -662,7 +662,6 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 
 #[tokio::test]
 async fn field_definition_value_reference_with_future() -> Result<(), Error> {
-	// TODO this is failing
 	let sql = "
 		DEFINE TABLE product;
 		DEFINE FIELD subproducts ON product VALUE <future> { ->contains->product };
