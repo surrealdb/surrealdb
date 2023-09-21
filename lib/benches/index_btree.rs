@@ -53,7 +53,7 @@ where
 	BK: BKeys + Default,
 {
 	let ds = Datastore::new("memory").await.unwrap();
-	let mut tx = ds.transaction(true, false).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
 	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 	let mut s = s.lock().await;

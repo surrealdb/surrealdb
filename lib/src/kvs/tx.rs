@@ -73,6 +73,25 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 }
 
+pub enum TransactionType {
+	Read,
+	Write,
+}
+
+impl From<bool> for TransactionType {
+	fn from(value: bool) -> Self {
+		match value {
+			true => TransactionType::Write,
+			false => TransactionType::Read,
+		}
+	}
+}
+
+pub enum LockType {
+	Pessimistic,
+	Optimistic,
+}
+
 impl fmt::Display for Transaction {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#![allow(unused_variables)]
@@ -2735,14 +2754,14 @@ impl Transaction {
 #[cfg(feature = "kv-mem")]
 mod tests {
 	use crate::{
-		kvs::Datastore,
+		kvs::{Datastore, LockType::*, TransactionType::*},
 		sql::{statements::DefineUserStatement, Base},
 	};
 
 	#[tokio::test]
 	async fn test_get_root_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent KV user
 		let res = txn.get_root_user("nonexistent").await;
@@ -2764,7 +2783,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_ns_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent NS user
 		let res = txn.get_ns_user("ns", "nonexistent").await;
@@ -2790,7 +2809,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_db_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent DB user
 		let res = txn.get_db_user("ns", "db", "nonexistent").await;
@@ -2816,7 +2835,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_root_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_root_users().await.unwrap();
@@ -2843,7 +2862,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_ns_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_ns_users("ns").await.unwrap();
@@ -2873,7 +2892,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_db_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_db_users("ns", "db").await.unwrap();
@@ -2904,41 +2923,41 @@ mod tests {
 	async fn test_seqs() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let nsid = txn.get_next_ns_id().await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(nsid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let dbid = txn.get_next_db_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(dbid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid1 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid1, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid2 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid2, 1);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_tb_id(nsid, dbid, tbid1).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_db_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_ns_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();

@@ -116,7 +116,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 
-	let mut tx = dbs.transaction(false, false).await?;
+	let mut tx = dbs.transaction(Read, Optimistic).await?;
 	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
 		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
 	}

@@ -34,6 +34,7 @@ use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use crate::kvs::{LockType::*, LockType, TransactionType::*, TransactionType};
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -110,16 +111,6 @@ impl fmt::Display for Datastore {
 			_ => unreachable!(),
 		}
 	}
-}
-
-pub enum TransactionType {
-	Read,
-	Write,
-}
-
-pub enum LockType {
-	Pessimistic,
-	Optimistic,
 }
 
 impl Datastore {
@@ -331,7 +322,7 @@ impl Datastore {
 	#[allow(unreachable_code, unused_variables)]
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
 		// Start a new writeable transaction
-		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();
+		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
 		// Fetch the root users from the storage
 		let users = txn.lock().await.all_root_users().await;
 		// Process credentials, depending on existing users
@@ -374,7 +365,7 @@ impl Datastore {
 	// ability.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		trace!("Clearing cluster");
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		match self.nuke_whole_cluster(&mut tx).await {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
@@ -385,7 +376,7 @@ impl Datastore {
 		}?;
 
 		trace!("Bootstrapping {}", self.id);
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let now = tx.clock();
 		let archived = match self.register_remove_and_archive(&mut tx, &self.id, now).await {
 			Ok(archived) => {
@@ -415,7 +406,7 @@ impl Datastore {
 			}
 		}
 
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let val = self.remove_archived(&mut tx, filtered).await;
 		let resolve_err = match val {
 			Ok(_) => tx.commit().await,
@@ -587,7 +578,7 @@ impl Datastore {
 		&self,
 		live_queries: &[uuid::Uuid],
 	) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
@@ -684,7 +675,7 @@ impl Datastore {
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -702,7 +693,7 @@ impl Datastore {
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		// TODO Make gc batch size/limit configurable?
 		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
 		tx.commit().await?;
@@ -713,7 +704,7 @@ impl Datastore {
 	// that the node is alive.
 	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock();
 		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
 		tx.commit().await
@@ -739,13 +730,13 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::kvs::{Datastore, TransactionType::*, LockType::*};
 	/// use surrealdb::err::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("file://database.db").await?;
-	///     let mut tx = ds.transaction(true, false).await?;
+	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
 	/// }
@@ -960,7 +951,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
@@ -1029,7 +1020,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
@@ -1082,7 +1073,7 @@ impl Datastore {
 			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
 		}
 		// Create a new readonly transaction
-		let mut txn = self.transaction(false, false).await?;
+		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
 		Ok(async move {
 			// Process the export

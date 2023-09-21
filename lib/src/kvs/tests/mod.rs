@@ -50,7 +50,9 @@ mod rocksdb {
 
 	use crate::kvs::tests::Kvs;
 	use crate::kvs::Datastore;
+	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
+	use crate::kvs::TransactionType;
 	use serial_test::serial;
 	use temp_dir::TempDir;
 
@@ -65,7 +67,7 @@ mod rocksdb {
 		)
 	}
 
-	async fn new_tx(write: bool, lock: bool) -> Transaction {
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("22358e5e-87bd-4040-8c63-01db896191ab").unwrap();
@@ -145,7 +147,7 @@ mod tikv {
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
@@ -189,7 +191,7 @@ mod fdb {
 			.unwrap()
 			.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.delp(vec![], u32::MAX).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore

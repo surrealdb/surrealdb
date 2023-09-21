@@ -278,12 +278,12 @@ mod tests {
 
 		// Setup the initial user if there are no root users
 		assert_eq!(
-			ds.transaction(false, false).await.unwrap().all_root_users().await.unwrap().len(),
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
 		ds.setup_initial_creds(creds).await.unwrap();
 		assert_eq!(
-			ds.transaction(false, false).await.unwrap().all_root_users().await.unwrap().len(),
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
 		);
 		verify_creds(&ds, None, None, creds.username, creds.password).await.unwrap();
@@ -294,7 +294,7 @@ mod tests {
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
 		let pass_hash = ds
-			.transaction(false, false)
+			.transaction(Read, Optimistic)
 			.await
 			.unwrap()
 			.get_root_user(creds.username)
@@ -305,7 +305,7 @@ mod tests {
 		ds.setup_initial_creds(creds).await.unwrap();
 		assert_eq!(
 			pass_hash,
-			ds.transaction(false, false)
+			ds.transaction(Read, Optimistic)
 				.await
 				.unwrap()
 				.get_root_user(creds.username)
