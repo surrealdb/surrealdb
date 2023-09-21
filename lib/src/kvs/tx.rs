@@ -1041,7 +1041,7 @@ impl Transaction {
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
 		let key_enc = key.encode()?;
 		self.del(key_enc).await

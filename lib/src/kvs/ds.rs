@@ -473,7 +473,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			// TODO should be delr in case of nested entries
-			tx.del_cl(hb.nd).await?;
+			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
@@ -537,7 +537,6 @@ impl Datastore {
 		// Scan nodes
 		let cluster = tx.scan_nd(1000).await?;
 		trace!("Found {} nodes", cluster.len());
-		println!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
@@ -552,7 +551,7 @@ impl Datastore {
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
 			trace!("Removing unreachable node {}", cl.name);
-			tx.del_cl(
+			tx.del_nd(
 				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
 				})?,
@@ -671,7 +670,7 @@ impl Datastore {
 		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_cl(dead_node.nd).await?;
+			tx.del_nd(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}
