@@ -74,7 +74,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let mut test = init(old_node, clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
-	test.db = test.db.with_node_id(sql::Uuid::from(old_node));
+	test.db = test.db.with_node_id(sql::Uuid::from(old_node)).with_notifications();
 	test.db.bootstrap().await.unwrap();
 
 	// Set up live query
