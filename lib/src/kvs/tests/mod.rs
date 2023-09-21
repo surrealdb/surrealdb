@@ -17,14 +17,16 @@ mod mem {
 
 	use crate::kvs::tests::Kvs;
 	use crate::kvs::Datastore;
+	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
+	use crate::kvs::TransactionType;
 	use serial_test::serial;
 
 	async fn new_ds(id: Uuid) -> (Datastore, Kvs) {
 		(Datastore::new("memory").await.unwrap().with_node_id(sql::Uuid::from(id)), Kvs::Mem)
 	}
 
-	async fn new_tx(write: bool, lock: bool) -> Transaction {
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("361893b5-a041-40c0-996c-c3a8828ef06b").unwrap();

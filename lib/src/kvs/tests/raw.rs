@@ -1,7 +1,7 @@
 #[tokio::test]
 #[serial]
 async fn initialise() {
-	let mut tx = new_tx(true, false).await;
+	let mut tx = new_tx(Write, Optimistic).await;
 	assert!(tx.put("test", "ok").await.is_ok());
 	tx.commit().await.unwrap();
 }

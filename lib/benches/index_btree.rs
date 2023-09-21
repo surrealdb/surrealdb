@@ -6,7 +6,7 @@ use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use surrealdb::kvs::{Datastore, Key};
+use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 
 macro_rules! get_key_value {
 	($idx:expr) => {{

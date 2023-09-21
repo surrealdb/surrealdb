@@ -14,6 +14,7 @@ use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -34,7 +35,6 @@ use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-use crate::kvs::{LockType::*, LockType, TransactionType::*, TransactionType};
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -741,18 +741,22 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction, Error> {
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+	) -> Result<Transaction, Error> {
+		#![allow(unused_variables)]
 		let write = match write {
-			TransactionType::Read => {false}
-			TransactionType::Write => {true}
+			TransactionType::Read => false,
+			TransactionType::Write => true,
 		};
 
 		let lock = match lock {
-			LockType::Pessimistic => {true}
-			LockType::Optimistic => {false}
+			LockType::Pessimistic => true,
+			LockType::Optimistic => false,
 		};
 
-		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {

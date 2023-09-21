@@ -698,7 +698,7 @@ mod tests {
 	};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType::*};
+	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};

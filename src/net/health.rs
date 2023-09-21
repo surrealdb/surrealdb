@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use http_body::Body as HttpBody;
+use surrealdb::kvs::{LockType::*, TransactionType::*};
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where

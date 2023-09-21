@@ -47,6 +47,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use crate::idx::trees::store::TreeStoreType;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -83,6 +84,16 @@ impl From<bool> for TransactionType {
 		match value {
 			true => TransactionType::Write,
 			false => TransactionType::Read,
+		}
+	}
+}
+
+impl From<TreeStoreType> for TransactionType {
+	fn from(value: TreeStoreType) -> Self {
+		match value {
+			TreeStoreType::Write => {TransactionType::Write}
+			TreeStoreType::Read => {TransactionType::Read}
+			TreeStoreType::Traversal => {TransactionType::Read}
 		}
 	}
 }

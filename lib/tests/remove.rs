@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
+use surrealdb::kvs::{LockType::*, TransactionType::*};
 use surrealdb::sql::Value;
 
 #[tokio::test]
