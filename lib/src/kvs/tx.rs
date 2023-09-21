@@ -1269,9 +1269,17 @@ impl Transaction {
 		lq: sql::Uuid,
 		limit: u32,
 	) -> Result<Vec<Notification>, Error> {
+		println!(
+			"\nscan_tbnt\n\
+		ns={:?}\n\
+		db={:?}\n\
+		tb={:?}\n\
+		lq={:?}\n\
+		",
+			ns, db, tb, lq
+		);
 		let pref = crate::key::table::nt::prefix(ns, db, tb, lq.clone());
 		let suff = crate::key::table::nt::suffix(ns, db, tb, lq);
-		println!("Scanning tbnt");
 		trace!(
 			"Scanning range from pref={}, suff={}",
 			crate::key::debug::sprint_key(&pref),
@@ -1338,12 +1346,22 @@ impl Transaction {
 		nt: Notification,
 		expected: Option<Notification>,
 	) -> Result<(), Error> {
+		println!(
+			"\nputc_tbnt\n\
+			ns={:?}\n\
+			db={:?}\n\
+			tb={:?}\n\
+			lq={:?}\n\
+			ts={:?}\n\
+			id={:?}",
+			ns, db, tb, lq, ts, id
+		);
 		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
 		println!(
 			"putc_tbnt key={:?}, encode={:?}",
-			crate::key::debug::sprint_key(&key_enc),
-			crate::key::debug::sprint_key(&key_enc)
+			debug::sprint_key(&key_enc),
+			debug::sprint_key(&key_enc)
 		);
 		trace!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, nt, expected).await

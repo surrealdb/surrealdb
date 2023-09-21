@@ -32,7 +32,7 @@ pub struct Nt<'a> {
 	_h: u8,
 	// If timestamps collide, we still want uniqueness
 	#[serde(with = "uuid::serde::compact")]
-	pub id: uuid::Uuid,
+	pub nt: uuid::Uuid,
 }
 
 pub fn new<'a>(
@@ -86,7 +86,7 @@ impl<'a> Nt<'a> {
 			_g: b'!',
 			ts,
 			_h: b'!',
-			id: id.0,
+			nt: id.0,
 		}
 	}
 }
@@ -107,11 +107,12 @@ mod tests {
 			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
 			0x1E, 0x1F,
 		]));
-		let val = Nt::new("testns", "testdb", "testtb", live_query_id, ts, id);
-		let enc = Nt::encode(&val).unwrap();
-		println!("{:?}", debug::sprint_key(&enc));
+		let key = Nt::new("testns", "testdb", "testtb", live_query_id, ts, id);
+		// let enc = Nt::encode(&key).unwrap();
+		let key_enc = key.encode().unwrap();
+		println!("{:?}", debug::sprint_key(&key_enc));
 		assert_eq!(
-			enc,
+			key_enc,
 			b"/*testns\x00\
             *testdb\x00\
             *testtb\x00\
@@ -120,8 +121,8 @@ mod tests {
             !\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
 		);
 
-		let dec = Nt::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let dec = Nt::decode(&key_enc).unwrap();
+		assert_eq!(key, dec);
 	}
 
 	#[test]
