@@ -53,7 +53,7 @@ async fn expired_nodes_are_garbage_collected() {
 	}
 
 	// And scan the nodes to verify its just the latest also
-	let scanned = tx.scan_cl(100).await.unwrap();
+	let scanned = tx.scan_nd(100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for cl in scanned.iter() {
 		assert_eq!(&cl.name, &new_node.to_string());
@@ -295,18 +295,10 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
 	match second_node.bootstrap().await {
 		Ok(_) => {
-			panic!("Expected an error because of missing live query")
+			// The behaviour has now changed to remove all broken entries without raising errors
 		}
-		Err(Error::Tx(e)) => match e {
-			_ if e.contains("LvNotFound") => {
-				// This is what we want... an LvNotFound error, but it gets wrapped into a string so that Tx doesnt carry vecs
-			}
-			_ => {
-				panic!("Expected an LvNotFound error but got: {:?}", e);
-			}
-		},
 		Err(e) => {
-			panic!("Missing live query error: {:?}", e)
+			panic!("Boostrapping should not generate errors: {:?}", e)
 		}
 	}
 

@@ -987,7 +987,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -1018,7 +1018,9 @@ impl Transaction {
 	/// It is used for unreliable ordering of events as well as
 	/// handling of timeouts. Operations that are not guaranteed to be correct.
 	/// But also allows for lexicographical ordering.
-	pub(crate) async fn clock(&self) -> Timestamp {
+	///
+	/// Public for tests, but we might not want to expose this
+	pub async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
 		match self.clock.read().await.deref() {
@@ -1032,8 +1034,9 @@ impl Transaction {
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
 		// We do not need to do a read, we always want to overwrite
+		let key_enc = key.encode()?;
 		self.put(
-			key,
+			key_enc,
 			ClusterMembership {
 				name: id.to_string(),
 				heartbeat: timestamp,
@@ -1050,19 +1053,17 @@ impl Transaction {
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
-		self.del(key).await
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Delete the live query notification registry on the table
-	// Return the Table ID
-	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
-		// This isn't implemented because it is covered by del_nd
-		// Will add later for remote node kill
-		Err(Error::NdNotFound {
-			value: format!("Missing cluster node {:?}", nd),
-		})
+	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
+		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
@@ -1117,7 +1118,7 @@ impl Transaction {
 		Ok(out)
 	}
 
-	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
@@ -1160,7 +1161,7 @@ impl Transaction {
 				num -= 1;
 			}
 		}
-		trace!("scan_hb: {:?}", out);
+		trace!("scan_nd: {:?}", out);
 		Ok(out)
 	}
 
@@ -1247,7 +1248,7 @@ impl Transaction {
 		let scanned = self.scan(rng, limit).await?;
 		let mut res: Vec<LqValue> = vec![];
 		for (key, value) in scanned {
-			trace!("scan_lv: key={:?} value={:?}", &key, &value);
+			trace!("scan_tblq: key={:?} value={:?}", &key, &value);
 			let val: LiveStatement = value.into();
 			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 			res.push(LqValue {

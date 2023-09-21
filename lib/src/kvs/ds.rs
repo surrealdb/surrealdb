@@ -26,6 +26,7 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -408,14 +409,17 @@ impl Datastore {
 	// In tests, it should be outside any other transaction - in isolation.
 	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
-		trace!("Clearing cluster");
+		// First we clear unreachable state that could exist by upgrading from
+		// previous beta versions
+		trace!("Clearing unreachable state");
 		let mut tx = self.transaction(true, false).await?;
-		match self.nuke_whole_cluster(&mut tx).await {
+		match self.clear_unreachable_state(&mut tx).await {
 			Ok(_) => tx.commit().await,
 			Err(e) => {
-				error!("Error nuking cluster at bootstrap: {:?}", e);
+				let msg = format!("Error clearing unreachable cluster state at bootstrap: {:?}", e);
+				error!(msg);
 				tx.cancel().await?;
-				Err(Error::Tx(format!("Error nuking cluster at bootstrap: {:?}", e).to_owned()))
+				Err(Error::Tx(msg))
 			}
 		}?;
 
@@ -496,7 +500,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_cl(node_id.0).await?;
+		tx.set_nd(node_id.0).await?;
 		tx.set_hb(timestamp.clone(), node_id.0).await?;
 		Ok(())
 	}
@@ -514,7 +518,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			// TODO should be delr in case of nested entries
-			tx.del_cl(hb.nd).await?;
+			tx.del_nd(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
@@ -574,44 +578,65 @@ impl Datastore {
 		Ok(())
 	}
 
-	pub async fn nuke_whole_cluster(&self, tx: &mut Transaction) -> Result<(), Error> {
+	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cls = tx.scan_cl(1000).await?;
-		trace!("Found {} nodes", cls.len());
-		for cl in cls {
-			tx.del_cl(
+		let cluster = tx.scan_nd(1000).await?;
+		trace!("Found {} nodes", cluster.len());
+		let mut unreachable_nodes = BTreeMap::new();
+		for cl in &cluster {
+			unreachable_nodes.insert(cl.name.clone(), cl.clone());
+		}
+		// Scan heartbeats
+		let now = tx.clock();
+		let hbs = tx.scan_hb(&now, 1000).await?;
+		trace!("Found {} heartbeats", hbs.len());
+		for hb in hbs {
+			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
+		}
+		// Remove unreachable nodes
+		for (_, cl) in unreachable_nodes {
+			trace!("Removing unreachable node {}", cl.name);
+			tx.del_nd(
 				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
 				})?,
 			)
 			.await?;
 		}
-		// Scan heartbeats
-		let hbs = tx
-			.scan_hb(
-				&Timestamp {
-					value: 0,
-				},
-				1000,
-			)
-			.await?;
-		trace!("Found {} heartbeats", hbs.len());
-		for hb in hbs {
-			tx.del_hb(hb.hb, hb.nd).await?;
-		}
-		// Scan node live queries
-		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
-		trace!("Found {} node live queries", ndlqs.len());
-		for ndlq in ndlqs {
-			tx.del_ndlq(&ndlq.nd).await?;
-			// Scan table live queries
-			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
-			trace!("Found {} table live queries", tblqs.len());
-			for tblq in tblqs {
-				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+		// Scan node live queries for every node
+		let mut nd_lqs: Vec<Arc<LqValue>> = vec![];
+		for cl in &cluster {
+			let ndlqs = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
+			})?, 1000).await?;
+			for ndlq in ndlqs {
+				nd_lqs.push(Arc::new(ndlq));
 			}
 		}
-		trace!("Successfully completed nuke");
+		trace!("Found {} node live queries", nd_lqs.len());
+		// Scan tables for all live queries
+		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
+		for lq in &nd_lqs {
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 1000).await?;
+			for tb in tbs {
+				tb_lqs.push(Arc::new(tb));
+			}
+		}
+		trace!("Found {} table live queries", tb_lqs.len());
+		// Find missing
+		let (broken_node_lqs, broken_table_lqs) = find_missing(nd_lqs, tb_lqs);
+		trace!("Found {} broken node live queries", broken_node_lqs.len());
+		trace!("Found {} broken table live queries", broken_table_lqs.len());
+		// Delete broken node live queries
+		for ndlq in broken_node_lqs {
+			warn!("Deleting ndlq {:?}", &ndlq);
+			tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
+		}
+		for tblq in broken_table_lqs {
+			warn!("Deleting tblq {:?}", &tblq);
+			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
+		}
+		trace!("Successfully cleared cluster of unreachable state");
 		Ok(())
 	}
 
@@ -690,7 +715,7 @@ impl Datastore {
 		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_cl(dead_node.nd).await?;
+			tx.del_nd(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}
@@ -1136,4 +1161,39 @@ impl Datastore {
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
+}
+/// Given a list of node LqValues and table LqValues
+/// return the list of LqValues for nodes that aren't in tables
+/// and the list of LqValues for tables that aren't in nodes
+fn find_missing(
+	source_node: Vec<Arc<LqValue>>,
+	source_table: Vec<Arc<LqValue>>,
+) -> (Vec<Arc<LqValue>>, Vec<Arc<LqValue>>) {
+	let mut missing_node = vec![];
+	let mut missing_table = vec![];
+	for node in &source_node {
+		let mut found = false;
+		for table in &source_table {
+			if node.lq == table.lq {
+				found = true;
+				break;
+			}
+		}
+		if !found {
+			missing_node.push(node.clone());
+		}
+	}
+	for table in &source_table {
+		let mut found = false;
+		for node in &source_node {
+			if node.lq == table.lq {
+				found = true;
+				break;
+			}
+		}
+		if !found {
+			missing_table.push(table.clone());
+		}
+	}
+	(missing_node, missing_table)
 }
