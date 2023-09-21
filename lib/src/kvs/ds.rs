@@ -112,6 +112,16 @@ impl fmt::Display for Datastore {
 	}
 }
 
+pub enum TransactionType {
+	Read,
+	Write,
+}
+
+pub enum LockType {
+	Pessimistic,
+	Optimistic,
+}
+
 impl Datastore {
 	/// Creates a new datastore instance
 	///
@@ -740,7 +750,17 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction, Error> {
+		let write = match write {
+			TransactionType::Read => {false}
+			TransactionType::Write => {true}
+		};
+
+		let lock = match lock {
+			LockType::Pessimistic => {true}
+			LockType::Optimistic => {false}
+		};
+
 		#![allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
