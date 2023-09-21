@@ -173,7 +173,7 @@ async fn a_valid_notification(
 	tx: &mut Transaction,
 	args: BootstrapPrerequisites,
 ) -> Result<ValidBootstrapState, Error> {
-	let now = tx.clock();
+	let now = tx.clock().await;
 	let entry = ValidBootstrapState {
 		timestamp: now.value,
 		node_id: Uuid::from(uuid::Uuid::parse_str("123e9d92-c975-4daf-8080-3082e83cfa9b").unwrap()),

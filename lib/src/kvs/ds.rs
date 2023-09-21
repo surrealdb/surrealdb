@@ -587,7 +587,7 @@ impl Datastore {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
 		}
 		// Scan heartbeats
-		let now = tx.clock();
+		let now = tx.clock().await;
 		let hbs = tx.scan_hb(&now, 1000).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
