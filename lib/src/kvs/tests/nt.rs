@@ -18,12 +18,14 @@ async fn can_scan_notifications() {
 			sqlUuid::try_from("69b5840c-d05f-4b58-8a64-606ad12689c1").unwrap(),
 			sqlUuid::try_from("74c37cb1-c329-4ec1-acd9-26d312e6f259").unwrap(),
 		),
-		// create_nt_tuple(
-		// 	namespace,
-		// 	database,
-		// 	table,
-		// 	sql::uuid::Uuid::try_from("cda21a4f-3493-4934-bb87-b81070dedba0").unwrap(),
-		// ),
+		create_nt_tuple(
+			namespace,
+			database,
+			table,
+			node_id.clone(),
+			sqlUuid::try_from("cda21a4f-3493-4934-bb87-b81070dedba0").unwrap(),
+			sqlUuid::try_from("2bd9c065-4301-4cdd-9df7-4ce1a50fd08b").unwrap(),
+		),
 	];
 
 	let clock_override =
