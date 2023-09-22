@@ -73,7 +73,8 @@ impl Snippet {
 	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
 		let full_line_length = line.chars().count();
 		line = line.trim_start();
-		let mut offset = around_offset - (full_line_length - line.chars().count());
+		// Saturate in case the error ocurred in invalid leading whitespace.
+		let mut offset = around_offset.saturating_sub(full_line_length - line.chars().count());
 		line = line.trim_end();
 		let mut truncation = Truncation::None;
 
