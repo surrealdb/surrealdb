@@ -96,7 +96,7 @@ mod rocksdb {
 mod speedb {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
 	use serial_test::serial;
 	use temp_dir::TempDir;
@@ -112,7 +112,7 @@ mod speedb {
 		)
 	}
 
-	async fn new_tx(write: bool, lock: bool) -> Transaction {
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("5877e580-12ac-49e4-95e1-3c407c4887f3").unwrap();
@@ -139,7 +139,7 @@ mod speedb {
 mod tikv {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
 	use serial_test::serial;
 
@@ -156,7 +156,7 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	async fn new_tx(write: bool, lock: bool) -> Transaction {
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("18717a0f-0ab0-421e-b20c-e69fb03e90a3").unwrap();
@@ -183,7 +183,7 @@ mod tikv {
 mod fdb {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
 	use serial_test::serial;
 
@@ -200,7 +200,7 @@ mod fdb {
 		(ds, Kvs::Fdb)
 	}
 
-	async fn new_tx(write: bool, lock: bool) -> Transaction {
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("50f5bdf5-8abe-406b-8002-a79c942f510f").unwrap();

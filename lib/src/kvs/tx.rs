@@ -7,6 +7,7 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+use crate::idx::trees::store::TreeStoreType;
 use crate::key::debug;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
@@ -47,7 +48,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-use crate::idx::trees::store::TreeStoreType;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -91,9 +91,9 @@ impl From<bool> for TransactionType {
 impl From<TreeStoreType> for TransactionType {
 	fn from(value: TreeStoreType) -> Self {
 		match value {
-			TreeStoreType::Write => {TransactionType::Write}
-			TreeStoreType::Read => {TransactionType::Read}
-			TreeStoreType::Traversal => {TransactionType::Read}
+			TreeStoreType::Write => TransactionType::Write,
+			TreeStoreType::Read => TransactionType::Read,
+			TreeStoreType::Traversal => TransactionType::Read,
 		}
 	}
 }
