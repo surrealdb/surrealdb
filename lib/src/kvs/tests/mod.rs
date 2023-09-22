@@ -96,8 +96,8 @@ mod rocksdb {
 mod speedb {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use serial_test::serial;
 	use temp_dir::TempDir;
 
@@ -139,8 +139,8 @@ mod speedb {
 mod tikv {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> (Datastore, Kvs) {
@@ -183,8 +183,8 @@ mod tikv {
 mod fdb {
 
 	use crate::kvs::tests::Kvs;
-	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::kvs::Transaction;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid) -> (Datastore, Kvs) {
