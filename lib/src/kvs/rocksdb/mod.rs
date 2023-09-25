@@ -288,11 +288,11 @@ impl Transaction {
 		let inner = self.inner.lock().await;
 		let inner = inner.as_ref().unwrap();
 		// Get the arguments
-		let key_rocksdb: Key = key.into();
+		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
-		match inner.get_opt(&key_rocksdb, &self.ro)? {
-			None => inner.put(key_rocksdb, val)?,
+		match inner.get_opt(&key, &self.ro)? {
+			None => inner.put(key, val)?,
 			_ => return Err(Error::TxKeyAlreadyExists(category)),
 		};
 		// Return result

@@ -286,12 +286,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key_tikv = key.into();
+		let key = key.into();
 		// Get the val
 		let val = val.into();
 		// Set the key if empty
-		match self.inner.key_exists(key_tikv.clone()).await? {
-			false => self.inner.put(key_tikv, val).await?,
+		match self.inner.key_exists(key.clone()).await? {
+			false => self.inner.put(key, val).await?,
 			_ => return Err(Error::TxKeyAlreadyExists(category)),
 		};
 		// Return result
