@@ -10,9 +10,6 @@ use crate::api::engine::any::Any;
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-#[cfg(feature = "protocol-http")]
-use crate::api::opt::Tls;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
@@ -21,9 +18,9 @@ use crate::api::Result;
 use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
-use flume::Receiver;
 #[cfg(feature = "protocol-http")]
 use crate::http::ClientBuilder;
+use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -143,17 +140,12 @@ impl Connection for Any {
 						let mut builder = ClientBuilder::new().default_headers(headers);
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						if let Some(tls) = address.config.tls_config {
-							builder = match tls {
-								#[cfg(feature = "native-tls")]
-								Tls::Native(config) => builder.use_preconfigured_tls(config),
-								#[cfg(feature = "rustls")]
-								Tls::Rust(config) => builder.use_preconfigured_tls(config),
-							};
+							builder = builder.with_tls(tls)
 						}
 						let client = builder.build()?;
 						let base_url = address.url;
 						engine::remote::http::health(
-							client.get(base_url.join(Method::Health.as_str())?),
+							client.get(base_url.join(Method::Health.as_str())?)?,
 						)
 						.await?;
 						engine::remote::http::native::router(base_url, client, route_rx);

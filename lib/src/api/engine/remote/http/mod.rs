@@ -47,10 +47,6 @@ use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncReadExt;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWrite;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -225,7 +221,7 @@ type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn export(
-	request: RequestBuilder,
+	request: Request,
 	(file, sender): (Option<PathBuf>, Option<BackupSender>),
 ) -> Result<Value> {
 	match (file, sender) {
@@ -280,8 +276,8 @@ async fn export(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let mut file = match OpenOptions::new().read(true).open(&path).await {
+async fn import(request: Request, path: PathBuf) -> Result<Value> {
+	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
 			return Err(Error::FileOpen {
@@ -292,7 +288,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		}
 	};
 
-	let res = request.header(ACCEPT, "application/octet-stream").body(file).send().await?;
+	let res = request.header(ACCEPT, "application/octet-stream")?.body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
@@ -491,14 +487,11 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let mut request =
 				client.post(path)?.headers(headers.clone()).query(&vars)?.auth(auth)?;
-			match &mut params[..] {
-				[Value::Strand(Strand(statements))] => {
-					request = request.body(mem::take(statements));
-				}
-				[Value::Strand(Strand(statements)), Value::Object(bindings)] => {
+			match param.query {
+				Some((query, bindings)) => {
 					let bindings: Vec<_> =
 						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
-					request = request.query(&bindings).body(query.to_string());
+					request = request.query(&bindings)?.body(query.to_string());
 				}
 				None => unreachable!(),
 			}
@@ -510,7 +503,6 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
 			let path = base_url.join(Method::Export.as_str())?;
-			let file = param.file.expect("file to export into");
 			let request = client
 				.get(path)?
 				.headers(headers.clone())

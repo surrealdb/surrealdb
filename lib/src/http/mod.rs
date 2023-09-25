@@ -12,7 +12,7 @@ use lib_http::{
 	method::InvalidMethod,
 	Method, StatusCode,
 };
-use std::{convert::Infallible, string::FromUtf8Error, sync::Arc};
+use std::{convert::Infallible, string::FromUtf8Error};
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
@@ -35,6 +35,7 @@ pub use wasm as backend;
 use backend::{Backend, BackendError};
 pub use backend::{BackendBody as Body, Response};
 
+/// Errors from serializing and deserializing values.
 #[derive(Error, Debug)]
 pub enum SerializeError {
 	#[error("{0}")]
@@ -79,47 +80,68 @@ impl From<Infallible> for Error {
 	}
 }
 
+/// A http client.
 #[derive(Clone)]
 pub struct Client {
-	inner: Arc<Backend>,
+	inner: Backend,
 }
 
 impl Client {
+	/// Create a new http client with an all default config.
 	pub fn new() -> Self {
 		Self {
-			inner: Arc::new(Backend::new()),
+			inner: Backend::new(),
 		}
 	}
 
+	/// Return a builder for configuring the http client.
 	pub fn builder() -> ClientBuilder {
 		ClientBuilder::new()
 	}
 
+	/// Create a new get request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn get<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::GET, url, self.clone())
 	}
 
+	/// Create a new post request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn post<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::POST, url, self.clone())
 	}
 
+	/// Create a new head request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn head<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::HEAD, url, self.clone())
 	}
 
+	/// Create a new put request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn put<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::PUT, url, self.clone())
 	}
 
+	/// Create a new patch request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn patch<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::PATCH, url, self.clone())
 	}
 
+	/// Create a new delete request.
+	///
+	/// Returns an error if the url is invalid.
 	pub fn delete<U: IntoUrl>(&self, url: U) -> Result<Request, Error> {
 		let url = url.to_url()?;
 		Request::new(Method::DELETE, url, self.clone())

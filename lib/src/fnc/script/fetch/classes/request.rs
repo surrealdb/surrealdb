@@ -373,11 +373,7 @@ pub use request::Request as RequestClass;
 
 pub use super::*;
 
-use bytes::Bytes;
-use js::function::Opt;
 // TODO: change implementation based on features.
-use reqwest::{header::HeaderName, Url};
-
 #[allow(dead_code)]
 #[js::class]
 #[derive(Trace)]

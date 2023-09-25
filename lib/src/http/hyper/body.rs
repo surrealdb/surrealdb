@@ -1,9 +1,8 @@
 use std::{
-	cell::UnsafeCell,
 	error::Error as StdError,
 	future::{self, Future},
-	mem::{self, ManuallyDrop},
-	sync::{Arc, Once},
+	mem::{self},
+	sync::Arc,
 	task::Poll,
 };
 
@@ -11,52 +10,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::body::HttpBody;
 
-use super::{BoxError, BoxStream};
-
-pub struct SyncCell<T: ?Sized> {
-	once: Once,
-	value: UnsafeCell<ManuallyDrop<T>>,
-}
-
-unsafe impl<T> Send for SyncCell<T> {}
-unsafe impl<T> Sync for SyncCell<T> {}
-
-impl<T: ?Sized> Drop for SyncCell<T> {
-	fn drop(&mut self) {
-		self.once.call_once(|| {
-			// SAFETY: This can only be called once, so it is safe to access mutably,
-			// and since it was not executed yet the value is still present so we need to call
-			// drop,
-			unsafe { ManuallyDrop::drop(&mut *self.value.get()) }
-		})
-	}
-}
-
-impl<T: Sized> SyncCell<T> {
-	pub fn new(t: T) -> Self {
-		Self {
-			once: Once::new(),
-			value: UnsafeCell::new(ManuallyDrop::new(t)),
-		}
-	}
-
-	pub fn take(&self) -> Option<T> {
-		let mut res = None;
-		self.once.call_once(|| {
-			// SAFETY: Since this function can only be called once, the value is still present in
-			// value and we can move out of it safely.
-			let value = unsafe { ManuallyDrop::take(&mut *self.value.get()) };
-			res = Some(value);
-		});
-		res
-	}
-}
-
-impl<T: ?Sized> SyncCell<T> {
-	pub fn is_taken(&self) -> bool {
-		self.once.is_completed()
-	}
-}
+use super::{once_option::OnceOption, BoxError, BoxStream};
 
 // A body implementation for use with hyper.
 //
@@ -74,7 +28,7 @@ enum Kind {
 	Stream(BoxStream),
 	/// A `reusable` stream, allows one to reuse a stream if the body was not consumed.
 	/// Used for replaying bodies in case of redirects.
-	Reusable(Arc<SyncCell<BoxStream>>),
+	Reusable(Arc<OnceOption<BoxStream>>),
 }
 
 impl Body {
@@ -141,7 +95,7 @@ impl Body {
 				}
 			}
 			Kind::Stream(x) => {
-				let reusable = Arc::new(SyncCell::new(x));
+				let reusable = Arc::new(OnceOption::new(x));
 				self.kind = Kind::Reusable(reusable.clone());
 				Self {
 					kind: Kind::Reusable(reusable),
@@ -197,6 +151,7 @@ impl Body {
 	/// Will undo reusablity.
 	///
 	/// If a future is returned it must be polled to completion to drive the channel forward.
+	#[must_use]
 	pub fn tee(&mut self) -> (Self, Option<impl Future<Output = ()> + Send + Sync>) {
 		match self.kind {
 			Kind::Used => (Self::used(), None),
@@ -311,5 +266,11 @@ impl From<&'static [u8]> for Body {
 impl From<Bytes> for Body {
 	fn from(value: Bytes) -> Self {
 		Body::from_buffer(value)
+	}
+}
+
+impl From<tokio::fs::File> for Body {
+	fn from(value: tokio::fs::File) -> Self {
+		Body::wrap_stream(tokio_util::io::ReaderStream::new(value))
 	}
 }

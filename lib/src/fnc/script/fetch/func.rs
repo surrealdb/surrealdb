@@ -1,10 +1,13 @@
 //! Contains the actual fetch function.
 
 use crate::{
-	fnc::script::fetch::classes::{self, Request, RequestInit, Response},
+	fnc::script::{
+		fetch::classes::{self, Request, RequestInit, Response},
+		modules::surrealdb::query::{QueryContext, QUERY_DATA_PROP_NAME},
+	},
 	http::{RedirectAction, RedirectPolicy},
 };
-use js::{function::Opt, Class, Ctx, Exception, Result, Value};
+use js::{class::OwnedBorrow, function::Opt, Class, Ctx, Exception, Result, Value};
 
 use super::{
 	body::Body,
@@ -36,14 +39,6 @@ pub async fn fetch<'js>(
 		panic!("Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
 	}
 
-	let req = reqwest::Request::new(js_req.init.method, url.clone());
-
-	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
-	// unwrap should never panic.
-	let headers = js_req.headers;
-	let headers = headers.borrow();
-	let headers = headers.inner.clone();
-
 	let redirect = js_req.request_redirect;
 
 	// set the policy for redirecting requests.
@@ -66,8 +61,14 @@ pub async fn fetch<'js>(
 		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
 	})?;
 
+	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
+	// unwrap should never panic.
+	let headers = js_req.headers;
+	let headers = headers.borrow();
+	let headers = headers.inner.clone();
+
 	// method and url already parsed object so this should never panic.
-	let req = crate::http::Request::new(js_req.method, url.clone(), client.clone()).unwrap();
+	let req = crate::http::Request::new(js_req.method, url.clone(), client).unwrap();
 
 	// make the request
 	let response = req

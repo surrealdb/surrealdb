@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, sync::Arc};
+use std::error::Error as StdError;
 
 use crate::http::{header::HeaderMap, status::StatusCode};
 use url::Url;
@@ -102,7 +102,7 @@ impl ClientBuilder {
 
 	pub fn build(self) -> Result<Client, Error> {
 		Ok(Client {
-			inner: Arc::new(Backend::build(self)),
+			inner: Backend::build(self),
 		})
 	}
 }
