@@ -156,7 +156,7 @@ impl Display for KeyCategory {
 			KeyCategory::TableLiveQuery => "TableLiveQuery",
 			KeyCategory::IndexRoot => "IndexRoot",
 			KeyCategory::IndexTermDocList => "IndexTermDocList",
-			KeyCategory::IndexBtreeNode => "IndexBtreeNode",
+			KeyCategory::IndexBTreeNode => "IndexBTreeNode",
 			KeyCategory::IndexTermDocFrequency => "IndexTermDocFrequency",
 			KeyCategory::IndexDocKeys => "IndexDocKeys",
 			KeyCategory::IndexTermList => "IndexTermList",

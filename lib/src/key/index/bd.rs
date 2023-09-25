@@ -24,7 +24,7 @@ pub struct Bd<'a> {
 
 impl KeyRequirements for Bd<'_> {
 	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexBtreeNode
+		KeyCategory::IndexBTreeNode
 	}
 }
 
