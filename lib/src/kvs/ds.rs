@@ -160,6 +160,7 @@ impl Datastore {
 	}
 
 	// For testing
+	#[allow(dead_code)]
 	pub async fn new_full(
 		path: &str,
 		clock_override: Option<Arc<RwLock<SizedClock>>>,
@@ -1118,6 +1119,7 @@ impl Datastore {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
+	#[allow(dead_code)]
 	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
 		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
 	}

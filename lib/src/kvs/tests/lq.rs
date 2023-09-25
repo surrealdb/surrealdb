@@ -244,15 +244,19 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 		.unwrap();
 
 	let mut first_not = nots.try_recv().unwrap();
+	// We cannot determine live query ID
 	assert!(!first_not.live_id.is_nil());
 	first_not.live_id = Default::default();
+	// We cannot determine notification ID
 	assert!(!first_not.notification_id.is_nil());
 	first_not.notification_id = Default::default();
 
 	let mut second_not = nots.try_recv().unwrap();
+	// We cannot determine live query ID
 	assert!(!second_not.live_id.is_nil());
 	second_not.live_id = Default::default();
-	assert!(second_not.notification_id.is_nil());
+	// We cannot determine notification ID
+	assert!(!second_not.notification_id.is_nil());
 	second_not.notification_id = Default::default();
 
 	let expected = vec![
@@ -261,7 +265,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 			node_id: sql::Uuid(local_node),
 			notification_id: Default::default(),
 			action: Action::Create,
-			result: first_create,
+			result: Value::Array(Array::from(first_create)),
 			timestamp: Default::default(),
 		},
 		Notification {
@@ -269,7 +273,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 			node_id: sql::Uuid(local_node),
 			notification_id: Default::default(),
 			action: Action::Create,
-			result: local_create_value,
+			result: Value::Array(Array::from(local_create_value)),
 			timestamp: Default::default(),
 		},
 	];

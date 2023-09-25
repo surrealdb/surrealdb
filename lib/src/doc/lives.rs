@@ -6,7 +6,6 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use std::ops::Deref;
@@ -115,7 +114,7 @@ impl<'a> Document<'a> {
 								opt.ns(),
 								opt.db(),
 								&self.id.unwrap().tb,
-								sql::uuid::Uuid(lv.node.0),
+								lv.id.clone(),
 								1000,
 							)
 							.await;
@@ -147,14 +146,16 @@ impl<'a> Document<'a> {
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
+					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
 					let notification = Notification {
 						live_id: lv.id.clone(),
 						node_id: lv.node.clone(),
 						notification_id: not_id.clone(),
 						action: Action::Create,
-						result: self.pluck(_ctx, opt, txn, &lq).await?,
+						result: plucked,
 						timestamp: ts.clone(),
 					};
+					println!("\n\nCREATE NOTIFICATION: {:?}\n\n", notification);
 					if opt.id()? == lv.node.0 {
 						println!("LV node {} was same as {}", lv.node.0, opt.id()?);
 						let previous_nots = tx
@@ -162,17 +163,20 @@ impl<'a> Document<'a> {
 								opt.ns(),
 								opt.db(),
 								&self.id.unwrap().tb,
-								lv.node.clone(),
+								lv.id.clone(),
 								1000,
 							)
 							.await;
 						match previous_nots {
 							Ok(nots) => {
 								println!("Found {} notifications in create", nots.len());
-								for not in nots {
-									if let Err(e) = chn.write().await.send(not).await {
+								let channel = chn.write().await;
+								for not in &nots {
+									if let Err(e) = channel.send(not.clone()).await {
 										println!("Error sending scanned notification: {}", e);
 										error!("Error sending scanned notification: {}", e);
+									} else {
+										println!("Sent notification: {:?}", not);
 									}
 								}
 							}
@@ -217,7 +221,7 @@ impl<'a> Document<'a> {
 								opt.ns(),
 								opt.db(),
 								&self.id.unwrap().tb,
-								sql::uuid::Uuid(lv.node.0),
+								lv.id.clone(),
 								1000,
 							)
 							.await;
