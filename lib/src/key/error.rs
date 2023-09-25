@@ -84,7 +84,7 @@ pub enum KeyCategory {
 	/// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}
 	IndexTermDocList,
 	/// crate::key::index::bd                /*{ns}*{db}*{tb}+{ix}!bd{id}
-	IndexBtreeNode,
+	IndexBTreeNode,
 	/// crate::key::index::bf                /*{ns}*{db}*{tb}+{ix}!bf{id}
 	IndexTermDocFrequency,
 	/// crate::key::index::bi                /*{ns}*{db}*{tb}+{ix}!bi{id}
