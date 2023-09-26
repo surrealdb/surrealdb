@@ -1098,7 +1098,7 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while num > 0 {
+		while limit == 0 || num > 0 {
 			// Get records batch
 			let res = match nxt {
 				None => {
@@ -1136,6 +1136,8 @@ impl Transaction {
 		Ok(out)
 	}
 
+	/// scan_nd will scan all the cluster membership registers
+	/// setting limit to 0 will result in scanning all entries
 	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
@@ -1145,7 +1147,7 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while num > 0 {
+		while limit == 0 || num > 0 {
 			// Get records batch
 			let res = match nxt {
 				None => {

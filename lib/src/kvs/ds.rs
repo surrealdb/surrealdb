@@ -536,7 +536,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(1000).await?;
+		let cluster = tx.scan_nd(0).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
