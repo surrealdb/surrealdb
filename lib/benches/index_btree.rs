@@ -6,7 +6,7 @@ use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use surrealdb::kvs::{Datastore, Key};
+use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 
 macro_rules! get_key_value {
 	($idx:expr) => {{
@@ -53,7 +53,7 @@ where
 	BK: BKeys + Default,
 {
 	let ds = Datastore::new("memory").await.unwrap();
-	let mut tx = ds.transaction(true, false).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
 	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 	let mut s = s.lock().await;

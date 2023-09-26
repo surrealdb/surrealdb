@@ -111,10 +111,10 @@ impl SerdeState for State {}
 mod tests {
 	use crate::err::Error;
 	use crate::idg::u32::U32;
-	use crate::kvs::{Datastore, Transaction};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let key = "foo";
 		let v = tx.get(key).await.unwrap();
 		let d = U32::new(key.into(), v).await.unwrap();

@@ -83,7 +83,7 @@ mod tests {
 	use crate::idx::ft::doclength::DocLengths;
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 
 	#[tokio::test]
 	async fn test_doc_lengths() {
@@ -92,7 +92,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		// Check empty state
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let l = DocLengths::new(
 			&mut tx,
 			IndexKeyBase::default(),

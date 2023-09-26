@@ -1242,6 +1242,7 @@ mod tests {
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 	use crate::kvs::Datastore;
+	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
 	use indexmap::IndexMap;
@@ -1256,7 +1257,7 @@ mod tests {
 		t: TreeStoreType,
 	) -> (Arc<Mutex<TreeNodeStore<MTreeNode>>>, Transaction) {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, t, 20);
-		let tx = ds.transaction(t == TreeStoreType::Write, false).await.unwrap();
+		let tx = ds.transaction(t.into(), Optimistic).await.unwrap();
 		(s, tx)
 	}
 

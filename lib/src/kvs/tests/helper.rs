@@ -19,7 +19,7 @@ impl TestContext {
 		time: Timestamp,
 	) -> Result<(), Error> {
 		// TODO we shouldn't test bootstrapping manually
-		let mut tx = self.db.transaction(true, false).await?;
+		let mut tx = self.db.transaction(Write, Optimistic).await?;
 		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
 		tx.commit().await?;
 
@@ -41,7 +41,7 @@ impl TestContext {
 			panic!("Encountered errors: {:?}", errors);
 		}
 
-		let mut tx = self.db.transaction(true, false).await?;
+		let mut tx = self.db.transaction(Write, Optimistic).await?;
 		self.db.remove_archived(&mut tx, values).await?;
 		Ok(tx.commit().await?)
 	}

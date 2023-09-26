@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::iam::{Actor, Level};
-use crate::kvs::Datastore;
+use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::{Duration, Utc};
@@ -43,7 +43,7 @@ pub async fn sc(
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
+	let mut tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified scope from storage
 	let scope = tx.get_sc(&ns, &db, &sc).await;
 	// Ensure that the transaction is cancelled
