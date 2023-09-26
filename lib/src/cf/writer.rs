@@ -111,7 +111,7 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
@@ -148,7 +148,7 @@ mod tests {
 		// work.
 		//
 
-		let mut tx0 = ds.transaction(true, false).await.unwrap();
+		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
 		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
 		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
 		tx0.put(&crate::key::database::tb::new(ns, db, tb), dtb.clone()).await.unwrap();
@@ -162,7 +162,7 @@ mod tests {
 		// Write things to the table.
 		//
 
-		let mut tx1 = ds.transaction(true, false).await.unwrap();
+		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_a = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("A".to_string()),
@@ -172,7 +172,7 @@ mod tests {
 		tx1.complete_changes(true).await.unwrap();
 		let _r1 = tx1.commit().await.unwrap();
 
-		let mut tx2 = ds.transaction(true, false).await.unwrap();
+		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_c = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
@@ -182,7 +182,7 @@ mod tests {
 		tx2.complete_changes(true).await.unwrap();
 		let _r2 = tx2.commit().await.unwrap();
 
-		let x = ds.transaction(true, false).await;
+		let x = ds.transaction(Write, Optimistic).await;
 		let mut tx3 = x.unwrap();
 		let thing_b = Thing {
 			tb: tb.to_owned(),
@@ -205,7 +205,7 @@ mod tests {
 
 		let start: u64 = 0;
 
-		let mut tx4 = ds.transaction(true, false).await.unwrap();
+		let mut tx4 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
 			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
@@ -252,14 +252,14 @@ mod tests {
 
 		assert_eq!(r, want);
 
-		let mut tx5 = ds.transaction(true, false).await.unwrap();
+		let mut tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
 		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
-		let mut tx6 = ds.transaction(true, false).await.unwrap();
+		let mut tx6 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
 			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
@@ -288,7 +288,7 @@ mod tests {
 		// Now we should see the gc_all results
 		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
-		let mut tx7 = ds.transaction(true, false).await.unwrap();
+		let mut tx7 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r = crate::cf::read(&mut tx7, ns, db, Some(tb), ShowSince::Timestamp(ts), Some(10))
 			.await
 			.unwrap();
