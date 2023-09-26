@@ -456,7 +456,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Transaction};
+	use crate::kvs::{Datastore, LockType::*, Transaction};
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
@@ -507,7 +507,7 @@ mod tests {
 		hl: bool,
 	) -> (Transaction, FtIndex) {
 		let write = matches!(store_type, TreeStoreType::Write);
-		let mut tx = ds.transaction(write, false).await.unwrap();
+		let mut tx = ds.transaction(write.into(), Optimistic).await.unwrap();
 		let fti = FtIndex::new(
 			&mut tx,
 			az.clone(),

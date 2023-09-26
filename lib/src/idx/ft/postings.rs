@@ -92,7 +92,7 @@ mod tests {
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use test_log::test;
 
 	#[test(tokio::test)]
@@ -100,7 +100,7 @@ mod tests {
 		const DEFAULT_BTREE_ORDER: u32 = 5;
 
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// Check empty state
 		let mut p = Postings::new(
 			&mut tx,
@@ -119,7 +119,7 @@ mod tests {
 		p.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut p = Postings::new(
 			&mut tx,
 			IndexKeyBase::default(),

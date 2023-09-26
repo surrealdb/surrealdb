@@ -5,7 +5,7 @@ async fn write_scan_tblq() {
 	let test = init(node_id).await.unwrap();
 
 	// Write some data
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let ns = "namespace";
 	let db = "database";
 	let tb = "table";
@@ -26,7 +26,7 @@ async fn write_scan_tblq() {
 	tx.commit().await.unwrap();
 
 	// Verify scan
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_tblq(ns, db, tb, 100).await.unwrap();
 	assert_eq!(
 		res,
