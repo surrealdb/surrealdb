@@ -6,7 +6,7 @@ async fn archive_lv_for_node_archives() {
 	let node_id = Uuid::parse_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(node_id, clock).await.unwrap();
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
 	let table = "test_table";
@@ -32,7 +32,7 @@ async fn archive_lv_for_node_archives() {
 	// i.e. setup data is part of same transaction as required implementation checks
 	tx.commit().await.unwrap();
 
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let results = test
 		.db
 		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id.clone()), this_node_id.clone())
@@ -55,7 +55,7 @@ async fn archive_lv_for_node_archives() {
 	assert_eq!(lq.tb, table);
 	assert_eq!(lq.lq, lv_id);
 
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let lv = tx.all_tb_lives(namespace, database, table).await.unwrap();
 	assert_eq!(lv.len(), 1, "{:?}", lv);
 	assert_eq!(lv[0].archived, Some(this_node_id));

@@ -201,12 +201,12 @@ mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Transaction};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	const BTREE_ORDER: u32 = 7;
 
 	async fn get_doc_ids(ds: &Datastore, store_type: TreeStoreType) -> (Transaction, DocIds) {
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let d =
 			DocIds::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, store_type).await.unwrap();
 		(tx, d)

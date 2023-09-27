@@ -6,6 +6,7 @@ use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Role};
+use crate::kvs::{LockType::*, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -45,7 +46,7 @@ async fn expired_nodes_are_garbage_collected() {
 	test.db.bootstrap().await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx.scan_hb(&new_time, 100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for hb in scanned.iter() {
@@ -102,7 +103,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_live(true)
 		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
 	match res {
 		Value::Uuid(_) => {}
@@ -129,7 +130,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	test.db.bootstrap().await.unwrap();
 
 	// Now validate lq was removed
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx
 		.all_tb_lives(ses.ns().unwrap().as_ref(), ses.db().unwrap().as_ref(), table)
 		.await
@@ -169,7 +170,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_delete),
@@ -212,7 +213,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// Validate
 	trace!("Validating live queries");
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx.all_tb_lives(namespace, database, table).await.unwrap();
 	assert_eq!(scanned.len(), 1, "The scanned values are {:?}", scanned);
 	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
@@ -256,7 +257,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let live_query_to_corrupt = Uuid::parse_str("d4cee7ce-5c78-4a30-9fa9-2444d58029f6").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_corrupt),
@@ -303,7 +304,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	}
 
 	// Verify node live query was deleted
-	let mut tx = second_node.transaction(true, false).await.unwrap();
+	let mut tx = second_node.transaction(Write, Optimistic).await.unwrap();
 	let found = tx
 		.scan_ndlq(&old_node_id, 100)
 		.await

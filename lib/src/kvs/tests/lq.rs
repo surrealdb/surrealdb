@@ -11,7 +11,7 @@ async fn scan_node_lq() {
 	let node_id = Uuid::parse_str("63bb5c1a-b14e-4075-a7f8-680267fbe136").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(node_id, clock).await.unwrap();
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
 	let live_query_id = Uuid::from_bytes([
@@ -30,7 +30,7 @@ async fn scan_node_lq() {
 	);
 	let _ = tx.putc(key, "value", None).await.unwrap();
 	tx.commit().await.unwrap();
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
 	let res = tx.scan_ndlq(&node_id, 100).await.unwrap();
 	assert_eq!(res.len(), 1);
