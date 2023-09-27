@@ -1,4 +1,6 @@
 //! Stores a DEFINE NAMESPACE config definition
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +27,12 @@ pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b's', 0xff]);
 	k
+}
+
+impl KeyRequirements for Ns<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Namespace
+	}
 }
 
 impl<'a> Ns<'a> {

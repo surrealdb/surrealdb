@@ -1,4 +1,6 @@
 //! Stores a graph edge pointer
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::sql::dir::Dir;
 use crate::sql::id::Id;
 use crate::sql::thing::Thing;
@@ -159,6 +161,12 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Ve
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode().unwrap();
 	k.extend_from_slice(&[0xff]);
 	k
+}
+
+impl KeyRequirements for Graph<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Graph
+	}
 }
 
 impl<'a> Graph<'a> {

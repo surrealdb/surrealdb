@@ -1,4 +1,6 @@
 //! Stores a LIVE SELECT query definition on the cluster
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -41,6 +43,12 @@ pub fn suffix_nd(nd: &Uuid) -> Vec<u8> {
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0xff]);
 	k
+}
+
+impl KeyRequirements for Lq<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::NodeLiveQuery
+	}
 }
 
 impl<'a> Lq<'a> {

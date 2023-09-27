@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::vs;
 
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use std::str;
 
 // Cf stands for change feeds
@@ -68,6 +70,12 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'#', 0xff]);
 	k
+}
+
+impl KeyRequirements for Cf<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::ChangeFeed
+	}
 }
 
 impl<'a> Cf<'a> {
