@@ -9,6 +9,8 @@ use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
 use crate::key::debug;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -598,7 +600,7 @@ impl Transaction {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[allow(unused_variables)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -615,12 +617,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -630,12 +632,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -1020,7 +1022,7 @@ impl Transaction {
 					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
-				self.put(key, value).await?;
+				self.put(key.key_category(), key, value).await?;
 				Ok(())
 			}
 		}
@@ -1052,6 +1054,7 @@ impl Transaction {
 		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
+			key.key_category(),
 			key,
 			ClusterMembership {
 				name: id.to_string(),
@@ -1890,7 +1893,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::NsNotFound {
@@ -1919,7 +1922,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::DbNotFound {
@@ -1949,7 +1952,7 @@ impl Transaction {
 						name: sc.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::ScNotFound {
@@ -1980,7 +1983,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::TbNotFound {
@@ -2150,7 +2153,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::NsNotFound {
@@ -2179,7 +2182,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::DbNotFound {
@@ -2210,7 +2213,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::TbNotFound {

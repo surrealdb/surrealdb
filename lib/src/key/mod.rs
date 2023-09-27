@@ -5,6 +5,7 @@
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
 /// crate::key::root::ns                 /!ns{ns}
+/// crate::key::root::us                 /!us{us}
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
@@ -14,6 +15,7 @@
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::tk            /*{ns}!tk{tk}
+/// crate::key::namespace::us            /*{ns}!us{us}
 ///
 /// crate::key::database::all            /*{ns}*{db}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
@@ -25,6 +27,7 @@
 /// crate::key::database::ti             /+{ns id}*{db id}!ti
 /// crate::key::database::tk             /*{ns}*{db}!tk{tk}
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
+/// crate::key::database::us             /*{ns}*{db}!us{us}
 /// crate::key::database::vs             /*{ns}*{db}!vs
 ///
 /// crate::key::scope::all               /*{ns}*{db}±{sc}
@@ -60,8 +63,10 @@
 pub mod change;
 pub mod database;
 pub mod debug;
+pub(crate) mod error;
 pub mod graph;
 pub mod index;
+pub(crate) mod key_req;
 pub mod namespace;
 pub mod node;
 pub mod root;

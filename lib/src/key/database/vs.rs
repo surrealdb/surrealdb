@@ -1,4 +1,6 @@
 //! Stores database versionstamps
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,12 @@ pub struct Vs<'a> {
 #[allow(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
 	Vs::new(ns, db)
+}
+
+impl KeyRequirements for Vs<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseVersionstamp
+	}
 }
 
 impl<'a> Vs<'a> {

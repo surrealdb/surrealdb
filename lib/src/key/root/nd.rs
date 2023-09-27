@@ -1,4 +1,6 @@
 //! Stores cluster membership information
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,6 +15,12 @@ pub struct Nd {
 	_c: u8,
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
+}
+
+impl KeyRequirements for Nd {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Node
+	}
 }
 
 impl Nd {
