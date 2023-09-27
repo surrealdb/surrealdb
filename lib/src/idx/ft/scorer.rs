@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::termdocs::TermsDocs;
@@ -76,8 +76,8 @@ impl BM25Scorer {
 		// (N - n(qi) + 0.5)
 		let numerator = self.doc_count - term_doc_count + 0.5;
 		let idf = (numerator / denominator).ln();
-		if idf.is_nan() || idf <= 0.0 {
-			return 0.0;
+		if idf.is_nan() {
+			return f32::NAN;
 		}
 		let tf_prim = 1.0 + term_freq.ln();
 		// idf * (k1 + 1)

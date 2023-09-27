@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
@@ -81,10 +81,8 @@ impl Postings {
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.lock().await.finish(tx).await?;
-		if self.btree.is_updated() || updated {
-			tx.set(self.state_key.clone(), self.btree.get_state().try_to_val()?).await?;
-		}
+		self.store.lock().await.finish(tx).await?;
+		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}
 }
@@ -94,7 +92,7 @@ mod tests {
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use test_log::test;
 
 	#[test(tokio::test)]
@@ -102,7 +100,7 @@ mod tests {
 		const DEFAULT_BTREE_ORDER: u32 = 5;
 
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// Check empty state
 		let mut p = Postings::new(
 			&mut tx,
@@ -121,7 +119,7 @@ mod tests {
 		p.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut p = Postings::new(
 			&mut tx,
 			IndexKeyBase::default(),

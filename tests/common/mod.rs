@@ -279,7 +279,7 @@ pub async fn ws_recv_all_msgs(
 			_ = time::sleep(timeout) => {
 				debug!("Waited for {:?} and received {} messages", timeout, res.len());
 				if res.len() != expected {
-					return Err(format!("Expected {} messages but got {} after {:?}", expected, res.len(), timeout).into());
+					return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
 				}
 			}
 			msg = ws_recv_msg(socket) => {

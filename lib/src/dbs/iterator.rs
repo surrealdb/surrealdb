@@ -8,9 +8,8 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
-use crate::idx::planner::plan::IndexOption;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -32,7 +31,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, IteratorRef, IndexOption),
+	Index(Table, IteratorRef),
 }
 
 pub(crate) struct Processed {
@@ -143,7 +142,7 @@ impl Iterator {
 				// Add the record to the iterator
 				self.ingest(Iterable::Thing(v));
 			}
-			Value::Model(v) => {
+			Value::Mock(v) => {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified

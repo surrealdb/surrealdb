@@ -14,6 +14,7 @@ use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -25,7 +26,6 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -317,9 +317,12 @@ impl Datastore {
 	}
 
 	/// Setup the initial credentials
+	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
+	/// https://github.com/rust-lang/rust/issues/111370
+	#[allow(unreachable_code, unused_variables)]
 	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
 		// Start a new writeable transaction
-		let txn = self.transaction(true, false).await?.rollback_with_panic().enclose();
+		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
 		// Fetch the root users from the storage
 		let users = txn.lock().await.all_root_users().await;
 		// Process credentials, depending on existing users
@@ -361,8 +364,19 @@ impl Datastore {
 	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
 	// ability.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
+		trace!("Clearing cluster");
+		let mut tx = self.transaction(Write, Optimistic).await?;
+		match self.nuke_whole_cluster(&mut tx).await {
+			Ok(_) => tx.commit().await,
+			Err(e) => {
+				error!("Error nuking cluster at bootstrap: {:?}", e);
+				tx.cancel().await?;
+				Err(Error::Tx(format!("Error nuking cluster at bootstrap: {:?}", e).to_owned()))
+			}
+		}?;
+
 		trace!("Bootstrapping {}", self.id);
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let now = tx.clock();
 		let archived = match self.register_remove_and_archive(&mut tx, &self.id, now).await {
 			Ok(archived) => {
@@ -392,7 +406,7 @@ impl Datastore {
 			}
 		}
 
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let val = self.remove_archived(&mut tx, filtered).await;
 		let resolve_err = match val {
 			Ok(_) => tx.commit().await,
@@ -439,7 +453,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(node_id.0).await?;
+		tx.set_cl(node_id.0).await?;
 		tx.set_hb(timestamp.clone(), node_id.0).await?;
 		Ok(())
 	}
@@ -456,7 +470,7 @@ impl Datastore {
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
 			// TODO should be delr in case of nested entries
-			tx.del_nd(hb.nd).await?;
+			tx.del_cl(hb.nd).await?;
 			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
 		}
 		Ok(nodes)
@@ -516,6 +530,47 @@ impl Datastore {
 		Ok(())
 	}
 
+	pub async fn nuke_whole_cluster(&self, tx: &mut Transaction) -> Result<(), Error> {
+		// Scan nodes
+		let cls = tx.scan_cl(1000).await?;
+		trace!("Found {} nodes", cls.len());
+		for cl in cls {
+			tx.del_cl(
+				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
+				})?,
+			)
+			.await?;
+		}
+		// Scan heartbeats
+		let hbs = tx
+			.scan_hb(
+				&Timestamp {
+					value: 0,
+				},
+				1000,
+			)
+			.await?;
+		trace!("Found {} heartbeats", hbs.len());
+		for hb in hbs {
+			tx.del_hb(hb.hb, hb.nd).await?;
+		}
+		// Scan node live queries
+		let ndlqs = tx.scan_ndlq(&self.id, 1000).await?;
+		trace!("Found {} node live queries", ndlqs.len());
+		for ndlq in ndlqs {
+			tx.del_ndlq(&ndlq.nd).await?;
+			// Scan table live queries
+			let tblqs = tx.scan_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, 1000).await?;
+			trace!("Found {} table live queries", tblqs.len());
+			for tblq in tblqs {
+				tx.del_tblq(&ndlq.ns, &ndlq.db, &ndlq.tb, tblq.lq.0).await?;
+			}
+		}
+		trace!("Successfully completed nuke");
+		Ok(())
+	}
+
 	// Garbage collection task to run when a client disconnects from a surrealdb node
 	// i.e. we know the node, we are not performing a full wipe on the node
 	// and the wipe must be fully performed by this node
@@ -523,7 +578,7 @@ impl Datastore {
 		&self,
 		live_queries: &[uuid::Uuid],
 	) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
@@ -591,7 +646,7 @@ impl Datastore {
 		// Delete the heartbeat and everything nested
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
-			tx.del_nd(dead_node.nd).await?;
+			tx.del_cl(dead_node.nd).await?;
 		}
 		Ok::<Vec<Hb>, Error>(dead)
 	}
@@ -620,7 +675,7 @@ impl Datastore {
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -638,7 +693,7 @@ impl Datastore {
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		// TODO Make gc batch size/limit configurable?
 		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
 		tx.commit().await?;
@@ -649,7 +704,7 @@ impl Datastore {
 	// that the node is alive.
 	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock();
 		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
 		tx.commit().await
@@ -675,19 +730,33 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::kvs::{Datastore, TransactionType::*, LockType::*};
 	/// use surrealdb::err::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("file://database.db").await?;
-	///     let mut tx = ds.transaction(true, false).await?;
+	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+	) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
+		let write = match write {
+			TransactionType::Read => false,
+			TransactionType::Write => true,
+		};
+
+		let lock = match lock {
+			LockType::Pessimistic => true,
+			LockType::Optimistic => false,
+		};
+
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -728,7 +797,6 @@ impl Datastore {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
-			write_buffer: HashMap::new(),
 			vso: self.versionstamp_oracle.clone(),
 		})
 	}
@@ -887,7 +955,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
@@ -956,7 +1024,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
-		let txn = self.transaction(val.writeable(), false).await?.enclose();
+		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await;
 		// Store any data
@@ -1009,7 +1077,7 @@ impl Datastore {
 			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
 		}
 		// Create a new readonly transaction
-		let mut txn = self.transaction(false, false).await?;
+		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
 		Ok(async move {
 			// Process the export

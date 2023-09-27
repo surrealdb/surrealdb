@@ -11,7 +11,10 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod vm;
 
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
@@ -99,6 +102,12 @@ pub struct Index<'a> {
 	pub id: Option<Cow<'a, Id>>,
 }
 
+impl KeyRequirements for Index<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Index
+	}
+}
+
 impl<'a> Index<'a> {
 	pub fn new(
 		ns: &'a str,
@@ -124,20 +133,40 @@ impl<'a> Index<'a> {
 		}
 	}
 
-	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
-		let mut beg = Prefix::new(ns, db, tb, ix).encode().unwrap();
-		beg.extend_from_slice(&[0x00]);
-		let mut end = Prefix::new(ns, db, tb, ix).encode().unwrap();
-		end.extend_from_slice(&[0xff]);
-		beg..end
+	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		Prefix::new(ns, db, tb, ix).encode().unwrap()
 	}
 
-	pub fn range_all_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> (Vec<u8>, Vec<u8>) {
-		let mut beg = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
+	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		let mut beg = Self::prefix(ns, db, tb, ix);
 		beg.extend_from_slice(&[0x00]);
-		let mut end = PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap();
-		end.extend_from_slice(&[0xff]);
-		(beg, end)
+		beg
+	}
+
+	pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+		let mut beg = Self::prefix(ns, db, tb, ix);
+		beg.extend_from_slice(&[0xff]);
+		beg
+	}
+
+	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
+		Self::prefix_beg(ns, db, tb, ix)..Self::prefix_end(ns, db, tb, ix)
+	}
+
+	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		PrefixIds::new(ns, db, tb, ix, fd).encode().unwrap()
+	}
+
+	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		beg.extend_from_slice(&[0x00]);
+		beg
+	}
+
+	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		beg.extend_from_slice(&[0xff]);
+		beg
 	}
 }
 

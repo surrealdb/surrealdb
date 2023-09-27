@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::docids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
@@ -72,9 +72,8 @@ impl DocLengths {
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.lock().await.finish(tx).await? {
-			tx.set(self.state_key.clone(), self.btree.get_state().try_to_val()?).await?;
-		}
+		self.store.lock().await.finish(tx).await?;
+		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}
 }
@@ -84,7 +83,7 @@ mod tests {
 	use crate::idx::ft::doclength::DocLengths;
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 
 	#[tokio::test]
 	async fn test_doc_lengths() {
@@ -93,7 +92,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		// Check empty state
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let l = DocLengths::new(
 			&mut tx,
 			IndexKeyBase::default(),

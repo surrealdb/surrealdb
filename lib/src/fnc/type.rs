@@ -201,8 +201,11 @@ pub mod is {
 		Ok(matches!(arg, Value::Geometry(Geometry::Polygon(_))).into())
 	}
 
-	pub fn record((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(arg.is_record().into())
+	pub fn record((arg, table): (Value, Option<String>)) -> Result<Value, Error> {
+		Ok(match table {
+			Some(tb) => arg.is_record_of_table(tb).into(),
+			None => arg.is_record().into(),
+		})
 	}
 
 	pub fn string((arg,): (Value,)) -> Result<Value, Error> {

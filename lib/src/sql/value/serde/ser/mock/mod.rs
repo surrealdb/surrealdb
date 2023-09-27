@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
-use crate::sql::Model;
+use crate::sql::Mock;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -9,18 +9,18 @@ use serde::ser::Serialize;
 pub(super) struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = Model;
+	type Ok = Mock;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<Model, Error>;
-	type SerializeTuple = Impossible<Model, Error>;
-	type SerializeTupleStruct = Impossible<Model, Error>;
-	type SerializeTupleVariant = SerializeModel;
-	type SerializeMap = Impossible<Model, Error>;
-	type SerializeStruct = Impossible<Model, Error>;
-	type SerializeStructVariant = Impossible<Model, Error>;
+	type SerializeSeq = Impossible<Mock, Error>;
+	type SerializeTuple = Impossible<Mock, Error>;
+	type SerializeTupleStruct = Impossible<Mock, Error>;
+	type SerializeTupleVariant = SerializeMock;
+	type SerializeMap = Impossible<Mock, Error>;
+	type SerializeStruct = Impossible<Mock, Error>;
+	type SerializeStructVariant = Impossible<Mock, Error>;
 
-	const EXPECTED: &'static str = "an enum `Model`";
+	const EXPECTED: &'static str = "an enum `Mock`";
 
 	fn serialize_tuple_variant(
 		self,
@@ -36,14 +36,14 @@ impl ser::Serializer for Serializer {
 				return Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`")));
 			}
 		};
-		Ok(SerializeModel {
+		Ok(SerializeMock {
 			inner,
 			index: 0,
 		})
 	}
 }
 
-pub(super) struct SerializeModel {
+pub(super) struct SerializeMock {
 	index: usize,
 	inner: Inner,
 }
@@ -53,8 +53,8 @@ enum Inner {
 	Range(Option<String>, Option<u64>, Option<u64>),
 }
 
-impl serde::ser::SerializeTupleVariant for SerializeModel {
-	type Ok = Model;
+impl serde::ser::SerializeTupleVariant for SerializeMock {
+	type Ok = Mock;
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -76,9 +76,7 @@ impl serde::ser::SerializeTupleVariant for SerializeModel {
 					Inner::Count(..) => "Count",
 					Inner::Range(..) => "Range",
 				};
-				return Err(Error::custom(format!(
-					"unexpected `Model::{variant}` index `{index}`"
-				)));
+				return Err(Error::custom(format!("unexpected `Mock::{variant}` index `{index}`")));
 			}
 		}
 		self.index += 1;
@@ -87,9 +85,9 @@ impl serde::ser::SerializeTupleVariant for SerializeModel {
 
 	fn end(self) -> Result<Self::Ok, Self::Error> {
 		match self.inner {
-			Inner::Count(Some(one), Some(two)) => Ok(Model::Count(one, two)),
-			Inner::Range(Some(one), Some(two), Some(three)) => Ok(Model::Range(one, two, three)),
-			_ => Err(Error::custom("`Model` missing required value(s)")),
+			Inner::Count(Some(one), Some(two)) => Ok(Mock::Count(one, two)),
+			Inner::Range(Some(one), Some(two), Some(three)) => Ok(Mock::Range(one, two, three)),
+			_ => Err(Error::custom("`Mock` missing required value(s)")),
 		}
 	}
 }
@@ -101,14 +99,14 @@ mod tests {
 
 	#[test]
 	fn count() {
-		let model = Model::Count(Default::default(), Default::default());
+		let model = Mock::Count(Default::default(), Default::default());
 		let serialized = model.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(model, serialized);
 	}
 
 	#[test]
 	fn range() {
-		let model = Model::Range(Default::default(), 1, 2);
+		let model = Mock::Range(Default::default(), 1, 2);
 		let serialized = model.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(model, serialized);
 	}

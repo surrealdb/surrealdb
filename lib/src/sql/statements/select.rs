@@ -105,7 +105,7 @@ impl SelectStatement {
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
 				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-				Value::Model(v) => {
+				Value::Mock(v) => {
 					for v in v {
 						i.ingest(Iterable::Thing(v));
 					}
@@ -118,7 +118,7 @@ impl SelectStatement {
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-							Value::Model(v) => {
+							Value::Mock(v) => {
 								for v in v {
 									i.ingest(Iterable::Thing(v));
 								}

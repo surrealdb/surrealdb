@@ -17,21 +17,21 @@ impl<'a> Document<'a> {
 		if !self.changed() {
 			return Ok(());
 		}
-		// Get the table for the record
+		//
 		let tb = self.tb(opt, txn).await?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Get the database and the table for the record
+		let db = run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
 		// Check if changefeeds are enabled
-		if tb.changefeed.is_some() {
-			// Clone transaction
-			let run = txn.clone();
-			// Claim transaction
-			let mut run = run.lock().await;
+		if db.changefeed.is_some() || tb.changefeed.is_some() {
 			// Get the arguments
-			let ns = opt.ns();
-			let db = opt.db();
 			let tb = tb.name.as_str();
 			let id = self.id.as_ref().unwrap();
 			// Create the changefeed entry
-			run.record_change(ns, db, tb, id, self.current.doc.clone());
+			run.record_change(opt.ns(), opt.db(), tb, id, self.current.doc.clone());
 		}
 		// Carry on
 		Ok(())

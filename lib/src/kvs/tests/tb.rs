@@ -8,7 +8,7 @@ async fn table_definitions_can_be_scanned() {
 	// Setup
 	let node_id = Uuid::parse_str("f7b2ba17-90ed-45f9-9aa2-906c6ba0c289").unwrap();
 	let test = init(node_id).await.unwrap();
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";
@@ -45,7 +45,7 @@ async fn table_definitions_can_be_deleted() {
 	// Setup
 	let node_id = Uuid::parse_str("13c0e650-1710-489e-bb80-f882bce50b56").unwrap();
 	let test = init(node_id).await.unwrap();
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
 	// Create a table definition
 	let namespace = "test_namespace";

@@ -17,7 +17,7 @@ impl Explanation {
 			Some(e) => {
 				let mut exp = Self::default();
 				for i in iterables {
-					exp.add_iter(i);
+					exp.add_iter(ctx, i);
 				}
 				if let Some(qp) = ctx.get_query_planner() {
 					for reason in qp.fallbacks() {
@@ -29,8 +29,8 @@ impl Explanation {
 		}
 	}
 
-	fn add_iter(&mut self, iter: &Iterable) {
-		self.0.push(ExplainItem::new_iter(iter));
+	fn add_iter(&mut self, ctx: &Context<'_>, iter: &Iterable) {
+		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
 
 	pub(super) fn add_fetch(&mut self, count: usize) {
@@ -68,7 +68,7 @@ impl ExplainItem {
 		}
 	}
 
-	fn new_iter(iter: &Iterable) -> Self {
+	fn new_iter(ctx: &Context<'_>, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(v) => Self {
 				name: "Iterate Value".into(),
@@ -102,10 +102,18 @@ impl ExplainItem {
 					("thing-3", Value::Thing(t3.to_owned())),
 				],
 			},
-			Iterable::Index(t, _, io) => Self {
-				name: "Iterate Index".into(),
-				details: vec![("table", Value::from(t.0.to_owned())), ("plan", io.explain())],
-			},
+			Iterable::Index(t, ir) => {
+				let mut details = vec![("table", Value::from(t.0.to_owned()))];
+				if let Some(qp) = ctx.get_query_planner() {
+					if let Some(exe) = qp.get_query_executor(&t.0) {
+						details.push(("plan", exe.explain(*ir)));
+					}
+				}
+				Self {
+					name: "Iterate Index".into(),
+					details,
+				}
+			}
 		}
 	}
 }
