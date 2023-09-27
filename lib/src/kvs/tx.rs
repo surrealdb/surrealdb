@@ -1099,20 +1099,22 @@ impl Transaction {
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
 		while limit == 0 || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
 			// Get records batch
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 			};
 			// Get total results
@@ -1129,7 +1131,9 @@ impl Transaction {
 				}
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
 				// Count
-				num -= 1;
+				if limit > 0 {
+					num -= 1;
+				}
 			}
 		}
 		trace!("scan_hb: {:?}", out);
@@ -1147,21 +1151,25 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while limit == 0 || num > 0 {
+		println!("pre-loop Limit = {:?} num = {:?}", limit, num);
+		while (limit == 0) || (num > 0) {
+			println!("loop Limit = {:?} num = {:?}", limit, num);
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
 			// Get records batch
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 			};
 			// Get total results
@@ -1178,7 +1186,9 @@ impl Transaction {
 				}
 				out.push((&v).into());
 				// Count
-				num -= 1;
+				if limit > 0 {
+					num -= 1;
+				}
 			}
 		}
 		trace!("scan_nd: {:?}", out);
