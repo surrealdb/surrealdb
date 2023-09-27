@@ -79,14 +79,14 @@ async fn live_creates_remote_notification_for_create() {
 	let remote_options = local_options.clone().with_id(remote_node);
 
 	// Register a live query on the remote node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
 
 	// Write locally to cause a remote notification
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let create_value = compute_create(&ctx, &local_options, tx.clone(), table, None).await;
 	tx.lock().await.commit().await.unwrap();
 	let create_value = match create_value {
@@ -113,7 +113,7 @@ async fn live_creates_remote_notification_for_create() {
 		.is_err());
 
 	// Verify there is a remote node notification entry
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let mut res = tx
 		.lock()
 		.await
@@ -179,7 +179,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	let remote_options = local_options.clone().with_id(remote_node);
 
 	// Create the table before starting live query
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let _ = compute_create(
 		&ctx,
 		&local_options,
@@ -192,7 +192,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	println!("Created table");
 
 	// Register a live query on the local node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &local_options, tx.clone(), live_query_id, local_node, table).await;
 	tx.lock().await.commit().await.unwrap();
@@ -200,7 +200,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	println!("Created local live query, now creating entries");
 
 	// Write remotely to cause a local stored notification
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let first_create = compute_create(
 		&ctx,
 		&remote_options,
@@ -224,7 +224,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	// Create a local notification to cause scanning of the lq notifications
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node));
 	test.db.bootstrap().await.unwrap();
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let local_create_value = compute_create(
 		&ctx,
 		&local_options,
@@ -317,7 +317,7 @@ async fn live_creates_remote_notification_for_update() {
 	let remote_options = local_options.clone().with_id(remote_node);
 
 	// Create the record we will update
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let create_value = compute_create(&ctx, &local_options, tx.clone(), table, None).await;
 	tx.lock().await.commit().await.unwrap();
 	let create_value = match create_value {
@@ -334,7 +334,7 @@ async fn live_creates_remote_notification_for_update() {
 	};
 
 	// Register a live query on the remote node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
@@ -350,7 +350,7 @@ async fn live_creates_remote_notification_for_update() {
 		Value::Thing(thing) => thing,
 		_ => panic!("Expected ID to be a thing"),
 	};
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let update_value = compute_update(
 		&ctx,
 		&local_options,
@@ -372,7 +372,7 @@ async fn live_creates_remote_notification_for_update() {
 		.is_err());
 
 	// Verify there is a remote node notification entry
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let mut res = tx
 		.lock()
 		.await
@@ -439,7 +439,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let remote_options = local_options.clone().with_id(remote_node);
 
 	// Create a record that we intend to delete for a notification
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let create_value = compute_create(&ctx, &local_options, tx.clone(), table, None).await;
 	tx.lock().await.commit().await.unwrap();
 	let create_value = match create_value {
@@ -457,7 +457,7 @@ async fn live_creates_remote_notification_for_delete() {
 	println!("Created entry");
 
 	// Register a live query on the remote node
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let live_value =
 		compute_live(&ctx, &remote_options, tx.clone(), live_query_id, remote_node, table).await;
 	tx.lock().await.commit().await.unwrap();
@@ -474,7 +474,7 @@ async fn live_creates_remote_notification_for_delete() {
 		Value::Thing(thing) => thing,
 		_ => panic!("Expected ID to be a thing"),
 	};
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let delete_value = compute_delete(&ctx, &local_options, tx.clone(), thing.clone()).await;
 	tx.lock().await.commit().await.unwrap();
 	// Delete returns empty
@@ -490,7 +490,7 @@ async fn live_creates_remote_notification_for_delete() {
 		.is_err());
 
 	// Verify there is a remote node notification entry
-	let tx = test.db.transaction(true, false).await.unwrap().enclose();
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
 	let mut res = tx
 		.lock()
 		.await

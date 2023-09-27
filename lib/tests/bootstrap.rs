@@ -9,7 +9,9 @@ mod parse;
 
 use helpers::new_ds;
 use surrealdb::err::Error;
+use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::Transaction;
+use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
 
@@ -18,7 +20,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	// Create the datastore
 	let dbs = new_ds().await.unwrap();
 
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	// Introduce missing nodes (without heartbeats)
 	let bad_node = uuid::Uuid::parse_str("9d8e16e4-9f6a-4704-8cf1-7cd55b937c5b").unwrap();
 	tx.set_nd(bad_node).await.unwrap();
@@ -41,7 +43,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	dbs.bootstrap().await.unwrap();
 
 	// Verify the incorrect node is deleted, but self and valid still exist
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_nd(1000).await.unwrap();
 	tx.cancel().await.unwrap();
 	for node in &res {
@@ -58,7 +60,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	let dbs = new_ds().await.unwrap();
 
 	// Introduce an invalid node live query
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let valid_data = a_valid_notification(
 		&mut tx,
 		BootstrapPrerequisites {
@@ -86,7 +88,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	dbs.bootstrap().await.unwrap();
 
 	// Verify node live query is deleted
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_ndlq(&valid_data.node_id, 1000).await.unwrap();
 	tx.cancel().await.unwrap();
 	assert_eq!(res.len(), 1);
@@ -102,7 +104,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	let dbs = new_ds().await.unwrap();
 
 	// Introduce an invalid table live query
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let valid_data = a_valid_notification(
 		&mut tx,
 		BootstrapPrerequisites {
@@ -131,7 +133,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	dbs.bootstrap().await.unwrap();
 
 	// Verify invalid table live query is deleted
-	let mut tx = dbs.transaction(true, false).await.unwrap();
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx
 		.scan_tblq(&valid_data.req.namesapce, &valid_data.req.database, &valid_data.req.table, 1000)
 		.await

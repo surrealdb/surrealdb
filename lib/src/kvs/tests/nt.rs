@@ -36,7 +36,7 @@ async fn can_scan_notifications() {
 		.with_node_id(node_id.clone());
 
 	// Create all the data
-	let mut tx = ds.transaction(true, false).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for pair in notifications.clone() {
 		tx.putc_tbnt(
 			pair.0.ns,
@@ -55,7 +55,7 @@ async fn can_scan_notifications() {
 
 	// Read all the data
 	for pair in notifications {
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let scanned_notifications =
 			tx.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), 1000).await.unwrap();
 		tx.commit().await.unwrap();
