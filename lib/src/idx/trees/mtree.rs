@@ -711,7 +711,7 @@ impl MTree {
 	) -> Result<DeletionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_internal: {} {:?}", node_id, od);
-		let mut on_idx = None;
+		let mut on_idxs = Vec::new();
 		// For each On E N
 		for (i, on_entry) in n_node.iter().enumerate() {
 			let on_od_dist = self.calculate_distance(on_entry.center.as_ref(), od.as_ref());
@@ -724,20 +724,24 @@ impl MTree {
 			);
 			// If (d(Od, On) <= r(On))
 			if on_od_dist <= on_entry.radius {
-				on_idx = Some(i);
-				break;
+				on_idxs.push(i);
 			}
 		}
 		#[cfg(debug_assertions)]
-		debug!("on_idx: {:?}", on_idx);
-		if let Some(on_idx) = on_idx {
+		debug!("on_idxs: {:?}", on_idxs);
+		for on_idx in on_idxs {
+			#[cfg(debug_assertions)]
+			debug!("on_idx: {:?}", on_idx);
 			// Delete (Od, child(On))
 			let (on_center, on_node) = {
 				let on_entry = &n_node[on_idx];
 				let on_node = store.get_node(tx, on_entry.node).await?;
 				(on_entry.center.clone(), on_node)
 			};
-			match self.delete_at_node(tx, store, on_node, &Some(on_center.clone()), od, id).await? {
+			match self
+				.delete_at_node(tx, store, on_node, &Some(on_center.clone()), od.clone(), id)
+				.await?
+			{
 				DeletionResult::NotFound => {}
 				DeletionResult::DocRemoved => {
 					Self::set_internal_node(store, node_id, node_key, n_node, false)?;
@@ -857,10 +861,19 @@ impl MTree {
 							// Add Op to S;
 							s.push(op);
 						}
-						//TODO
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "MTREE deletions (underflow internal)".to_string(),
-						});
+						// Let r(Onn) = max (Os E S) {parentDistance(Os) + r(Os)}
+						let mut radius = 0.0;
+						for e in s {
+							let d = e.parent_dist + e.radius;
+							if d > radius {
+								radius = d;
+							}
+						}
+						let onn_entry = &mut n_node[onn_idx];
+						if onn_entry.radius != radius {
+							onn_entry.radius = radius;
+							n_updated = true;
+						}
 					}
 					MTreeNode::Leaf(s) => {
 						let p_node = p_node.leaf()?;
@@ -872,16 +885,16 @@ impl MTree {
 							// Add Op to S;
 							s.insert(op, p);
 						}
-						// Let r(Onn) = max (Os E S) {[arentDistance Os)}
-						let mut max_parent_distance = 0.0;
+						// Let r(Onn) = max (Os E S) {parentDistance(Os)}
+						let mut radius = 0.0;
 						for (_, p) in s {
-							if p.parent_dist > max_parent_distance {
-								max_parent_distance = p.parent_dist;
+							if p.parent_dist > radius {
+								radius = p.parent_dist;
 							}
 						}
 						let onn_entry = &mut n_node[onn_idx];
-						if onn_entry.radius != max_parent_distance {
-							onn_entry.radius = max_parent_distance;
+						if onn_entry.radius != radius {
+							onn_entry.radius = radius;
 							n_updated = true;
 						}
 					}
@@ -923,6 +936,10 @@ impl MTree {
 					entry_removed = true;
 				}
 			}
+		} else {
+			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
+			store.set_node(sn, false)?;
+			return Ok(DeletionResult::NotFound);
 		}
 		// If (N is underflown)
 		if entry_removed && leaf_node.len() < self.minimum {
@@ -1881,7 +1898,7 @@ mod tests {
 			check_tree_properties(&mut tx, &mut s, &t).await.check(8, 3, Some(2), Some(3), 12, 12);
 		}
 
-		// Remove v4 ->
+		// Remove v5 ->
 		{
 			debug!("Remove v5");
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
@@ -1893,7 +1910,16 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
 			let mut s = s.lock().await;
-			check_tree_properties(&mut tx, &mut s, &t).await.check(8, 3, Some(2), Some(3), 11, 11);
+			check_tree_properties(&mut tx, &mut s, &t).await.check(5, 2, Some(2), Some(4), 11, 11);
+		}
+
+		// Remove v8 ->
+		{
+			debug!("Remove v8");
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+			let mut s = s.lock().await;
+			assert!(t.delete(&mut tx, &mut s, v8.clone(), 80).await.unwrap());
+			finish_operation(tx, s, true).await;
 		}
 	}
 
