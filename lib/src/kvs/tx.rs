@@ -1151,9 +1151,7 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		println!("pre-loop Limit = {:?} num = {:?}", limit, num);
 		while (limit == 0) || (num > 0) {
-			println!("loop Limit = {:?} num = {:?}", limit, num);
 			let batch_size = match num {
 				0 => 1000,
 				_ => std::cmp::min(1000, num),
@@ -1215,30 +1213,64 @@ impl Transaction {
 	}
 
 	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::node::lq::prefix_nd(node);
-		let suff = crate::key::node::lq::suffix_nd(node);
+		let beg = crate::key::node::lq::prefix_nd(node);
+		let end = crate::key::node::lq::suffix_nd(node);
 		trace!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
 		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_lq: key={:?} value={:?}", &key, &value);
-			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
-			let tb: String = String::from_utf8(value).unwrap();
-			trace!("scan_lq Found tb: {:?}", tb);
-			res.push(LqValue {
-				nd: lq.nd.into(),
-				ns: lq.ns.to_string(),
-				db: lq.db.to_string(),
-				tb,
-				lq: lq.lq.into(),
-			});
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<LqValue> = vec![];
+		while limit == 0 || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (key, value)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(key.clone());
+				}
+				let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
+				let tb: String = String::from_utf8(value).unwrap();
+				trace!("scan_lq Found tb: {:?}", tb);
+				out.push(LqValue {
+					nd: lq.nd.into(),
+					ns: lq.ns.to_string(),
+					db: lq.db.to_string(),
+					tb,
+					lq: lq.lq.into(),
+				});
+				// Count
+				if limit > 0 {
+					num -= 1;
+				}
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
 	pub async fn scan_tblq<'a>(
