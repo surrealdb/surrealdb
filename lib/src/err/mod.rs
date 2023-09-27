@@ -1,5 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
+use crate::key::error::KeyCategory;
 use crate::sql::error::RenderedError as RenderedParserError;
 use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
@@ -78,8 +79,8 @@ pub enum Error {
 	TxConditionNotMet,
 
 	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists")]
-	TxKeyAlreadyExists,
+	#[error("The key being inserted already exists: {0}")]
+	TxKeyAlreadyExists(KeyCategory),
 
 	/// The key exceeds a limit set by the KV store
 	#[error("Record id or key is too large")]
@@ -732,7 +733,9 @@ impl From<JWTError> for Error {
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			echodb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -743,7 +746,9 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			indxdb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -754,7 +759,9 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::DuplicateKeyInsertion => {
+				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),

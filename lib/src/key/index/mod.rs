@@ -13,6 +13,8 @@ pub mod bt;
 pub mod bu;
 pub mod vm;
 
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
@@ -98,6 +100,12 @@ pub struct Index<'a> {
 	_e: u8,
 	pub fd: Cow<'a, Array>,
 	pub id: Option<Cow<'a, Id>>,
+}
+
+impl KeyRequirements for Index<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Index
+	}
 }
 
 impl<'a> Index<'a> {

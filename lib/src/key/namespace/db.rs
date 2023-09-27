@@ -1,3 +1,5 @@
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE DATABASE config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,12 @@ pub fn suffix(ns: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'd', b'b', 0xff]);
 	k
+}
+
+impl KeyRequirements for Db<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseAlias
+	}
 }
 
 impl<'a> Db<'a> {
