@@ -1,4 +1,6 @@
 //! Stores the key prefix for all keys under a database
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,12 @@ pub struct All<'a> {
 
 pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
 	All::new(ns, db)
+}
+
+impl KeyRequirements for All<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseRoot
+	}
 }
 
 impl<'a> All<'a> {
