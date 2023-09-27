@@ -250,6 +250,9 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	// We cannot determine notification ID
 	assert!(!first_not.notification_id.is_nil());
 	first_not.notification_id = Default::default();
+	// We cannot determine the timestamp
+	assert_ne!(first_not.timestamp, Default::default());
+	first_not.timestamp = Default::default();
 
 	let mut second_not = nots.try_recv().unwrap();
 	// We cannot determine live query ID
@@ -258,6 +261,9 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	// We cannot determine notification ID
 	assert!(!second_not.notification_id.is_nil());
 	second_not.notification_id = Default::default();
+	// We cannot determine the timestamp
+	assert_ne!(second_not.timestamp, Default::default());
+	second_not.timestamp = Default::default();
 
 	let expected = vec![
 		Notification {
@@ -265,7 +271,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 			node_id: sql::Uuid(local_node),
 			notification_id: Default::default(),
 			action: Action::Create,
-			result: Value::Array(Array::from(first_create)),
+			result: safe_pop(first_create),
 			timestamp: Default::default(),
 		},
 		Notification {
@@ -273,11 +279,12 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 			node_id: sql::Uuid(local_node),
 			notification_id: Default::default(),
 			action: Action::Create,
-			result: Value::Array(Array::from(local_create_value)),
+			result: safe_pop(local_create_value),
 			timestamp: Default::default(),
 		},
 	];
-	assert_eq!(expected, vec![first_not, second_not]);
+	let actual = vec![first_not, second_not];
+	assert_eq!(expected, actual);
 
 	// Then no more notifications
 	assert!(nots.try_recv().is_err());
@@ -615,5 +622,15 @@ async fn compute_update<'a>(
 			arr.get(0).unwrap().clone()
 		}
 		_ => panic!("Expected an array"),
+	}
+}
+
+fn safe_pop(v: Value) -> Value {
+	match v {
+		Value::Array(mut arr) => {
+			assert_eq!(arr.len(), 1);
+			arr.pop().unwrap()
+		}
+		o => o,
 	}
 }

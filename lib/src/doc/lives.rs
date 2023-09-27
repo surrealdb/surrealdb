@@ -121,6 +121,7 @@ impl<'a> Document<'a> {
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
+									println!("Iteration over create and sending scanned notification: {:?}", not);
 									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
