@@ -103,7 +103,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			// Avoid establising another connection if already connected
+			// Avoid establishing another connection if already connected
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}

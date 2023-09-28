@@ -360,7 +360,7 @@ impl Intersect<Self> for Array {
 
 // Documented with the assumption that it is just for arrays.
 pub(crate) trait Matches<T> {
-	/// Returns an array complimenting the origional where each value is true or false
+	/// Returns an array complimenting the original where each value is true or false
 	/// depending on whether it is == to the compared value.
 	///
 	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`

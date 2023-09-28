@@ -516,7 +516,7 @@ impl Options {
 			}
 		};
 
-		// Check permissions if the autor is not already allowed to do the action
+		// Check permissions if the author is not already allowed to do the action
 		!is_allowed
 	}
 }

@@ -181,7 +181,7 @@ impl fmt::Display for Duration {
 		// Calculate the total minutes
 		let mins = secs / SECONDS_PER_MINUTE;
 		let secs = secs % SECONDS_PER_MINUTE;
-		// Calculate the total millseconds
+		// Calculate the total milliseconds
 		let msec = nano / NANOSECONDS_PER_MILLISECOND;
 		let nano = nano % NANOSECONDS_PER_MILLISECOND;
 		// Calculate the total microseconds

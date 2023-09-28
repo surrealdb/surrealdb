@@ -2643,7 +2643,7 @@ impl Transaction {
 	//
 	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
 	// Every change must be recorded by calling this struct's `record_change` function beforehand.
-	// If there was no preceeding `record_change` function calls for this transaction, this function will do nothing.
+	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
 	//
 	// This function should be called only after all the changes have been made to the transaction.
 	// Otherwise, changes are missed in the change feed.
