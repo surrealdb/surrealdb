@@ -421,7 +421,8 @@ impl MTree {
 					node.push(p1);
 					node.push(p2);
 					// Split(N U P)
-					self.split_node(store, node_id, node_key, node)
+					let (e1, e2) = self.split_node(store, node_id, node_key, node)?;
+					Ok(InsertionResult::PromotedEntries(e1, e2))
 				}
 			}
 			InsertionResult::DocAdded => {
@@ -505,7 +506,8 @@ impl MTree {
 		} else {
 			// Else
 			// Split (N)
-			self.split_node(store, node_id, node_key, node)
+			let (e1, e2) = self.split_node(store, node_id, node_key, node)?;
+			Ok(InsertionResult::PromotedEntries(e1, e2))
 		}
 	}
 
@@ -522,7 +524,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		node: N,
-	) -> Result<InsertionResult, Error>
+	) -> Result<(RoutingEntry, RoutingEntry), Error>
 	where
 		N: NodeVectors,
 	{
@@ -537,12 +539,12 @@ impl MTree {
 		let (node1, r1, node2, r2) = node.distribute_entries(&distances, p1_idx, p2_idx)?;
 
 		// Create a new node
-		let new_node = self.new_node_id();
+		let new_node_id = self.new_node_id();
 
 		// Update the store/cache
 		let n = StoredNode::new(node1.into_mtree_node(), node_id, node_key, 0);
 		store.set_node(n, true)?;
-		let n = store.new_node(new_node, node2.into_mtree_node())?;
+		let n = store.new_node(new_node_id, node2.into_mtree_node())?;
 		store.set_node(n, true)?;
 
 		// Update the split node
@@ -553,12 +555,12 @@ impl MTree {
 			parent_dist: 0.0,
 		};
 		let e2 = RoutingEntry {
-			node: new_node,
+			node: new_node_id,
 			center: p2_obj,
 			radius: r2,
 			parent_dist: 0.0,
 		};
-		Ok(InsertionResult::PromotedEntries(e1, e2))
+		Ok((e1, e2))
 	}
 
 	fn select_promotion_objects(distances: &[Vec<f64>]) -> (usize, usize) {
@@ -634,42 +636,40 @@ impl MTree {
 		object: Vector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
+		let mut deleted = false;
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node(tx, root_id).await?;
-			match self.delete_at_node(tx, store, root_node, &None, Arc::new(object), doc_id).await?
+			if let DeletionResult::Underflown(id, key, n) = self
+				.delete_at_node(tx, store, root_node, &None, Arc::new(object), doc_id, &mut deleted)
+				.await?
 			{
-				DeletionResult::DocRemoved => return Ok(true),
-				DeletionResult::CoveringRadius(_) | DeletionResult::NotFound => return Ok(false),
-				DeletionResult::Underflown(id, key, n) => {
-					match &n {
-						MTreeNode::Internal(n) => match n.len() {
-							0 => {
-								store.remove_node(id, key)?;
-								self.set_root(None);
-								return Ok(true);
-							}
-							1 => {
-								store.remove_node(id, key)?;
-								self.set_root(Some(n[0].node));
-								return Ok(true);
-							}
-							_ => {}
-						},
-						MTreeNode::Leaf(n) => {
-							if n.is_empty() {
-								store.remove_node(id, key)?;
-								self.set_root(None);
-								return Ok(true);
-							}
+				match &n {
+					MTreeNode::Internal(n) => match n.len() {
+						0 => {
+							store.remove_node(id, key)?;
+							self.set_root(None);
+							return Ok(deleted);
+						}
+						1 => {
+							store.remove_node(id, key)?;
+							self.set_root(Some(n[0].node));
+							return Ok(deleted);
+						}
+						_ => {}
+					},
+					MTreeNode::Leaf(n) => {
+						if n.is_empty() {
+							store.remove_node(id, key)?;
+							self.set_root(None);
+							return Ok(deleted);
 						}
 					}
-					let sn = StoredNode::new(n, id, key, 0);
-					store.set_node(sn, true)?;
-					return Ok(true);
 				}
+				let sn = StoredNode::new(n, id, key, 0);
+				store.set_node(sn, true)?;
 			}
 		}
-		Ok(false)
+		Ok(deleted)
 	}
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
@@ -682,6 +682,7 @@ impl MTree {
 		parent_center: &Option<Arc<Vector>>,
 		object: Arc<Vector>,
 		id: DocId,
+		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("delete_at_node: {} {:?}", node.id, object);
@@ -689,11 +690,22 @@ impl MTree {
 		match node.n {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
-				self.delete_node_leaf(store, node.id, node.key, n, parent_center, object, id).await
+				self.delete_node_leaf(
+					store,
+					node.id,
+					node.key,
+					n,
+					parent_center,
+					object,
+					id,
+					deleted,
+				)
+				.await
 			}
 			// Else
 			MTreeNode::Internal(n) => {
-				self.delete_node_internal(tx, store, node.id, node.key, n, object, id).await
+				self.delete_node_internal(tx, store, node.id, node.key, n, object, id, deleted)
+					.await
 			}
 		}
 	}
@@ -708,6 +720,7 @@ impl MTree {
 		mut n_node: InternalNode,
 		od: Arc<Vector>,
 		id: DocId,
+		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_internal: {} {:?}", node_id, od);
@@ -739,7 +752,15 @@ impl MTree {
 				(on_entry.center.clone(), on_node)
 			};
 			match self
-				.delete_at_node(tx, store, on_node, &Some(on_center.clone()), od.clone(), id)
+				.delete_at_node(
+					tx,
+					store,
+					on_node,
+					&Some(on_center.clone()),
+					od.clone(),
+					id,
+					deleted,
+				)
 				.await?
 			{
 				DeletionResult::NotFound => {}
@@ -826,7 +847,7 @@ impl MTree {
 		other_center: &Vector,
 		p_id: NodeId,
 		p_key: Key,
-		p_node: MTreeNode,
+		mut p_node: MTreeNode,
 	) -> Result<bool, Error> {
 		let min = f64::NAN;
 		let mut onn_idx = None;
@@ -899,13 +920,25 @@ impl MTree {
 						}
 					}
 				}
+				store.remove_node(p_id, p_key)?;
+				store.set_node(onn_node, true)?;
 			} else {
-				return Err(Error::FeatureNotYetImplemented {
-					feature: "MTREE deletions ()".to_string(),
-				});
+				// Remove On and Onn from N;
+				n_node.remove(on_idx.max(onn_idx));
+				n_node.remove(on_idx.min(onn_idx));
+				n_updated = true;
+				// Split(S U P)
+				p_node.merge(onn_node.n)?;
+				let (e1, e2) = match p_node {
+					MTreeNode::Internal(n) => self.split_node(store, p_id, p_key, n)?,
+					MTreeNode::Leaf(n) => self.split_node(store, p_id, p_key, n)?,
+				};
+				// TODO: Compute parent_dist?
+				// Add new child pointer entries to N;
+				n_node.push(e1);
+				n_node.push(e2);
+				store.remove_node(onn_node.id, onn_node.key)?;
 			}
-			store.remove_node(p_id, p_key)?;
-			store.set_node(onn_node, true)?;
 		}
 		Ok(n_updated)
 	}
@@ -920,6 +953,7 @@ impl MTree {
 		parent_center: &Option<Arc<Vector>>,
 		od: Arc<Vector>,
 		id: DocId,
+		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_leaf: {} {:?}", node_id, od);
@@ -931,6 +965,7 @@ impl MTree {
 			// Remove Od from N
 			if p.docs.remove(id) {
 				doc_removed = true;
+				*deleted = true;
 				if p.docs.is_empty() {
 					e.remove();
 					entry_removed = true;
@@ -1044,6 +1079,33 @@ impl MTreeNode {
 		match self {
 			MTreeNode::Internal(_) => Err(Error::Unreachable),
 			MTreeNode::Leaf(n) => Ok(n),
+		}
+	}
+
+	fn merge(&mut self, other: MTreeNode) -> Result<(), Error> {
+		match (self, other) {
+			(MTreeNode::Internal(s), MTreeNode::Internal(o)) => Ok(Self::merge_internal(s, o)),
+			(MTreeNode::Leaf(s), MTreeNode::Leaf(o)) => Ok(Self::merge_leaf(s, o)),
+			(_, _) => Err(Error::Unreachable),
+		}
+	}
+
+	fn merge_internal(s: &mut InternalNode, o: InternalNode) {
+		for e in o {
+			s.push(e);
+		}
+	}
+
+	fn merge_leaf(s: &mut LeafNode, o: LeafNode) {
+		for (o, p) in o {
+			match s.entry(o) {
+				Entry::Occupied(mut e) => {
+					e.get_mut().docs |= p.docs;
+				}
+				Entry::Vacant(e) => {
+					e.insert(p);
+				}
+			}
 		}
 	}
 }
@@ -1906,7 +1968,6 @@ mod tests {
 			assert!(t.delete(&mut tx, &mut s, v5.clone(), 50).await.unwrap());
 			finish_operation(tx, s, true).await;
 		}
-
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
 			let mut s = s.lock().await;
@@ -1920,6 +1981,11 @@ mod tests {
 			let mut s = s.lock().await;
 			assert!(t.delete(&mut tx, &mut s, v8.clone(), 80).await.unwrap());
 			finish_operation(tx, s, true).await;
+		}
+		{
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+			let mut s = s.lock().await;
+			check_tree_properties(&mut tx, &mut s, &t).await.check(5, 2, Some(2), Some(3), 10, 10);
 		}
 	}
 
