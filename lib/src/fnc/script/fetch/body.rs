@@ -50,7 +50,7 @@ impl Body {
 		}
 	}
 
-	/// Returns wther the body is alread used.
+	/// Returns whether the body is already used.
 	pub fn used(&self) -> bool {
 		match self.data.replace(BodyData::Used) {
 			BodyData::Used => true,

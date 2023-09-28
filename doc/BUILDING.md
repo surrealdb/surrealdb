@@ -331,7 +331,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 
 ###  ✅ Compile for `windows-amd64`
 
-> Compiling SurrealDB with windows OS requires **Administrator** priveledge!
+> Compiling SurrealDB with windows OS requires **Administrator** privilege!
 
 ⚠**Tested on Windows 11 build 22H2(22621.963)**
 
@@ -354,7 +354,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 	
 	e.g. "C:\patch"
 
-	> For some bizzare reasons, **patch.exe needs elevated priviledge** to be invoked during compilation
+	> For some bizzarre reasons, **patch.exe needs elevated privileges** to be invoked during compilation
 
 5. Add `gcc` and `patch` binary path to environment
 

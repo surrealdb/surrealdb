@@ -114,7 +114,7 @@ macro_rules! impl_builtins {
 			Err(_) => {
 				return Err(Err::Error(ParseError::Expected{
 					tried: $input,
-					expected: "a path seperator `::`"
+					expected: "a path separator `::`"
 				}))
 			}
 		}

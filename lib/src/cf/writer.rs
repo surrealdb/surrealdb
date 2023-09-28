@@ -204,7 +204,7 @@ mod tests {
 		tx3.commit().await.unwrap();
 
 		// Note that we committed tx1, tx2, and tx3 in this order so far.
-		// Therfore, the change feeds should give us
+		// Therefore, the change feeds should give us
 		// the mutations in the commit order, which is tx1, tx3, then tx2.
 
 		let start: u64 = 0;

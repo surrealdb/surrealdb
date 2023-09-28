@@ -1,14 +1,14 @@
-/// Returns wether the status code is an null body status
+/// Returns whether the status code is an null body status
 pub fn is_null_body_status(status: u16) -> bool {
 	matches!(status, 101 | 103 | 204 | 205 | 304)
 }
 
-/// Returns wether the status code is an ok status
+/// Returns whether the status code is an ok status
 pub fn is_ok_status(status: u16) -> bool {
 	(200..=299).contains(&status)
 }
 
-/// Returns wether the status code is an redirect status
+/// Returns whether the status code is an redirect status
 pub fn is_redirect_status(status: u16) -> bool {
 	[301, 302, 303, 307, 308].contains(&status)
 }
