@@ -419,7 +419,7 @@ impl<'js> Request<'js> {
 		} else {
 			Err(Exception::throw_type(
 				&ctx,
-				"request `init` paramater must either be a request object or a string",
+				"request `init` parameter must either be a request object or a string",
 			))
 		}
 	}

@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use channel::Receiver;
 use futures::{FutureExt, Stream, StreamExt};
 
-/// A newtype struct over reciever implementing the [`Stream`] trait.
+/// A newtype struct over receiver implementing the [`Stream`] trait.
 pub struct ChannelStream<R>(Receiver<R>);
 
 impl<R> Stream for ChannelStream<R> {

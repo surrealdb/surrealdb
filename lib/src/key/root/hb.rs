@@ -44,7 +44,7 @@ impl Hb {
 	}
 
 	pub fn suffix(ts: &Timestamp) -> Vec<u8> {
-		// Add one to timestmap so we get a complete range inclusive of provided timestamp
+		// Add one to timestamp so we get a complete range inclusive of provided timestamp
 		// Also convert type
 		let tskey: KeyTimestamp = KeyTimestamp {
 			value: ts.value + 1,

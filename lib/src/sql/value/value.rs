@@ -1297,7 +1297,7 @@ impl Value {
 			Value::Number(Number::Decimal(v)) => match v.try_into() {
 				// The Decimal can be represented as a f64
 				Ok(v) => Ok(v),
-				// Ths Decimal loses precision
+				// This Decimal loses precision
 				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "f64".into(),
@@ -1373,7 +1373,7 @@ impl Value {
 			Value::Number(Number::Decimal(ref v)) => match v.to_f64() {
 				// The Decimal can be represented as a Float
 				Some(v) => Ok(Number::Float(v)),
-				// Ths BigDecimal loses precision
+				// This BigDecimal loses precision
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "float".into(),
@@ -1396,7 +1396,7 @@ impl Value {
 			Value::Number(Number::Int(v)) => match Decimal::from_i64(v) {
 				// The Int can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
-				// Ths Int does not convert to a Decimal
+				// This Int does not convert to a Decimal
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
@@ -1406,7 +1406,7 @@ impl Value {
 			Value::Number(Number::Float(v)) => match Decimal::from_f64(v) {
 				// The Float can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
-				// Ths Float does not convert to a Decimal
+				// This Float does not convert to a Decimal
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
@@ -1797,7 +1797,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<bool>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(v),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "bool".into(),
@@ -1832,7 +1832,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<i64>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(Number::Int(v)),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "int".into(),
@@ -1867,7 +1867,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<f64>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(Number::Float(v)),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "float".into(),
@@ -1890,7 +1890,7 @@ impl Value {
 			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
 				// The Int can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths Int does not convert to a Decimal
+				// This Int does not convert to a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1900,7 +1900,7 @@ impl Value {
 			Value::Number(Number::Float(ref v)) => match Decimal::try_from(*v) {
 				// The Float can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths Float does not convert to a Decimal
+				// This Float does not convert to a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1910,7 +1910,7 @@ impl Value {
 			Value::Strand(ref v) => match Decimal::from_str(v) {
 				// The string can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths string is not a Decimal
+				// This string is not a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1933,7 +1933,7 @@ impl Value {
 			Value::Strand(ref v) => match Number::from_str(v) {
 				// The string can be represented as a Float
 				Ok(v) => Ok(v),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "number".into(),
@@ -2008,7 +2008,7 @@ impl Value {
 			Value::Strand(ref v) => match Uuid::try_from(v.as_str()) {
 				// The string can be represented as a uuid
 				Ok(v) => Ok(v),
-				// Ths string is not a uuid
+				// This string is not a uuid
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "uuid".into(),
@@ -2031,7 +2031,7 @@ impl Value {
 			Value::Strand(ref v) => match Datetime::try_from(v.as_str()) {
 				// The string can be represented as a datetime
 				Ok(v) => Ok(v),
-				// Ths string is not a datetime
+				// This string is not a datetime
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "datetime".into(),
@@ -2054,7 +2054,7 @@ impl Value {
 			Value::Strand(ref v) => match Duration::try_from(v.as_str()) {
 				// The string can be represented as a duration
 				Ok(v) => Ok(v),
-				// Ths string is not a duration
+				// This string is not a duration
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "duration".into(),
@@ -2512,7 +2512,7 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value using natrual numerical comparison
+	/// Compare this Value to another Value using natural numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
@@ -2520,7 +2520,7 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natrual numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),

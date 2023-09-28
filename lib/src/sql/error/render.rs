@@ -31,14 +31,14 @@ pub enum Truncation {
 	Both,
 }
 
-/// A piece of the source code with a location and an optional explenation.
+/// A piece of the source code with a location and an optional explanation.
 #[derive(Clone, Debug)]
 pub struct Snippet {
-	/// The part of the orignal source code,
+	/// The part of the original source code,
 	source: String,
-	/// Wether part of the source line was truncated.
+	/// Whether part of the source line was truncated.
 	truncation: Truncation,
-	/// The location of the snippet in the orignal source code.
+	/// The location of the snippet in the original source code.
 	location: Location,
 	/// The offset, in chars, into the snippet where the location is.
 	offset: usize,
@@ -73,7 +73,7 @@ impl Snippet {
 	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
 		let full_line_length = line.chars().count();
 		line = line.trim_start();
-		// Saturate in case the error ocurred in invalid leading whitespace.
+		// Saturate in case the error occurred in invalid leading whitespace.
 		let mut offset = around_offset.saturating_sub(full_line_length - line.chars().count());
 		line = line.trim_end();
 		let mut truncation = Truncation::None;

@@ -17,7 +17,7 @@ available in the nightly release.
 Unfortunately for us the nightly release is a little unstable and there
 was a [bug](https://github.com/rust-lang/rust/issues/110475) in the 
 latest version of the nightly compiler that prevents use from compiling
-some of surrealdb's depdendencies. To workaround this issue we've carefully
+some of surrealdb's dependencies. To workaround this issue we've carefully
 picked a version of the nightly compiler that works with both cargo-fuzz
 and our dependencies. This version is `nightly-2023-04-21`. To install
 this version we simply need to run;
@@ -58,7 +58,7 @@ The previous command will run the fuzzer in libfuzzer's default mode,
 which means as a single thread. If you would like to speed fuzzing
 up we can make use of all cores, and use a dictionary file. e.g.
 ```
-# -fork: Run N seperate process fuzzing in parralell in this case we
+# -fork: Run N separate process fuzzing in parallel in this case we
 #        use nproc to match the number of processors on our local
 #        machine.
 # -dict: Make use the fuzzer specific dictionary file.

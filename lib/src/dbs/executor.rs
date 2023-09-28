@@ -65,7 +65,7 @@ impl<'a> Executor<'a> {
 	///
 	/// # Return
 	///
-	/// An `Err` if the transaction could not be commited;
+	/// An `Err` if the transaction could not be committed;
 	/// otherwise returns `Ok`.
 	async fn commit(&mut self, local: bool) -> Result<(), Error> {
 		if local {

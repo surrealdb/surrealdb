@@ -230,7 +230,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	let (i, explain) = opt(preceded(shouldbespace, explain))(i)?;
 	let (i, _) = expected(
-		"one of WITH, WHERE, SPLIT, GROUP, ORDER, LIMIT, START, FETCH, VERSION, TIMEOUT, PARELLEL, or EXPLAIN",
+		"one of WITH, WHERE, SPLIT, GROUP, ORDER, LIMIT, START, FETCH, VERSION, TIMEOUT, PARALLEL, or EXPLAIN",
 		cut(peek(ending::query))
 	)(i)?;
 
