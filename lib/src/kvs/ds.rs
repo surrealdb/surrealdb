@@ -568,7 +568,7 @@ impl Datastore {
 		for cl in &cluster {
 			let ndlqs = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-			})?, crate::kvs::tx::NO_LIMIT).await?;
+			})?, NO_LIMIT).await?;
 			for ndlq in ndlqs {
 				nd_lqs.push(Arc::new(ndlq));
 			}
@@ -577,7 +577,7 @@ impl Datastore {
 		// Scan tables for all live queries
 		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
 		for lq in &nd_lqs {
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, crate::kvs::tx::NO_LIMIT).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
 			for tb in tbs {
 				tb_lqs.push(Arc::new(tb));
 			}
@@ -611,7 +611,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, crate::kvs::tx::NO_LIMIT).await?;
+		let lqs = tx.scan_ndlq(&self.id, NO_LIMIT).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
