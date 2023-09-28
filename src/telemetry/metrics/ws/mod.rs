@@ -1,16 +1,16 @@
 use std::time::Instant;
 
 use once_cell::sync::Lazy;
-use opentelemetry::KeyValue;
-use opentelemetry::{
-	metrics::{Histogram, MetricsError, ObservableUpDownCounter, Unit},
-	Context as TelemetryContext,
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::{
+	Histogram, MetricsError, ObservableUpDownCounter, Unit,
 };
+use opentelemetry::{global, Context, KeyValue};
 
-use super::{METER_DURATION, METER_SIZE};
+static METER: Lazy<Meter> = Lazy::new(|| global::meter("surrealdb.rpc"));
 
 pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_DURATION
+	METER
 		.u64_histogram("rpc.server.duration")
 		.with_description("Measures duration of inbound RPC requests in milliseconds.")
 		.with_unit(Unit::new("ms"))
@@ -18,14 +18,14 @@ pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 pub static RPC_SERVER_ACTIVE_CONNECTIONS: Lazy<ObservableUpDownCounter<i64>> = Lazy::new(|| {
-	METER_DURATION
+	METER
 		.i64_observable_up_down_counter("rpc.server.active_connections")
 		.with_description("The number of active WebSocket connections.")
 		.init()
 });
 
 pub static RPC_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+	METER
 		.u64_histogram("rpc.server.request.size")
 		.with_description("Measures the size of HTTP request messages.")
 		.with_unit(Unit::new("mb"))
@@ -33,7 +33,7 @@ pub static RPC_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 pub static RPC_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+	METER
 		.u64_histogram("rpc.server.response.size")
 		.with_description("Measures the size of HTTP response messages.")
 		.with_unit(Unit::new("mb"))
@@ -57,8 +57,11 @@ pub fn on_disconnect() -> Result<(), MetricsError> {
 pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
 	let attrs = otel_common_attrs();
 
-	METER_DURATION
-		.register_callback(move |cx| RPC_SERVER_ACTIVE_CONNECTIONS.observe(cx, value, &attrs))
+	METER.register_callback(&[RPC_SERVER_ACTIVE_CONNECTIONS.as_any()], move |o| {
+		o.observe_i64(&RPC_SERVER_ACTIVE_CONNECTIONS.clone(), value, &attrs)
+	})?;
+
+	Ok(())
 }
 
 //
@@ -99,12 +102,12 @@ impl RequestContext {
 }
 
 /// Updates the request and response metrics for an RPC method.
-pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
+pub fn record_rpc(res_size: usize, is_error: bool) {
 	let mut attrs = otel_common_attrs();
 	let mut duration = 0;
 	let mut req_size = 0;
 
-	if let Some(cx) = cx.get::<RequestContext>() {
+	if let Some(cx) = Context::current().get::<RequestContext>() {
 		attrs.extend_from_slice(&[
 			KeyValue::new("rpc.method", cx.method.clone()),
 			KeyValue::new("rpc.error", is_error),
@@ -120,7 +123,7 @@ pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 		]);
 	};
 
-	RPC_SERVER_DURATION.record(cx, duration, &attrs);
-	RPC_SERVER_REQUEST_SIZE.record(cx, req_size, &attrs);
-	RPC_SERVER_RESPONSE_SIZE.record(cx, res_size as u64, &attrs);
+	RPC_SERVER_DURATION.record(duration, &attrs);
+	RPC_SERVER_REQUEST_SIZE.record(req_size, &attrs);
+	RPC_SERVER_RESPONSE_SIZE.record(res_size as u64, &attrs);
 }

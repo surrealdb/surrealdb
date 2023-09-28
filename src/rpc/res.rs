@@ -1,5 +1,4 @@
 use axum::extract::ws::Message;
-use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
 use serde_json::{json, Value as Json};
 use std::borrow::Cow;
@@ -135,7 +134,7 @@ impl Response {
 			}
 		};
 
-		record_rpc(&TelemetryContext::current(), res_size, is_error);
+		record_rpc(res_size, is_error);
 	}
 }
 
