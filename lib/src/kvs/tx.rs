@@ -51,6 +51,8 @@ use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+pub(crate) const NO_LIMIT: u32 = 0;
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -1101,7 +1103,7 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while limit == 0 || num > 0 {
+		while limit == NO_LIMIT || num > 0 {
 			let batch_size = match num {
 				0 => 1000,
 				_ => std::cmp::min(1000, num),
@@ -1154,7 +1156,7 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while (limit == 0) || (num > 0) {
+		while (limit == NO_LIMIT) || (num > 0) {
 			let batch_size = match num {
 				0 => 1000,
 				_ => std::cmp::min(1000, num),
@@ -1226,7 +1228,7 @@ impl Transaction {
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
-		while limit == 0 || num > 0 {
+		while limit == NO_LIMIT || num > 0 {
 			let batch_size = match num {
 				0 => 1000,
 				_ => std::cmp::min(1000, num),

@@ -14,7 +14,7 @@ use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -36,6 +36,10 @@ use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+const HEARTBEAT_BATCH_SIZE: u32 = 1000;
+const LQ_CHANNEL_SIZE: usize = 100;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -284,7 +288,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(channel::bounded(100));
+		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -496,7 +500,7 @@ impl Datastore {
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, 1000).await?;
+			let node_lqs = tx.scan_ndlq(nd, NO_LIMIT).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
@@ -536,7 +540,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(0).await?;
+		let cluster = tx.scan_nd(NO_LIMIT).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
@@ -544,7 +548,7 @@ impl Datastore {
 		}
 		// Scan heartbeats
 		let now = tx.clock();
-		let hbs = tx.scan_hb(&now, 1000).await?;
+		let hbs = tx.scan_hb(&now, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
@@ -564,7 +568,7 @@ impl Datastore {
 		for cl in &cluster {
 			let ndlqs = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-			})?, 1000).await?;
+			})?, crate::kvs::tx::NO_LIMIT).await?;
 			for ndlq in ndlqs {
 				nd_lqs.push(Arc::new(ndlq));
 			}
@@ -573,7 +577,7 @@ impl Datastore {
 		// Scan tables for all live queries
 		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
 		for lq in &nd_lqs {
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 1000).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, crate::kvs::tx::NO_LIMIT).await?;
 			for tb in tbs {
 				tb_lqs.push(Arc::new(tb));
 			}
@@ -607,7 +611,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, 1000).await?;
+		let lqs = tx.scan_ndlq(&self.id, crate::kvs::tx::NO_LIMIT).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
@@ -666,10 +670,9 @@ impl Datastore {
 		tx: &mut Transaction,
 		ts: &Timestamp,
 	) -> Result<Vec<Hb>, Error> {
-		let limit = 1000;
-		let dead = tx.scan_hb(ts, limit).await?;
+		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
 		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), 1000).await?;
+		tx.delr_hb(dead.clone(), NO_LIMIT).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
 		}

@@ -29,7 +29,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	a_valid_notification(
 		&mut tx,
 		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -64,7 +64,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	let valid_data = a_valid_notification(
 		&mut tx,
 		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -75,7 +75,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	tx.putc_ndlq(
 		bad_nd_lq_id,
 		valid_data.live_query_id.0,
-		&valid_data.req.namesapce,
+		&valid_data.req.namespace,
 		&valid_data.req.database,
 		&valid_data.req.table,
 		None,
@@ -108,7 +108,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	let valid_data = a_valid_notification(
 		&mut tx,
 		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -119,7 +119,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	let mut live_stm = LiveStatement::default();
 	live_stm.id = bad_tb_lq_id.into();
 	tx.putc_tblq(
-		&valid_data.req.namesapce,
+		&valid_data.req.namespace,
 		&valid_data.req.database,
 		&valid_data.req.table,
 		live_stm,
@@ -135,7 +135,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	// Verify invalid table live query is deleted
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx
-		.scan_tblq(&valid_data.req.namesapce, &valid_data.req.database, &valid_data.req.table, 1000)
+		.scan_tblq(&valid_data.req.namespace, &valid_data.req.database, &valid_data.req.table, 1000)
 		.await
 		.unwrap();
 	tx.cancel().await.unwrap();
@@ -165,7 +165,7 @@ struct ValidBootstrapState {
 
 #[derive(Debug, Clone)]
 struct BootstrapPrerequisites {
-	pub namesapce: String,
+	pub namespace: String,
 	pub database: String,
 	pub table: String,
 }
@@ -195,7 +195,7 @@ async fn a_valid_notification(
 	tx.putc_ndlq(
 		entry.node_id.0,
 		entry.live_query_id.0,
-		&args.namesapce,
+		&args.namespace,
 		&args.database,
 		&args.table,
 		None,
@@ -205,7 +205,7 @@ async fn a_valid_notification(
 	let mut live_stm = LiveStatement::default();
 	live_stm.id = entry.live_query_id.clone().into();
 	live_stm.node = entry.node_id.clone().into();
-	tx.putc_tblq(&args.namesapce, &args.database, &args.table, live_stm, None).await?;
+	tx.putc_tblq(&args.namespace, &args.database, &args.table, live_stm, None).await?;
 	// TODO Create notification
 	// tx.putc_tbnt(
 	// ).await?;
