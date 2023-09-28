@@ -115,6 +115,8 @@ tracing = "0.1.37"
 trice = "0.3.1"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.4.0"
+phf = { version = "0.11.2", features = ["macros", "unicase"] }
+unicase = "2.7.0"
 
 [dev-dependencies]
 criterion = { version="0.4", features= ["async_futures"] }
