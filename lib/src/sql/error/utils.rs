@@ -57,7 +57,7 @@ where
 }
 
 pub trait ExplainResultExt<I, O> {
-	/// A function which adds a explaination to an error if the parser fails at a place which can
+	/// A function which adds a explanation to an error if the parser fails at a place which can
 	/// be parsed with the given parser.
 	fn explain<P, O1>(self, explain: &'static str, condition: P) -> Self
 	where

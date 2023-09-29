@@ -127,7 +127,7 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 		ret.push_str(" AS res FROM node:0;\n");
 		ret
 	}
-	// Test different traveral depths
+	// Test different traversal depths
 	for n in 1..=40 {
 		// Ensure a good stack size for tests
 		with_enough_stack(async move {

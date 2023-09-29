@@ -91,7 +91,7 @@ pub async fn run(
 			// Get the context global object
 			let global = ctx.globals();
 
-			// SAFETY: This is safe because the runtime only lifes for the duration of this
+			// SAFETY: This is safe because the runtime only lives for the duration of this
 			// function. For the entire duration of which context, opt, txn and doc are valid.
 			unsafe{ create_query_data(context,opt,txn,doc,&ctx) }?;
 			// Register the surrealdb module as a global object
