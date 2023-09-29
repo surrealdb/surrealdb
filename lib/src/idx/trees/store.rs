@@ -3,6 +3,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -18,7 +19,7 @@ pub enum TreeStoreType {
 
 pub enum TreeNodeStore<N>
 where
-	N: TreeNode,
+	N: TreeNode + Debug,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
 	Write(TreeWriteCache<N>),
@@ -30,7 +31,7 @@ where
 
 impl<N> TreeNodeStore<N>
 where
-	N: TreeNode,
+	N: TreeNode + Debug,
 {
 	pub fn new(
 		keys: TreeNodeProvider,
@@ -96,7 +97,7 @@ where
 
 pub struct TreeWriteCache<N>
 where
-	N: TreeNode,
+	N: TreeNode + Debug,
 {
 	np: TreeNodeProvider,
 	nodes: HashMap<NodeId, StoredNode<N>>,
@@ -106,7 +107,7 @@ where
 	out: HashSet<NodeId>,
 }
 
-impl<N> TreeWriteCache<N>
+impl<N: Debug> TreeWriteCache<N>
 where
 	N: TreeNode,
 {
@@ -140,7 +141,7 @@ where
 	fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
-			debug!("SET: {} {}", node.id, updated);
+			debug!("SET: {} {} {:?}", node.id, updated, node.n);
 			self.out.remove(&node.id);
 		}
 		if updated {

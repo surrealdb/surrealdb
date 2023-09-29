@@ -18,6 +18,7 @@ use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::btree_map::Entry as BEntry;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -218,7 +219,18 @@ impl MTree {
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v);
 						if Self::check_add(k, d, &res) {
-							res.insert(PriorityResult(d, o.clone()), p.docs.clone());
+							let pr = PriorityResult(d);
+							match res.entry(pr) {
+								BEntry::Vacant(e) => {
+									e.insert(p.docs.clone());
+								}
+								BEntry::Occupied(mut e) => {
+									let docs = e.get_mut();
+									for doc in &p.docs {
+										docs.insert(doc);
+									}
+								}
+							}
 							if res.len() > k {
 								res.pop_last();
 							}
@@ -251,8 +263,8 @@ impl MTree {
 	fn check_add(k: usize, dist: f64, res: &BTreeMap<PriorityResult, RoaringTreemap>) -> bool {
 		if res.len() < k {
 			true
-		} else if let Some(l) = res.keys().last() {
-			dist < l.0
+		} else if let Some(pr) = res.keys().last() {
+			dist <= pr.0
 		} else {
 			true
 		}
@@ -409,13 +421,10 @@ impl MTree {
 						.map_or(0.0, |pd| self.calculate_distance(p2.center.as_ref(), pd.as_ref()));
 					node.push(p1);
 					node.push(p2);
-					let max_dist = self.compute_internal_max_distance(&mut node);
+					let max_dist = self.compute_internal_max_distance(&node);
 					#[cfg(debug_assertions)]
 					debug!("NODE: {} - MAX_DIST: {:?}", node_id, max_dist);
-					store.set_node(
-						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-						true,
-					)?;
+					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)?;
 					Ok(InsertionResult::CoveringRadius(max_dist))
 				} else {
 					node.push(p1);
@@ -443,7 +452,7 @@ impl MTree {
 					best_entry.radius = covering_radius;
 					updated = true;
 				}
-				let max_dist = self.compute_internal_max_distance(&mut node);
+				let max_dist = self.compute_internal_max_distance(&node);
 				#[cfg(debug_assertions)]
 				debug!("NODE INTERNAL: {} - MAX_DIST: {:?}", node_id, max_dist);
 				store.set_node(
@@ -674,6 +683,7 @@ impl MTree {
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	#[allow(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,
 		tx: &mut Transaction,
@@ -704,8 +714,18 @@ impl MTree {
 			}
 			// Else
 			MTreeNode::Internal(n) => {
-				self.delete_node_internal(tx, store, node.id, node.key, n, object, id, deleted)
-					.await
+				self.delete_node_internal(
+					tx,
+					store,
+					node.id,
+					node.key,
+					n,
+					parent_center,
+					object,
+					id,
+					deleted,
+				)
+				.await
 			}
 		}
 	}
@@ -718,6 +738,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut n_node: InternalNode,
+		parent_center: &Option<Arc<Vector>>,
 		od: Arc<Vector>,
 		id: DocId,
 		deleted: &mut bool,
@@ -746,10 +767,10 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			debug!("on_idx: {:?}", on_idx);
 			// Delete (Od, child(On))
-			let (on_center, on_node) = {
+			let (on_center, on_node, on_radius) = {
 				let on_entry = &n_node[on_idx];
 				let on_node = store.get_node(tx, on_entry.node).await?;
-				(on_entry.center.clone(), on_node)
+				(on_entry.center.clone(), on_node, on_entry.radius)
 			};
 			match self
 				.delete_at_node(
@@ -765,7 +786,13 @@ impl MTree {
 			{
 				DeletionResult::NotFound => {}
 				DeletionResult::DocRemoved => {
-					Self::set_internal_node(store, node_id, node_key, n_node, false)?;
+					Self::set_stored_node(
+						store,
+						node_id,
+						node_key,
+						n_node.into_mtree_node(),
+						false,
+					)?;
 					return Ok(DeletionResult::DocRemoved);
 				}
 				// Let r = returned covering radius
@@ -778,8 +805,9 @@ impl MTree {
 						on_entry.radius = r;
 						n_updated = true;
 					}
+					let on_radius = on_entry.radius;
 					return self.delete_node_internal_check_underflown(
-						store, node_id, node_key, n_node, on_idx, n_updated,
+						store, node_id, node_key, n_node, on_radius, n_updated,
 					);
 				}
 				DeletionResult::Underflown(p_node_id, p_node_key, p_node) => {
@@ -787,6 +815,7 @@ impl MTree {
 						.deletion_underflown(
 							tx,
 							store,
+							parent_center,
 							on_idx,
 							&mut n_node,
 							on_center.as_ref(),
@@ -796,12 +825,12 @@ impl MTree {
 						)
 						.await?;
 					return self.delete_node_internal_check_underflown(
-						store, node_id, node_key, n_node, on_idx, n_updated,
+						store, node_id, node_key, n_node, on_radius, n_updated,
 					);
 				}
 			}
 		}
-		Self::set_internal_node(store, node_id, node_key, n_node, false)?;
+		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), false)?;
 		Ok(DeletionResult::NotFound)
 	}
 
@@ -812,7 +841,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		n_node: InternalNode,
-		on_idx: usize,
+		on_radius: f64,
 		n_updated: bool,
 	) -> Result<DeletionResult, Error> {
 		// If (N is underflown)
@@ -821,20 +850,19 @@ impl MTree {
 			return Ok(DeletionResult::Underflown(node_id, node_key, MTreeNode::Internal(n_node)));
 		}
 		// Return max(On E N) { parentDistance(On) + r(On)}
-		let max_dist = self.compute_internal_max_distance(&n_node) + n_node[on_idx].radius;
-		Self::set_internal_node(store, node_id, node_key, n_node, n_updated)?;
+		let max_dist = self.compute_internal_max_distance(&n_node) + on_radius;
+		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)?;
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
-	fn set_internal_node(
+	fn set_stored_node(
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
-		internal_node: InternalNode,
+		node: MTreeNode,
 		updated: bool,
 	) -> Result<(), Error> {
-		let sn = StoredNode::new(MTreeNode::Internal(internal_node), node_id, node_key, 0);
-		store.set_node(sn, updated)
+		store.set_node(StoredNode::new(node, node_id, node_key, 0), updated)
 	}
 
 	#[allow(unused_variables, unused_assignments, clippy::too_many_arguments)]
@@ -842,42 +870,52 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
+		parent_center: &Option<Arc<Vector>>,
 		on_idx: usize,
 		n_node: &mut InternalNode,
-		other_center: &Vector,
+		on_center: &Vector,
 		p_id: NodeId,
 		p_key: Key,
 		mut p_node: MTreeNode,
 	) -> Result<bool, Error> {
+		#[cfg(debug_assertions)]
+		debug!("deletion_underflown: {}", p_id);
 		let min = f64::NAN;
 		let mut onn_idx = None;
 		// Find node entry Onn € N, e <> 0, for which d(On, Onn) is a minimum
 		for (i, e) in n_node.iter().enumerate() {
 			if e.node != p_id {
-				let d = self.calculate_distance(other_center, e.center.as_ref());
+				let d = self.calculate_distance(on_center, e.center.as_ref());
 				if min.is_nan() || d < min {
 					onn_idx = Some(i);
 				}
 			}
 		}
 		let mut n_updated = false;
-		if let Some(onn_idx) = onn_idx {
-			let onn_entry = &mut n_node[onn_idx];
+		if let Some(mut onn_idx) = onn_idx {
+			let onn_entry = &n_node[onn_idx];
+			#[cfg(debug_assertions)]
+			debug!("deletion_underflown: onn_entry {}", onn_entry.node);
 			let onn_center = onn_entry.center.clone();
 			// Let S be the set of entries in child(Onn()
 			let mut onn_node = store.get_node(tx, onn_entry.node).await?;
 			// If (S U P) will fit into child(Onn)
 			if onn_node.n.len() + p_node.len() <= self.state.capacity as usize {
+				#[cfg(debug_assertions)]
+				debug!("deletion_underflown - fit into: {}", onn_node.id);
 				// Remove On from N;
 				n_node.remove(on_idx);
+				if on_idx < onn_idx {
+					onn_idx -= 1;
+				}
 				n_updated = true;
 				match &mut onn_node.n {
 					MTreeNode::Internal(s) => {
 						let p_node = p_node.internal()?;
 						// for each Op E P
-						for op in p_node {
+						for mut op in p_node {
 							// Let parentDistance(Op) = d(Op, Onn);
-							let parent_dist =
+							op.parent_dist =
 								self.calculate_distance(op.center.as_ref(), onn_center.as_ref());
 							// Add Op to S;
 							s.push(op);
@@ -923,21 +961,37 @@ impl MTree {
 				store.remove_node(p_id, p_key)?;
 				store.set_node(onn_node, true)?;
 			} else {
+				#[cfg(debug_assertions)]
+				debug!("deletion_underflown - split: {}", p_id);
 				// Remove On and Onn from N;
 				n_node.remove(on_idx.max(onn_idx));
 				n_node.remove(on_idx.min(onn_idx));
 				n_updated = true;
 				// Split(S U P)
 				p_node.merge(onn_node.n)?;
-				let (e1, e2) = match p_node {
+				let (mut e1, mut e2) = match p_node {
 					MTreeNode::Internal(n) => self.split_node(store, p_id, p_key, n)?,
 					MTreeNode::Leaf(n) => self.split_node(store, p_id, p_key, n)?,
 				};
-				// TODO: Compute parent_dist?
+				e1.parent_dist = parent_center
+					.as_ref()
+					.map_or(0.0, |pd| self.calculate_distance(e1.center.as_ref(), pd.as_ref()));
+				e2.parent_dist = parent_center
+					.as_ref()
+					.map_or(0.0, |pd| self.calculate_distance(e2.center.as_ref(), pd.as_ref()));
 				// Add new child pointer entries to N;
 				n_node.push(e1);
 				n_node.push(e2);
 				store.remove_node(onn_node.id, onn_node.key)?;
+			}
+		} else {
+			#[cfg(debug_assertions)]
+			debug!("deletion_underflown - nothing");
+			if p_node.len() == 0 {
+				store.remove_node(p_id, p_key)?;
+				n_updated = true;
+			} else {
+				Self::set_stored_node(store, p_id, p_key, p_node, false)?;
 			}
 		}
 		Ok(n_updated)
@@ -957,14 +1011,12 @@ impl MTree {
 	) -> Result<DeletionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_leaf: {} {:?}", node_id, od);
-		let mut doc_removed = false;
 		let mut entry_removed = false;
 		// If (Od E N)
 		if let Entry::Occupied(mut e) = leaf_node.entry(od) {
 			let p = e.get_mut();
 			// Remove Od from N
 			if p.docs.remove(id) {
-				doc_removed = true;
 				*deleted = true;
 				if p.docs.is_empty() {
 					e.remove();
@@ -976,20 +1028,25 @@ impl MTree {
 			store.set_node(sn, false)?;
 			return Ok(DeletionResult::NotFound);
 		}
-		// If (N is underflown)
-		if entry_removed && leaf_node.len() < self.minimum {
-			return Ok(DeletionResult::Underflown(node_id, node_key, MTreeNode::Leaf(leaf_node)));
-		}
-		if doc_removed {
+		if entry_removed {
+			// If (N is underflown)
+			if leaf_node.len() < self.minimum {
+				return Ok(DeletionResult::Underflown(
+					node_id,
+					node_key,
+					MTreeNode::Leaf(leaf_node),
+				));
+			}
+			// Return max(Ol E N) { parentDistance(Ol)};
+			let max_dist = self.compute_leaf_max_distance(&leaf_node, parent_center);
+			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
+			store.set_node(sn, true)?;
+			Ok(DeletionResult::CoveringRadius(max_dist))
+		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
 			store.set_node(sn, true)?;
 			return Ok(DeletionResult::DocRemoved);
 		}
-		// Return max(Ol E N) { parentDistance(Ol)};
-		let max_dist = self.compute_leaf_max_distance(&leaf_node, parent_center);
-		let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-		store.set_node(sn, false)?;
-		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
 	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
@@ -1035,7 +1092,7 @@ impl Ord for PriorityNode {
 }
 
 #[derive(PartialEq)]
-struct PriorityResult(f64, Arc<Vector>);
+struct PriorityResult(f64);
 
 impl Eq for PriorityResult {}
 
@@ -1047,10 +1104,7 @@ impl PartialOrd for PriorityResult {
 
 impl Ord for PriorityResult {
 	fn cmp(&self, other: &Self) -> Ordering {
-		match partial_cmp_f64(self.0, other.0).unwrap_or(Ordering::Equal) {
-			Ordering::Equal => self.1.cmp(&other.1),
-			other => other,
-		}
+		partial_cmp_f64(self.0, other.0).unwrap_or(Ordering::Equal)
 	}
 }
 
@@ -1084,8 +1138,14 @@ impl MTreeNode {
 
 	fn merge(&mut self, other: MTreeNode) -> Result<(), Error> {
 		match (self, other) {
-			(MTreeNode::Internal(s), MTreeNode::Internal(o)) => Ok(Self::merge_internal(s, o)),
-			(MTreeNode::Leaf(s), MTreeNode::Leaf(o)) => Ok(Self::merge_leaf(s, o)),
+			(MTreeNode::Internal(s), MTreeNode::Internal(o)) => {
+				Self::merge_internal(s, o);
+				Ok(())
+			}
+			(MTreeNode::Leaf(s), MTreeNode::Leaf(o)) => {
+				Self::merge_leaf(s, o);
+				Ok(())
+			}
 			(_, _) => Err(Error::Unreachable),
 		}
 	}
@@ -1328,8 +1388,9 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
 	use indexmap::IndexMap;
+	//use rand::{thread_rng, Rng};
 	use roaring::RoaringTreemap;
-	use std::collections::VecDeque;
+	use std::collections::{BTreeMap, VecDeque};
 	use std::sync::Arc;
 	use test_log::test;
 	use tokio::sync::{Mutex, MutexGuard};
@@ -1711,7 +1772,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec8, 20).await.unwrap();
 			check_knn(
 				&res.objects,
-				vec![vec![8], vec![9], vec![6], vec![10], vec![4], vec![3], vec![2, 3], vec![1]],
+				vec![vec![8], vec![9], vec![6, 10], vec![4], vec![3], vec![2, 3], vec![1]],
 			);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 7);
@@ -1989,6 +2050,81 @@ mod tests {
 		}
 	}
 
+	#[test(tokio::test)]
+	async fn test_mtree_large_set() {
+		//let mut rng = thread_rng();
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
+
+		let mut collection = BTreeMap::new();
+
+		// Prepare data set
+		for doc_id in 0..10 {
+			collection.insert(doc_id, vec![doc_id.into()]);
+		}
+
+		// Insert
+		for (doc_id, obj) in &collection {
+			{
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+				let mut s = s.lock().await;
+				t.insert(&mut tx, &mut s, obj.clone(), *doc_id).await.unwrap();
+				finish_operation(tx, s, true).await;
+			}
+			{
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+				let mut s = s.lock().await;
+				check_tree_properties(&mut tx, &mut s, &t).await;
+			}
+		}
+
+		// Find
+		{
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
+			let mut s = s.lock().await;
+			for (doc_id, obj) in &collection {
+				let res = t.knn_search(&mut tx, &mut s, obj.as_ref(), 1).await.unwrap();
+				let docs = &res.objects[0];
+				assert!(docs.contains(*doc_id), "{} vs {:?}", doc_id, docs);
+			}
+		}
+
+		// Deletion
+		for (doc_id, obj) in &collection {
+			{
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+				let mut s = s.lock().await;
+				assert!(
+					t.delete(&mut tx, &mut s, obj.clone(), *doc_id).await.unwrap(),
+					"Delete failed: {} {:?}",
+					doc_id,
+					obj
+				);
+				finish_operation(tx, s, true).await;
+			}
+			{
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
+				let mut s = s.lock().await;
+				let res = t.knn_search(&mut tx, &mut s, obj.as_ref(), 1).await.unwrap();
+				for docs in res.objects {
+					assert!(!docs.contains(*doc_id), "Found: {} {:?}", doc_id, obj);
+				}
+			}
+			{
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+				let mut s = s.lock().await;
+				check_tree_properties(&mut tx, &mut s, &t).await;
+			}
+		}
+
+		{
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+			let mut s = s.lock().await;
+			check_tree_properties(&mut tx, &mut s, &t).await.check(0, 0, None, None, 0, 0);
+		}
+	}
+
 	fn check_leaf_vec(
 		m: &IndexMap<Arc<Vector>, ObjectProperties>,
 		idx: usize,
@@ -2078,7 +2214,7 @@ mod tests {
 		}
 	}
 
-	#[derive(Default)]
+	#[derive(Default, Debug)]
 	struct CheckedProperties {
 		node_count: usize,
 		max_depth: usize,
@@ -2100,19 +2236,19 @@ mod tests {
 			expected_object_count: usize,
 			expected_doc_count: usize,
 		) {
-			assert_eq!(self.node_count, expected_node_count, "Node count");
-			assert_eq!(self.max_depth, expected_depth, "Max depth");
+			assert_eq!(self.node_count, expected_node_count, "Node count - {:?}", self);
+			assert_eq!(self.max_depth, expected_depth, "Max depth - {:?}", self);
 			let expected_leaf_depth = if expected_depth == 0 {
 				None
 			} else {
 				Some(expected_depth)
 			};
-			assert_eq!(self.min_leaf_depth, expected_leaf_depth, "Min leaf depth");
-			assert_eq!(self.max_leaf_depth, expected_leaf_depth, "Max leaf depth");
-			assert_eq!(self.min_objects, expected_min_objects, "Min objects");
-			assert_eq!(self.max_objects, expected_max_objects, "Max objects");
-			assert_eq!(self.object_count, expected_object_count, "Object count");
-			assert_eq!(self.doc_count, expected_doc_count, "Doc count");
+			assert_eq!(self.min_leaf_depth, expected_leaf_depth, "Min leaf depth - {:?}", self);
+			assert_eq!(self.max_leaf_depth, expected_leaf_depth, "Max leaf depth - {:?}", self);
+			assert_eq!(self.min_objects, expected_min_objects, "Min objects - {:?}", self);
+			assert_eq!(self.max_objects, expected_max_objects, "Max objects - {:?}", self);
+			assert_eq!(self.object_count, expected_object_count, "Object count- {:?}", self);
+			assert_eq!(self.doc_count, expected_doc_count, "Doc count - {:?}", self);
 		}
 	}
 
@@ -2145,10 +2281,9 @@ mod tests {
 					let next_depth = depth + 1;
 					entries.iter().for_each(|e| {
 						if let Some(center) = center.as_ref() {
-							assert!(
-								t.calculate_distance(center.as_ref(), e.center.as_ref()) + e.radius
-									<= radius
-							);
+							let pd = t.calculate_distance(center.as_ref(), e.center.as_ref());
+							assert_eq!(pd, e.parent_dist, "Incorrect parent distance");
+							assert!(pd + e.radius <= radius);
 						}
 						nodes.push_back((e.node, e.radius, Some(e.center.clone()), next_depth))
 					});
@@ -2159,7 +2294,11 @@ mod tests {
 					update_max(&mut checks.max_objects, m.len());
 					update_min(&mut checks.min_leaf_depth, depth);
 					update_max(&mut checks.max_leaf_depth, depth);
-					for (_, p) in m {
+					for (o, p) in m {
+						if let Some(center) = center.as_ref() {
+							let pd = t.calculate_distance(center.as_ref(), o.as_ref());
+							assert_eq!(pd, p.parent_dist);
+						}
 						checks.doc_count += p.docs.len() as usize;
 					}
 				}
