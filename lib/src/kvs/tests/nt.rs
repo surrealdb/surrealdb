@@ -58,8 +58,12 @@ async fn can_scan_notifications() {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let scanned_notifications =
 			tx.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), 1000).await.unwrap();
+		let scanned_no_limit =
+		// TODO rename to NO_LIMIT
+			tx.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), 0).await.unwrap();
 		tx.commit().await.unwrap();
 		assert_eq!(scanned_notifications, vec![pair.1]);
+		assert_eq!(scanned_notifications, scanned_no_limit);
 	}
 }
 

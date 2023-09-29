@@ -28,8 +28,12 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	// Introduce a valid chain of data to confirm it is not removed from a cleanup
 	a_valid_notification(
 		&mut tx,
-		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+		ValidNotificationState {
+			timestamp: None,
+			node_id: None,
+			live_query_id: None,
+			notification_id: None,
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -63,8 +67,12 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let valid_data = a_valid_notification(
 		&mut tx,
-		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+		ValidNotificationState {
+			timestamp: None,
+			node_id: None,
+			live_query_id: None,
+			notification_id: None,
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -74,10 +82,10 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	let bad_nd_lq_id = uuid::Uuid::parse_str("67b0f588-2b95-4b6e-87f3-73d0a49034be").unwrap();
 	tx.putc_ndlq(
 		bad_nd_lq_id,
-		valid_data.live_query_id.0,
-		&valid_data.req.namesapce,
-		&valid_data.req.database,
-		&valid_data.req.table,
+		valid_data.live_query_id.clone().unwrap().0,
+		&valid_data.namespace,
+		&valid_data.database,
+		&valid_data.table,
 		None,
 	)
 	.await
@@ -89,11 +97,11 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 
 	// Verify node live query is deleted
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-	let res = tx.scan_ndlq(&valid_data.node_id, 1000).await.unwrap();
+	let res = tx.scan_ndlq(&valid_data.node_id.unwrap(), 1000).await.unwrap();
 	tx.cancel().await.unwrap();
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
-	assert_eq!(tested_entry.lq, valid_data.live_query_id);
+	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
 
 	Ok(())
 }
@@ -107,8 +115,12 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let valid_data = a_valid_notification(
 		&mut tx,
-		BootstrapPrerequisites {
-			namesapce: "testns".to_string(),
+		ValidNotificationState {
+			timestamp: None,
+			node_id: None,
+			live_query_id: None,
+			notification_id: None,
+			namespace: "testns".to_string(),
 			database: "testdb".to_string(),
 			table: "testtb".to_string(),
 		},
@@ -118,15 +130,9 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	let bad_tb_lq_id = uuid::Uuid::parse_str("97b8fbe4-a147-4420-95dc-97db3a46c491").unwrap();
 	let mut live_stm = LiveStatement::default();
 	live_stm.id = bad_tb_lq_id.into();
-	tx.putc_tblq(
-		&valid_data.req.namesapce,
-		&valid_data.req.database,
-		&valid_data.req.table,
-		live_stm,
-		None,
-	)
-	.await
-	.unwrap();
+	tx.putc_tblq(&valid_data.namespace, &valid_data.database, &valid_data.table, live_stm, None)
+		.await
+		.unwrap();
 	tx.commit().await.unwrap();
 
 	// Bootstrap
@@ -135,13 +141,14 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	// Verify invalid table live query is deleted
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx
-		.scan_tblq(&valid_data.req.namesapce, &valid_data.req.database, &valid_data.req.table, 1000)
+		.scan_tblq(&valid_data.namespace, &valid_data.database, &valid_data.table, 1000)
 		.await
 		.unwrap();
 	tx.cancel().await.unwrap();
+
 	assert_eq!(res.len(), 1, "Expected 1 table live query: {:?}", res);
 	let tested_entry = res.get(0).unwrap();
-	assert_eq!(tested_entry.lq, valid_data.live_query_id);
+	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
 	Ok(())
 }
 
@@ -155,57 +162,58 @@ async fn bootstrap_removes_unreachable_live_query_notifications() -> Result<(), 
 /// - sometimes we want to detect invalid data that has a valid path (notification without a live query).
 /// - sometimes we want to detect existing valid data is not deleted
 #[derive(Debug, Clone)]
-struct ValidBootstrapState {
-	pub timestamp: u64,
-	pub node_id: surrealdb::sql::Uuid,
-	pub live_query_id: surrealdb::sql::Uuid,
-	pub notification_id: surrealdb::sql::Uuid,
-	pub req: BootstrapPrerequisites,
-}
-
-#[derive(Debug, Clone)]
-struct BootstrapPrerequisites {
-	pub namesapce: String,
+struct ValidNotificationState {
+	pub timestamp: Option<u64>,
+	pub node_id: Option<Uuid>,
+	pub live_query_id: Option<Uuid>,
+	pub notification_id: Option<Uuid>,
+	pub namespace: String,
 	pub database: String,
 	pub table: String,
 }
 
 /// Create a chain of valid state that bootstrapping should not remove.
+/// As a general rule, there is no need to override the system defaults since this code is to place generic data.
+/// If you see these IDs, it is because you captured this entry.
+/// So its ok to share ID between tests
 async fn a_valid_notification(
 	tx: &mut Transaction,
-	args: BootstrapPrerequisites,
-) -> Result<ValidBootstrapState, Error> {
+	args: ValidNotificationState,
+) -> Result<ValidNotificationState, Error> {
 	let now = tx.clock().await;
-	let entry = ValidBootstrapState {
-		timestamp: now.value,
-		node_id: Uuid::from(uuid::Uuid::parse_str("123e9d92-c975-4daf-8080-3082e83cfa9b").unwrap()),
-		live_query_id: Uuid::from(
-			uuid::Uuid::parse_str("ca02c2d0-31dd-4bf0-ada4-ee02b1191e0a").unwrap(),
-		),
-		notification_id: Uuid::from(
-			uuid::Uuid::parse_str("c952cf7d-b503-4370-802e-cd2404f2160d").unwrap(),
-		),
-		req: args.clone(),
+	let default_node_id =
+		Uuid::from(uuid::Uuid::parse_str("123e9d92-c975-4daf-8080-3082e83cfa9b").unwrap());
+	let default_lq_id =
+		Uuid::from(uuid::Uuid::parse_str("ca02c2d0-31dd-4bf0-ada4-ee02b1191e0a").unwrap());
+	let default_not_id =
+		Uuid::from(uuid::Uuid::parse_str("c952cf7d-b503-4370-802e-cd2404f2160d").unwrap());
+	let entry = ValidNotificationState {
+		timestamp: Some(args.timestamp.unwrap_or(now.value)),
+		node_id: Some(args.node_id.unwrap_or(default_node_id)),
+		live_query_id: Some(args.live_query_id.unwrap_or(default_lq_id)),
+		notification_id: Some(args.notification_id.unwrap_or(default_not_id)),
+		..args
 	};
+
 	// Create heartbeat
-	tx.set_hb(entry.timestamp.into(), entry.node_id.0).await?;
+	tx.set_hb(entry.timestamp.clone().unwrap().into(), entry.node_id.clone().unwrap().0).await?;
 	// Create cluster node entry
-	tx.set_nd(entry.node_id.0).await?;
+	tx.set_nd(entry.node_id.clone().unwrap().0).await?;
 	// Create node live query registration
 	tx.putc_ndlq(
-		entry.node_id.0,
-		entry.live_query_id.0,
-		&args.namesapce,
-		&args.database,
-		&args.table,
+		entry.node_id.clone().unwrap().0,
+		entry.live_query_id.clone().unwrap().0,
+		&entry.namespace,
+		&entry.database,
+		&entry.table,
 		None,
 	)
 	.await?;
 	// Create table live query registration
 	let mut live_stm = LiveStatement::default();
-	live_stm.id = entry.live_query_id.clone().into();
-	live_stm.node = entry.node_id.clone().into();
-	tx.putc_tblq(&args.namesapce, &args.database, &args.table, live_stm, None).await?;
+	live_stm.id = entry.live_query_id.clone().unwrap().into();
+	live_stm.node = entry.node_id.clone().unwrap().into();
+	tx.putc_tblq(&entry.namespace, &entry.database, &entry.table, live_stm, None).await?;
 	// TODO Create notification
 	// tx.putc_tbnt(
 	// ).await?;
