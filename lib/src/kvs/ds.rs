@@ -608,7 +608,7 @@ impl Datastore {
 			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
                 Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
             })?, NO_LIMIT).await?;
-			nd_lq_set.extend(nds.into_iter().map(|nd| LqType::Nd(nd)));
+			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
@@ -617,7 +617,7 @@ impl Datastore {
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
-			tb_lq_set.extend(tbs.into_iter().map(|tb| LqType::Tb(tb)));
+			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
 		// Find and delete missing
