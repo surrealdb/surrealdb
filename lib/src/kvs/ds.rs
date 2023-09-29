@@ -582,9 +582,11 @@ impl Datastore {
 		for cl in &cluster {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
 		}
-		// Scan heartbeats
-		let now = tx.clock();
-		let hbs = tx.scan_hb(&now, NO_LIMIT).await?;
+		// Scan all heartbeats
+		let end_of_time = Timestamp {
+			value: u64::MAX,
+		};
+		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
