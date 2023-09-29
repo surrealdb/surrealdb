@@ -584,7 +584,8 @@ impl Datastore {
 		}
 		// Scan all heartbeats
 		let end_of_time = Timestamp {
-			value: u64::MAX,
+			// We remove one, because the scan range adds one
+			value: u64::MAX - 1,
 		};
 		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());

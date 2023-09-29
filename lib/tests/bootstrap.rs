@@ -9,7 +9,6 @@ mod parse;
 
 use helpers::new_ds;
 use surrealdb::err::Error;
-use surrealdb::key::debug;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
