@@ -13,7 +13,6 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
-use crate::key::debug;
 use crate::key::root::hb::Hb;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
@@ -375,15 +374,11 @@ impl Datastore {
 		trace!("Clearing unreachable state");
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		match self.clear_unreachable_state(&mut tx).await {
-			Ok(_) => {
-				println!("Committed transaction for bootstrap clear");
-				tx.commit().await
-			}
+			Ok(_) => tx.commit().await,
 			Err(e) => {
 				let msg = format!("Error clearing unreachable cluster state at bootstrap: {:?}", e);
 				error!(msg);
 				tx.cancel().await?;
-				println!("Cancelled transaction for bootstrap clear");
 				Err(Error::Tx(msg))
 			}
 		}?;
@@ -547,7 +542,6 @@ impl Datastore {
 		// Scan nodes
 		let cluster = tx.scan_nd(NO_LIMIT).await?;
 		trace!("Found {} nodes", cluster.len());
-		println!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
@@ -556,14 +550,12 @@ impl Datastore {
 		let now = tx.clock();
 		let hbs = tx.scan_hb(&now, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
-		println!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
 		}
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
 			trace!("Removing unreachable node {}", cl.name);
-			println!("Removing unreachable node {}", cl.name);
 			tx.del_nd(
 				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
@@ -578,51 +570,30 @@ impl Datastore {
 				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
 			})?, NO_LIMIT).await?;
 			for ndlq in ndlqs {
-				{
-					// recreate keys for debug, block can be deleted
-					let lq = crate::key::node::lq::Lq::new(
-						ndlq.nd.0,
-						ndlq.lq.0,
-						ndlq.ns.as_str(),
-						ndlq.db.as_str(),
-					);
-					println!(
-						"Found node live query {:?}",
-						debug::sprint_key(&lq.encode().unwrap())
-					);
-				}
 				nd_lqs.push(Arc::new(ndlq));
 			}
 		}
 		trace!("Found {} node live queries", nd_lqs.len());
-		println!("Found {} node live queries", nd_lqs.len());
 		// Scan tables for all live queries
 		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
 		for lq in &nd_lqs {
-			println!("Scanning ns={} db={} tb={}", lq.ns, lq.db, lq.tb);
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
 			for tb in tbs {
-				println!("Found table live query {:?}", tb);
 				tb_lqs.push(Arc::new(tb));
 			}
 		}
 		trace!("Found {} table live queries", tb_lqs.len());
-		println!("Found {} table live queries", tb_lqs.len());
 		// Find missing
 		let (broken_node_lqs, broken_table_lqs) = find_missing(nd_lqs, tb_lqs);
 		trace!("Found {} broken node live queries", broken_node_lqs.len());
 		trace!("Found {} broken table live queries", broken_table_lqs.len());
-		println!("Found {} broken node live queries", broken_node_lqs.len());
-		println!("Found {} broken table live queries", broken_table_lqs.len());
 		// Delete broken node live queries
 		for ndlq in broken_node_lqs {
 			warn!("Deleting ndlq {:?}", &ndlq);
-			println!("Deleting ndlq {:?}", &ndlq);
 			tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 		}
 		for tblq in broken_table_lqs {
 			warn!("Deleting tblq {:?}", &tblq);
-			println!("Deleting tblq {:?}", &tblq);
 			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 		}
 		trace!("Successfully cleared cluster of unreachable state");

@@ -136,10 +136,6 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 		.unwrap();
 	tx.commit().await.unwrap();
 
-	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-	delete_this_debug_code(&mut tx, "pre apocalyptic scan").await;
-	tx.commit().await.unwrap();
-
 	// Bootstrap
 	dbs.bootstrap().await.unwrap();
 
@@ -150,7 +146,6 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 		.scan_tblq(&valid_data.namespace, &valid_data.database, &valid_data.table, 1000)
 		.await
 		.unwrap();
-	delete_this_debug_code(&mut tx, "post apocalyptic scan").await;
 	tx.cancel().await.unwrap();
 
 	assert_eq!(res.len(), 1, "Expected 1 table live query: {:?}", res);
@@ -225,21 +220,4 @@ async fn a_valid_notification(
 	// tx.putc_tbnt(
 	// ).await?;
 	Ok(entry)
-}
-
-async fn delete_this_debug_code(tx: &mut Transaction, message: &str) {
-	let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
-	println!("START OF RANGE SCAN - {}", message);
-	for (k, _v) in r.iter() {
-		println!("{}", sprint_key(k.as_ref()));
-	}
-	println!("END OF RANGE SCAN - {}", message);
-}
-
-pub fn sprint_key(key: &[u8]) -> String {
-	key.clone()
-		.iter()
-		.flat_map(|&byte| std::ascii::escape_default(byte))
-		.map(|byte| byte as char)
-		.collect::<String>()
 }
