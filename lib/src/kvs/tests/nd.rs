@@ -17,7 +17,7 @@ async fn write_scan_nd() {
 
 	// Scan limit 0
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let vals_no_lim = tx.scan_nd(0).await.unwrap();
+	let vals_no_lim = tx.scan_nd(NO_LIMIT).await.unwrap();
 	tx.cancel().await.unwrap();
 
 	// Assert equal

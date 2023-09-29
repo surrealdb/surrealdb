@@ -1,4 +1,4 @@
-use crate::kvs::LqValue;
+use crate::kvs::{LqValue, NO_LIMIT};
 
 #[tokio::test]
 #[serial]
@@ -19,7 +19,7 @@ async fn write_scan_ndlq() {
 	// Verify scan
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let res_lim = tx.scan_ndlq(&nd, 100).await.unwrap();
-	let res_no_lim = tx.scan_ndlq(&nd, 0).await.unwrap();
+	let res_no_lim = tx.scan_ndlq(&nd, NO_LIMIT).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(
 		res_lim,

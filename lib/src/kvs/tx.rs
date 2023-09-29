@@ -1086,6 +1086,7 @@ impl Transaction {
 	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
 		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
 		let key_enc = key.encode()?;
+		println!("del_ndlq: {:?}", debug::sprint_key(&key_enc));
 		self.del(key_enc).await
 	}
 
@@ -1270,11 +1271,12 @@ impl Transaction {
 					lq: lq.lq.into(),
 				});
 				// Count
-				if limit > 0 {
+				if limit != NO_LIMIT {
 					num -= 1;
 				}
 			}
 		}
+		println!("ND LQ SCAN FOR LIMIT {} WAS SIZE {}", limit, out.len());
 		Ok(out)
 	}
 
@@ -1288,6 +1290,11 @@ impl Transaction {
 		let pref = crate::key::table::lq::prefix(ns, db, tb);
 		let suff = crate::key::table::lq::suffix(ns, db, tb);
 		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&pref),
+			crate::key::debug::sprint_key(&suff),
+		);
+		println!(
 			"Scanning range from pref={}, suff={}",
 			crate::key::debug::sprint_key(&pref),
 			crate::key::debug::sprint_key(&suff),
@@ -1320,7 +1327,12 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		println!(
+			"putc_tblq ({:?}): key={:?}",
+			&live_stm.id,
+			crate::key::debug::sprint_key(&key_enc)
+		);
 		self.putc(key_enc, live_stm, expected).await
 	}
 
