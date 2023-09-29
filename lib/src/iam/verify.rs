@@ -561,7 +561,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 
@@ -632,7 +632,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 
@@ -705,7 +705,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 

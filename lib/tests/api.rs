@@ -38,7 +38,7 @@ mod api_integration {
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
 	const TICK_INTERVAL: Duration = Duration::from_secs(1);
-	// Used to ensure that only one test at a time is setting up the underlaying datastore.
+	// Used to ensure that only one test at a time is setting up the underlying datastore.
 	// When auth is enabled, multiple tests may try to create the same root user at the same time.
 	static SETUP_MUTEX: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
 

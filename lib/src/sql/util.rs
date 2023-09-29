@@ -3,7 +3,7 @@ use nom::{Err, InputLength, Parser};
 
 /// Parses a parser delimited by two other parsers.
 ///
-/// This parser failes (not errors) if the second delimiting parser returns an error.
+/// This parser fails (not errors) if the second delimiting parser returns an error.
 pub fn expect_delimited<I, D, V, T, O, O1>(
 	mut prefix: D,
 	mut value: V,
@@ -51,10 +51,10 @@ where
 	}
 }
 
-/// Parses a delimited list with an option trailing seperator in the form of:
+/// Parses a delimited list with an option trailing separator in the form of:
 ///
 ///```text
-/// PREFIX $(PARSER)SEPERATOR* $(SEPERATOR)? TERMINATOR
+/// PREFIX $(PARSER)SEPARATOR* $(SEPARATOR)? TERMINATOR
 ///```
 ///
 /// Which parsers productions like
@@ -63,14 +63,14 @@ where
 /// First parses the prefix and returns it's error if there is one.
 /// The tries to parse the terminator. If there is one the parser completes else it tries to parse
 /// the value, else it returns the parsed values.
-/// Then it tries to parse the seperator, if there is one it start again trying to parse the
+/// Then it tries to parse the separator, if there is one it start again trying to parse the
 /// terminator followed by a value if there is no terminator. Else it tries to parse the terminator
 /// and if there is none it returns a failure. Otherwise completes with an vec of the parsed
 /// values.
 ///
 pub fn delimited_list0<I, D, S, V, T, O, O1, O2>(
 	mut prefix: D,
-	mut seperator: S,
+	mut separator: S,
 	mut value: V,
 	mut terminator: T,
 ) -> impl FnMut(I) -> IResult<I, Vec<O>, ParseError<I>>
@@ -96,7 +96,7 @@ where
 			}
 			let (i, value) = value.parse(input)?;
 			res.push(value);
-			match seperator.parse(i.clone()) {
+			match separator.parse(i.clone()) {
 				Ok((i, _)) => {
 					input = i;
 				}
@@ -120,10 +120,10 @@ where
 	}
 }
 
-/// Parses a delimited list with an option trailing seperator in the form of:
+/// Parses a delimited list with an option trailing separator in the form of:
 ///
 ///```text
-/// PREFIX $(PARSER)SEPERATOR+ $(SEPERATOR)? TERMINATOR
+/// PREFIX $(PARSER)SEPARATOR+ $(SEPARATOR)? TERMINATOR
 ///```
 ///
 /// Which parsers productions like
@@ -132,14 +132,14 @@ where
 /// First parses the prefix and returns it's error if there is one.
 /// The tries to parse the terminator. If there is one the parser completes else it tries to parse
 /// the value, else it returns the parsed values.
-/// Then it tries to parse the seperator, if there is one it start again trying to parse the
+/// Then it tries to parse the separator, if there is one it start again trying to parse the
 /// terminator followed by a value if there is no terminator. Else it tries to parse the terminator
 /// and if there is none it returns a failure. Otherwise completes with an vec of the parsed
 /// values.
 ///
 pub fn delimited_list1<I, D, S, V, T, O, O1, O2>(
 	mut prefix: D,
-	mut seperator: S,
+	mut separator: S,
 	mut value: V,
 	mut terminator: T,
 ) -> impl FnMut(I) -> IResult<I, Vec<O>, ParseError<I>>
@@ -165,7 +165,7 @@ where
 			}
 			let (i, value) = value.parse(input)?;
 			res.push(value);
-			match seperator.parse(i.clone()) {
+			match separator.parse(i.clone()) {
 				Ok((i, _)) => {
 					input = i;
 				}
