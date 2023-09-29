@@ -26,7 +26,8 @@ use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,6 +51,41 @@ pub struct LqValue {
 	pub db: String,
 	pub tb: String,
 	pub lq: Uuid,
+}
+
+#[derive(Debug)]
+enum LqType {
+	Nd(LqValue),
+	Tb(LqValue),
+}
+
+impl LqType {
+	fn get_inner(&self) -> &LqValue {
+		match self {
+			LqType::Nd(lq) => lq,
+			LqType::Tb(lq) => lq,
+		}
+	}
+}
+
+impl PartialEq for LqType {
+	fn eq(&self, other: &Self) -> bool {
+		self.get_inner().lq == other.get_inner().lq
+	}
+}
+
+impl Eq for LqType {}
+
+impl PartialOrd for LqType {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Option::Some(self.get_inner().lq.cmp(&other.get_inner().lq))
+	}
+}
+
+impl Ord for LqType {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.get_inner().lq.cmp(&other.get_inner().lq)
+	}
 }
 
 /// The underlying datastore instance which stores the dataset.
@@ -168,7 +204,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-mem"))]
-				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an File database
 			s if s.starts_with("file:") => {
@@ -182,7 +218,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an RocksDB database
 			s if s.starts_with("rocksdb:") => {
@@ -196,7 +232,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an SpeeDB database
 			s if s.starts_with("speedb:") => {
@@ -210,7 +246,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-speedb"))]
-				return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -224,7 +260,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
-				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a TiKV database
 			s if s.starts_with("tikv:") => {
@@ -238,7 +274,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-tikv"))]
-				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a FoundationDB database
 			s if s.starts_with("fdb:") => {
@@ -252,7 +288,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-fdb"))]
-				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -564,37 +600,35 @@ impl Datastore {
 			.await?;
 		}
 		// Scan node live queries for every node
-		let mut nd_lqs: Vec<Arc<LqValue>> = vec![];
+		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for cl in &cluster {
-			let ndlqs = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-			})?, NO_LIMIT).await?;
-			for ndlq in ndlqs {
-				nd_lqs.push(Arc::new(ndlq));
-			}
+			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+                Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
+            })?, NO_LIMIT).await?;
+			nd_lq_set.extend(nds.into_iter().map(|nd| LqType::Nd(nd)));
 		}
-		trace!("Found {} node live queries", nd_lqs.len());
+		trace!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
-		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
-		for lq in &nd_lqs {
+		// let mut tb_lqs: Vec<LqValue> = vec![];
+		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		for ndlq in &nd_lq_set {
+			let lq = ndlq.get_inner();
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
-			for tb in tbs {
-				tb_lqs.push(Arc::new(tb));
+			tb_lq_set.extend(tbs.into_iter().map(|tb| LqType::Tb(tb)));
+		}
+		trace!("Found {} table live queries", tb_lq_set.len());
+		// Find and delete missing
+		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
+			match missing {
+				LqType::Nd(ndlq) => {
+					warn!("Deleting ndlq {:?}", &ndlq);
+					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
+				}
+				LqType::Tb(tblq) => {
+					warn!("Deleting tblq {:?}", &tblq);
+					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
+				}
 			}
-		}
-		trace!("Found {} table live queries", tb_lqs.len());
-		// Find missing
-		let (broken_node_lqs, broken_table_lqs) = find_missing(nd_lqs, tb_lqs);
-		trace!("Found {} broken node live queries", broken_node_lqs.len());
-		trace!("Found {} broken table live queries", broken_table_lqs.len());
-		// Delete broken node live queries
-		for ndlq in broken_node_lqs {
-			warn!("Deleting ndlq {:?}", &ndlq);
-			tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
-		}
-		for tblq in broken_table_lqs {
-			warn!("Deleting tblq {:?}", &tblq);
-			tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 		}
 		trace!("Successfully cleared cluster of unreachable state");
 		Ok(())
@@ -1129,39 +1163,4 @@ impl Datastore {
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
-}
-/// Given a list of node LqValues and table LqValues
-/// return the list of LqValues for nodes that aren't in tables
-/// and the list of LqValues for tables that aren't in nodes
-fn find_missing(
-	source_node: Vec<Arc<LqValue>>,
-	source_table: Vec<Arc<LqValue>>,
-) -> (Vec<Arc<LqValue>>, Vec<Arc<LqValue>>) {
-	let mut missing_node = vec![];
-	let mut missing_table = vec![];
-	for node in &source_node {
-		let mut found = false;
-		for table in &source_table {
-			if node.lq == table.lq {
-				found = true;
-				break;
-			}
-		}
-		if !found {
-			missing_node.push(node.clone());
-		}
-	}
-	for table in &source_table {
-		let mut found = false;
-		for node in &source_node {
-			if node.lq == table.lq {
-				found = true;
-				break;
-			}
-		}
-		if !found {
-			missing_table.push(table.clone());
-		}
-	}
-	(missing_node, missing_table)
 }
