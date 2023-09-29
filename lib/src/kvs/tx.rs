@@ -1287,34 +1287,68 @@ impl Transaction {
 		tb: &str,
 		limit: u32,
 	) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::table::lq::prefix(ns, db, tb);
-		let suff = crate::key::table::lq::suffix(ns, db, tb);
+		let beg = crate::key::table::lq::prefix(ns, db, tb);
+		let end = crate::key::table::lq::suffix(ns, db, tb);
 		trace!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
 		);
 		println!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
 		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_tblq: key={:?} value={:?}", &key, &value);
-			let val: LiveStatement = value.into();
-			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
-			res.push(LqValue {
-				nd: val.node,
-				ns: lv.ns.to_string(),
-				db: lv.db.to_string(),
-				tb: lv.tb.to_string(),
-				lq: val.id.clone(),
-			});
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<LqValue> = vec![];
+		while limit == NO_LIMIT || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (key, value)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(key.clone());
+				}
+				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
+				let val: LiveStatement = value.into();
+				out.push(LqValue {
+					nd: val.node,
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
+					tb: lv.tb.to_string(),
+					lq: val.id.clone(),
+				});
+				// Count
+				if limit != NO_LIMIT {
+					num -= 1;
+				}
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
 	pub async fn putc_tblq(

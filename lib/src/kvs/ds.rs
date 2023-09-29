@@ -13,6 +13,7 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::key::debug;
 use crate::key::root::hb::Hb;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
@@ -577,6 +578,19 @@ impl Datastore {
 				Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
 			})?, NO_LIMIT).await?;
 			for ndlq in ndlqs {
+				{
+					// recreate keys for debug, block can be deleted
+					let lq = crate::key::node::lq::Lq::new(
+						ndlq.nd.0,
+						ndlq.lq.0,
+						ndlq.ns.as_str(),
+						ndlq.db.as_str(),
+					);
+					println!(
+						"Found node live query {:?}",
+						debug::sprint_key(&lq.encode().unwrap())
+					);
+				}
 				nd_lqs.push(Arc::new(ndlq));
 			}
 		}
@@ -585,8 +599,10 @@ impl Datastore {
 		// Scan tables for all live queries
 		let mut tb_lqs: Vec<Arc<LqValue>> = vec![];
 		for lq in &nd_lqs {
+			println!("Scanning ns={} db={} tb={}", lq.ns, lq.db, lq.tb);
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
 			for tb in tbs {
+				println!("Found table live query {:?}", tb);
 				tb_lqs.push(Arc::new(tb));
 			}
 		}
