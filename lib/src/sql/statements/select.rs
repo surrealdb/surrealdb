@@ -223,10 +223,10 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
 	check_order_by_fields(i, &expr, &order)?;
 
-	let (i, (limit, start)) = if let Ok((i, limit)) = peek(preceded(shouldbespace, limit))(i) {
+	let (i, (limit, start)) = if let Ok((i, limit)) = preceded(shouldbespace, limit)(i) {
 		let (i, start) = opt(preceded(shouldbespace, start))(i)?;
 		(i, (Some(limit), start))
-	} else if let Ok((i, start)) = peek(preceded(shouldbespace, start))(i) {
+	} else if let Ok((i, start)) = preceded(shouldbespace, start)(i) {
 		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 		(i, (limit, Some(start)))
 	} else {
