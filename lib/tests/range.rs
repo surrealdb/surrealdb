@@ -115,6 +115,7 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 			}
 		]",
 	);
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
