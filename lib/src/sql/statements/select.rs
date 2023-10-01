@@ -30,7 +30,6 @@ use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
 use crate::sql::with::{with, With};
 use derive::Store;
-use nom::branch::permutation;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::cut;
 use nom::combinator::opt;
@@ -224,12 +223,15 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
 	check_order_by_fields(i, &expr, &order)?;
 
-	// limit & start should be in any order (#117)
-	let (i, limit_or_start) = opt(permutation((
-		opt(preceded(shouldbespace, limit)),
-		opt(preceded(shouldbespace, start)),
-	)))(i)?;
-	let (limit, start) = limit_or_start.unwrap_or((None, None));
+	let (i, (limit, start)) = if let Ok((i, limit)) = peek(preceded(shouldbespace, limit))(i) {
+		let (i, start) = opt(preceded(shouldbespace, start))(i)?;
+		(i, (Some(limit), start))
+	} else if let Ok((i, start)) = peek(preceded(shouldbespace, start))(i) {
+		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
+		(i, (limit, Some(start)))
+	} else {
+		(i, (None, None))
+	};
 
 	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
