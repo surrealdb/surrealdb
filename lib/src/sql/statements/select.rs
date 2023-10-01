@@ -271,53 +271,54 @@ mod tests {
 
 	use super::*;
 
+	fn assert_parsable(sql: &str) {
+		let res = select(sql);
+		assert!(res.is_ok());
+		let (_, out) = res.unwrap();
+		assert_eq!(sql, format!("{}", out))
+	}
+
 	#[test]
 	fn select_statement_param() {
-		let sql = "SELECT * FROM $test";
-		let res = select(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
+		assert_parsable("SELECT * FROM $test");
 	}
 
 	#[test]
 	fn select_statement_table() {
-		let sql = "SELECT * FROM test";
-		let res = select(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
+		assert_parsable("SELECT * FROM test");
 	}
 
 	#[test]
 	fn select_statement_omit() {
-		let sql = "SELECT * OMIT password FROM test";
-		let res = select(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
+		assert_parsable("SELECT * OMIT password FROM test");
 	}
 
 	#[test]
 	fn select_statement_thing() {
-		let sql = "SELECT * FROM test:thingy ORDER BY name";
-		let res = select(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
+		assert_parsable("SELECT * FROM test:thingy ORDER BY name");
 	}
 
 	#[test]
 	fn select_statement_clash() {
-		let sql = "SELECT * FROM order ORDER BY order";
-		let res = select(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
+		assert_parsable("SELECT * FROM order ORDER BY order");
+	}
+
+	#[test]
+	fn select_statement_limit_select() {
+		assert_parsable("SELECT * FROM table LIMIT 3 START 2");
+	}
+
+	#[test]
+	fn select_statement_limit_select_unordered() {
+		let res = select("SELECT * FROM table START 2 LIMIT 1");
+		assert!(res.is_ok());
+		let (_, out) = res.unwrap();
+		assert_eq!("SELECT * FROM table LIMIT 1 START 2", format!("{}", out))
 	}
 
 	#[test]
 	fn select_statement_table_thing() {
-		let sql = "SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy";
-		let res = select(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
+		assert_parsable("SELECT *, ((1 + 3) / 4), 1.3999f AS tester FROM test, test:thingy");
 	}
 
 	#[test]
