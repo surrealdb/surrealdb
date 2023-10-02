@@ -84,8 +84,8 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	.unwrap();
 	let bad_nd_lq_id = uuid::Uuid::parse_str("67b0f588-2b95-4b6e-87f3-73d0a49034be").unwrap();
 	tx.putc_ndlq(
+		valid_data.clone().node_id.unwrap().0,
 		bad_nd_lq_id,
-		valid_data.live_query_id.clone().unwrap().0,
 		&valid_data.namespace,
 		&valid_data.database,
 		&valid_data.table,
