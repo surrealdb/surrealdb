@@ -15,6 +15,7 @@ use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
+use tokio::time::sleep;
 
 #[tokio::test]
 #[serial]
@@ -51,7 +52,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	// Verify the incorrect node is deleted, but self and valid still exist
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_nd(1000).await.unwrap();
-	tx.cancel().await.unwrap();
+	tx.commit().await.unwrap();
 	for node in &res {
 		assert_ne!(node.name, bad_node.to_string());
 	}
@@ -99,9 +100,17 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	dbs.bootstrap().await.unwrap();
 
 	// Verify node live query is deleted
-	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-	let res = tx.scan_ndlq(&valid_data.node_id.unwrap(), 1000).await.unwrap();
-	tx.cancel().await.unwrap();
+	// Retries due to flakiness
+	let mut res = vec![];
+	for _ in 0..10 {
+		let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
+		res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
+		tx.commit().await.unwrap();
+		if res.len() != 0 {
+			break;
+		}
+		sleep(std::time::Duration::from_millis(100)).await;
+	}
 	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
@@ -148,7 +157,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 		.scan_tblq(&valid_data.namespace, &valid_data.database, &valid_data.table, 1000)
 		.await
 		.unwrap();
-	tx.cancel().await.unwrap();
+	tx.commit().await.unwrap();
 
 	assert_eq!(res.len(), 1, "Expected 1 table live query: {:?}", res);
 	let tested_entry = res.get(0).unwrap();

@@ -78,3 +78,9 @@ impl SystemClock {
 		}
 	}
 }
+
+impl Default for SystemClock {
+	fn default() -> Self {
+		Self::new()
+	}
+}
