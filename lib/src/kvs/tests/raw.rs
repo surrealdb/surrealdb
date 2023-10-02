@@ -13,7 +13,8 @@ async fn initialise() {
 async fn exi() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("463a5008-ee1d-43db-9662-5e752b6ea3f9").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
@@ -32,7 +33,8 @@ async fn exi() {
 async fn get() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("477e2895-8c98-4606-a827-0add82eb466b").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
@@ -51,7 +53,8 @@ async fn get() {
 async fn set() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("32b80d8b-dd16-4f6f-a687-1192f6cfc6f1").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.set("test", "one").await.is_ok());
@@ -77,7 +80,8 @@ async fn set() {
 async fn put() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("80149655-db34-451c-8711-6fa662a44b70").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "one").await.is_ok());
@@ -103,7 +107,8 @@ async fn put() {
 async fn del() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("e0acb360-9187-401f-8192-f870b09e2c9e").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "one").await.is_ok());
@@ -124,7 +129,8 @@ async fn del() {
 async fn putc() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("705bb520-bc2b-4d52-8e64-d1214397e408").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "one").await.is_ok());
@@ -159,7 +165,8 @@ async fn putc() {
 async fn delc() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("0985488e-cf2f-417a-bd10-7f4aa9c99c15").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "one").await.is_ok());
@@ -189,7 +196,8 @@ async fn delc() {
 async fn scan() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test1", "1").await.is_ok());

@@ -1,4 +1,5 @@
 use futures::lock::Mutex;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use crate::ctx::context;
@@ -18,19 +19,31 @@ use uuid;
 async fn expired_nodes_are_garbage_collected() {
 	let old_node = Uuid::parse_str("2ea6d33f-4c0a-417a-ab04-1fa9869f9a65").unwrap();
 	let new_node = Uuid::parse_str("fbfb3487-71fe-4749-b3aa-1cc0a5380cdd").unwrap();
-	let test = init(new_node).await.unwrap();
-
-	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
+	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(new_node, clock.clone()).await.unwrap();
+
+	// Set up the first node at an early timestamp
+	test.db = test.db.with_node_id(sql::Uuid::from(old_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
 		value: 567,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
+	{
+		// Lock released after scope
+		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
+			clock.set(new_time.clone());
+		} else {
+			panic!("Clock is not fake");
+		}
+	}
+	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
@@ -41,7 +54,7 @@ async fn expired_nodes_are_garbage_collected() {
 	}
 
 	// And scan the nodes to verify its just the latest also
-	let scanned = tx.scan_cl(100).await.unwrap();
+	let scanned = tx.scan_nd(100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for cl in scanned.iter() {
 		assert_eq!(&cl.name, &new_node.to_string());
@@ -54,13 +67,16 @@ async fn expired_nodes_are_garbage_collected() {
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
 	let old_node = Uuid::parse_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
-	let test = init(old_node).await.unwrap();
-
-	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
 		value: 123,
 	};
-	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
+	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(old_node, clock.clone()).await.unwrap();
+
+	// Set up the first node at an early timestamp
+	test.db = test.db.with_node_id(sql::Uuid::from(old_node)).with_notifications();
+	test.db.bootstrap().await.unwrap();
 
 	// Set up live query
 	let ses = Session::owner()
@@ -79,7 +95,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let ctx = context::Context::background();
-	let (sender, _) = channel::unbounded();
+	let sender = test.db.live_sender().unwrap();
 	let opt = Options::new()
 		.with_ns(ses.ns())
 		.with_db(ses.db())
@@ -101,8 +117,17 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
 		value: 456,
-	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
-	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
+	};
+	{
+		// Lock is released after scope
+		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
+			clock.set(new_time.clone());
+		} else {
+			panic!("Clock is not fake");
+		}
+	}
+	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
+	test.db.bootstrap().await.unwrap();
 
 	// Now validate lq was removed
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
@@ -120,10 +145,12 @@ async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
 	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
-	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
 		value: 123,
 	};
+	let clock = SizedClock::Fake(FakeClock::new(time.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let mut test = init(node_id, clock).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
@@ -138,7 +165,8 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", node_id);
-	test.bootstrap_at_time(crate::sql::uuid::Uuid::from(node_id), time).await.unwrap();
+	test.db = test.db.with_node_id(crate::sql::uuid::Uuid::from(node_id));
+	test.db.bootstrap().await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
@@ -201,10 +229,15 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// Test parameters
 	let ctx = context::Context::background();
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
-	let test = init(old_node_id).await.unwrap();
-	let time = Timestamp {
-		value: 123,
+	let t1 = Timestamp {
+		value: 123_000,
 	};
+	let t2 = Timestamp {
+		value: 456_000,
+	};
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(clock));
+	let test = init(old_node_id, clock.clone()).await.unwrap();
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
 	let database = database_owned.as_str();
@@ -220,7 +253,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// We do standard cluster init
 	trace!("Bootstrapping node {}", old_node_id);
-	test.bootstrap_at_time(crate::sql::uuid::Uuid::from(old_node_id), time).await.unwrap();
+	test.db.bootstrap().await.unwrap();
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
@@ -252,21 +285,21 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	trace!("Bootstrapping");
 	let new_node_id = Uuid::parse_str("53f7355d-5be1-4a94-9803-5192b59c5244").unwrap();
 	// There should not be an error
+	match clock.write().await.deref_mut() {
+		SizedClock::Fake(clock) => {
+			clock.set(t2.clone());
+		}
+		_ => {
+			panic!("Clock is not fake");
+		}
+	}
 	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
 	match second_node.bootstrap().await {
 		Ok(_) => {
-			panic!("Expected an error because of missing live query")
+			// The behaviour has now changed to remove all broken entries without raising errors
 		}
-		Err(Error::Tx(e)) => match e {
-			_ if e.contains("LvNotFound") => {
-				// This is what we want... an LvNotFound error, but it gets wrapped into a string so that Tx doesnt carry vecs
-			}
-			_ => {
-				panic!("Expected an LvNotFound error but got: {:?}", e);
-			}
-		},
 		Err(e) => {
-			panic!("Missing live query error: {:?}", e)
+			panic!("Bootstrapping should not generate errors: {:?}", e)
 		}
 	}
 

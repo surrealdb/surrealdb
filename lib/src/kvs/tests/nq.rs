@@ -4,12 +4,13 @@ use crate::sql::statements::live::live;
 #[serial]
 async fn archive_lv_for_node_archives() {
 	let node_id = Uuid::parse_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
-	let test = init(node_id).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
 	let table = "test_table";
-	tx.set_cl(node_id).await.unwrap();
+	tx.set_nd(node_id).await.unwrap();
 
 	let lv_id = crate::sql::uuid::Uuid::from(Uuid::from_bytes([
 		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,

@@ -2,7 +2,8 @@
 #[serial]
 async fn write_scan_tblq() {
 	let node_id = uuid::Uuid::parse_str("0bee25e0-34d7-448c-abc0-48cdf3db3a53").unwrap();
-	let test = init(node_id).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(node_id, clock).await.unwrap();
 
 	// Write some data
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
@@ -28,6 +29,8 @@ async fn write_scan_tblq() {
 	// Verify scan
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_tblq(ns, db, tb, 100).await.unwrap();
+	let no_limit = tx.scan_tblq(ns, db, tb, NO_LIMIT).await.unwrap();
+	tx.commit().await.unwrap();
 	assert_eq!(
 		res,
 		vec![LqValue {
@@ -38,5 +41,5 @@ async fn write_scan_tblq() {
 			lq: live_id
 		}]
 	);
-	tx.commit().await.unwrap();
+	assert_eq!(res, no_limit);
 }
