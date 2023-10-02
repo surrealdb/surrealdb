@@ -54,6 +54,11 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const NO_LIMIT: u32 = 0;
 
+#[cfg(not(target_arch = "wasm32"))]
+type AtomicLockedClock = Arc<RwLock<SizedClock>>;
+#[cfg(target_arch = "wasm32")]
+type AtomicLockedClock = Arc<SizedClock>;
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -61,7 +66,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
-	pub(super) clock: Arc<RwLock<SizedClock>>,
+	pub(super) clock: AtomicLockedClock,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1051,7 +1056,13 @@ impl Transaction {
 	pub async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
-		match self.clock.read().await.deref() {
+		#[cfg(not(target_arch = "wasm32"))]
+		let owned = self.clock.read().await;
+		#[cfg(not(target_arch = "wasm32"))]
+		let clock_impl = owned.deref();
+		#[cfg(target_arch = "wasm32")]
+		let clock_impl = self.clock;
+		match clock_impl {
 			SizedClock::Fake(fake) => fake.now(),
 			SizedClock::Inc(inc) => inc.now().await,
 			SizedClock::System(system) => system.now(),
