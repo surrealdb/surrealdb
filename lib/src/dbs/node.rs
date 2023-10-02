@@ -53,7 +53,7 @@ impl Add<Duration> for Timestamp {
 	type Output = Timestamp;
 	fn add(self, rhs: Duration) -> Timestamp {
 		Timestamp {
-			value: self.value + rhs.as_secs(),
+			value: self.value + rhs.as_millis(),
 		}
 	}
 }
@@ -61,7 +61,7 @@ impl Add<Duration> for Timestamp {
 impl Sub<Duration> for Timestamp {
 	type Output = Result<Timestamp, Error>;
 	fn sub(self, rhs: Duration) -> Self::Output {
-		let millis = rhs.as_secs();
+		let millis = rhs.as_millis().into();
 		if self.value <= millis {
 			// Removing the duration from this timestamp will cause it to overflow
 			return Err(TimestampOverflow(format!(
