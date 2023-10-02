@@ -39,14 +39,6 @@ pub static HTTP_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-fn observe_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	observe_active_request(1, tracker)
-}
-
-fn observe_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	observe_active_request(-1, tracker)
-}
-
 fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 
