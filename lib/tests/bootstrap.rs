@@ -8,6 +8,7 @@ mod helpers;
 mod parse;
 
 use helpers::new_ds;
+use serial_test::serial;
 use surrealdb::err::Error;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::Transaction;
@@ -16,6 +17,7 @@ use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
 
 #[tokio::test]
+#[serial]
 async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	// Create the datastore
 	let dbs = new_ds().await.unwrap();
@@ -59,6 +61,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[serial]
 async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> {
 	// Create the datastore
 	let dbs = new_ds().await.unwrap();
@@ -107,6 +110,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 }
 
 #[tokio::test]
+#[serial]
 async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error> {
 	// Create the datastore
 	let dbs = new_ds().await.unwrap();
@@ -154,6 +158,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 }
 
 #[tokio::test]
+#[serial]
 async fn bootstrap_removes_unreachable_live_query_notifications() -> Result<(), Error> {
 	Ok(())
 }
@@ -195,6 +200,9 @@ async fn a_valid_notification(
 		notification_id: Some(args.notification_id.unwrap_or(default_not_id)),
 		..args
 	};
+	let mut live_stm = LiveStatement::default();
+	live_stm.id = entry.live_query_id.clone().unwrap().into();
+	live_stm.node = entry.node_id.clone().unwrap().into();
 
 	// Create heartbeat
 	tx.set_hb(entry.timestamp.clone().unwrap().into(), entry.node_id.clone().unwrap().0).await?;
@@ -211,9 +219,6 @@ async fn a_valid_notification(
 	)
 	.await?;
 	// Create table live query registration
-	let mut live_stm = LiveStatement::default();
-	live_stm.id = entry.live_query_id.clone().unwrap().into();
-	live_stm.node = entry.node_id.clone().unwrap().into();
 	tx.putc_tblq(&entry.namespace, &entry.database, &entry.table, live_stm, None).await?;
 	// TODO Create notification
 	// tx.putc_tbnt(
