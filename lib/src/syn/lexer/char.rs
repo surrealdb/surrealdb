@@ -1,5 +1,5 @@
-use crate::sql::lexer::{CharError, Lexer};
-use crate::sql::token::{t, Token, TokenKind};
+use crate::syn::lexer::{CharError, Lexer};
+use crate::syn::token::{t, Token, TokenKind};
 
 impl<'a> Lexer<'a> {
 	pub fn lex_char(&mut self, byte: u8) -> Token {

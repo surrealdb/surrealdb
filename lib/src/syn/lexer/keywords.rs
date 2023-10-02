@@ -1,4 +1,4 @@
-use crate::sql::token::{Keyword, TokenKind};
+use crate::syn::token::{Keyword, TokenKind};
 use phf::phf_map;
 use unicase::UniCase;
 
@@ -29,6 +29,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("CREATE") => TokenKind::Keyword(Keyword::Create),
 	UniCase::ascii("DANISH") => TokenKind::Keyword(Keyword::Danish),
 	UniCase::ascii("DATABASE") => TokenKind::Keyword(Keyword::Database),
+	UniCase::ascii("DB") => TokenKind::Keyword(Keyword::Database),
 	UniCase::ascii("DEFAULT") => TokenKind::Keyword(Keyword::Default),
 	UniCase::ascii("DEFINE") => TokenKind::Keyword(Keyword::Define),
 	UniCase::ascii("DELETE") => TokenKind::Keyword(Keyword::Delete),
@@ -80,6 +81,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MINKOWSKI") => TokenKind::Keyword(Keyword::Minkowski),
 	UniCase::ascii("MODEL") => TokenKind::Keyword(Keyword::Model),
 	UniCase::ascii("NAMESPACE") => TokenKind::Keyword(Keyword::Namespace),
+	UniCase::ascii("NS") => TokenKind::Keyword(Keyword::Namespace),
 	UniCase::ascii("NGRAM") => TokenKind::Keyword(Keyword::Ngram),
 	UniCase::ascii("NOINDEX") => TokenKind::Keyword(Keyword::NoIndex),
 	UniCase::ascii("NONE") => TokenKind::Keyword(Keyword::None),
@@ -117,6 +119,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SCOPE") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SELECT") => TokenKind::Keyword(Keyword::Select),
 	UniCase::ascii("SESSION") => TokenKind::Keyword(Keyword::Session),
+	UniCase::ascii("SET") => TokenKind::Keyword(Keyword::Set),
 	UniCase::ascii("SHOW") => TokenKind::Keyword(Keyword::Show),
 	UniCase::ascii("SIGNIM") => TokenKind::Keyword(Keyword::Signim),
 	UniCase::ascii("SIGNUP") => TokenKind::Keyword(Keyword::Signup),
@@ -137,6 +140,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("TURKISH") => TokenKind::Keyword(Keyword::Turkish),
 	UniCase::ascii("TYPE") => TokenKind::Keyword(Keyword::Type),
 	UniCase::ascii("UNIQUE") => TokenKind::Keyword(Keyword::Unique),
+	UniCase::ascii("UNSET") => TokenKind::Keyword(Keyword::Unset),
 	UniCase::ascii("UPDATE") => TokenKind::Keyword(Keyword::Update),
 	UniCase::ascii("UPPERCASE") => TokenKind::Keyword(Keyword::Uppercase),
 	UniCase::ascii("USE") => TokenKind::Keyword(Keyword::Use),

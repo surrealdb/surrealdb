@@ -1,8 +1,8 @@
-use crate::sql::lexer::{
+use crate::syn::lexer::{
 	unicode::{byte, chars},
 	CharError, Lexer,
 };
-use crate::sql::token::{t, Token, TokenKind};
+use crate::syn::token::{t, Token, TokenKind};
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment and returns the next token.
@@ -275,7 +275,7 @@ impl<'a> Lexer<'a> {
 			b'"' => return self.lex_strand(true),
 			b'\'' => return self.lex_strand(false),
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-				return self.lex_ident(byte);
+				return self.lex_ident_from_next_byte(byte);
 			}
 			b'0'..=b'9' => return self.lex_number(byte),
 			_ => TokenKind::Invalid,

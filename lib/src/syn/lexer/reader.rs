@@ -1,4 +1,4 @@
-use crate::sql::token::Span;
+use crate::syn::token::Span;
 use std::{fmt, marker::PhantomData, ptr::NonNull};
 
 pub enum CharError {
@@ -89,6 +89,7 @@ impl<'a> BytesReader<'a> {
 		}
 	}
 
+	#[inline]
 	pub fn len(&self) -> usize {
 		unsafe {
 			// SAFETY: current and end are created from the same pointer so have the
@@ -98,6 +99,7 @@ impl<'a> BytesReader<'a> {
 		}
 	}
 
+	#[inline]
 	pub fn offset(&self) -> usize {
 		unsafe {
 			// SAFETY: current and start are created from the same pointer so have the
@@ -107,15 +109,18 @@ impl<'a> BytesReader<'a> {
 		}
 	}
 
+	#[inline]
 	pub fn backup(&mut self, offset: usize) {
 		assert!(offset <= self.offset());
 		self.current = unsafe { NonNull::new_unchecked(self.start.as_ptr().add(offset)) };
 	}
 
+	#[inline]
 	pub fn is_empty(&self) -> bool {
 		self.end == self.current
 	}
 
+	#[inline]
 	pub fn peek(&self) -> Option<u8> {
 		if self.end == self.current {
 			None
@@ -125,6 +130,7 @@ impl<'a> BytesReader<'a> {
 		}
 	}
 
+	#[inline]
 	pub fn span(&self, span: Span) -> &[u8] {
 		assert!(((span.offset + span.len) as usize) < self.full().len());
 		unsafe {
@@ -133,6 +139,7 @@ impl<'a> BytesReader<'a> {
 		}
 	}
 
+	#[inline]
 	pub fn next_continue_byte(&mut self) -> Result<u8, CharError> {
 		const CONTINUE_BYTE_PREFIX_MASK: u8 = 0b1100_0000;
 		const CONTINUE_BYTE_MASK: u8 = 0b0011_1111;

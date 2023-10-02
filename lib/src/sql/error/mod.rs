@@ -13,6 +13,8 @@ pub use utils::*;
 mod render;
 pub use render::*;
 
+use crate::syn::token::Span;
+
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<I> {
 	Base(I),
@@ -153,6 +155,29 @@ impl Location {
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
 		for (line_idx, line) in input.split('\n').enumerate() {
+			// +1 for the '\n'
+			let bytes_so_far = bytes_prior + line.len() + 1;
+			if bytes_so_far > offset {
+				// found line.
+				let line_offset = offset - bytes_prior;
+				let column = line[..line_offset].chars().count();
+				// +1 because line and column are 1 index.
+				return Self {
+					line: line_idx + 1,
+					column: column + 1,
+				};
+			}
+			bytes_prior = bytes_so_far;
+		}
+		unreachable!()
+	}
+
+	pub fn of_span(source: &str, span: Span) -> Self {
+		// Bytes of input before substr.
+		let offset = span.offset as usize;
+		// Bytes of input prior to line being iteratated.
+		let mut bytes_prior = 0;
+		for (line_idx, line) in source.split('\n').enumerate() {
 			// +1 for the '\n'
 			let bytes_so_far = bytes_prior + line.len() + 1;
 			if bytes_so_far > offset {

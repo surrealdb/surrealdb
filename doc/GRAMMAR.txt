@@ -1,0 +1,13 @@
+
+Query =>
+	StatementList opt(StatementTail)
+
+StatementList =>
+	StatementList; Statement
+	Statement
+
+StatementListTail =>
+	StatementListTail ';'
+
+Statement =>
+	SelectStatement

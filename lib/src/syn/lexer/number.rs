@@ -1,5 +1,5 @@
-use crate::sql::lexer::Lexer;
-use crate::sql::token::{Token, TokenKind};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, TokenKind};
 
 impl Lexer<'_> {
 	pub fn lex_number(&mut self, start: u8) -> Token {
@@ -13,40 +13,6 @@ impl Lexer<'_> {
 					self.reader.next();
 					self.scratch.push(start as char);
 				}
-				b'f' => {
-					self.reader.next();
-					if let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9') = self.reader.peek() {
-						return self.lex_ident(b'f');
-					} else {
-						self.scratch.clear();
-						return self.finish_token(TokenKind::Number, None);
-					}
-				}
-				b'd' => {
-					self.reader.next();
-					if let Some(b'e') = self.reader.peek() {
-						self.reader.next();
-						if let Some(b'c') = self.reader.peek() {
-							self.reader.next();
-							if let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9') =
-								self.reader.peek()
-							{
-								self.scratch.push('d');
-								self.scratch.push('e');
-								return self.lex_ident(b'c');
-							} else {
-								self.scratch.clear();
-								return self.finish_token(TokenKind::Number, None);
-							}
-						}
-						self.scratch.push('d');
-						return self.lex_ident(b'e');
-					}
-					return self.lex_ident(b'd');
-				}
-				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-					return self.lex_ident(x);
-				}
 				b'.' => {
 					let backup = self.reader.offset();
 					self.reader.next();
@@ -59,6 +25,43 @@ impl Lexer<'_> {
 						self.scratch.clear();
 						return self.finish_token(TokenKind::Number, None);
 					}
+				}
+				b'f' => {
+					self.reader.next();
+					if let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9') = self.reader.peek() {
+						return self.lex_ident_from_next_byte(b'f');
+					} else {
+						self.scratch.clear();
+						return self.finish_token(TokenKind::Number, None);
+					}
+				}
+				b'd' => {
+					self.reader.next();
+					let Some(b'e') = self.reader.peek() else {
+						return self.lex_ident_from_next_byte(b'd');
+					};
+					self.reader.next();
+					let Some(b'c') = self.reader.peek() else {
+						self.scratch.push('d');
+						return self.lex_ident_from_next_byte(b'e');
+					};
+					self.reader.next();
+
+					if let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9') = self.reader.peek() {
+						self.scratch.push('d');
+						self.scratch.push('e');
+						return self.lex_ident_from_next_byte(b'c');
+					} else {
+						self.scratch.clear();
+						return self.finish_token(TokenKind::Number, None);
+					}
+				}
+				// Oxc2 is the start byte of 'µ'
+				0xc2 | b'n' | b'u' | b'm' | b'h' | b'd' | b'w' | b'y' => {
+					return self.lex_duration()
+				}
+				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+					return self.lex_ident_from_next_byte(x);
 				}
 				_ => {
 					self.scratch.clear();

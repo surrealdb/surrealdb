@@ -1,7 +1,9 @@
 use unicase::UniCase;
 
-use crate::sql::lexer::{keywords::KEYWORDS, CharError, Lexer};
-use crate::sql::token::{Token, TokenKind};
+use crate::syn::lexer::{keywords::KEYWORDS, CharError, Lexer};
+use crate::syn::token::{Token, TokenKind};
+
+use super::unicode::chars;
 
 impl<'a> Lexer<'a> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
@@ -20,13 +22,20 @@ impl<'a> Lexer<'a> {
 
 	/// Lex an not surrounded identifier in the form of `[a-zA-Z0-9_]*`
 	///
-	/// When calling the caller should already know that the token can't be a number..
-	pub fn lex_ident(&mut self, start: u8) -> Token {
-		if start.is_ascii() {
-			self.scratch.push(start as char);
-		} else {
-			return self.finish_string_token(TokenKind::Identifier);
-		}
+	/// The start byte should already a valid byte of the identifier.
+	///
+	/// When calling the caller should already know that the token can't be any other token covered
+	/// by `[a-zA-Z0-9_]*`.
+	pub fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
+		debug_assert!(matches!(start, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'));
+		self.scratch.push(start as char);
+		self.lex_ident()
+	}
+
+	/// Lex a not surrounded identfier.
+	///
+	/// The scratch should contain only identifier valid chars.
+	pub fn lex_ident(&mut self) -> Token {
 		loop {
 			if let Some(x) = self.reader.peek() {
 				if x.is_ascii_alphanumeric() || x == b'_' {
@@ -77,19 +86,19 @@ impl<'a> Lexer<'a> {
 									self.scratch.push('/');
 								}
 								b'b' => {
-									self.scratch.push('\u{08}');
+									self.scratch.push(chars::BS);
 								}
 								b'f' => {
-									self.scratch.push('\u{0c}');
+									self.scratch.push(chars::FF);
 								}
 								b'n' => {
-									self.scratch.push('\u{0a}');
+									self.scratch.push(chars::LF);
 								}
 								b'r' => {
-									self.scratch.push('\u{0d}');
+									self.scratch.push(chars::CR);
 								}
 								b't' => {
-									self.scratch.push('\u{09}');
+									self.scratch.push(chars::TAB);
 								}
 								_ => {
 									self.scratch.clear();
@@ -160,19 +169,19 @@ impl<'a> Lexer<'a> {
 								self.scratch.push('/');
 							}
 							b'b' => {
-								self.scratch.push('\u{08}');
+								self.scratch.push(chars::BS);
 							}
 							b'f' => {
-								self.scratch.push('\u{0c}');
+								self.scratch.push(chars::FF);
 							}
 							b'n' => {
-								self.scratch.push('\u{0a}');
+								self.scratch.push(chars::LF);
 							}
 							b'r' => {
-								self.scratch.push('\u{0d}');
+								self.scratch.push(chars::CR);
 							}
 							b't' => {
-								self.scratch.push('\u{09}');
+								self.scratch.push(chars::TAB);
 							}
 							_ => {
 								self.scratch.clear();

@@ -77,10 +77,6 @@ pub(crate) mod with;
 #[cfg(test)]
 pub(crate) mod test;
 
-pub(crate) mod token;
-pub(crate) mod lexer;
-pub(crate) mod parser2;
-
 pub mod serde;
 pub mod statements;
 

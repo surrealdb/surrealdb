@@ -115,6 +115,7 @@ mod fnc;
 mod vs;
 
 pub mod sql;
+pub mod syn;
 
 #[doc(hidden)]
 pub mod cnf;

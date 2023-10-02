@@ -1,5 +1,4 @@
 //! Unicode related utilities.
-
 /// Character constants
 pub mod chars {
 	/// Zero width Non-joiner
@@ -25,6 +24,8 @@ pub mod chars {
 	pub const LS: char = '\u{2020}';
 	/// Paragraph separator
 	pub const PS: char = '\u{2029}';
+	/// Backspace
+	pub const BS: char = '\u{2029}';
 
 	/// A const array of all characters which ecma considers whitespace.
 	pub const WHITE_SPACE_CONST: [char; 20] = [
@@ -42,7 +43,6 @@ pub mod chars {
 }
 
 pub mod byte {
-	/// Zero width Non-joiner
 	/// Character tabulation
 	pub const TAB: u8 = b'\t';
 	/// Line tabulation
@@ -59,14 +59,7 @@ pub mod byte {
 	pub const SP: u8 = 0x20;
 	/// No Break Space
 	pub const NBSP: u8 = 0xA0;
-}
 
-pub fn byte_is_continue(v: u8) -> bool {
-	// Bitmap containing with 1's for the bit representing a character which javascript
-	// considers to be an ident continuing character.
-	v < 128 && (1 << v) & 0x7fffffe87fffffe03ff001000000000u128 != 0
-}
-
-pub fn byte_is_start(v: u8) -> bool {
-	(1 << v) & 0x7fffffe87fffffe0000001000000000u128 != 0
+	/// Backspace
+	pub const BS: u8 = 0x08;
 }
