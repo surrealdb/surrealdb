@@ -578,6 +578,7 @@ impl Datastore {
 		// Scan nodes
 		let cluster = tx.scan_nd(NO_LIMIT).await?;
 		trace!("Found {} nodes", cluster.len());
+		println!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
 			unreachable_nodes.insert(cl.name.clone(), cl.clone());
@@ -589,12 +590,14 @@ impl Datastore {
 		};
 		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
+		println!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
 		}
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
 			trace!("Removing unreachable node {}", cl.name);
+			println!("Removing unreachable node {}", cl.name);
 			tx.del_nd(
 				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
 					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
@@ -611,6 +614,7 @@ impl Datastore {
 			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
+		println!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
 		// let mut tb_lqs: Vec<LqValue> = vec![];
 		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
@@ -620,20 +624,24 @@ impl Datastore {
 			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
+		println!("Found {} table live queries", tb_lq_set.len());
 		// Find and delete missing
 		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
 			match missing {
 				LqType::Nd(ndlq) => {
 					warn!("Deleting ndlq {:?}", &ndlq);
+					println!("Deleting ndlq {:?}", &ndlq);
 					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 				}
 				LqType::Tb(tblq) => {
 					warn!("Deleting tblq {:?}", &tblq);
+					println!("Deleting tblq {:?}", &tblq);
 					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 				}
 			}
 		}
 		trace!("Successfully cleared cluster of unreachable state");
+		println!("Successfully cleared cluster of unreachable state");
 		Ok(())
 	}
 

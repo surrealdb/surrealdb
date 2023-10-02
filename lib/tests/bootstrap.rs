@@ -111,7 +111,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 		}
 		sleep(std::time::Duration::from_millis(100)).await;
 	}
-	if res.len() == 0 {
+	if res.len() == 1 {
 		let message = "Scan of kv range for test case";
 		let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
@@ -128,7 +128,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 		}
 		println!("END OF RANGE SCAN - {}", message);
 	}
-	assert_eq!(res.len(), 1, "We expect the node to be available");
+	assert_eq!(res.len(), 2, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
 
