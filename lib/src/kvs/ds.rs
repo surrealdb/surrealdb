@@ -54,7 +54,7 @@ pub struct LqValue {
 }
 
 #[derive(Debug)]
-enum LqType {
+pub(crate) enum LqType {
 	Nd(LqValue),
 	Tb(LqValue),
 }
@@ -486,7 +486,12 @@ impl Datastore {
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
 		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
+		println!(
+			"Removing dead nodes given now = {:?} and ts_expired = {:?}",
+			timestamp, ts_expired
+		);
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
+		println!("Archiving dead nodes: {:?}", dead);
 		self.archive_dead_lqs(tx, &dead, node_id).await
 	}
 

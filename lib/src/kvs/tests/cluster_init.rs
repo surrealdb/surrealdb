@@ -1,11 +1,12 @@
 use futures::lock::Mutex;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Role};
-use crate::kvs::{LockType::*, TransactionType::*};
+use crate::kvs::{LockType::*, LqType, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -285,4 +286,54 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		.unwrap();
 	assert_eq!(0, found.len(), "Found: {:?}", found);
 	tx.cancel().await.unwrap();
+}
+
+#[test(tokio::test)]
+async fn test_asymmetric_difference() {
+	let nd1 = Uuid::parse_str("7da0b3bb-1811-4c0e-8d8d-5fc08b8200a5").unwrap();
+	let nd2 = Uuid::parse_str("8fd394df-7f96-4395-9c9a-3abf1e2386ea").unwrap();
+	let nd3 = Uuid::parse_str("aa53cb74-1d6b-44df-b063-c495e240ae9e").unwrap();
+	let ns1 = "namespace_one";
+	let ns2 = "namespace_two";
+	let ns3 = "namespace_three";
+	let db1 = "database_one";
+	let db2 = "database_two";
+	let db3 = "database_three";
+	let tb1 = "table_one";
+	let tb2 = "table_two";
+	let tb3 = "table_three";
+	let lq1 = Uuid::parse_str("95f0e060-d301-4dfc-9d35-f150e802873b").unwrap();
+	let left_size = BTreeSet::from_iter(vec![
+		LqType::Nd(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+		LqType::Nd(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+	]);
+
+	let right_size = BTreeSet::from_iter(vec![
+		LqType::Tb(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+		LqType::Tb(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+	])
 }
