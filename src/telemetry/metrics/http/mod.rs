@@ -50,7 +50,8 @@ fn observe_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), Metrics
 fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 
-	Ok(HTTP_SERVER_ACTIVE_REQUESTS.add(&TelemetryContext::current(), value, &attrs))
+	HTTP_SERVER_ACTIVE_REQUESTS.add(&TelemetryContext::current(), value, &attrs);
+	Ok(())
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {
