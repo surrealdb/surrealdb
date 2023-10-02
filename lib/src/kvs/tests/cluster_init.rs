@@ -95,7 +95,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let ctx = context::Context::background();
-	let sender = test.db.live_sender().unwrap();
+	let (sender, _) = channel::unbounded();
 	let opt = Options::new()
 		.with_ns(ses.ns())
 		.with_db(ses.db())

@@ -13,6 +13,7 @@ use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
@@ -43,10 +44,10 @@ use sql::statements::LiveStatement;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
@@ -60,6 +61,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
+	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -654,7 +656,7 @@ impl Transaction {
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!(
+		println!(
 			"Scan {:?} - {:?}",
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
@@ -794,10 +796,15 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		println!(
+			"Getr {:?}..{:?} (limit: {limit})",
+			debug::sprint_key(&rng.start.clone().into()),
+			debug::sprint_key(&rng.end.clone().into())
+		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -1022,7 +1029,7 @@ impl Transaction {
 			None => {
 				let value = ClusterMembership {
 					name: id.to_string(),
-					heartbeat: self.clock(),
+					heartbeat: self.clock().await,
 				};
 				self.put(key.key_category(), key, value).await?;
 				Ok(())
@@ -1040,15 +1047,19 @@ impl Transaction {
 		}
 	}
 
-	// Public for tests, but we might not want to expose this
-	pub fn clock(&self) -> Timestamp {
+	/// Clock retrieves the current timestamp which is fallible
+	/// It is used for unreliable ordering of events as well as
+	/// handling of timeouts. Operations that are not guaranteed to be correct.
+	/// But also allows for lexicographical ordering.
+	///
+	/// Public for tests, but we might not want to expose this
+	pub async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
-		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
-			Ok(duration) => duration.as_millis(),
-			Err(error) => panic!("Clock may have gone backwards: {:?}", error.duration()),
-		};
-		Timestamp {
-			value: now as u64,
+		// Match, because we cannot have sized traits or async traits
+		match self.clock.read().await.deref() {
+			SizedClock::Fake(fake) => fake.now(),
+			SizedClock::Inc(inc) => inc.now().await,
+			SizedClock::System(system) => system.now(),
 		}
 	}
 
@@ -1344,6 +1355,7 @@ impl Transaction {
 		Ok(out)
 	}
 
+	/// Add live query to table
 	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
@@ -1745,20 +1757,21 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::table::lq::prefix(ns, db, tb);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Lvs(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::table::lq::prefix(ns, db, tb);
-			let end = crate::key::table::lq::suffix(ns, db, tb);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-			val
-		})
+		// Ok(if let Some(e) = self.cache.get(&key) {
+		// 	if let Entry::Lvs(v) = e {
+		// 		v
+		// 	} else {
+		// 		unreachable!();
+		// 	}
+		// } else {
+		let beg = crate::key::table::lq::prefix(ns, db, tb);
+		let end = crate::key::table::lq::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+		// val
+		// })
+		Ok(val)
 	}
 
 	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
@@ -2722,7 +2735,7 @@ impl Transaction {
 	// complete_changes will complete the changefeed recording for the given namespace and database.
 	//
 	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
-	// Every change must be recorded by calling this struct's `record_change` function beforehand.
+	// Every change must be recorded by calling this model's `record_change` function beforehand.
 	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
 	//
 	// This function should be called only after all the changes have been made to the transaction.

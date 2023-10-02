@@ -186,7 +186,7 @@ async fn a_valid_notification(
 	tx: &mut Transaction,
 	args: ValidNotificationState,
 ) -> Result<ValidNotificationState, Error> {
-	let now = tx.clock();
+	let now = tx.clock().await;
 	let default_node_id =
 		Uuid::from(uuid::Uuid::parse_str("123e9d92-c975-4daf-8080-3082e83cfa9b").unwrap());
 	let default_lq_id =
