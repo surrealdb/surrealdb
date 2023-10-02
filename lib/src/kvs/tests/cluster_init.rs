@@ -129,7 +129,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
-			node_id.clone(),
+			node_id,
 			Some(Arc::from(namespace)),
 			Some(Arc::from(database)),
 			Arc::new(Auth::for_root(Role::Owner)),
@@ -211,7 +211,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
-			old_node_id.clone(),
+			old_node_id,
 			Some(Arc::from(namespace)),
 			Some(Arc::from(database)),
 			Arc::new(Auth::for_root(Role::Owner)),

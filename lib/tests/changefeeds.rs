@@ -35,7 +35,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	dbs.tick_at(end_ts).await?;
 	assert_eq!(res.len(), 6);
 	// DEFINE DATABASE
@@ -95,12 +95,12 @@ async fn database_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	dbs.tick_at(end_ts + 3599).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, val);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
@@ -140,7 +140,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	dbs.tick_at(end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
@@ -276,12 +276,12 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	dbs.tick_at(end_ts + 3599).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, val);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
@@ -344,7 +344,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
