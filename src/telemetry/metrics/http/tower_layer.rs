@@ -84,7 +84,7 @@ where
 		// Initialize the metrics if not already done.
 		if this.tracker.state.get_mut() == &ResultState::None {
 			this.tracker.set_state(ResultState::Started);
-	
+
 			if let Err(err) = on_request_start(this.tracker) {
 				error!("Failed to setup metrics when request started: {}", err);
 				// Consider this request not tracked: reset the state to None, so that the drop handler does not decrease the counter.
