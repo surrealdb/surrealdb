@@ -105,7 +105,6 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	for _ in 0..10 {
 		let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
-		tx.commit().await.unwrap();
 		if res.len() != 0 {
 			break;
 		}
@@ -126,6 +125,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 		}
 		println!("END OF RANGE SCAN - {}", message);
 	}
+	tx.commit().await.unwrap();
 	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
