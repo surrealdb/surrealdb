@@ -15,7 +15,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--all-features", "--tests", "--benches", "--examples", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--all-features", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
