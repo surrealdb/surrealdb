@@ -81,13 +81,16 @@ where
 	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		let this = self.project();
 
-		this.tracker.set_state(ResultState::Started);
+		// Initialize the metrics if not already done.
+		if this.tracker.state.get_mut() == &ResultState::None {
+			this.tracker.set_state(ResultState::Started);
 
-		if let Err(err) = on_request_start(this.tracker) {
-			error!("Failed to setup metrics when request started: {}", err);
-			// Consider this request not tracked: reset the state to None, so that the drop handler does not decrease the counter.
-			this.tracker.set_state(ResultState::None);
-		};
+			if let Err(err) = on_request_start(this.tracker) {
+				error!("Failed to setup metrics when request started: {}", err);
+				// Consider this request not tracked: reset the state to None, so that the drop handler does not decrease the counter.
+				this.tracker.set_state(ResultState::None);
+			};
+		}
 
 		let response = futures_util::ready!(this.inner.poll(cx));
 
@@ -123,6 +126,7 @@ pub struct HttpCallMetricTracker {
 	finish: Option<Instant>,
 }
 
+#[derive(PartialEq, Eq)]
 pub enum ResultState {
 	/// The result was already processed.
 	None,
@@ -241,13 +245,13 @@ impl Drop for HttpCallMetricTracker {
 }
 
 pub fn on_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	// Setup the active_requests observer
-	super::observe_request_start(tracker)
+	// Increase the number of active requests.
+	super::observe_active_request(1, tracker)
 }
 
 pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	// Setup the active_requests observer
-	super::observe_request_finish(tracker)?;
+	// Decrease the number of active requests.
+	super::observe_active_request(-1, tracker)?;
 
 	// Record the duration of the request.
 	super::record_request_duration(tracker);
