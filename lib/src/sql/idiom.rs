@@ -105,9 +105,11 @@ impl Idiom {
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
-			.iter().filter(|&p| {
+			.iter()
+			.filter(|&p| {
 				matches!(p, Part::Field(_) | Part::Start(_) | Part::Value(_) | Part::Graph(_))
-			}).cloned()
+			})
+			.cloned()
 			.collect::<Vec<_>>()
 			.into()
 	}
