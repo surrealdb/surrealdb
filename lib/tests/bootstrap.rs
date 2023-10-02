@@ -15,6 +15,7 @@ use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
+use tokio::time::sleep;
 
 #[tokio::test]
 #[serial]
@@ -108,6 +109,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 		if res.len() != 0 {
 			break;
 		}
+		sleep(std::time::Duration::from_millis(100)).await;
 	}
 	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
