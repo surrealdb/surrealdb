@@ -800,11 +800,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
-		println!(
-			"Getr {:?}..{:?} (limit: {limit})",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
