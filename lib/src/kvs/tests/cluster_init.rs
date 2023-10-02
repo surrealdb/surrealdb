@@ -258,7 +258,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 			// The behaviour has now changed to remove all broken entries without raising errors
 		}
 		Err(e) => {
-			panic!("Boostrapping should not generate errors: {:?}", e)
+			panic!("Bootstrapping should not generate errors: {:?}", e)
 		}
 	}
 
