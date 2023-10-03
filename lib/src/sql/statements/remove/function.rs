@@ -72,3 +72,16 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 		},
 	))
 }
+
+#[cfg(test)]
+mod test {
+	use super::super::remove;
+
+	#[test]
+	fn remove_long_function() {
+		let sql = "REMOVE FUNCTION fn::foo::bar::baz::bac";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FUNCTION fn::foo::bar::baz::bac", format!("{}", out))
+	}
+}
