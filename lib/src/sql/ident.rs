@@ -84,11 +84,6 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 	Ok((i, Ident::from(v)))
 }
 
-pub fn plain(i: &str) -> IResult<&str, Ident> {
-	let (i, v) = take_while1(val_char)(i)?;
-	Ok((i, Ident::from(v)))
-}
-
 pub fn multi(i: &str) -> IResult<&str, Ident> {
 	let (i, v) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 	Ok((i, Ident::from(v)))
