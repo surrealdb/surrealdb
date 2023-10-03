@@ -1,4 +1,5 @@
 use futures::lock::Mutex;
+use std::collections::BTreeSet;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -6,7 +7,7 @@ use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Role};
-use crate::kvs::{LockType::*, TransactionType::*};
+use crate::kvs::{LockType::*, LqType, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -20,7 +21,7 @@ async fn expired_nodes_are_garbage_collected() {
 	let old_node = Uuid::parse_str("2ea6d33f-4c0a-417a-ab04-1fa9869f9a65").unwrap();
 	let new_node = Uuid::parse_str("fbfb3487-71fe-4749-b3aa-1cc0a5380cdd").unwrap();
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
 	let clock = Arc::new(RwLock::new(clock));
@@ -32,7 +33,7 @@ async fn expired_nodes_are_garbage_collected() {
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
-		value: 567,
+		value: 567000,
 	};
 	{
 		// Lock released after scope
@@ -68,7 +69,7 @@ async fn expired_nodes_are_garbage_collected() {
 async fn expired_nodes_get_live_queries_archived() {
 	let old_node = Uuid::parse_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
 	let clock = Arc::new(RwLock::new(clock));
@@ -116,7 +117,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	// Set up second node at a later timestamp
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
-		value: 456,
+		value: 456000,
 	};
 	{
 		// Lock is released after scope
@@ -146,7 +147,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let clock = SizedClock::Fake(FakeClock::new(time.clone()));
 	let clock = Arc::new(RwLock::new(clock));
@@ -326,4 +327,64 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		.unwrap();
 	assert_eq!(0, found.len(), "Found: {:?}", found);
 	tx.cancel().await.unwrap();
+}
+
+#[test(tokio::test)]
+async fn test_asymmetric_difference() {
+	let nd1 = Uuid::parse_str("7da0b3bb-1811-4c0e-8d8d-5fc08b8200a5").unwrap();
+	let nd2 = Uuid::parse_str("8fd394df-7f96-4395-9c9a-3abf1e2386ea").unwrap();
+	let nd3 = Uuid::parse_str("aa53cb74-1d6b-44df-b063-c495e240ae9e").unwrap();
+	let ns1 = "namespace_one";
+	let ns2 = "namespace_two";
+	let ns3 = "namespace_three";
+	let db1 = "database_one";
+	let db2 = "database_two";
+	let db3 = "database_three";
+	let tb1 = "table_one";
+	let tb2 = "table_two";
+	let tb3 = "table_three";
+	let lq1 = Uuid::parse_str("95f0e060-d301-4dfc-9d35-f150e802873b").unwrap();
+	let lq2 = Uuid::parse_str("acf60c04-5819-4a23-9874-aeb0ae1be425").unwrap();
+	let lq3 = Uuid::parse_str("5d591ae7-db79-4e4f-aa02-a83a4a25ce3f").unwrap();
+	let left_set = BTreeSet::from_iter(vec![
+		LqType::Nd(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+		LqType::Nd(LqValue {
+			nd: nd2.into(),
+			ns: ns2.to_string(),
+			db: db2.to_string(),
+			tb: tb2.to_string(),
+			lq: lq2.into(),
+		}),
+	]);
+
+	let right_set = BTreeSet::from_iter(vec![
+		LqType::Tb(LqValue {
+			nd: nd2.into(),
+			ns: ns2.to_string(),
+			db: db2.to_string(),
+			tb: tb2.to_string(),
+			lq: lq2.into(),
+		}),
+		LqType::Tb(LqValue {
+			nd: nd3.into(),
+			ns: ns3.to_string(),
+			db: db3.to_string(),
+			tb: tb3.to_string(),
+			lq: lq3.into(),
+		}),
+	]);
+
+	let diff = left_set.symmetric_difference(&right_set);
+	// TODO but also poorman's count
+	let mut count = 0;
+	for _ in diff {
+		count += 1;
+	}
+	assert_ne!(count, 0);
 }
