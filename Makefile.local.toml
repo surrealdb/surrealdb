@@ -32,6 +32,11 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = ["check", "--workspace"]
 
+[tasks.cargo-check-wasm]
+category = "CI - CHECK"
+command = "cargo"
+args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http", "--target", "wasm32-unknown-unknown"]
+
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
 command = "cargo"
@@ -53,6 +58,10 @@ args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 [tasks.check]
 category = "LOCAL USAGE"
 dependencies = ["cargo-check", "cargo-fmt", "cargo-fmt-unlinked", "cargo-clippy"]
+
+[tasks.check-wasm]
+category = "LOCAL USAGE"
+dependencies = ["cargo-check-wasm"]
 
 # Clean
 [tasks.clean]
