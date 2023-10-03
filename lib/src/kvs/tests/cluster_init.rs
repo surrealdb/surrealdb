@@ -23,13 +23,13 @@ async fn expired_nodes_are_garbage_collected() {
 
 	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
-		value: 567,
+		value: 567000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
@@ -59,7 +59,7 @@ async fn expired_nodes_get_live_queries_archived() {
 
 	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
@@ -101,7 +101,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	// Set up second node at a later timestamp
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
-		value: 456,
+		value: 456000,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
 	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
@@ -123,7 +123,7 @@ async fn single_live_queries_are_garbage_collected() {
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let namespace = "test_namespace";
 	let database = "test_db";
@@ -204,7 +204,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let test = init(old_node_id).await.unwrap();
 	let time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
