@@ -36,9 +36,12 @@ impl Lexer<'_> {
 					}
 				}
 				b'd' => {
+					let checkpoint = self.reader.offset();
 					self.reader.next();
 					let Some(b'e') = self.reader.peek() else {
-						return self.lex_ident_from_next_byte(b'd');
+						// 'e' isn't next so it could be a duration
+						self.reader.backup(checkpoint);
+						return self.lex_duration();
 					};
 					self.reader.next();
 					let Some(b'c') = self.reader.peek() else {
@@ -57,7 +60,7 @@ impl Lexer<'_> {
 					}
 				}
 				// Oxc2 is the start byte of 'µ'
-				0xc2 | b'n' | b'u' | b'm' | b'h' | b'd' | b'w' | b'y' => {
+				0xc2 | b'n' | b'u' | b'm' | b'h' | b'w' | b'y' | b's' => {
 					return self.lex_duration()
 				}
 				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {

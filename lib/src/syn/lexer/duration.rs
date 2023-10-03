@@ -40,6 +40,7 @@ impl<'a> Lexer<'a> {
 						if valid_identifier {
 							return self.lex_ident_from_next_byte(x);
 						} else {
+							self.scratch.clear();
 							return self.invalid_token();
 						}
 					};
@@ -48,6 +49,7 @@ impl<'a> Lexer<'a> {
 					let Ok(number) = self.scratch[number_offset..].parse() else {
 						// Can only happen if the number is too big.
 						// TODO: Should probably handle to big numbers with a specific error.
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 
@@ -67,19 +69,24 @@ impl<'a> Lexer<'a> {
 				0xc2 => {
 					self.reader.next();
 					// Second byte of 'µ'.
-					let Some(0xb5) = self.reader.peek() else {
+					// Always consume as the next byte will always be part of a two byte character.
+					let Some(0xb5) = self.reader.next() else {
 						// can no longer be a valid identifier
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 
 					let Some(b's') = self.reader.peek() else {
 						// can no longer be a valid identifier
+						self.scratch.clear();
 						return self.invalid_token();
 					};
+					self.reader.next();
 
 					let Ok(number) = self.scratch[number_offset..].parse() else {
 						// Can only happen if the number is too big.
 						// TODO: Should probably handle to big numbers with a specific error.
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 
@@ -91,6 +98,7 @@ impl<'a> Lexer<'a> {
 					number_offset = self.scratch.len();
 				}
 				b'm' => {
+					self.reader.next();
 					// Either milli or minute
 					let is_milli = self.reader.peek() == Some(b's');
 					if is_milli {
@@ -100,6 +108,7 @@ impl<'a> Lexer<'a> {
 					let Ok(number) = self.scratch[number_offset..].parse() else {
 						// Can only happen if the number is too big.
 						// TODO: Should probably handle to big numbers with a specific error.
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 
@@ -107,6 +116,7 @@ impl<'a> Lexer<'a> {
 						Duration::from_millis(number)
 					} else {
 						let Some(number) = number.checked_mul(SECONDS_PER_MINUTE) else {
+							self.scratch.clear();
 							return self.invalid_token();
 						};
 						Duration::from_secs(number)
@@ -121,11 +131,13 @@ impl<'a> Lexer<'a> {
 					number_offset = self.scratch.len();
 				}
 				x @ (b's' | b'h' | b'd' | b'w' | b'y') => {
+					self.reader.next();
 					// second, hour, day, week or year.
 
 					let Ok(number) = self.scratch[number_offset..].parse() else {
 						// Can only happen if the number is too big.
 						// TODO: Should probably handle to big numbers with a specific error.
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 
@@ -139,6 +151,7 @@ impl<'a> Lexer<'a> {
 					};
 
 					let Some(new_duration) = new_duration else {
+						self.scratch.clear();
 						return self.invalid_token();
 					};
 					duration += new_duration;
@@ -152,6 +165,7 @@ impl<'a> Lexer<'a> {
 					if valid_identifier {
 						return self.lex_ident();
 					} else {
+						self.scratch.clear();
 						return self.invalid_token();
 					}
 				}
@@ -167,6 +181,7 @@ impl<'a> Lexer<'a> {
 						self.reader.next();
 						return self.lex_ident_from_next_byte(x);
 					} else {
+						self.scratch.clear();
 						return self.invalid_token();
 					}
 				}
@@ -175,6 +190,7 @@ impl<'a> Lexer<'a> {
 					// Duration done.
 					let index = (self.durations.len() as u32).into();
 					self.durations.push(duration);
+					self.scratch.clear();
 					return self.finish_token(
 						TokenKind::Duration {
 							valid_identifier,

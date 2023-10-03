@@ -13,19 +13,31 @@ macro_rules! test_case(
 #[test]
 fn operators() {
 	test_case! {
-		r#"- + / * < > <= >= = -= += +?="# => [
-			t!("-"),
-			t!("+"),
-			t!("/"),
-			t!("*"),
-			t!("<"),
-			t!(">"),
-			t!("<="),
-			t!(">="),
-			t!("="),
-			t!("-="),
-			t!("+="),
-			t!("+?="),
+		r#"- + / * ! **
+           < > <= >= <- <-> ->
+           = == -= += != +?=
+           ? ?? ?: ?~ ?=
+           { } [ ] ( )
+           ; , | || & &&
+           . .. ...
+
+           ^
+    "# => [
+			t!("-"), t!("+"), t!("/"), t!("*"), t!("!"), t!("**"),
+
+			t!("<"), t!(">"), t!("<="), t!(">="), t!("<-"), t!("<->"), t!("->"),
+
+			t!("="), t!("=="), t!("-="), t!("+="), t!("!="), t!("+?="),
+
+			t!("?"), t!("??"), t!("?:"), t!("?~"), t!("?="),
+
+			t!("{"), t!("}"), t!("["), t!("]"), t!("("), t!(")"),
+
+			t!(";"), t!(","), t!("|"), t!("||"), TokenKind::Invalid, t!("&&"),
+
+			t!("."), t!(".."), t!("..."),
+
+			TokenKind::Invalid
 		]
 	}
 }
@@ -33,12 +45,12 @@ fn operators() {
 #[test]
 fn comments() {
 	test_case! {
-		r#"
+		r"
 			+ /* some comment */
 			- // another comment
 			+ -- a third comment
 			-
-		"# => [
+		" => [
 			t!("+"),
 			t!("-"),
 			t!("+"),
@@ -103,7 +115,6 @@ fn numbers() {
 			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Identifier,
-			t!("+"),
 		]
 	}
 }
@@ -164,6 +175,18 @@ fn duration() {
 			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
+			TokenKind::Identifier,
+		]
+	}
+}
+
+#[test]
+fn keyword() {
+	test_case! {
+		r#"select SELECT sElEcT"# => [
+			t!("SELECT"),
+			t!("SELECT"),
+			t!("SELECT"),
 		]
 	}
 }
