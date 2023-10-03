@@ -100,17 +100,9 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	dbs.bootstrap().await.unwrap();
 
 	// Verify node live query is deleted
-	// Retries due to flakiness
-	let mut res = vec![];
-	for _ in 0..10 {
-		let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
-		tx.commit().await.unwrap();
-		if res.len() != 0 {
-			break;
-		}
-		sleep(std::time::Duration::from_millis(100)).await;
-	}
+	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
+	let res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
+	tx.commit().await.unwrap();
 	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
