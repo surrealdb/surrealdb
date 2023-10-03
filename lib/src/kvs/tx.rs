@@ -55,9 +55,9 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 pub(crate) const NO_LIMIT: u32 = 0;
 
 #[cfg(not(target_arch = "wasm32"))]
-type AtomicLockedClock = Arc<RwLock<SizedClock>>;
+pub(crate) type AtomicLockedClock = Arc<RwLock<SizedClock>>;
 #[cfg(target_arch = "wasm32")]
-type AtomicLockedClock = Arc<SizedClock>;
+pub(crate) type AtomicLockedClock = Arc<SizedClock>;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -1061,7 +1061,7 @@ impl Transaction {
 		#[cfg(not(target_arch = "wasm32"))]
 		let clock_impl = owned.deref();
 		#[cfg(target_arch = "wasm32")]
-		let clock_impl = self.clock;
+		let clock_impl = self.clock.deref();
 		match clock_impl {
 			SizedClock::Fake(fake) => fake.now(),
 			SizedClock::Inc(inc) => inc.now().await,

@@ -15,7 +15,9 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{
+	AtomicLockedClock, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT,
+};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -113,7 +115,7 @@ pub struct Datastore {
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: Arc<RwLock<SizedClock>>,
+	clock: AtomicLockedClock,
 }
 
 /// We always want to be circulating the live query information
@@ -204,17 +206,22 @@ impl Datastore {
 	#[allow(dead_code)]
 	pub async fn new_full(
 		path: &str,
-		clock_override: Option<Arc<RwLock<SizedClock>>>,
+		clock_override: Option<AtomicLockedClock>,
 	) -> Result<Datastore, Error> {
+		#[cfg(not(target_arch = "wasm32"))]
+		let default_clock: AtomicLockedClock =
+			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+		#[cfg(target_arch = "wasm32")]
+		let default_clock: AtomicLockedClock = Arc::new(SizedClock::System(SystemClock::new()));
 		// Initiate the desired datastore
-		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
+		let (inner, clock): (Result<Inner, Error>, AtomicLockedClock) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					info!("Started kvs store in {}", path);
@@ -232,7 +239,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					info!("Started kvs store at {}", path);
@@ -251,7 +258,7 @@ impl Datastore {
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					Ok((v, clock))
@@ -269,7 +276,7 @@ impl Datastore {
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					Ok((v, clock))
@@ -287,7 +294,7 @@ impl Datastore {
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					Ok((v, clock))
@@ -305,7 +312,7 @@ impl Datastore {
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					Ok((v, clock))
@@ -323,7 +330,7 @@ impl Datastore {
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
 					let clock = match clock_override {
-						None => Arc::new(RwLock::new(SizedClock::System(SystemClock::new()))),
+						None => default_clock,
 						Some(c) => c,
 					};
 					Ok((v, clock))
