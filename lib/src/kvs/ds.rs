@@ -25,7 +25,6 @@ use crate::sql::{Query, Uuid};
 use crate::vs::Oracle;
 use channel::Receiver;
 use channel::Sender;
-use dirs::home_dir;
 use futures::lock::Mutex;
 use futures::Future;
 use std::cmp::Ordering;
@@ -241,7 +240,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
@@ -266,7 +265,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
@@ -291,7 +290,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
@@ -316,7 +315,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
@@ -341,7 +340,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
@@ -366,7 +365,7 @@ impl Datastore {
 
 					let s = match s.starts_with('~') {
 						true => {
-							s.replacen("~", home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
+							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
 						}
 						false => s.to_string(),
 					};
