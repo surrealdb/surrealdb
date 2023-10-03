@@ -239,9 +239,11 @@ impl Datastore {
 					let s = s.trim_start_matches("file:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
@@ -264,9 +266,11 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
@@ -289,9 +293,11 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
@@ -314,9 +320,11 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
@@ -339,9 +347,11 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
@@ -364,9 +374,11 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 
 					let s = match s.starts_with('~') {
-						true => {
-							s.replacen('~', dirs::home_dir().unwrap().as_os_str().to_str().unwrap(), 1)
-						}
+						true => s.replacen(
+							'~',
+							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
+							1,
+						),
 						false => s.to_string(),
 					};
 
