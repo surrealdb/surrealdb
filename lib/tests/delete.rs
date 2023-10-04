@@ -436,9 +436,8 @@ fn recv_notification(
 	poll_rate: std::time::Duration,
 ) -> Result<Notification, TryRecvError> {
 	for _ in 0..tries {
-		match notifications.try_recv() {
-			Ok(not) => return Ok(not),
-			Err(_) => {}
+		if let Ok(not) = notifications.try_recv() {
+			return Ok(not);
 		}
 		std::thread::sleep(poll_rate);
 	}
