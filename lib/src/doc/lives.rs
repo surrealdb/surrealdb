@@ -6,6 +6,7 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::key::debug;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use std::ops::Deref;
@@ -182,6 +183,22 @@ impl<'a> Document<'a> {
 								println!("Found {} notifications in create", nots.len());
 								let channel = chn.write().await;
 								for not in &nots {
+									// Consume the notification entry
+									let key = crate::key::table::nt::Nt::new(
+										opt.ns(),
+										opt.db(),
+										&self.id.unwrap().tb,
+										lv.id.clone(),
+										not.timestamp.clone(),
+										not.notification_id.clone(),
+									);
+									let key_enc = key.encode().unwrap();
+									println!(
+										"Deleting notification: {:?}",
+										debug::sprint_key(&key_enc)
+									);
+									tx.del(key_enc).await.unwrap();
+									// Send the notification to the channel
 									if let Err(e) = channel.send(not.clone()).await {
 										println!("Error sending scanned notification: {}", e);
 										error!("Error sending scanned notification: {}", e);
@@ -396,7 +413,12 @@ mod tests {
 		assert_eq!(first_notification.notification_id, expected_not_id);
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
-		// TODO verify deleted notifications
+		// verify remote notifications have been consumed
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 1000).await;
+		tx.commit().await.unwrap();
+		let results = results.unwrap();
+		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
 	}
 
 	#[tokio::test]

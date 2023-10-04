@@ -1444,6 +1444,15 @@ impl Transaction {
 				if n == i + 1 {
 					nxt = Some(key.clone());
 				}
+				println!("Found key {:?}", debug::sprint_key(&key));
+				let key_dec = crate::key::table::nt::Nt::decode(key.as_slice())?;
+				println!("ns={:?}", key_dec.ns);
+				println!("db={:?}", key_dec.db);
+				println!("tb={:?}", key_dec.tb);
+				println!("lq={:?}", key_dec.lq);
+				println!("ts={:?}", key_dec.ts);
+				println!("id={:?}", key_dec.nt);
+
 				let val: Notification = value.into();
 				out.push(val);
 				// Count
