@@ -18,7 +18,6 @@ use crate::kvs::clock::{SizedClock, SystemClock};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
-use crate::sql::dir::dir;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::Base;
 use crate::sql::Value;
