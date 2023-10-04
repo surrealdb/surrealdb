@@ -324,36 +324,29 @@ impl<'a> Document<'a> {
 #[cfg(feature = "kv-mem")]
 mod tests {
 	use crate::ctx::Context;
-	use crate::dbs::{Action, Executor, Notification, Options, Session};
-	use crate::iam::{Auth, Level, Role};
+	use crate::dbs::{Action, Notification, Session};
+	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::sql;
 	use crate::sql::Value;
-	use std::sync::Arc;
+	use std::ops::Deref;
 
 	#[tokio::test]
 	async fn create_consumes_remote_notifications() {
 		// Setup
 		let ds = Datastore::new("memory").await.unwrap().with_notifications();
-		let mut exe = Executor::new(&ds);
 		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
 		let node_id = uuid::Uuid::parse_str("22fa1d05-abea-4835-9463-e1dc6d733aad").unwrap();
-		let opt = Options::new()
-			.with_id(node_id)
-			.with_auth(Arc::new(Auth::for_root(Role::Owner)))
-			.with_live(true)
-			.with_ns(sess.ns())
-			.with_db(sess.db());
+		let mut ctx = Context::background().with_live_value(Value::None).with_live_sess(&sess);
+		let sender = ds.live_sender();
+		let chan = sender.as_ref().unwrap().write().await;
+		ctx.add_notifications(Some(chan.deref()));
 
 		// Setup live query to receive remote notification
 		let qry = "LIVE SELECT * FROM test_table";
-		let ast = sql::parse(qry).unwrap();
-		let res = exe
-			.execute(Context::default().with_live_value(Value::None), opt.clone(), ast)
-			.await
-			.unwrap();
+		let res = ds.execute(qry, &sess, None).await.unwrap();
 		assert_eq!(res.len(), 1);
 		let lq = res.get(0).unwrap().result.as_ref().unwrap();
 		let lq_id = match lq {
@@ -394,8 +387,7 @@ mod tests {
 
 		// Perform a CREATE statement
 		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
-		let ast = sql::parse(qry).unwrap();
-		let res = exe.execute(Context::default(), opt, ast).await.unwrap();
+		let res = ds.execute(qry, &sess, None).await.unwrap();
 		assert_eq!(res.len(), 1);
 		res.get(0).unwrap().result.as_ref().unwrap();
 
