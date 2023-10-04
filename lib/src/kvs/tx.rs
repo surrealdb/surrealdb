@@ -1775,7 +1775,7 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-			Ok(val)
+			val
 		})
 	}
 
