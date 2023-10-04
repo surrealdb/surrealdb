@@ -72,6 +72,11 @@ impl LiveStatement {
 		// Get the Node ID
 		let nid = opt.id()?;
 		// Check that auth has been set
+		if ctx.value("session").is_none() {
+			return Err(Error::InternalContextError(
+				"Expected the context to include 'session'".to_string(),
+			));
+		}
 		let mut stm = LiveStatement {
 			// Use the current session authentication
 			// for when we store the LIVE Statement

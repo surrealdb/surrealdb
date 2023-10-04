@@ -635,6 +635,11 @@ pub enum Error {
 	#[error("Internal database error: {0}")]
 	Internal(String),
 
+	/// Internal server error related to context
+	/// A classification of internal error, related directly to context
+	#[error("Internal database error due to context: {0}")]
+	InternalContextError(String),
+
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),

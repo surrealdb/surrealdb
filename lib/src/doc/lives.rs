@@ -32,6 +32,7 @@ impl<'a> Document<'a> {
 			let chn = chn.clone();
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
+				println!("Processing live query: {:?}", lv);
 				// Create a new statement
 				let lq = Statement::from(lv);
 				// Get the event action
@@ -48,6 +49,7 @@ impl<'a> Document<'a> {
 					false => &self.current,
 				};
 				// Ensure that a session exists on the LIVE query
+				println!("The session is {:?}", lv.session.as_ref());
 				let sess = match lv.session.as_ref() {
 					Some(v) => v,
 					None => continue,
@@ -57,16 +59,19 @@ impl<'a> Document<'a> {
 					Some(v) => v,
 					None => continue,
 				};
+				println!("There is an auth");
 				// We need to create a new context which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the session
 				// of the user who created the LIVE query.
 				let mut lqctx = Context::background().with_live_value(sess.clone());
+				println!("We have an lq context");
 				// We need to create a new options which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data
 				// of the user who created the LIVE query.
 				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
+				println!("We have an lq options");
 				// Add $before, $after, $value, and $event params
 				// to this LIVE query so that user can use these
 				// within field projections and WHERE clauses.
@@ -97,6 +102,7 @@ impl<'a> Document<'a> {
 				let mut tx = txn.lock().await;
 				let ts = tx.clock().await;
 				let not_id = crate::sql::Uuid::new_v4();
+				println!("We are in the part that checks delete");
 				if stm.is_delete() {
 					// Send a DELETE notification
 					let thing = (*rid).clone();
@@ -308,4 +314,64 @@ impl<'a> Document<'a> {
 		// Carry on
 		Ok(())
 	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests {
+	use crate::ctx::Context;
+	use crate::dbs::{Executor, Options, Session};
+	use crate::iam::{Auth, Level, Role};
+	use crate::kvs::Datastore;
+	use crate::sql;
+	use crate::sql::Value;
+	use std::sync::Arc;
+
+	#[tokio::test]
+	async fn create_consumes_remote_notifications() {
+		// Setup
+		let ds = Datastore::new("memory").await.unwrap().with_notifications();
+		let mut exe = Executor::new(&ds);
+		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+		let opt = Options::new()
+			.with_id(uuid::Uuid::parse_str("22fa1d05-abea-4835-9463-e1dc6d733aad").unwrap())
+			.with_auth(Arc::new(Auth::for_root(Role::Owner)))
+			.with_live(true)
+			.with_ns(sess.ns())
+			.with_db(sess.db());
+
+		// Setup live query to receive remote notification
+		let qry = "LIVE SELECT * FROM test_table";
+		let ast = sql::parse(qry).unwrap();
+		let res = exe
+			.execute(Context::default().with_live_value(Value::None), opt.clone(), ast)
+			.await
+			.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Create remote notification artificially
+		let expected_not_id =
+			uuid::Uuid::parse_str("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
+
+		// Perform a CREATE statement
+		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
+		let ast = sql::parse(qry).unwrap();
+		let res = exe.execute(Context::default(), opt, ast).await.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Verify we received the remote notification before the create notification
+		let receiver = ds.notifications().unwrap();
+		let first_notification = receiver.try_recv().unwrap();
+		let second_notification = receiver.try_recv().unwrap();
+		assert_eq!(first_notification.notification_id.0, expected_not_id);
+		assert_ne!(second_notification.notification_id.0, expected_not_id);
+	}
+
+	#[tokio::test]
+	async fn update_consumes_remote_notifications() {}
+
+	#[tokio::test]
+	async fn delete_consumes_remote_notifications() {}
 }
