@@ -356,15 +356,13 @@ mod tests {
 
 		// Create remote notification artificially
 		let expected_not_id =
-			uuid::Uuid::parse_str("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
+			sql::uuid::Uuid::try_from("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let notification_id =
-			sql::uuid::Uuid::try_from("ed491dec-5407-4636-86ff-608c2a00ad7f").unwrap();
 		let not = Notification {
 			live_id: lq_id.clone(),
 			node_id: sql::uuid::Uuid::from(node_id.clone()),
-			notification_id: notification_id.clone(),
+			notification_id: expected_not_id.clone(),
 			action: Action::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
@@ -377,7 +375,7 @@ mod tests {
 			"test_table",
 			lq_id.clone(),
 			ts,
-			notification_id,
+			expected_not_id.clone(),
 			not,
 			None,
 		)
@@ -395,8 +393,8 @@ mod tests {
 		let receiver = ds.notifications().unwrap();
 		let first_notification = receiver.try_recv().unwrap();
 		let second_notification = receiver.try_recv().unwrap();
-		assert_eq!(first_notification.notification_id.0, expected_not_id);
-		assert_ne!(second_notification.notification_id.0, expected_not_id);
+		assert_eq!(first_notification.notification_id, expected_not_id);
+		assert_ne!(second_notification.notification_id, expected_not_id);
 
 		// TODO verify deleted notifications
 	}
