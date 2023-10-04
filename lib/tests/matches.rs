@@ -291,7 +291,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..6 {
@@ -329,7 +329,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..7 {

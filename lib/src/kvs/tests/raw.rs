@@ -44,7 +44,7 @@ async fn get() {
 	let val = tx.get("test").await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"ok")));
 	let val = tx.get("none").await.unwrap();
-	assert!(matches!(val.as_deref(), None));
+	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
 
@@ -120,7 +120,7 @@ async fn del() {
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get("test").await.unwrap();
-	assert!(matches!(val.as_deref(), None));
+	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
 
@@ -187,7 +187,7 @@ async fn delc() {
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get("test").await.unwrap();
-	assert!(matches!(val.as_deref(), None));
+	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
 

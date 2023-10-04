@@ -437,7 +437,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, &session, None).await;
+				let res = ds.execute(statement, session, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);

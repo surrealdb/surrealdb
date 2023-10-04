@@ -453,7 +453,7 @@ impl Datastore {
 	// completely failed. It may have partially completed. It certainly has side-effects
 	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
 	// ability.
-	// NOTE: If you get deadlocks, check your transactions around this method.
+	// NOTE: If you get rust mutex deadlocks, check your transactions around this method.
 	// This should be called before any transactions are made in release mode
 	// In tests, it should be outside any other transaction - in isolation.
 	// We cannot easily systematise this, since we aren't counting transactions created.
@@ -517,8 +517,8 @@ impl Datastore {
 				}
 			}
 		};
-		if resolve_err.is_err() {
-			err.push(resolve_err.unwrap_err());
+		if let Err(e) = resolve_err {
+			err.push(e);
 		}
 		if !err.is_empty() {
 			error!("Error bootstrapping sweep phase: {:?}", err);

@@ -48,7 +48,8 @@ impl RemoveFunctionStatement {
 
 impl Display for RemoveFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE FUNCTION fn::{}", self.name)
+		// Bypass ident display since we don't want backticks arround the ident.
+		write!(f, "REMOVE FUNCTION fn::{}", self.name.0)
 	}
 }
 
@@ -56,7 +57,7 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
-	let (i, name) = ident::plain(i)?;
+	let (i, name) = ident::multi(i)?;
 	let (i, _) = opt(|i| {
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char('(')(i)?;
@@ -70,4 +71,17 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 			name,
 		},
 	))
+}
+
+#[cfg(test)]
+mod test {
+	use super::super::remove;
+
+	#[test]
+	fn remove_long_function() {
+		let sql = "REMOVE FUNCTION fn::foo::bar::baz::bac";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FUNCTION fn::foo::bar::baz::bac", format!("{}", out))
+	}
 }

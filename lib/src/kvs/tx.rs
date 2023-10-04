@@ -1890,21 +1890,20 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::table::lq::prefix(ns, db, tb);
-		// Ok(if let Some(e) = self.cache.get(&key) {
-		// 	if let Entry::Lvs(v) = e {
-		// 		v
-		// 	} else {
-		// 		unreachable!();
-		// 	}
-		// } else {
-		let beg = crate::key::table::lq::prefix(ns, db, tb);
-		let end = crate::key::table::lq::suffix(ns, db, tb);
-		let val = self.getr(beg..end, u32::MAX).await?;
-		let val = val.convert().into();
-		self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-		// val
-		// })
-		Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Lvs(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::table::lq::prefix(ns, db, tb);
+			let end = crate::key::table::lq::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+			Ok(val)
+		})
 	}
 
 	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
@@ -3014,7 +3013,7 @@ mod tests {
 			..Default::default()
 		};
 		let key = crate::key::root::us::new("user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap()
@@ -3040,7 +3039,7 @@ mod tests {
 		};
 
 		let key = crate::key::namespace::us::new("ns", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_ns_user("ns", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -3066,7 +3065,7 @@ mod tests {
 		};
 
 		let key = crate::key::database::us::new("ns", "db", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -3090,8 +3089,8 @@ mod tests {
 
 		let key1 = crate::key::root::us::new("user1");
 		let key2 = crate::key::root::us::new("user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 		let res = txn.all_root_users().await.unwrap();
 
 		assert_eq!(res.len(), 2);
@@ -3117,8 +3116,8 @@ mod tests {
 
 		let key1 = crate::key::namespace::us::new("ns", "user1");
 		let key2 = crate::key::namespace::us::new("ns", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 
@@ -3147,8 +3146,8 @@ mod tests {
 
 		let key1 = crate::key::database::us::new("ns", "db", "user1");
 		let key2 = crate::key::database::us::new("ns", "db", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 

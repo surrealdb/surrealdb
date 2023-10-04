@@ -17,7 +17,7 @@ pub struct TestContext {
 impl TestContext {
 	// Use this to generate strings that have the test uuid associated with it
 	pub fn test_str(&self, prefix: &str) -> String {
-		return format!("{}-{}", prefix, self.context_id);
+		format!("{}-{}", prefix, self.context_id)
 	}
 }
 
@@ -28,11 +28,11 @@ pub(crate) async fn init(
 	clock: Arc<RwLock<SizedClock>>,
 ) -> Result<TestContext, Error> {
 	let (db, kvs) = new_ds(node_id, clock).await;
-	return Ok(TestContext {
+	Ok(TestContext {
 		db,
 		kvs,
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
-	});
+	})
 }
 
 /// Scan the entire storage layer displaying keys
@@ -41,7 +41,7 @@ async fn _debug_scan(tx: &mut Transaction, message: &str) {
 	let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
 	println!("START OF RANGE SCAN - {}", message);
 	for (k, _v) in r.iter() {
-		println!("{}", crate::key::debug::sprint_key(k.as_ref()));
+		println!("{}", crate::key::debug::sprint_key(k));
 	}
 	println!("END OF RANGE SCAN - {}", message);
 }
