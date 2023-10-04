@@ -13,7 +13,7 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			let desired_value = Value::parse(*desired_response);
+			let desired_value = Value::parse(desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
 				assert_eq!(
@@ -3756,7 +3756,7 @@ async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -3788,7 +3788,7 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;

@@ -16,7 +16,7 @@ async fn archive_lv_for_node_archives() {
 		0x1F,
 	]));
 
-	let key = crate::key::node::lq::new(node_id.clone(), lv_id.0.clone(), namespace, database);
+	let key = crate::key::node::lq::new(node_id, lv_id.0, namespace, database);
 	tx.putc(key, table, None).await.unwrap();
 
 	let (_, mut stm) = live(format!("LIVE SELECT * FROM {}", table).as_str()).unwrap();
@@ -34,7 +34,7 @@ async fn archive_lv_for_node_archives() {
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let results = test
 		.db
-		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id.clone()), this_node_id.clone())
+		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id.clone())
 		.await
 		.unwrap();
 	assert_eq!(results.len(), 1);
@@ -48,7 +48,7 @@ async fn archive_lv_for_node_archives() {
 			panic!("Unexpected error: {:?}", err);
 		}
 	}
-	assert_eq!(lq.nd, sql::uuid::Uuid(node_id.clone()));
+	assert_eq!(lq.nd, sql::uuid::Uuid(node_id));
 	assert_eq!(lq.ns, namespace);
 	assert_eq!(lq.db, database);
 	assert_eq!(lq.tb, table);
