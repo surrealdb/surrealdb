@@ -1041,7 +1041,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -1092,7 +1092,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -1265,7 +1265,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
 
 	assert!(define_str
-		.strip_prefix("\"")
+		.strip_prefix('\"')
 		.unwrap()
 		.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
 	Ok(())

@@ -129,18 +129,24 @@ mod tests {
 		let ns = "myns";
 		let db = "mydb";
 		let tb = "mytb";
-		let mut dns = DefineNamespaceStatement::default();
-		dns.name = crate::sql::Ident(ns.to_string());
-		let mut ddb = DefineDatabaseStatement::default();
-		ddb.name = crate::sql::Ident(db.to_string());
-		ddb.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(10),
-		});
-		let mut dtb = DefineTableStatement::default();
-		dtb.name = tb.into();
-		dtb.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(10),
-		});
+		let dns = DefineNamespaceStatement {
+			name: crate::sql::Ident(ns.to_string()),
+			..Default::default()
+		};
+		let ddb = DefineDatabaseStatement {
+			name: crate::sql::Ident(db.to_string()),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+			}),
+			..Default::default()
+		};
+		let dtb = DefineTableStatement {
+			name: tb.into(),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+			}),
+			..Default::default()
+		};
 
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -174,7 +180,7 @@ mod tests {
 		let value_a: super::Value = "a".into();
 		tx1.record_change(ns, db, tb, &thing_a, Cow::Borrowed(&value_a));
 		tx1.complete_changes(true).await.unwrap();
-		let _r1 = tx1.commit().await.unwrap();
+		tx1.commit().await.unwrap();
 
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_c = Thing {
@@ -184,7 +190,7 @@ mod tests {
 		let value_c: Value = "c".into();
 		tx2.record_change(ns, db, tb, &thing_c, Cow::Borrowed(&value_c));
 		tx2.complete_changes(true).await.unwrap();
-		let _r2 = tx2.commit().await.unwrap();
+		tx2.commit().await.unwrap();
 
 		let x = ds.transaction(Write, Optimistic).await;
 		let mut tx3 = x.unwrap();
@@ -216,43 +222,44 @@ mod tests {
 				.unwrap();
 		tx4.commit().await.unwrap();
 
-		let mut want: Vec<ChangeSet> = Vec::new();
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(2),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![TableMutation::Set(
-					Thing::from(("mytb".to_string(), "A".to_string())),
-					Value::from("a"),
-				)],
-			)]),
-		));
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(3),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![TableMutation::Set(
-					Thing::from(("mytb".to_string(), "C".to_string())),
-					Value::from("c"),
-				)],
-			)]),
-		));
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(4),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![
-					TableMutation::Set(
-						Thing::from(("mytb".to_string(), "B".to_string())),
-						Value::from("b"),
-					),
-					TableMutation::Set(
+		let want: Vec<ChangeSet> = vec![
+			ChangeSet(
+				vs::u64_to_versionstamp(2),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![TableMutation::Set(
+						Thing::from(("mytb".to_string(), "A".to_string())),
+						Value::from("a"),
+					)],
+				)]),
+			),
+			ChangeSet(
+				vs::u64_to_versionstamp(3),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![TableMutation::Set(
 						Thing::from(("mytb".to_string(), "C".to_string())),
-						Value::from("c2"),
-					),
-				],
-			)]),
-		));
+						Value::from("c"),
+					)],
+				)]),
+			),
+			ChangeSet(
+				vs::u64_to_versionstamp(4),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "B".to_string())),
+							Value::from("b"),
+						),
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::from("c2"),
+						),
+					],
+				)]),
+			),
+		];
 
 		assert_eq!(r, want);
 
@@ -270,8 +277,7 @@ mod tests {
 				.unwrap();
 		tx6.commit().await.unwrap();
 
-		let mut want: Vec<ChangeSet> = Vec::new();
-		want.push(ChangeSet(
+		let want: Vec<ChangeSet> = vec![ChangeSet(
 			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
@@ -286,7 +292,7 @@ mod tests {
 					),
 				],
 			)]),
-		));
+		)];
 		assert_eq!(r, want);
 
 		// Now we should see the gc_all results

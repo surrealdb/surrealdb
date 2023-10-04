@@ -106,10 +106,10 @@ impl Idiom {
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
-			.cloned()
-			.filter(|p| {
+			.filter(|&p| {
 				matches!(p, Part::Field(_) | Part::Start(_) | Part::Value(_) | Part::Graph(_))
 			})
+			.cloned()
 			.collect::<Vec<_>>()
 			.into()
 	}

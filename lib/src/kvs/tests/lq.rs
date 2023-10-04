@@ -19,11 +19,11 @@ async fn scan_node_lq() {
 		key.encode()
 			.unwrap()
 			.iter()
-			.flat_map(|byte| std::ascii::escape_default(byte.clone()))
+			.flat_map(|byte| std::ascii::escape_default(*byte))
 			.map(|byte| byte as char)
 			.collect::<String>()
 	);
-	let _ = tx.putc(key, "value", None).await.unwrap();
+	tx.putc(key, "value", None).await.unwrap();
 	tx.commit().await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 

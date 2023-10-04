@@ -1647,7 +1647,7 @@ mod tests {
 	}
 
 	fn check_routing_vec(
-		m: &Vec<RoutingEntry>,
+		m: &[RoutingEntry],
 		idx: usize,
 		center: &Vector,
 		node_id: NodeId,
