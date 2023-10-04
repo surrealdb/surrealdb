@@ -1763,21 +1763,20 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::table::lq::prefix(ns, db, tb);
-		// Ok(if let Some(e) = self.cache.get(&key) {
-		// 	if let Entry::Lvs(v) = e {
-		// 		v
-		// 	} else {
-		// 		unreachable!();
-		// 	}
-		// } else {
-		let beg = crate::key::table::lq::prefix(ns, db, tb);
-		let end = crate::key::table::lq::suffix(ns, db, tb);
-		let val = self.getr(beg..end, u32::MAX).await?;
-		let val = val.convert().into();
-		self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-		// val
-		// })
-		Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Lvs(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::table::lq::prefix(ns, db, tb);
+			let end = crate::key::table::lq::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+			Ok(val)
+		})
 	}
 
 	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
