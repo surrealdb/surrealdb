@@ -52,7 +52,10 @@ impl<'a> Document<'a> {
 				println!("The session is {:?}", lv.session.as_ref());
 				let sess = match lv.session.as_ref() {
 					Some(v) => v,
-					None => continue,
+					None => {
+						warn!("Lives picked up a live query but it had no session");
+						continue;
+					}
 				};
 				// Ensure that auth info exists on the LIVE query
 				let auth = match lv.auth.clone() {
@@ -192,6 +195,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
+						println!("Now sent processed notification after buffer");
 						chn.write().await.send(notification).await?;
 					} else {
 						println!(
@@ -320,9 +324,11 @@ impl<'a> Document<'a> {
 #[cfg(feature = "kv-mem")]
 mod tests {
 	use crate::ctx::Context;
-	use crate::dbs::{Executor, Options, Session};
+	use crate::dbs::{Action, Executor, Notification, Options, Session};
 	use crate::iam::{Auth, Level, Role};
 	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
 	use crate::sql;
 	use crate::sql::Value;
 	use std::sync::Arc;
@@ -333,8 +339,9 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap().with_notifications();
 		let mut exe = Executor::new(&ds);
 		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+		let node_id = uuid::Uuid::parse_str("22fa1d05-abea-4835-9463-e1dc6d733aad").unwrap();
 		let opt = Options::new()
-			.with_id(uuid::Uuid::parse_str("22fa1d05-abea-4835-9463-e1dc6d733aad").unwrap())
+			.with_id(node_id)
 			.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 			.with_live(true)
 			.with_ns(sess.ns())
@@ -348,11 +355,42 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(res.len(), 1);
-		res.get(0).unwrap().result.as_ref().unwrap();
+		let lq = res.get(0).unwrap().result.as_ref().unwrap();
+		let lq_id = match lq {
+			Value::Uuid(lq) => lq,
+			_ => panic!("Expected response to be uuid"),
+		};
 
 		// Create remote notification artificially
 		let expected_not_id =
 			uuid::Uuid::parse_str("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let ts = tx.clock().await;
+		let notification_id =
+			sql::uuid::Uuid::try_from("ed491dec-5407-4636-86ff-608c2a00ad7f").unwrap();
+		let not = Notification {
+			live_id: lq_id.clone(),
+			node_id: sql::uuid::Uuid::from(node_id.clone()),
+			notification_id: notification_id.clone(),
+			action: Action::Create,
+			result: Value::Strand(sql::Strand::from(
+				"normally, this would be an object or array of objects",
+			)),
+			timestamp: Default::default(),
+		};
+		tx.putc_tbnt(
+			"testns",
+			"testdb",
+			"test_table",
+			lq_id.clone(),
+			ts,
+			notification_id,
+			not,
+			None,
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
 
 		// Perform a CREATE statement
 		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
@@ -367,6 +405,8 @@ mod tests {
 		let second_notification = receiver.try_recv().unwrap();
 		assert_eq!(first_notification.notification_id.0, expected_not_id);
 		assert_ne!(second_notification.notification_id.0, expected_not_id);
+
+		// TODO verify deleted notifications
 	}
 
 	#[tokio::test]
