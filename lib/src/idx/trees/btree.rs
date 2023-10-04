@@ -1236,7 +1236,7 @@ mod tests {
 
 		{
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			print_tree(&mut tx, &mut t).await;
+			print_tree(&mut tx, &t).await;
 			tx.commit().await.unwrap();
 		}
 

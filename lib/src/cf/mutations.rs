@@ -171,13 +171,13 @@ mod tests {
 				vec![
 					TableMutation::Set(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
-						Value::from(Value::Object(Object::from(HashMap::from([
+						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
 								Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
 							),
 							("note", Value::from("surreal")),
-						])))),
+						]))),
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
 					TableMutation::Def(DefineTableStatement {

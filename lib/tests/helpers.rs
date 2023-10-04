@@ -62,7 +62,7 @@ pub async fn iam_run_case(
 			}
 
 			let tmp = tmp.unwrap().to_string();
-			if &tmp != check_expected_result[i] {
+			if tmp != check_expected_result[i] {
 				return Err(format!(
 					"Check statement failed for test: expected value '{}' doesn't match '{}'",
 					check_expected_result[i], tmp
@@ -93,9 +93,11 @@ pub async fn iam_run_case(
 	Ok(())
 }
 
+type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool)>;
+
 #[allow(dead_code)]
 pub async fn iam_check_cases(
-	cases: std::slice::Iter<'_, ((Level, Role), (&str, &str), bool)>,
+	cases: CaseIter<'_>,
 	scenario: &HashMap<&str, &str>,
 	check_results: [Vec<&str>; 2],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -114,14 +116,14 @@ pub async fn iam_check_cases(
 		// Auth enabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
-			iam_run_case(prepare, test, check, &expected_result, &ds, &sess, *should_succeed)
+			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
 				.await?;
 		}
 
 		// Auth disabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(false);
-			iam_run_case(prepare, test, check, &expected_result, &ds, &sess, *should_succeed)
+			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
 				.await?;
 		}
 	}
@@ -133,8 +135,11 @@ pub async fn iam_check_cases(
 		{
 			println!(
 				"* Testing '{test}' for 'Anonymous' on '({ns}, {db})' with {auth_enabled}",
-				auth_enabled =
-					auth_enabled.then(|| "auth enabled").unwrap_or_else(|| "auth disabled")
+				auth_enabled = if auth_enabled {
+					"auth enabled"
+				} else {
+					"auth disabled"
+				}
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
@@ -146,7 +151,7 @@ pub async fn iam_check_cases(
 				prepare,
 				test,
 				check,
-				&expected_result,
+				expected_result,
 				&ds,
 				&Session::default().with_ns(ns).with_db(db),
 				!auth_enabled,

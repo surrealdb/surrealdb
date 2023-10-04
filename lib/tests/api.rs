@@ -82,6 +82,7 @@ mod api_integration {
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Client> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -104,6 +105,7 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Client;
 		use surrealdb::engine::remote::http::Http;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Client> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -220,6 +222,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::File;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -247,6 +250,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::RocksDb;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -274,6 +278,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::SpeeDb;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -301,6 +306,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::TiKv;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -327,6 +333,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::FDb;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
@@ -352,6 +359,7 @@ mod api_integration {
 		use super::*;
 		use surrealdb::engine::any::Any;
 
+		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Any> {
 			let _guard = SETUP_MUTEX.lock().unwrap();
 			init_logger();
