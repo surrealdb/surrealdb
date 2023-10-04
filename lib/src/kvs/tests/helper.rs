@@ -20,8 +20,16 @@ impl TestContext {
 	) -> Result<(), Error> {
 		// TODO we shouldn't test bootstrapping manually
 		let mut tx = self.db.transaction(Write, Optimistic).await?;
-		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
-		tx.commit().await?;
+		let archived = match self.db.register_remove_and_archive(&mut tx, &node_id, time).await {
+			Ok(v) => {
+				tx.commit().await?;
+				v
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
 
 		let mut errors = vec![];
 		let mut values = vec![];
