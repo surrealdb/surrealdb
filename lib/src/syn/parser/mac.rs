@@ -33,9 +33,10 @@ macro_rules! unexpected {
 
 /// A macro for indicating that the parser encountered an token which it didn't expect.
 macro_rules! expected {
-	($parser:expr, $kind:tt) => {
-		match $parser.next_token().kind {
-			t!($kind) => {}
+	($parser:expr, $kind:tt) => {{
+		let token = $parser.next_token();
+		match token.kind {
+			t!($kind) => token,
 			$crate::syn::parser::TokenKind::Invalid => {
 				return Err($crate::syn::parser::ParseError {
 					kind: $crate::syn::parser::ParseErrorKind::InvalidToken,
@@ -62,7 +63,7 @@ macro_rules! expected {
 				});
 			}
 		}
-	};
+	}};
 }
 
 /// A macro for indicating a path in the parser which is not yet implemented.

@@ -16,7 +16,7 @@ pub struct Span {
 
 impl Span {
 	/// Create a new empty span.
-	pub fn empty() -> Self {
+	pub const fn empty() -> Self {
 		Span {
 			offset: 0,
 			len: 0,
@@ -73,6 +73,7 @@ pub enum Keyword {
 	Euclidean,
 	Event,
 	Explain,
+	False,
 	Fetch,
 	Fields,
 	Filters,
@@ -163,6 +164,7 @@ pub enum Keyword {
 	Timeout,
 	Tokeizers,
 	Transaction,
+	True,
 	Turkish,
 	Type,
 	Unique,
@@ -194,6 +196,21 @@ pub enum Keyword {
 	ContainsNot,
 	Contains,
 	In,
+
+	Any,
+	Future,
+	Bool,
+	Bytes,
+	Datetime,
+	Decimal,
+	Duration,
+	Float,
+	Int,
+	Number,
+	Object,
+	Point,
+	String,
+	Uuid,
 }
 
 impl Keyword {
@@ -240,6 +257,7 @@ impl Keyword {
 			Keyword::Euclidean => "EUCLIDEAN",
 			Keyword::Event => "EVENT",
 			Keyword::Explain => "EXPLAIN",
+			Keyword::False => "false",
 			Keyword::Fetch => "FETCH",
 			Keyword::Fields => "FIELDS",
 			Keyword::Filters => "FILTERS",
@@ -330,6 +348,7 @@ impl Keyword {
 			Keyword::Timeout => "TIMEOUT",
 			Keyword::Tokeizers => "TOKEIZERS",
 			Keyword::Transaction => "TRANSACTION",
+			Keyword::True => "true",
 			Keyword::Turkish => "TURKISH",
 			Keyword::Type => "TYPE",
 			Keyword::Unique => "UNIQUE",
@@ -361,6 +380,21 @@ impl Keyword {
 			Keyword::ContainsNot => "CONTAINSNOT",
 			Keyword::Contains => "CONTAINS",
 			Keyword::In => "IN",
+
+			Keyword::Any => "ANY",
+			Keyword::Future => "FUTURE",
+			Keyword::Bool => "BOOL",
+			Keyword::Bytes => "BYTES",
+			Keyword::Datetime => "DATETIME",
+			Keyword::Decimal => "DECIMAL",
+			Keyword::Duration => "DURATION",
+			Keyword::Float => "FLOAT",
+			Keyword::Int => "INT",
+			Keyword::Number => "NUMBER",
+			Keyword::Object => "OBJECT",
+			Keyword::Point => "POINT",
+			Keyword::String => "STRING",
+			Keyword::Uuid => "UUID",
 		}
 	}
 }
@@ -552,6 +586,18 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+	pub fn can_be_identifier(&self) -> bool {
+		matches!(
+			self,
+			TokenKind::Identifier
+				| TokenKind::Number
+				| TokenKind::Keyword(_)
+				| TokenKind::Duration {
+					valid_identifier: true,
+				}
+		)
+	}
+
 	pub fn as_str(&self) -> &'static str {
 		match *self {
 			TokenKind::Keyword(x) => x.as_str(),
@@ -608,7 +654,7 @@ impl From<DataIndex> for u32 {
 	}
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct Token {
 	pub kind: TokenKind,
 	pub span: Span,
@@ -616,6 +662,14 @@ pub struct Token {
 }
 
 impl Token {
+	pub const fn invalid() -> Token {
+		Token {
+			kind: TokenKind::Invalid,
+			span: Span::empty(),
+			data_index: None,
+		}
+	}
+
 	/// Returns if the token is invalid.
 	pub fn is_invalid(&self) -> bool {
 		matches!(self.kind, TokenKind::Invalid)

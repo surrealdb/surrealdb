@@ -1,6 +1,6 @@
 //! This module defines the pratt parser for operators.
 
-use crate::syn::token::{TokenKind, t};
+use crate::syn::token::{t, TokenKind};
 
 impl Parser<'_> {
 	/// Returns the binding power of an infix operator.
@@ -21,8 +21,16 @@ impl Parser<'_> {
 			// assigment operators have the lowes binding power.
 			t!("+=") | t!("-=") | t!("-?=") => Some((2, 1)),
 			// Equality operators have same binding power.
-			t!("=") | t!("==") | t!("!=") | t!("*=") | t!("?=")
-				| t!("~") | t!("!~") | t!("*~") | t!("?~") | t!("@") => Some(todo!()),
+			t!("=")
+			| t!("==")
+			| t!("!=")
+			| t!("*=")
+			| t!("?=")
+			| t!("~")
+			| t!("!~")
+			| t!("*~")
+			| t!("?~")
+			| t!("@") => Some(todo!()),
 
 			t!("<") | t!("<=") | t!(">") | t!(">=") => Some(todo!()),
 
@@ -30,10 +38,10 @@ impl Parser<'_> {
 		}
 	}
 
-	fn prefix_binding_power(token: TokenKind) -> Option<((), u8)>{
+	fn prefix_binding_power(token: TokenKind) -> Option<((), u8)> {
 		match token {
-			t!("!") =>  Some(todo!()),
-			_ => None
+			t!("!") => Some(todo!()),
+			_ => None,
+		}
 	}
-
 }

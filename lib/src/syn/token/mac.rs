@@ -107,6 +107,9 @@ macro_rules! t {
 	("$param") => {
 		$crate::syn::token::TokenKind::Parameter
 	};
+	("123") => {
+		$crate::syn::token::TokenKind::Number
+	};
 
 	("!") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Not)
@@ -359,6 +362,9 @@ macro_rules! t {
 	};
 	("EXPLAIN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Explain)
+	};
+	("FALSE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::False)
 	};
 	("FETCH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Fetch)
@@ -627,6 +633,9 @@ macro_rules! t {
 	("TRANSACTION") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Transaction)
 	};
+	("TRUE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::True)
+	};
 	("TURKISH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Turkish)
 	};
@@ -668,6 +677,49 @@ macro_rules! t {
 	};
 	("WITH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::With)
+	};
+
+	("ANY") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Any)
+	};
+	("FUTURE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Future)
+	};
+	("BOOL") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Bool)
+	};
+	("BYTES") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Bytes)
+	};
+	("DATETIME") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Datetime)
+	};
+	("DECIMAL") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Decimal)
+	};
+	("DURATION") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Duration)
+	};
+	("FLOAT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Float)
+	};
+	("INT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Int)
+	};
+	("NUMBER") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Number)
+	};
+	("OBJECT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Object)
+	};
+	("POINT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Point)
+	};
+	("STRING") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::String)
+	};
+	("UUID") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Uuid)
 	};
 }
 

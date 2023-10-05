@@ -4,12 +4,9 @@ use crate::sql::{
 		analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 		CommitStatement, ContinueStatement, CreateStatement, UseStatement,
 	},
-	Data, Ident, Operator, Statement,
+	Data, Operator, Statement,
 };
-use crate::syn::{
-	parser::mac::expected,
-	token::{t, TokenKind},
-};
+use crate::syn::{parser::mac::expected, token::t};
 
 use super::{
 	mac::{to_do, unexpected},
@@ -195,6 +192,10 @@ impl Parser<'_> {
 				t!("DIFF") => Output::Diff,
 				t!("AFTER") => Output::After,
 				t!("BEFORE") => Output::Before,
+				t!("VALUE") => {
+					let value = self.parse_value();
+					todo!()
+				}
 				// TODO: Field
 				x => unexpected!(self, x, "an output"),
 			};
@@ -246,30 +247,5 @@ impl Parser<'_> {
 			db: db.map(|x| x.0),
 		};
 		Ok(Statement::Use(res))
-	}
-
-	pub fn parse_ident(&mut self) -> ParseResult<Ident> {
-		self.parse_raw_ident().map(Ident)
-	}
-
-	pub fn parse_raw_ident(&mut self) -> ParseResult<String> {
-		let token = self.next_token();
-		match token.kind {
-			TokenKind::Keyword(_) | TokenKind::Number => {
-				let str = self.lexer.reader.span(token.span);
-				// Lexer should ensure that the token is valid utf-8
-				let str = std::str::from_utf8(str).unwrap().to_owned();
-				Ok(str)
-			}
-			TokenKind::Identifier => {
-				let data_index = token.data_index.unwrap();
-				let idx = u32::from(data_index) as usize;
-				let str = self.lexer.strings[idx].clone();
-				Ok(str)
-			}
-			x => {
-				unexpected!(self, x, "a identifier");
-			}
-		}
 	}
 }

@@ -106,6 +106,14 @@ impl<'a> Lexer<'a> {
 		self.strings.push(string);
 		self.finish_token(kind, Some(id.into()))
 	}
+
+	pub fn backup_before(&mut self, span: Span) {
+		self.reader.backup(span.offset as usize);
+	}
+
+	pub fn backup_after(&mut self, span: Span) {
+		self.reader.backup(span.offset as usize + span.len as usize);
+	}
 }
 
 impl Iterator for Lexer<'_> {
