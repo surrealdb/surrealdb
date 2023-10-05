@@ -1047,12 +1047,14 @@ impl Transaction {
 		}
 	}
 
-	/// Clock retrieves the current timestamp which is fallible
+	/// Clock retrieves the current timestamp, without guaranteeing
+	/// monotonicity in all implementations.
+	///
 	/// It is used for unreliable ordering of events as well as
 	/// handling of timeouts. Operations that are not guaranteed to be correct.
 	/// But also allows for lexicographical ordering.
 	///
-	/// Public for tests, but we might not want to expose this
+	/// Public for tests, but not required for usage from a user perspective.
 	pub async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
