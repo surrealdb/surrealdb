@@ -7,7 +7,7 @@ use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn select_limit_fetch() -> Result<(), Error> {
+async fn select_start_limit_fetch() -> Result<(), Error> {
 	let sql = "
 		CREATE tag:rs SET name = 'Rust';
 		CREATE tag:go SET name = 'Golang';
@@ -15,11 +15,12 @@ async fn select_limit_fetch() -> Result<(), Error> {
 		CREATE person:tobie SET tags = [tag:rs, tag:go, tag:js];
 		CREATE person:jaime SET tags = [tag:js];
 		SELECT * FROM person LIMIT 1 FETCH tags;
+		SELECT * FROM person START 1 LIMIT 1 FETCH tags;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -82,6 +83,30 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				id: person:jaime,
 				tags: [
+					{
+						id: tag:js,
+						name: 'JavaScript'
+					}
+				]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:tobie,
+				tags: [
+					{
+						id: tag:rs,
+						name: 'Rust'
+					},
+					{
+						id: tag:go,
+						name: 'Golang'
+					},
 					{
 						id: tag:js,
 						name: 'JavaScript'
