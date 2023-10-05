@@ -29,6 +29,10 @@ test: check-deps
 check: check-deps
 	cargo make check
 
+.PHONY: check-wasm
+check-wasm: check-deps
+	cargo make check-wasm
+
 .PHONY: clean
 clean: check-deps
 	cargo make clean
