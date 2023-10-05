@@ -186,6 +186,48 @@ pub fn second((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+// Used in millisecond(), microsecond(), nanosecond() to convert nanoseconds.
+// converting number to string and getting N chars is safer & faster than dividing.
+fn discard_last_n_digits(num: i64, digits: usize) -> i64 {
+    if digits == 0 {
+        return num;
+    }
+
+    let s = num.to_string();
+
+    if digits >= s.len() {
+        return 0;
+    }
+
+    s.as_str()[..(s.len() - digits)].parse().unwrap()
+}
+
+pub fn millisecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => {
+			// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
+			// Converted to milliseconds:          1_696_537_096_309ms
+			let milliseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 6);
+
+			(v.second()*1_000 + milliseconds_of_nanoseconds).into()
+		},
+		None => Datetime::default().second().into(),
+	})
+}
+
+pub fn microsecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => {
+			// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
+			// Converted to microseconds:          1_696_537_096_309_565ms
+			let microseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 3);
+
+			(v.second()*1_000_000 + milliseconds_of_nanoseconds).into()
+		},
+		None => Datetime::default().second().into(),
+	})
+}
+
 pub fn timezone(_: ()) -> Result<Value, Error> {
 	Ok(Local::now().offset().to_string().into())
 }
@@ -231,6 +273,22 @@ pub mod from {
 	use crate::sql::datetime::Datetime;
 	use crate::sql::value::Value;
 	use chrono::{NaiveDateTime, Offset, TimeZone, Utc};
+
+	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
+		match NaiveDateTime::from_timestamp_opt(0, val) {
+			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
+				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
+				None => Err(Error::InvalidArguments {
+					name: String::from("time::from::nanos"),
+					message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+				}),
+			}
+			None => Err(Error::InvalidArguments {
+				name: String::from("time::from::nanos"),
+				message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+			}),
+		}
+	}
 
 	pub fn micros((val,): (i64,)) -> Result<Value, Error> {
 		match NaiveDateTime::from_timestamp_micros(val) {
