@@ -189,17 +189,17 @@ pub fn second((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 // Used in millisecond(), microsecond(), nanosecond() to convert nanoseconds.
 // converting number to string and getting N chars is safer & faster than dividing.
 fn discard_last_n_digits(num: i64, digits: usize) -> i64 {
-    if digits == 0 {
-        return num;
-    }
+	if digits == 0 {
+		return num;
+	}
 
-    let s = num.to_string();
+	let s = num.to_string();
 
-    if digits >= s.len() {
-        return 0;
-    }
+	if digits >= s.len() {
+		return 0;
+	}
 
-    s.as_str()[..(s.len() - digits)].parse().unwrap()
+	s.as_str()[..(s.len() - digits)].parse().unwrap()
 }
 
 pub fn millisecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
@@ -209,8 +209,8 @@ pub fn millisecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 			// Converted to milliseconds:          1_696_537_096_309ms
 			let milliseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 6);
 
-			(v.second()*1_000 + milliseconds_of_nanoseconds).into()
-		},
+			(v.second() * 1_000 + milliseconds_of_nanoseconds).into()
+		}
 		None => Datetime::default().second().into(),
 	})
 }
@@ -222,8 +222,8 @@ pub fn microsecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 			// Converted to microseconds:          1_696_537_096_309_565ms
 			let microseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 3);
 
-			(v.second()*1_000_000 + milliseconds_of_nanoseconds).into()
-		},
+			(v.second() * 1_000_000 + milliseconds_of_nanoseconds).into()
+		}
 		None => Datetime::default().second().into(),
 	})
 }
