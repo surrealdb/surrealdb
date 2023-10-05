@@ -182,10 +182,6 @@ impl<'a> Executor<'a> {
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
-		println!("Ctx notifications channel is {:?}", ctx.notifications());
-		if ctx.notifications().is_none() {
-			panic!("No notifications channel")
-		}
 		// Create a notification channel that buffers notifications until transaction is committed
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel

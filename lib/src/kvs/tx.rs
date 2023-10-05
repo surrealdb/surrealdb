@@ -302,6 +302,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
+		println!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -1525,6 +1526,16 @@ impl Transaction {
 			id={:?}",
 			ns, db, tb, lq, ts, id
 		);
+		// Sanity check
+		if nt.timestamp != ts {
+			return Err(Error::Internal("putc_tbnt: timestamp mismatch".to_string()));
+		}
+		if nt.live_id != lq {
+			return Err(Error::Internal("putc_tbnt: live_id mismatch".to_string()));
+		}
+		if nt.notification_id != id {
+			return Err(Error::Internal("putc_tbnt: notification_id mismatch".to_string()));
+		}
 		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
 		println!(

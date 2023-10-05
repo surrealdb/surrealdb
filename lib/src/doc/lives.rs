@@ -184,11 +184,27 @@ impl<'a> Document<'a> {
 								let channel = chn.write().await;
 								for not in &nots {
 									// Consume the notification entry
-									let key = crate::key::table::nt::Nt::new(
+									println!(
+										r#"Consuming notification: 
+										ns: {:?}\n
+										db: {:?}\n
+										tb: {:?}\n
+										live_id: {:?}\n
+										timestamp: {:?}\n
+										notification_id: {:?}\n
+										"#,
 										opt.ns(),
 										opt.db(),
 										&self.id.unwrap().tb,
 										lv.id.clone(),
+										not.timestamp.clone(),
+										not.notification_id.clone()
+									);
+									let key = crate::key::table::nt::Nt::new(
+										opt.ns(),
+										opt.db(),
+										&self.id.unwrap().tb,
+										not.live_id.clone(),
 										not.timestamp.clone(),
 										not.notification_id.clone(),
 									);
@@ -384,7 +400,7 @@ mod tests {
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
-			timestamp: Default::default(),
+			timestamp: ts.clone(),
 		};
 		tx.putc_tbnt(
 			"testns",

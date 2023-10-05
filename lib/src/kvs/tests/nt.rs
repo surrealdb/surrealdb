@@ -68,6 +68,111 @@ async fn can_scan_notifications() {
 	}
 }
 
+#[tokio::test]
+async fn can_delete_notifications() {
+	let clock_override =
+		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
+	let ns = "testns";
+	let db = "testdb";
+	let tb = "testtb";
+	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
+	let ts = Timestamp {
+		value: 123456,
+	};
+	let not_id = sql::uuid::Uuid::try_from("7719f939-e901-416d-89ff-5e6d97e2a49d").unwrap();
+	let live_id = sql::uuid::Uuid::try_from("cfaea67b-6cca-436e-8bf0-819c2277100e").unwrap();
+	let not = Notification {
+		live_id: live_id.clone(),
+		node_id: node_id.clone(),
+		notification_id: not_id.clone(),
+		action: Action::Create,
+		result: Value::Strand(Strand("this would be an object".to_string())),
+		timestamp: ts.clone(),
+	};
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	tx.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not.clone(), None)
+		.await
+		.unwrap();
+	tx.commit().await.unwrap();
+
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let res = tx.scan_tbnt(ns, db, tb, live_id.clone(), 0).await.unwrap();
+	tx.commit().await.unwrap();
+	assert_eq!(res, vec![not.clone()]);
+
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let key_nt = nt::Nt::new(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone());
+	tx.del(key_nt).await.unwrap();
+	tx.commit().await.unwrap();
+
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let res = tx.scan_tbnt(ns, db, tb, live_id.clone(), 0).await.unwrap();
+	tx.commit().await.unwrap();
+	assert_eq!(res, vec![]);
+}
+
+#[tokio::test]
+async fn putc_tbnt_sanity_checks_duplicate_data() {
+	let clock_override =
+		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
+
+	// Test truths
+	let ns = "testns";
+	let db = "testdb";
+	let tb = "testtb";
+	let live_id = sql::uuid::Uuid::try_from("04c7197a-a4af-4b1a-a663-8affe9a2b7b1").unwrap();
+	let ts = Timestamp {
+		value: 0x123456,
+	};
+	let not_id = sql::uuid::Uuid::try_from("bb4be42a-e04c-4245-8cee-55263bd19eeb").unwrap();
+	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
+
+	// Test erroneous data
+	let not_bad_ts = Notification {
+		live_id: live_id.clone(),
+		node_id: node_id.clone(),
+		notification_id: not_id.clone(),
+		action: Action::Create,
+		result: Value::None,
+		timestamp: Timestamp {
+			value: 0x0bad,
+		},
+	};
+	let not_bad_lq = Notification {
+		live_id: live_id.clone(),
+		node_id: node_id.clone(),
+		notification_id: not_id.clone(),
+		action: Action::Create,
+		result: Value::None,
+		timestamp: ts.clone(),
+	};
+	let not_bad_nt = Notification {
+		live_id: live_id.clone(),
+		node_id: node_id.clone(),
+		notification_id: Default::default(),
+		action: Action::Create,
+		result: Value::None,
+		timestamp: ts.clone(),
+	};
+
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let res = tx
+		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_ts, None)
+		.await;
+	assert!(res.is_err());
+	let res = tx
+		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_lq, None)
+		.await;
+	assert!(res.is_err());
+	let res = tx
+		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_nt, None)
+		.await;
+	assert!(res.is_err());
+	tx.commit().await.unwrap();
+}
+
 fn create_nt_tuple<'a>(
 	ns: &'a str,
 	db: &'a str,
