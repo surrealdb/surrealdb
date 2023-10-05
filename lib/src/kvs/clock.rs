@@ -3,7 +3,7 @@ use crate::sql;
 use sql::Duration;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
 pub enum SizedClock {
@@ -41,20 +41,20 @@ impl FakeClock {
 /// is accessed, and due to the nature of async - you neither have order guarantee.
 #[derive(Clone)]
 pub struct IncFakeClock {
-	now: Arc<Mutex<Timestamp>>,
+	now: Arc<RwLock<Timestamp>>,
 	increment: Duration,
 }
 
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
-			now: Arc::new(Mutex::new(now)),
+			now: Arc::new(RwLock::new(now)),
 			increment,
 		}
 	}
 
 	pub async fn now(&self) -> Timestamp {
-		self.now.lock().await.get_and_inc(self.increment.clone())
+		self.now.write().await.get_and_inc(self.increment.clone())
 	}
 }
 
