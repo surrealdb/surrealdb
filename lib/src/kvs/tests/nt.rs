@@ -141,7 +141,7 @@ async fn putc_tbnt_sanity_checks_key_with_value() {
 		},
 	};
 	let not_bad_lq = Notification {
-		live_id: live_id.clone(),
+		live_id: Default::default(),
 		node_id: node_id.clone(),
 		notification_id: not_id.clone(),
 		action: Action::Create,

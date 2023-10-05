@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
-use crate::iam::{Auth, Role};
+use crate::iam::{Auth, Level, Role};
 use crate::kvs::{LockType::*, LqType, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
@@ -95,7 +95,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	let ctx = context::Context::background();
+	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&ses);
 	let sender = test.db.live_sender().unwrap();
 	let opt = Options::new()
 		.with_ns(ses.ns())
@@ -119,13 +119,10 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456000,
 	};
-	{
-		// Lock is released after scope
-		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
-			clock.set(new_time.clone());
-		} else {
-			panic!("Clock is not fake");
-		}
+	if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
+		clock.set(new_time.clone());
+	} else {
+		panic!("Clock is not fake");
 	}
 	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
 	test.db.bootstrap().await.unwrap();
@@ -144,7 +141,11 @@ async fn expired_nodes_get_live_queries_archived() {
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
-	let ctx = context::Context::background();
+	let namespace = "test_namespace";
+	let database = "test_db";
+	let table = "test_table";
+	let sess = Session::for_level(Level::Root, Role::Owner).with_ns(namespace).with_db(database);
+	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&sess);
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let time = Timestamp {
 		value: 123000,
@@ -152,9 +153,6 @@ async fn single_live_queries_are_garbage_collected() {
 	let clock = SizedClock::Fake(FakeClock::new(time.clone()));
 	let clock = Arc::new(RwLock::new(clock));
 	let mut test = init(node_id, clock).await.unwrap();
-	let namespace = "test_namespace";
-	let database = "test_db";
-	let table = "test_table";
 	let options = Options::default()
 		.with_required(
 			node_id,
@@ -228,20 +226,21 @@ async fn single_live_queries_are_garbage_collected() {
 #[serial]
 async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// Test parameters
-	let ctx = context::Context::background();
-	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let t1 = Timestamp {
 		value: 123_000,
 	};
 	let t2 = Timestamp {
 		value: 456_000,
 	};
+	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
 	let clock = Arc::new(RwLock::new(clock));
 	let test = init(old_node_id, clock.clone()).await.unwrap();
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
 	let database = database_owned.as_str();
+	let sess = Session::for_level(Level::Root, Role::Owner).with_ns(namespace).with_db(database);
+	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&sess);
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
