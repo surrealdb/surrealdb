@@ -24,6 +24,15 @@ pub struct ClusterMembership {
 pub struct Timestamp {
 	pub value: u64,
 }
+
+impl From<u64> for Timestamp {
+	fn from(ts: u64) -> Self {
+		Timestamp {
+			value: ts,
+		}
+	}
+}
+
 // This struct is to be used only when storing keys as the macro currently
 // conflicts when you have Store and Key derive macros.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Key)]
@@ -44,7 +53,7 @@ impl Add<Duration> for Timestamp {
 	type Output = Timestamp;
 	fn add(self, rhs: Duration) -> Timestamp {
 		Timestamp {
-			value: self.value + rhs.as_secs(),
+			value: self.value + rhs.as_millis() as u64,
 		}
 	}
 }
@@ -52,7 +61,7 @@ impl Add<Duration> for Timestamp {
 impl Sub<Duration> for Timestamp {
 	type Output = Result<Timestamp, Error>;
 	fn sub(self, rhs: Duration) -> Self::Output {
-		let millis = rhs.as_secs();
+		let millis = rhs.as_millis() as u64;
 		if self.value <= millis {
 			// Removing the duration from this timestamp will cause it to overflow
 			return Err(TimestampOverflow(format!(

@@ -323,20 +323,20 @@ mod tests {
 	fn test_range_default_value() {
 		let r = RangeValue::default();
 		assert_eq!(r.value, Value::None);
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 	}
 	#[test]
 	fn test_range_value_from_inclusive() {
 		let mut r = RangeValue::default();
 		r.set_from_inclusive(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_from_inclusive(&10.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_from_inclusive(&20.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 	}
 
 	#[test]
@@ -344,13 +344,13 @@ mod tests {
 		let mut r = RangeValue::default();
 		r.set_from(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_from(&10.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_from(&20.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 	}
 
 	#[test]
@@ -358,13 +358,13 @@ mod tests {
 		let mut r = RangeValue::default();
 		r.set_to_inclusive(&10.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_to_inclusive(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_to_inclusive(&10.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 	}
 
 	#[test]
@@ -372,13 +372,13 @@ mod tests {
 		let mut r = RangeValue::default();
 		r.set_to(&10.into());
 		assert_eq!(r.value, 10.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_to(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_to(&10.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 	}
 
 	#[test]
@@ -386,13 +386,13 @@ mod tests {
 		let mut r = RangeValue::default();
 		r.set_to(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_to_inclusive(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_to(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 	}
 
 	#[test]
@@ -400,12 +400,12 @@ mod tests {
 		let mut r = RangeValue::default();
 		r.set_from(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, false);
+		assert!(!r.inclusive);
 		r.set_from_inclusive(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 		r.set_from(&20.into());
 		assert_eq!(r.value, 20.into());
-		assert_eq!(r.inclusive, true);
+		assert!(r.inclusive);
 	}
 }
