@@ -117,7 +117,7 @@ async fn live_creates_remote_notification_for_create() {
 	let mut res = tx
 		.lock()
 		.await
-		.scan_nt(
+		.scan_tbnt(
 			namespace.as_str(),
 			database.as_str(),
 			table,
@@ -383,7 +383,7 @@ async fn live_creates_remote_notification_for_update() {
 	let mut res = tx
 		.lock()
 		.await
-		.scan_nt(
+		.scan_tbnt(
 			namespace.as_str(),
 			database.as_str(),
 			table,
@@ -501,7 +501,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let mut res = tx
 		.lock()
 		.await
-		.scan_nt(
+		.scan_tbnt(
 			namespace.as_str(),
 			database.as_str(),
 			table,

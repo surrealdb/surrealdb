@@ -1224,25 +1224,6 @@ impl Transaction {
 		Ok(out)
 	}
 
-	pub async fn scan_nt(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		lq: sql::uuid::Uuid,
-		limit: u32,
-	) -> Result<Vec<Notification>, Error> {
-		let prefix = crate::key::table::nt::prefix(ns, db, tb, lq.clone());
-		let suffix = crate::key::table::nt::suffix(ns, db, tb, lq);
-		let res = self.scan(prefix..suffix, limit).await?;
-		let mut out: Vec<Notification> = vec![];
-		for (_k, v) in res.into_iter() {
-			let value = crate::dbs::Notification::from(v);
-			out.push(value);
-		}
-		Ok(out)
-	}
-
 	pub async fn delr_hb(
 		&mut self,
 		ts: Vec<crate::key::root::hb::Hb>,
