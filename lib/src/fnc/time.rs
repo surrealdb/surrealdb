@@ -153,6 +153,20 @@ pub fn nano((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn millis((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => v.timestamp_millis().into(),
+		None => Datetime::default().timestamp_millis().into(),
+	})
+}
+
+pub fn micros((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => v.timestamp_micros().into(),
+		None => Datetime::default().timestamp_micros().into(),
+	})
+}
+
 pub fn now(_: ()) -> Result<Value, Error> {
 	Ok(Datetime::default().into())
 }
@@ -182,48 +196,6 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 pub fn second((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.second().into(),
-		None => Datetime::default().second().into(),
-	})
-}
-
-// Used in millisecond(), microsecond(), nanosecond() to convert nanoseconds.
-// converting number to string and getting N chars is safer & faster than dividing.
-fn discard_last_n_digits(num: i64, digits: usize) -> i64 {
-	if digits == 0 {
-		return num;
-	}
-
-	let s = num.to_string();
-
-	if digits >= s.len() {
-		return 0;
-	}
-
-	s.as_str()[..(s.len() - digits)].parse().unwrap()
-}
-
-pub fn millisecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
-	Ok(match val {
-		Some(v) => {
-			// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
-			// Converted to milliseconds:          1_696_537_096_309ms
-			let milliseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 6);
-
-			(v.second() * 1_000 + milliseconds_of_nanoseconds).into()
-		}
-		None => Datetime::default().second().into(),
-	})
-}
-
-pub fn microsecond((val,): (Option<Datetime>,)) -> Result<Value, Error> {
-	Ok(match val {
-		Some(v) => {
-			// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
-			// Converted to microseconds:          1_696_537_096_309_565ms
-			let microseconds_of_nanoseconds = first_n_digits(v.nanosecond(), 3);
-
-			(v.second() * 1_000_000 + milliseconds_of_nanoseconds).into()
-		}
 		None => Datetime::default().second().into(),
 	})
 }
@@ -275,7 +247,23 @@ pub mod from {
 	use chrono::{NaiveDateTime, Offset, TimeZone, Utc};
 
 	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
-		match NaiveDateTime::from_timestamp_opt(0, val) {
+		// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
+		// Get seconds part:                   1_696_537_096s
+		// Get nanoseconds part:               309_565_400ns
+		let s = val.to_string();
+
+		let seconds: i64 = if s.len() > 9 {
+			s.as_str()[..(s.len() - 9)].parse().unwrap()
+		} else {
+			0
+		};
+		let nanoseconds: u32 = if s.len() > 9 {
+			s.as_str()[(s.len() - 9)..].parse().unwrap()
+		} else {
+			s.as_str().parse().unwrap()
+		};
+
+		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
 			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
 				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
 				None => Err(Error::InvalidArguments {
