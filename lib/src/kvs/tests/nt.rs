@@ -113,7 +113,7 @@ async fn can_delete_notifications() {
 }
 
 #[tokio::test]
-async fn putc_tbnt_sanity_checks_duplicate_data() {
+async fn putc_tbnt_sanity_checks_key_with_value() {
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
