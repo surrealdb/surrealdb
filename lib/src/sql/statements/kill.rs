@@ -69,6 +69,7 @@ impl KillStatement {
 					// Delete the table live query
 					let key = crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
 					run.del(key).await?;
+					// Delete notifications
 				}
 				_ => {
 					return Err(Error::KillStatement {
@@ -108,7 +109,15 @@ pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::{Ident, Param, Uuid};
+	use crate::dbs::{Response, Session};
+	use crate::iam::{Level, Role};
+	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
+	use crate::sql;
+	use crate::sql::statements::LiveStatement;
+	use crate::sql::{Ident, Param, Strand, Uuid};
+	use std::collections::BTreeMap;
 
 	#[test]
 	fn kill_uuid() {
@@ -139,5 +148,32 @@ mod tests {
 			}
 		);
 		assert_eq!("KILL $id", format!("{}", out));
+	}
+
+	#[tokio::test]
+	#[cfg(feature = "kv-mem")]
+	async fn kill_removes_notifications() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let nd = sql::Uuid::try_from("fe54b86e-d88e-462a-9835-9cb553a75619").unwrap();
+		let ns = "namespace_abc";
+		let db = "database_abc";
+		let tb = "table_abc";
+		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+
+		// Create a live query
+		let mut vars = BTreeMap::new();
+		vars.insert("table".to_string(), Value::Strand(Strand(tb.to_string())));
+		let lq = ds.execute("LIVE SELECT * FROM table_abc", &sess, Some(vars)).await.unwrap();
+		assert_eq!(lq.len(), 1);
+		let lq = match lq.get(0) {
+			None => {}
+			Some(r) => match r.result.unwrap() {
+				Value::Uuid(uuid) => uuid,
+				_ => panic!("Expected the response to be a Uuid"),
+			},
+		};
+
+		// Kill
+		// Verify garbage is removed
 	}
 }
