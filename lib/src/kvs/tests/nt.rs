@@ -4,7 +4,6 @@ use crate::sql::uuid::Uuid as sqlUuid;
 
 #[tokio::test]
 #[serial]
-#[cfg(feature = "kv-mem")]
 async fn can_scan_notifications() {
 	let namespace = "testns";
 	let database = "testdb";
