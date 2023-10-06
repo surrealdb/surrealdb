@@ -1,4 +1,5 @@
 use crate::key::table::nt;
+use crate::key::table::nt::Nt;
 use crate::sql::uuid::Uuid as sqlUuid;
 
 #[tokio::test]
@@ -38,18 +39,15 @@ async fn can_scan_notifications() {
 	// Create all the data
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for pair in notifications.clone() {
-		tx.putc_tbnt(
+		let key = nt::Nt::new(
 			pair.0.ns,
 			pair.0.db,
 			pair.0.tb,
 			sql::Uuid(pair.0.lq),
 			pair.0.ts,
 			sql::Uuid(pair.0.nt),
-			pair.1.clone(),
-			None,
-		)
-		.await
-		.unwrap();
+		);
+		tx.putc_tbnt(key, pair.1.clone(), None).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
@@ -91,9 +89,8 @@ async fn can_delete_notifications() {
 		timestamp: ts.clone(),
 	};
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not.clone(), None)
-		.await
-		.unwrap();
+	let key = Nt::new(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone());
+	tx.putc_tbnt(key, not.clone(), None).await.unwrap();
 	tx.commit().await.unwrap();
 
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -158,17 +155,14 @@ async fn putc_tbnt_sanity_checks_key_with_value() {
 	};
 
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let res = tx
-		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_ts, None)
-		.await;
+	let key = Nt::new(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone());
+	let res = tx.putc_tbnt(key, not_bad_ts, None).await;
 	assert!(res.is_err());
-	let res = tx
-		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_lq, None)
-		.await;
+	let key = Nt::new(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone());
+	let res = tx.putc_tbnt(key, not_bad_lq, None).await;
 	assert!(res.is_err());
-	let res = tx
-		.putc_tbnt(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone(), not_bad_nt, None)
-		.await;
+	let key = Nt::new(ns, db, tb, live_id.clone(), ts.clone(), not_id.clone());
+	let res = tx.putc_tbnt(key, not_bad_nt, None).await;
 	assert!(res.is_err());
 	tx.commit().await.unwrap();
 }

@@ -1486,45 +1486,23 @@ impl Transaction {
 	}
 
 	/// Add live notification to table live query
-	pub async fn putc_tbnt(
+	pub async fn putc_tbnt<'a>(
 		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		lq: sql::Uuid,
-		ts: Timestamp,
-		id: sql::Uuid,
+		key: crate::key::table::nt::Nt<'a>,
 		nt: Notification,
 		expected: Option<Notification>,
 	) -> Result<(), Error> {
-		println!(
-			"\nputc_tbnt\n\
-			ns={:?}\n\
-			db={:?}\n\
-			tb={:?}\n\
-			lq={:?}\n\
-			ts={:?}\n\
-			id={:?}",
-			ns, db, tb, lq, ts, id
-		);
 		// Sanity check
-		if nt.timestamp != ts {
+		if nt.timestamp != key.ts {
 			return Err(Error::Internal("putc_tbnt: timestamp mismatch".to_string()));
 		}
-		if nt.live_id != lq {
+		if nt.live_id.0 != key.lq {
 			return Err(Error::Internal("putc_tbnt: live_id mismatch".to_string()));
 		}
-		if nt.notification_id != id {
+		if nt.notification_id.0 != key.nt {
 			return Err(Error::Internal("putc_tbnt: notification_id mismatch".to_string()));
 		}
-		let key = crate::key::table::nt::new(ns, db, tb, lq, ts, id);
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
-		println!(
-			"putc_tbnt key={:?}, encode={:?}",
-			debug::sprint_key(&key_enc),
-			debug::sprint_key(&key_enc)
-		);
-		trace!("putc_tbnt key={:?}", crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, nt, expected).await
 	}
 

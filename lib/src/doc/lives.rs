@@ -6,7 +6,6 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::key::debug;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use std::ops::Deref;
@@ -27,13 +26,11 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
-		println!("CHECKING LIVES");
 		if let Some(chn) = &opt.sender {
 			// Clone the sending channel
 			let chn = chn.clone();
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
-				println!("Processing live query: {:?}", lv);
 				// Create a new statement
 				let lq = Statement::from(lv);
 				// Get the event action
@@ -50,7 +47,6 @@ impl<'a> Document<'a> {
 					false => &self.current,
 				};
 				// Ensure that a session exists on the LIVE query
-				println!("The session is {:?}", lv.session.as_ref());
 				let sess = match lv.session.as_ref() {
 					Some(v) => v,
 					None => {
@@ -63,19 +59,16 @@ impl<'a> Document<'a> {
 					Some(v) => v,
 					None => continue,
 				};
-				println!("There is an auth");
 				// We need to create a new context which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the session
 				// of the user who created the LIVE query.
 				let mut lqctx = Context::background().with_live_value(sess.clone());
-				println!("We have an lq context");
 				// We need to create a new options which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data
 				// of the user who created the LIVE query.
 				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
-				println!("We have an lq options");
 				// Add $before, $after, $value, and $event params
 				// to this LIVE query so that user can use these
 				// within field projections and WHERE clauses.
@@ -105,8 +98,10 @@ impl<'a> Document<'a> {
 				// relevant notification based on the statement.
 				let mut tx = txn.lock().await;
 				let ts = tx.clock().await;
+				let ns = Box::new(opt.ns().to_string());
+				let db = Box::new(opt.db().to_string());
+				let tb = Box::new(self.id.unwrap().tb.to_string());
 				let not_id = crate::sql::Uuid::new_v4();
-				println!("We are in the part that checks delete");
 				if stm.is_delete() {
 					// Send a DELETE notification
 					let thing = (*rid).clone();
@@ -119,19 +114,10 @@ impl<'a> Document<'a> {
 						timestamp: ts.clone(),
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx
-							.scan_tbnt(
-								opt.ns(),
-								opt.db(),
-								&self.id.unwrap().tb,
-								lv.id.clone(),
-								1000,
-							)
-							.await;
+						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id.clone(), 1000).await;
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
-									println!("Iteration over create and sending scanned notification: {:?}", not);
 									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
@@ -143,17 +129,15 @@ impl<'a> Document<'a> {
 						}
 						chn.write().await.send(notification).await?;
 					} else {
-						tx.putc_tbnt(
-							opt.ns(),
-							opt.db(),
-							&self.id.unwrap().tb,
+						let key = crate::key::table::nt::Nt::new(
+							&ns,
+							&db,
+							&tb,
 							lv.id.clone(),
 							ts,
 							not_id,
-							notification,
-							None,
-						)
-						.await?;
+						);
+						tx.putc_tbnt(key, notification, None).await?;
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
@@ -166,88 +150,45 @@ impl<'a> Document<'a> {
 						result: plucked,
 						timestamp: ts.clone(),
 					};
-					println!("\n\nCREATE NOTIFICATION: {:?}\n\n", notification);
 					if opt.id()? == lv.node.0 {
-						println!("LV node {} was same as {}", lv.node.0, opt.id()?);
-						let previous_nots = tx
-							.scan_tbnt(
-								opt.ns(),
-								opt.db(),
-								&self.id.unwrap().tb,
-								lv.id.clone(),
-								1000,
-							)
-							.await;
+						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id.clone(), 1000).await;
 						match previous_nots {
 							Ok(nots) => {
-								println!("Found {} notifications in create", nots.len());
 								let channel = chn.write().await;
 								for not in &nots {
 									// Consume the notification entry
-									println!(
-										r#"Consuming notification: 
-										ns: {:?}\n
-										db: {:?}\n
-										tb: {:?}\n
-										live_id: {:?}\n
-										timestamp: {:?}\n
-										notification_id: {:?}\n
-										"#,
-										opt.ns(),
-										opt.db(),
-										&self.id.unwrap().tb,
-										lv.id.clone(),
-										not.timestamp.clone(),
-										not.notification_id.clone()
-									);
 									let key = crate::key::table::nt::Nt::new(
 										opt.ns(),
 										opt.db(),
-										&self.id.unwrap().tb,
+										&tb,
 										not.live_id.clone(),
 										not.timestamp.clone(),
 										not.notification_id.clone(),
 									);
 									let key_enc = key.encode().unwrap();
-									println!(
-										"Deleting notification: {:?}",
-										debug::sprint_key(&key_enc)
-									);
 									tx.del(key_enc).await.unwrap();
 									// Send the notification to the channel
 									if let Err(e) = channel.send(not.clone()).await {
-										println!("Error sending scanned notification: {}", e);
 										error!("Error sending scanned notification: {}", e);
 									} else {
-										println!("Sent notification: {:?}", not);
 									}
 								}
 							}
 							Err(err) => {
-								println!("Error scanning notifications: {}", err);
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						println!("Now sent processed notification after buffer");
 						chn.write().await.send(notification).await?;
 					} else {
-						println!(
-							"LV node {} was not same as {}. Putting {}",
-							lv.node.0,
-							opt.id()?,
-							notification
-						);
-						tx.putc_tbnt(
-							opt.ns(),
-							opt.db(),
-							&self.id.unwrap().tb,
+						let key = crate::key::table::nt::Nt::new(
+							&ns,
+							&db,
+							&tb,
 							lv.id.clone(),
 							ts,
 							not_id,
-							notification,
-							None,
-						)
-						.await?;
+						);
+						tx.putc_tbnt(key, notification, None).await?;
 					}
 				} else {
 					// Send a UPDATE notification
@@ -260,15 +201,8 @@ impl<'a> Document<'a> {
 						timestamp: ts.clone(),
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx
-							.scan_tbnt(
-								opt.ns(),
-								opt.db(),
-								&self.id.unwrap().tb,
-								lv.id.clone(),
-								1000,
-							)
-							.await;
+						let previous_nots =
+							tx.scan_tbnt(opt.ns(), opt.db(), &tb, lv.id.clone(), 1000).await;
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
@@ -283,17 +217,15 @@ impl<'a> Document<'a> {
 						}
 						chn.write().await.send(notification).await?;
 					} else {
-						tx.putc_tbnt(
-							opt.ns(),
-							opt.db(),
-							&self.id.unwrap().tb,
+						let key = crate::key::table::nt::Nt::new(
+							&ns,
+							&db,
+							&tb,
 							lv.id.clone(),
 							ts,
 							not_id,
-							notification,
-							None,
-						)
-						.await?;
+						);
+						tx.putc_tbnt(key, notification, None).await?;
 					}
 				};
 			}
@@ -402,18 +334,15 @@ mod tests {
 			)),
 			timestamp: ts.clone(),
 		};
-		tx.putc_tbnt(
+		let key = crate::key::table::nt::Nt::new(
 			"testns",
 			"testdb",
 			"test_table",
 			lq_id.clone(),
 			ts,
 			expected_not_id.clone(),
-			not,
-			None,
-		)
-		.await
-		.unwrap();
+		);
+		tx.putc_tbnt(key, not, None).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Perform a CREATE statement

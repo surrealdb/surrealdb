@@ -146,15 +146,11 @@ impl<'a> Executor<'a> {
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
 	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<Notification>) {
-		println!("Flush happening");
 		if let Some(chn) = ctx.notifications() {
-			println!("Flush had channel");
 			while let Ok(v) = rcv.try_recv() {
-				println!("Flushing a notification down the channel in executor");
 				let _ = chn.send(v).await;
 			}
 		} else {
-			println!("Flush had no channel so consuming");
 			while rcv.try_recv().is_ok() {
 				// Ignore notification
 			}
