@@ -118,6 +118,18 @@ impl<'a> Document<'a> {
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
+									// Consume the notification
+									let key = crate::key::table::nt::Nt::new(
+										&ns,
+										&db,
+										&tb,
+										not.live_id.clone(),
+										not.timestamp.clone(),
+										not.notification_id.clone(),
+									);
+									let key_enc = key.encode()?;
+									tx.del(key_enc).await?;
+									// Send the notification
 									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
@@ -165,8 +177,8 @@ impl<'a> Document<'a> {
 										not.timestamp.clone(),
 										not.notification_id.clone(),
 									);
-									let key_enc = key.encode().unwrap();
-									tx.del(key_enc).await.unwrap();
+									let key_enc = key.encode()?;
+									tx.del(key_enc).await?;
 									// Send the notification to the channel
 									if let Err(e) = channel.send(not.clone()).await {
 										error!("Error sending scanned notification: {}", e);
@@ -206,6 +218,18 @@ impl<'a> Document<'a> {
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
+									// Delete the consumed notification
+									let key = crate::key::table::nt::Nt::new(
+										&ns,
+										&db,
+										&tb,
+										not.live_id.clone(),
+										not.timestamp.clone(),
+										not.notification_id.clone(),
+									);
+									let key_enc = key.encode()?;
+									tx.del(key_enc).await?;
+									// Send the consumed notification
 									if let Err(e) = chn.write().await.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
@@ -288,7 +312,6 @@ impl<'a> Document<'a> {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
-	use crate::ctx::Context;
 	use crate::dbs::{Action, Notification, Session};
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
@@ -296,7 +319,6 @@ mod tests {
 	use crate::kvs::TransactionType::Write;
 	use crate::sql;
 	use crate::sql::Value;
-	use std::ops::Deref;
 
 	#[tokio::test]
 	async fn create_consumes_remote_notifications() {
@@ -304,10 +326,6 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap().with_notifications();
 		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
 		let node_id = uuid::Uuid::parse_str("22fa1d05-abea-4835-9463-e1dc6d733aad").unwrap();
-		let mut ctx = Context::background().with_live_value(Value::None).with_live_sess(&sess);
-		let sender = ds.live_sender();
-		let chan = sender.as_ref().unwrap().write().await;
-		ctx.add_notifications(Some(chan.deref()));
 
 		// Setup live query to receive remote notification
 		let qry = "LIVE SELECT * FROM test_table";
@@ -367,8 +385,142 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn update_consumes_remote_notifications() {}
+	async fn update_consumes_remote_notifications() {
+		// Setup
+		let ds = Datastore::new("memory").await.unwrap().with_notifications();
+		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+		let node_id = uuid::Uuid::parse_str("0d414fe5-cf76-4d86-af91-57eda18836a7").unwrap();
+
+		// Perform a CREATE statement
+		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Setup live query to receive remote notification
+		let qry = "LIVE SELECT * FROM test_table";
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		let lq = res.get(0).unwrap().result.as_ref().unwrap();
+		let lq_id = match lq {
+			Value::Uuid(lq) => lq,
+			_ => panic!("Expected response to be uuid"),
+		};
+
+		// Create remote notification artificially
+		let expected_not_id =
+			sql::uuid::Uuid::try_from("4511114c-1780-4d46-8657-efcbd9a45d12").unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let ts = tx.clock().await;
+		let not = Notification {
+			live_id: lq_id.clone(),
+			node_id: sql::uuid::Uuid::from(node_id.clone()),
+			notification_id: expected_not_id.clone(),
+			action: Action::Create,
+			result: Value::Strand(sql::Strand::from(
+				"normally, this would be an object or array of objects",
+			)),
+			timestamp: ts.clone(),
+		};
+		let key = crate::key::table::nt::Nt::new(
+			"testns",
+			"testdb",
+			"test_table",
+			lq_id.clone(),
+			ts,
+			expected_not_id.clone(),
+		);
+		tx.putc_tbnt(key, not, None).await.unwrap();
+		tx.commit().await.unwrap();
+
+		// Perform an UPDATE statement
+		let qry = r#"UPDATE test_table:123 CONTENT {"name":"something else"}"#;
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Verify we received the remote notification before the create notification
+		let receiver = ds.notifications().unwrap();
+		let first_notification = receiver.try_recv().unwrap();
+		let second_notification = receiver.try_recv().unwrap();
+		assert_eq!(first_notification.notification_id, expected_not_id);
+		assert_ne!(second_notification.notification_id, expected_not_id);
+
+		// verify remote notifications have been consumed
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 0).await;
+		tx.commit().await.unwrap();
+		let results = results.unwrap();
+		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
+	}
 
 	#[tokio::test]
-	async fn delete_consumes_remote_notifications() {}
+	async fn delete_consumes_remote_notifications() {
+		// Setup
+		let ds = Datastore::new("memory").await.unwrap().with_notifications();
+		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+		let node_id = uuid::Uuid::parse_str("6da5535b-9c0b-493b-8077-c26449738608").unwrap();
+
+		// Perform a CREATE statement
+		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Setup live query to receive remote notification
+		let qry = "LIVE SELECT * FROM test_table";
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		let lq = res.get(0).unwrap().result.as_ref().unwrap();
+		let lq_id = match lq {
+			Value::Uuid(lq) => lq,
+			_ => panic!("Expected response to be uuid"),
+		};
+
+		// Create remote notification artificially
+		let expected_not_id =
+			sql::uuid::Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let ts = tx.clock().await;
+		let not = Notification {
+			live_id: lq_id.clone(),
+			node_id: sql::uuid::Uuid::from(node_id.clone()),
+			notification_id: expected_not_id.clone(),
+			action: Action::Create,
+			result: Value::Strand(sql::Strand::from(
+				"normally, this would be an object or array of objects",
+			)),
+			timestamp: ts.clone(),
+		};
+		let key = crate::key::table::nt::Nt::new(
+			"testns",
+			"testdb",
+			"test_table",
+			lq_id.clone(),
+			ts,
+			expected_not_id.clone(),
+		);
+		tx.putc_tbnt(key, not, None).await.unwrap();
+		tx.commit().await.unwrap();
+
+		// Perform an UPDATE statement
+		let qry = r#"DELETE test_table:123"#;
+		let res = ds.execute(qry, &sess, None).await.unwrap();
+		assert_eq!(res.len(), 1);
+		res.get(0).unwrap().result.as_ref().unwrap();
+
+		// Verify we received the remote notification before the create notification
+		let receiver = ds.notifications().unwrap();
+		let first_notification = receiver.try_recv().unwrap();
+		let second_notification = receiver.try_recv().unwrap();
+		assert_eq!(first_notification.notification_id, expected_not_id);
+		assert_ne!(second_notification.notification_id, expected_not_id);
+
+		// verify remote notifications have been consumed
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 0).await;
+		tx.commit().await.unwrap();
+		let results = results.unwrap();
+		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
+	}
 }
