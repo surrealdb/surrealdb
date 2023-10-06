@@ -3,13 +3,12 @@ use crate::key::table::nt::Nt;
 use crate::sql::uuid::Uuid as sqlUuid;
 
 #[tokio::test]
-#[serial]
 async fn can_scan_notifications() {
 	let namespace = "testns";
 	let database = "testdb";
 	let table = "testtb";
 	let node_id = sql::uuid::Uuid::try_from("10e59cba-98bd-42b1-b60d-6ab32d989b65").unwrap();
-	let notifications: Vec<(nt::Nt, Notification)> = vec![
+	let notifications: Vec<(Nt, Notification)> = vec![
 		create_nt_tuple(
 			namespace,
 			database,
@@ -30,12 +29,12 @@ async fn can_scan_notifications() {
 
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
+	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 
 	// Create all the data
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for pair in notifications.clone() {
-		let key = nt::Nt::new(
+		let key = Nt::new(
 			pair.0.ns,
 			pair.0.db,
 			pair.0.tb,
@@ -67,7 +66,7 @@ async fn can_delete_notifications() {
 	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
+	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 	let ns = "testns";
 	let db = "testdb";
 	let tb = "testtb";
@@ -110,7 +109,7 @@ async fn putc_tbnt_sanity_checks_key_with_value() {
 	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
+	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 
 	// Test truths
 	let ns = "testns";
@@ -170,7 +169,7 @@ fn create_nt_tuple<'a>(
 	node_id: sqlUuid,
 	live_id: sqlUuid,
 	not_id: sqlUuid,
-) -> (nt::Nt<'a>, Notification) {
+) -> (Nt<'a>, Notification) {
 	let result = Value::Strand(Strand::from("teststrand result"));
 	let timestamp = Timestamp {
 		value: 123,
@@ -183,6 +182,6 @@ fn create_nt_tuple<'a>(
 		result,
 		timestamp: timestamp.clone(),
 	};
-	let nt = nt::Nt::new(ns, db, tb, live_id, timestamp, not_id);
+	let nt = Nt::new(ns, db, tb, live_id, timestamp, not_id);
 	return (nt, not);
 }
