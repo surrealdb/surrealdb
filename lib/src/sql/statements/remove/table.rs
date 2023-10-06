@@ -40,19 +40,19 @@ impl RemoveTableStatement {
 		run.clear_cache();
 		for name in &self.names {
 			// Get the defined table
-			let tb = run.get_tb(opt.ns(), opt.db(), &name).await?;
+			let tb = run.get_tb(opt.ns(), opt.db(), name).await?;
 			// Delete the definition
-			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &name);
+			let key = crate::key::database::tb::new(opt.ns(), opt.db(), name);
 			run.del(key).await?;
 			// Remove the resource data
-			let key = crate::key::table::all::new(opt.ns(), opt.db(), &name);
+			let key = crate::key::table::all::new(opt.ns(), opt.db(), name);
 			run.delp(key, u32::MAX).await?;
 			// Check if this is a foreign table
 			if let Some(view) = &tb.view {
 				// Process each foreign table
 				for v in view.what.0.iter() {
 					// Save the view config
-					let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &name);
+					let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, name);
 					run.del(key).await?;
 				}
 			}
