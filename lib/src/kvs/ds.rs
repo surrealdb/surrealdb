@@ -206,10 +206,7 @@ impl Datastore {
 		path: &str,
 		clock_override: Option<SizedClock>,
 	) -> Result<Datastore, Error> {
-		#[cfg(not(target_arch = "wasm32"))]
 		let default_clock: SizedClock = SizedClock::System(SystemClock::new());
-		#[cfg(target_arch = "wasm32")]
-		let default_clock: AtomicLockedClock = Arc::new(SizedClock::System(SystemClock::new()));
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, SizedClock) = match path {
 			"memory" => {
