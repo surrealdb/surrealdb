@@ -35,7 +35,7 @@ impl ser::Serializer for Serializer {
 
 #[derive(Default)]
 pub struct SerializeRemoveTableStatement {
-	name: Ident,
+	names: Vec<Ident>,
 }
 
 impl serde::ser::SerializeStruct for SerializeRemoveTableStatement {
@@ -47,8 +47,12 @@ impl serde::ser::SerializeStruct for SerializeRemoveTableStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
-			"name" => {
-				self.name = Ident(value.serialize(ser::string::Serializer.wrap())?);
+			"names" => {
+				self.names = value
+					.serialize(ser::table::vec::Serializer.wrap())?
+					.iter()
+					.map(|v| Ident(v.clone().0))
+					.collect();
 			}
 			key => {
 				return Err(Error::custom(format!(
@@ -61,7 +65,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveTableStatement {
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(RemoveTableStatement {
-			name: self.name,
+			names: self.names,
 		})
 	}
 }
