@@ -34,6 +34,7 @@ mod mem {
 	}
 
 	include!("cluster_init.rs");
+	include!("hb.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -42,6 +43,7 @@ mod mem {
 	include!("tb.rs");
 	include!("multireader.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
@@ -77,6 +79,7 @@ mod rocksdb {
 	}
 
 	include!("cluster_init.rs");
+	include!("hb.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -87,6 +90,7 @@ mod rocksdb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
@@ -120,6 +124,7 @@ mod speedb {
 	}
 
 	include!("cluster_init.rs");
+	include!("hb.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -130,6 +135,7 @@ mod speedb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
@@ -164,6 +170,7 @@ mod tikv {
 	}
 
 	include!("cluster_init.rs");
+	include!("hb.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -174,6 +181,7 @@ mod tikv {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
@@ -208,6 +216,7 @@ mod fdb {
 	}
 
 	include!("cluster_init.rs");
+	include!("hb.rs");
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
@@ -218,6 +227,7 @@ mod fdb {
 	include!("multiwriter_different_keys.rs");
 	include!("multiwriter_same_keys_allow.rs");
 	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");

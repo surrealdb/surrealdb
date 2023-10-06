@@ -1,7 +1,7 @@
 pub(super) mod tower_layer;
 
 use once_cell::sync::Lazy;
-use opentelemetry::metrics::{Histogram, MetricsError, ObservableUpDownCounter, Unit};
+use opentelemetry::metrics::{Histogram, MetricsError, Unit, UpDownCounter};
 use opentelemetry::Context as TelemetryContext;
 
 use self::tower_layer::HttpCallMetricTracker;
@@ -16,9 +16,9 @@ pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static HTTP_SERVER_ACTIVE_REQUESTS: Lazy<ObservableUpDownCounter<i64>> = Lazy::new(|| {
+pub static HTTP_SERVER_ACTIVE_REQUESTS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
 	METER_DURATION
-		.i64_observable_up_down_counter("http.server.active_requests")
+		.i64_up_down_counter("http.server.active_requests")
 		.with_description("The number of active HTTP requests.")
 		.init()
 });
@@ -39,19 +39,11 @@ pub static HTTP_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-fn observe_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	observe_active_request(1, tracker)
-}
-
-fn observe_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
-	observe_active_request(-1, tracker)
-}
-
 fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
 
-	METER_DURATION
-		.register_callback(move |ctx| HTTP_SERVER_ACTIVE_REQUESTS.observe(ctx, value, &attrs))
+	HTTP_SERVER_ACTIVE_REQUESTS.add(&TelemetryContext::current(), value, &attrs);
+	Ok(())
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {

@@ -20,8 +20,16 @@ impl TestContext {
 	) -> Result<(), Error> {
 		// TODO we shouldn't test bootstrapping manually
 		let mut tx = self.db.transaction(Write, Optimistic).await?;
-		let archived = self.db.register_remove_and_archive(&mut tx, &node_id, time).await?;
-		tx.commit().await?;
+		let archived = match self.db.register_remove_and_archive(&mut tx, &node_id, time).await {
+			Ok(v) => {
+				tx.commit().await?;
+				v
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
 
 		let mut errors = vec![];
 		let mut values = vec![];
@@ -43,12 +51,12 @@ impl TestContext {
 
 		let mut tx = self.db.transaction(Write, Optimistic).await?;
 		self.db.remove_archived(&mut tx, values).await?;
-		Ok(tx.commit().await?)
+		tx.commit().await
 	}
 
 	// Use this to generate strings that have the test uuid associated with it
 	pub fn test_str(&self, prefix: &str) -> String {
-		return format!("{}-{}", prefix, self.context_id);
+		format!("{}-{}", prefix, self.context_id)
 	}
 }
 
@@ -56,11 +64,11 @@ impl TestContext {
 /// In the future it would be nice to handle multiple datastores
 pub(crate) async fn init(node_id: Uuid) -> Result<TestContext, Error> {
 	let (db, kvs) = new_ds(node_id).await;
-	return Ok(TestContext {
+	Ok(TestContext {
 		db,
 		kvs,
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
-	});
+	})
 }
 
 /// Scan the entire storage layer displaying keys
@@ -69,7 +77,7 @@ async fn _debug_scan(tx: &mut Transaction, message: &str) {
 	let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
 	println!("START OF RANGE SCAN - {}", message);
 	for (k, _v) in r.iter() {
-		println!("{}", crate::key::debug::sprint_key(k.as_ref()));
+		println!("{}", crate::key::debug::sprint_key(k));
 	}
 	println!("END OF RANGE SCAN - {}", message);
 }

@@ -1647,7 +1647,7 @@ mod tests {
 	}
 
 	fn check_routing_vec(
-		m: &Vec<RoutingEntry>,
+		m: &[RoutingEntry],
 		idx: usize,
 		center: &Vector,
 		node_id: NodeId,
@@ -1726,7 +1726,6 @@ mod tests {
 		expected_min_objects: Option<usize>,
 		expected_max_objects: Option<usize>,
 	) {
-		println!("CheckTreeProperties");
 		let mut node_count = 0;
 		let mut max_depth = 0;
 		let mut min_leaf_depth = None;
@@ -1743,13 +1742,6 @@ mod tests {
 				max_depth = depth;
 			}
 			let node = s.get_node(tx, node_id).await.unwrap();
-			println!(
-				"Node id: {} - depth: {} - len: {} - {:?}",
-				node.id,
-				depth,
-				node.n.len(),
-				node.n
-			);
 			match node.n {
 				MTreeNode::Internal(entries) => {
 					let next_depth = depth + 1;
