@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::{ContextCause, Error};
 use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -73,9 +73,7 @@ impl LiveStatement {
 		let nid = opt.id()?;
 		// Check that auth has been set
 		if ctx.value("session").is_none() {
-			return Err(Error::InternalContextError(
-				"Expected the context to include 'session'".to_string(),
-			));
+			return Err(Error::InternalContextError(ContextCause::MissingSession));
 		}
 		let mut stm = LiveStatement {
 			// Use the current session authentication

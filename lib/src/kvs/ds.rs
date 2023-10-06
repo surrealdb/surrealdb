@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
-use crate::err::Error;
+use crate::err::{Error, InternalCause};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
@@ -774,7 +774,8 @@ impl Datastore {
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+			error!("Clock may have gone backwards: {:?}", e.duration());
+			Error::Internal(InternalCause::ClockMayHaveGoneBackwards)
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;

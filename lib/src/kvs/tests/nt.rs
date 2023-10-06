@@ -30,10 +30,7 @@ async fn can_scan_notifications() {
 
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let ds = Datastore::new_full("memory", Some(clock_override))
-		.await
-		.unwrap()
-		.with_node_id(node_id.clone());
+	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
 
 	// Create all the data
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -67,13 +64,13 @@ async fn can_scan_notifications() {
 
 #[tokio::test]
 async fn can_delete_notifications() {
+	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
+	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
 	let ns = "testns";
 	let db = "testdb";
 	let tb = "testtb";
-	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
 	let ts = Timestamp {
 		value: 123456,
 	};
@@ -110,9 +107,10 @@ async fn can_delete_notifications() {
 
 #[tokio::test]
 async fn putc_tbnt_sanity_checks_key_with_value() {
+	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
 	let clock_override =
 		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
-	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
+	let (ds, _) = new_ds(node_id.0.clone(), clock_override).await;
 
 	// Test truths
 	let ns = "testns";
@@ -123,7 +121,6 @@ async fn putc_tbnt_sanity_checks_key_with_value() {
 		value: 0x123456,
 	};
 	let not_id = sql::uuid::Uuid::try_from("bb4be42a-e04c-4245-8cee-55263bd19eeb").unwrap();
-	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
 
 	// Test erroneous data
 	let not_bad_ts = Notification {

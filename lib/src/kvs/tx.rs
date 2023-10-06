@@ -6,7 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::dbs::Notification;
-use crate::err::Error;
+use crate::err::{Error, InternalCause, LiveQueryCause};
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
 use crate::key::debug;
@@ -1494,13 +1494,13 @@ impl Transaction {
 	) -> Result<(), Error> {
 		// Sanity check
 		if nt.timestamp != key.ts {
-			return Err(Error::Internal("putc_tbnt: timestamp mismatch".to_string()));
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::TimestampMismatch));
 		}
 		if nt.live_id.0 != key.lq {
-			return Err(Error::Internal("putc_tbnt: live_id mismatch".to_string()));
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::LiveQueryIDMismatch));
 		}
 		if nt.notification_id.0 != key.nt {
-			return Err(Error::Internal("putc_tbnt: notification_id mismatch".to_string()));
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::NotificationIDMismatch));
 		}
 		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
 		self.putc(key_enc, nt, expected).await
@@ -1896,7 +1896,8 @@ impl Transaction {
 			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
-				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
+				error!("Error decoding live query value: {:?}", e);
+				Error::InternalLiveQueryError(LiveQueryCause::FailedToDecodeNodeLiveQueryValue)
 			})?;
 			let lqv = LqValue {
 				nd: (*nd).into(),
@@ -2893,9 +2894,7 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				return Err(Error::Internal(InternalCause::TimestampSkew));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2920,7 +2919,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+				return Err(Error::Internal(InternalCause::InvalidVersionstamp));
 			}
 		}
 		Ok(None)
