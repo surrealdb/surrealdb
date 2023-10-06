@@ -15,9 +15,7 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::{
-	AtomicLockedClock, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT,
-};
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -115,7 +113,7 @@ pub struct Datastore {
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: AtomicLockedClock,
+	clock: SizedClock,
 }
 
 /// We always want to be circulating the live query information
@@ -206,15 +204,11 @@ impl Datastore {
 	#[allow(dead_code)]
 	pub async fn new_full(
 		path: &str,
-		clock_override: Option<AtomicLockedClock>,
+		clock_override: Option<SizedClock>,
 	) -> Result<Datastore, Error> {
-		#[cfg(not(target_arch = "wasm32"))]
-		let default_clock: AtomicLockedClock =
-			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
-		#[cfg(target_arch = "wasm32")]
-		let default_clock: AtomicLockedClock = Arc::new(SizedClock::System(SystemClock::new()));
+		let default_clock: SizedClock = SizedClock::System(SystemClock::new());
 		// Initiate the desired datastore
-		let (inner, clock): (Result<Inner, Error>, AtomicLockedClock) = match path {
+		let (inner, clock): (Result<Inner, Error>, SizedClock) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{

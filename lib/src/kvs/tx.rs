@@ -45,20 +45,11 @@ use sql::statements::LiveStatement;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
-use std::ops::{Deref, Range};
+use std::ops::Range;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::RwLock;
 use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const NO_LIMIT: u32 = 0;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) type AtomicLockedClock = Arc<RwLock<SizedClock>>;
-#[cfg(target_arch = "wasm32")]
-pub(crate) type AtomicLockedClock = Arc<SizedClock>;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -67,7 +58,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
-	pub(super) clock: AtomicLockedClock,
+	pub(super) clock: SizedClock,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1062,20 +1053,10 @@ impl Transaction {
 	/// But also allows for lexicographical ordering.
 	///
 	/// Public for tests, but not required for usage from a user perspective.
-	pub async fn clock(&self) -> Timestamp {
+	pub async fn clock(&mut self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
-		#[cfg(not(target_arch = "wasm32"))]
-		let owned = self.clock.read().await;
-		#[cfg(not(target_arch = "wasm32"))]
-		let clock_impl = owned.deref();
-		#[cfg(target_arch = "wasm32")]
-		let clock_impl = self.clock.deref();
-		match clock_impl {
-			SizedClock::Fake(fake) => fake.now(),
-			SizedClock::Inc(inc) => inc.now().await,
-			SizedClock::System(system) => system.now(),
-		}
+		self.clock.now().await
 	}
 
 	// Set heartbeat

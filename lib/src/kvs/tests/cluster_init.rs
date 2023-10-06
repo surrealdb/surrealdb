@@ -1,6 +1,5 @@
 use futures::lock::Mutex;
 use std::collections::BTreeSet;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use crate::ctx::context;
@@ -23,8 +22,8 @@ async fn expired_nodes_are_garbage_collected() {
 	let old_time = Timestamp {
 		value: 123000,
 	};
-	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
-	let clock = Arc::new(RwLock::new(clock));
+	let mut fake_clock = FakeClock::new(old_time.clone());
+	let clock = SizedClock::Fake(fake_clock.clone());
 	let mut test = init(new_node, clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
@@ -35,14 +34,7 @@ async fn expired_nodes_are_garbage_collected() {
 	let new_time = Timestamp {
 		value: 567000,
 	};
-	{
-		// Lock released after scope
-		if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
-			clock.set(new_time.clone());
-		} else {
-			panic!("Clock is not fake");
-		}
-	}
+	fake_clock.set(new_time.clone());
 	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
 	test.db.bootstrap().await.unwrap();
 
@@ -71,8 +63,8 @@ async fn expired_nodes_get_live_queries_archived() {
 	let old_time = Timestamp {
 		value: 123000,
 	};
-	let clock = SizedClock::Fake(FakeClock::new(old_time.clone()));
-	let clock = Arc::new(RwLock::new(clock));
+	let mut fake_clock = FakeClock::new(old_time.clone());
+	let clock = SizedClock::Fake(fake_clock.clone());
 	let mut test = init(old_node, clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
@@ -119,11 +111,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456000,
 	};
-	if let SizedClock::Fake(clock) = clock.write().await.deref_mut() {
-		clock.set(new_time.clone());
-	} else {
-		panic!("Clock is not fake");
-	}
+	fake_clock.set(new_time.clone());
 	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
 	test.db.bootstrap().await.unwrap();
 
@@ -150,8 +138,8 @@ async fn single_live_queries_are_garbage_collected() {
 	let time = Timestamp {
 		value: 123000,
 	};
-	let clock = SizedClock::Fake(FakeClock::new(time.clone()));
-	let clock = Arc::new(RwLock::new(clock));
+	let fake_clock = FakeClock::new(time.clone());
+	let clock = SizedClock::Fake(fake_clock);
 	let mut test = init(node_id, clock).await.unwrap();
 	let options = Options::default()
 		.with_required(
@@ -233,8 +221,8 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		value: 456_000,
 	};
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
-	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
-	let clock = Arc::new(RwLock::new(clock));
+	let mut fake_clock = FakeClock::new(t1.clone());
+	let clock = SizedClock::Fake(fake_clock.clone());
 	let test = init(old_node_id, clock.clone()).await.unwrap();
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
@@ -284,15 +272,9 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// Subject: Perform the action we are testing
 	trace!("Bootstrapping");
 	let new_node_id = Uuid::parse_str("53f7355d-5be1-4a94-9803-5192b59c5244").unwrap();
+
 	// There should not be an error
-	match clock.write().await.deref_mut() {
-		SizedClock::Fake(clock) => {
-			clock.set(t2.clone());
-		}
-		_ => {
-			panic!("Clock is not fake");
-		}
-	}
+	fake_clock.set(t2.clone());
 	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
 	match second_node.bootstrap().await {
 		Ok(_) => {

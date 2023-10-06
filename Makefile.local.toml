@@ -54,6 +54,10 @@ args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 category = "LOCAL USAGE"
 dependencies = ["cargo-check", "cargo-fmt", "cargo-fmt-unlinked", "cargo-clippy"]
 
+[tasks.check-wasm]
+category = "LOCAL USAGE"
+dependencies = ["ci-check-wasm"]
+
 # Clean
 [tasks.clean]
 category = "LOCAL USAGE"
