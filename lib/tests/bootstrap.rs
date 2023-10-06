@@ -15,7 +15,6 @@ use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
-use tokio::time::sleep;
 
 #[tokio::test]
 #[serial]

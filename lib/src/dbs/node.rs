@@ -81,6 +81,10 @@ impl Timestamp {
 		self.value += rhs.as_secs();
 		get
 	}
+
+	pub(crate) fn set(&mut self, ts: Timestamp) {
+		self.value = ts.value;
+	}
 }
 
 // TODO test

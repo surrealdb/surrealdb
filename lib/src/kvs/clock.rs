@@ -1,37 +1,47 @@
 use crate::dbs::node::Timestamp;
 use crate::sql;
 use sql::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
+#[derive(Clone)]
 pub enum SizedClock {
 	Fake(FakeClock),
 	Inc(IncFakeClock),
 	System(SystemClock),
 }
 
+impl SizedClock {
+	pub async fn now(&mut self) -> Timestamp {
+		match self {
+			SizedClock::Fake(c) => c.now(),
+			SizedClock::Inc(c) => c.now().await,
+			SizedClock::System(c) => c.now(),
+		}
+	}
+}
+
 /// FakeClock is a clock that is fully controlled externally.
 /// Use this clock for when you are testing timestamps.
 #[derive(Clone)]
 pub struct FakeClock {
-	now: Timestamp,
+	now: Arc<RwLock<Timestamp>>,
 }
 
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
-			now,
+			now: Arc::new(RwLock::new(now)),
 		}
 	}
 
 	pub fn now(&self) -> Timestamp {
-		self.now.clone()
+		self.now.read().unwrap().clone()
 	}
 
 	pub fn set(&mut self, timestamp: Timestamp) {
-		self.now = timestamp;
+		self.now.write().unwrap().set(timestamp);
 	}
 }
 
@@ -41,20 +51,20 @@ impl FakeClock {
 /// is accessed, and due to the nature of async - you neither have order guarantee.
 #[derive(Clone)]
 pub struct IncFakeClock {
-	now: Arc<RwLock<Timestamp>>,
+	now: Timestamp,
 	increment: Duration,
 }
 
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
-			now: Arc::new(RwLock::new(now)),
+			now,
 			increment,
 		}
 	}
 
-	pub async fn now(&self) -> Timestamp {
-		self.now.write().await.get_and_inc(self.increment.clone())
+	pub async fn now(&mut self) -> Timestamp {
+		self.now.get_and_inc(self.increment.clone())
 	}
 }
 
