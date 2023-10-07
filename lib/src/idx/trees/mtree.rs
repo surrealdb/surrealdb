@@ -1,3 +1,17 @@
+use std::cmp::Ordering;
+use std::collections::btree_map::Entry as BEntry;
+use std::collections::hash_map::Entry as HEntry;
+use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
+use std::fmt::Debug;
+use std::io::Cursor;
+use std::sync::Arc;
+
+use async_recursion::async_recursion;
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
+
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
 	CosineSimilarity, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
@@ -11,18 +25,6 @@ use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Array, Number, Object, Thing, Value};
-use async_recursion::async_recursion;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::btree_map::Entry as BEntry;
-use std::collections::hash_map::Entry as HEntry;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
 
 pub(crate) type Vector = Vec<Number>;
 
@@ -339,6 +341,7 @@ impl MTree {
 		p2: RoutingProperties,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
+		#[cfg(debug_assertions)]
 		debug!(
 			"New internal root - node: {} - r1: {:?}/{} - r2: {:?}/{}",
 			new_root_id,
@@ -554,12 +557,16 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
-		node: N,
+		mut node: N,
 	) -> Result<(Arc<Vector>, RoutingProperties, Arc<Vector>, RoutingProperties), Error>
 	where
 		N: NodeVectors + Debug,
 	{
-		let (p1_obj, node1, r1, p2_obj, node2, r2) = node.split_node()?;
+		let objects = node.get_objects();
+		let (distances, o1, o2) = self.compute_distances_and_promoted_objects(&objects)?;
+		let (a1, o1, a2, o2) = Self::distribute_objects(objects, &distances, o1, o2);
+		let (node1, r1, o1) = node.extract_node(&distances, o1, a1)?;
+		let (node2, r2, o2) = node.extract_node(&distances, o2, a2)?;
 
 		// Create a new node
 		let new_node_id = self.new_node_id();
@@ -581,49 +588,69 @@ impl MTree {
 			radius: r2,
 			parent_dist: 0.0,
 		};
-		Ok((p1_obj, p1, p2_obj, p2))
+		Ok((o1, p1, o2, p2))
 	}
 
-	// #[cfg(debug_assertions)]
-	// debug!("SPLIT NODE - id: {} - len: {} - {:?}", node_id, node.len(), node);
-	// let distances = self.compute_distance_matrix(&node)?;
-	// let (p1_idx, p2_idx) = Self::select_promotion_objects(&distances);
-	// let p1_obj = node.get_vector(p1_idx)?;
-	// let p2_obj = node.get_vector(p2_idx)?;
-	// #[cfg(debug_assertions)]
-	// debug!("PROMOTED - p1: {:?} - p2: {:?}", p1_obj, p2_obj);
-	//
-	// // Distribute entries, update parent_dist and calculate radius
-	// let (node1, r1, node2, r2) = node.distribute_entries(&distances, p1_idx, p2_idx)?;
-	//
-	// #[cfg(debug_assertions)]
-	// debug!(
-	// 		"DISTRIBUTE - id: {} - len: {}/{} - NODE1: {:?} - NODE2: {:?}",
-	// 		node_id,
-	// 		node1.len(),
-	// 		node2.len(),
-	// 		node1,
-	// 		node2
-	// 	);
-	//
-	// fn select_promotion_objects(distances: &[Vec<f64>]) -> (usize, usize) {
-	// 	let mut promo = (0, 1);
-	// 	let mut max_distance = distances[0][1];
-	// 	// Compare each pair of objects
-	// 	let n = distances.len();
-	// 	#[allow(clippy::needless_range_loop)]
-	// 	for i in 0..n {
-	// 		for j in i + 1..n {
-	// 			let distance = distances[i][j];
-	// 			// If this pair is further apart than the current maximum, update the promotion objects
-	// 			if distance > max_distance {
-	// 				promo = (i, j);
-	// 				max_distance = distance;
-	// 			}
-	// 		}
-	// 	}
-	// 	promo
-	// }
+	// Compute the distance cache, and return the most distant objects
+	fn compute_distances_and_promoted_objects(
+		&self,
+		objects: &[Arc<Vector>],
+	) -> Result<(DistanceCache, Arc<Vector>, Arc<Vector>), Error> {
+		let mut promo = None;
+		let mut max_dist = 0f64;
+		let n = objects.len();
+		let mut dist_cache = HashMap::with_capacity(n * 2);
+		for (i, o1) in objects.iter().enumerate() {
+			for j in i + 1..n {
+				let o2 = &objects[j];
+				let distance = self.calculate_distance(o1, o2.as_ref());
+				dist_cache.insert((o1.clone(), o2.clone()), distance);
+				dist_cache.insert((o2.clone(), o1.clone()), distance); // Because the distance function is symmetric
+				#[cfg(debug_assertions)]
+				debug!("dist_cache {} ({:?} - {:?})", dist_cache.len(), o1, o2);
+				if distance > max_dist {
+					promo = Some((o1.clone(), o2.clone()));
+					max_dist = distance;
+				}
+			}
+		}
+		#[cfg(debug_assertions)]
+		assert_eq!(dist_cache.len(), n * n - n);
+		match promo {
+			None => Err(Error::Unreachable),
+			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
+		}
+	}
+
+	fn distribute_objects(
+		objects: Vec<Arc<Vector>>,
+		distances: &DistanceCache,
+		p1: Arc<Vector>,
+		p2: Arc<Vector>,
+	) -> (Vec<Arc<Vector>>, Arc<Vector>, Vec<Arc<Vector>>, Arc<Vector>) {
+		let l = objects.len();
+		let mut a1 = Vec::with_capacity(l);
+		let mut a2 = Vec::with_capacity(l);
+		for o in objects {
+			a1.push(o.clone());
+			a2.push(o.clone());
+		}
+		a1.sort_by(|o1, o2| {
+			let d1 = *distances.0.get(&(o1.clone(), p1.clone())).unwrap_or(&0.0);
+			let d2 = *distances.0.get(&(o2.clone(), p1.clone())).unwrap_or(&0.0);
+			d1.total_cmp(&d2)
+		});
+		a2.sort_by(|o1, o2| {
+			let d1 = *distances.0.get(&(o1.clone(), p2.clone())).unwrap_or(&0.0);
+			let d2 = *distances.0.get(&(o2.clone(), p2.clone())).unwrap_or(&0.0);
+			d1.total_cmp(&d2)
+		});
+		let a1_size = l / 2;
+		let a2_size = l - a1_size;
+		let a1: Vec<Arc<Vector>> = a1.drain(0..a1_size).collect();
+		let a2: Vec<Arc<Vector>> = a2.drain(0..a2_size).collect();
+		(a1, p1, a2, p2)
+	}
 
 	fn compute_internal_max_distance(&self, node: &InternalNode) -> f64 {
 		let mut max_dist = 0f64;
@@ -1078,6 +1105,8 @@ impl MTree {
 	}
 }
 
+struct DistanceCache(HashMap<(Arc<Vector>, Arc<Vector>), f64>);
+
 #[derive(PartialEq)]
 struct PriorityNode(f64, NodeId);
 
@@ -1193,56 +1222,45 @@ impl MTreeNode {
 trait NodeVectors: Sized {
 	fn len(&self) -> usize;
 
-	fn split_node(self) -> Result<(Arc<Vector>, Self, f64, Arc<Vector>, Self, f64), Error>;
+	fn get_objects(&self) -> Vec<Arc<Vector>>;
+
+	fn extract_node(
+		&mut self,
+		distances: &DistanceCache,
+		p: Arc<Vector>,
+		a: Vec<Arc<Vector>>,
+	) -> Result<(Self, f64, Arc<Vector>), Error>;
 
 	fn into_mtree_node(self) -> MTreeNode;
 }
-
-// fn compute_distance_matrix<N>(&self, vectors: &N) -> Result<Vec<Vec<f64>>, Error>
-// 	where
-// 		N: NodeVectors,
-// {
-// 	let mut distances = vec![vec![0.0; n]; n];
-// 	for i in vectors {
-// 		let v1 = vectors.get_vector(i)?;
-// 		for j in i + 1..n {
-// 			let v2 = vectors.get_vector(j)?;
-// 			let distance = self.calculate_distance(v1.as_ref(), v2.as_ref());
-// 			distances[i][j] = distance;
-// 			distances[j][i] = distance; // Because the distance function is symmetric
-// 		}
-// 	}
-// 	Ok(distances)
-// }
 
 impl NodeVectors for LeafNode {
 	fn len(&self) -> usize {
 		self.len()
 	}
 
-	fn split_node(self) -> Result<(Arc<Vector>, Self, f64, Arc<Vector>, Self, f64), Error> {
-		todo!()
-		// let mut leaf1 = LeafNode::new();
-		// let mut leaf2 = LeafNode::new();
-		// let (mut r1, mut r2) = (0f64, 0f64);
-		// for (i, (v, mut p)) in self.drain(..).enumerate() {
-		// 	let dist_p1 = distances[i][p1];
-		// 	let dist_p2 = distances[i][p2];
-		// 	if dist_p1 <= dist_p2 {
-		// 		p.parent_dist = dist_p1;
-		// 		leaf1.insert(v, p);
-		// 		if dist_p1 > r1 {
-		// 			r1 = dist_p1;
-		// 		}
-		// 	} else {
-		// 		p.parent_dist = dist_p2;
-		// 		leaf2.insert(v, p);
-		// 		if dist_p2 > r2 {
-		// 			r2 = dist_p2;
-		// 		}
-		// 	}
-		// }
-		// Ok((leaf1, r1, leaf2, r2))
+	fn get_objects(&self) -> Vec<Arc<Vector>> {
+		self.keys().map(|o| o.clone()).collect()
+	}
+
+	fn extract_node(
+		&mut self,
+		distances: &DistanceCache,
+		p: Arc<Vector>,
+		a: Vec<Arc<Vector>>,
+	) -> Result<(Self, f64, Arc<Vector>), Error> {
+		let mut n = LeafNode::new();
+		let mut r = 0f64;
+		for o in a {
+			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
+			if dist > r {
+				r = dist;
+			}
+			props.parent_dist = dist;
+			n.insert(o, props);
+		}
+		Ok((n, r, p))
 	}
 
 	fn into_mtree_node(self) -> MTreeNode {
@@ -1255,31 +1273,29 @@ impl NodeVectors for InternalNode {
 		self.len()
 	}
 
-	fn split_node(self) -> Result<(Arc<Vector>, Self, f64, Arc<Vector>, Self, f64), Error> {
-		todo!()
-		// let mut internal1 = InternalNode::new();
-		// let mut internal2 = InternalNode::new();
-		// let (mut r1, mut r2) = (0.0, 0.0);
-		// for (i, (o, mut e)) in self.into_iter().enumerate() {
-		// 	let dist_p1 = distances[i][p1];
-		// 	let dist_p2 = distances[i][p2];
-		// 	if dist_p1 <= dist_p2 {
-		// 		let r = dist_p1 + e.radius;
-		// 		if r > r1 {
-		// 			r1 = r;
-		// 		}
-		// 		e.parent_dist = dist_p1;
-		// 		internal1.insert(o, e);
-		// 	} else {
-		// 		let r = dist_p2 + e.radius;
-		// 		if r > r2 {
-		// 			r2 = r;
-		// 		}
-		// 		e.parent_dist = dist_p2;
-		// 		internal2.insert(o, e);
-		// 	}
-		// }
-		// Ok((internal1, r1, internal2, r2))
+	fn get_objects(&self) -> Vec<Arc<Vector>> {
+		self.keys().map(|o| o.clone()).collect()
+	}
+
+	fn extract_node(
+		&mut self,
+		distances: &DistanceCache,
+		p: Arc<Vector>,
+		a: Vec<Arc<Vector>>,
+	) -> Result<(Self, f64, Arc<Vector>), Error> {
+		let mut n = InternalNode::new();
+		let mut max_r = 0f64;
+		for o in a {
+			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
+			let r = dist + props.radius;
+			if r > max_r {
+				max_r = r;
+			}
+			props.parent_dist = dist;
+			n.insert(o, props);
+		}
+		Ok((n, max_r, p))
 	}
 
 	fn into_mtree_node(self) -> MTreeNode {
@@ -1392,6 +1408,14 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
+	use std::collections::{BTreeMap, HashMap, VecDeque};
+	use std::sync::Arc;
+
+	//use rand::{thread_rng, Rng};
+	use roaring::RoaringTreemap;
+	use test_log::test;
+	use tokio::sync::{Mutex, MutexGuard};
+
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{
 		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties, Vector,
@@ -1401,12 +1425,6 @@ mod tests {
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::sql::index::Distance;
-	//use rand::{thread_rng, Rng};
-	use roaring::RoaringTreemap;
-	use std::collections::{BTreeMap, HashMap, VecDeque};
-	use std::sync::Arc;
-	use test_log::test;
-	use tokio::sync::{Mutex, MutexGuard};
 
 	async fn new_operation(
 		ds: &Datastore,
