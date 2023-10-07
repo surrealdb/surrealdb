@@ -175,10 +175,8 @@ impl Connection for Any {
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 						let config = WebSocketConfig {
-							max_send_queue: match capacity {
-								0 => None,
-								capacity => Some(capacity),
-							},
+							#[allow(clippy::deprecated)]
+							max_send_queue: None,
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
 							accept_unmasked_frames: false,

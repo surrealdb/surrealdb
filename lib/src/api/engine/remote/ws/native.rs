@@ -114,15 +114,13 @@ impl Connection for Client {
 			let maybe_connector = None;
 
 			let config = WebSocketConfig {
-				max_send_queue: match capacity {
-					0 => None,
-					capacity => Some(capacity),
-				},
 				max_message_size: Some(MAX_MESSAGE_SIZE),
 				max_frame_size: Some(MAX_FRAME_SIZE),
 				accept_unmasked_frames: false,
 				write_buffer_size: Default::default(),
 				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
+				#[allow(clippy::deprecated)]
+				max_send_queue: None,
 			};
 
 			let socket = connect(&url, Some(config), maybe_connector.clone()).await?;
