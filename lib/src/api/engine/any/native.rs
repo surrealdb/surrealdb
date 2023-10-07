@@ -174,8 +174,8 @@ impl Connection for Any {
 						let maybe_connector = address.config.tls_config.map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
+						#[allow(deprecated)]
 						let config = WebSocketConfig {
-							#[allow(deprecated)]
 							max_send_queue: None,
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),

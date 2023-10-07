@@ -113,13 +113,13 @@ impl Connection for Client {
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
+			#[allow(deprecated)]
 			let config = WebSocketConfig {
 				max_message_size: Some(MAX_MESSAGE_SIZE),
 				max_frame_size: Some(MAX_FRAME_SIZE),
 				accept_unmasked_frames: false,
 				write_buffer_size: Default::default(),
 				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
-				#[allow(deprecated)]
 				max_send_queue: None,
 			};
 
