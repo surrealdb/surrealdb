@@ -182,6 +182,8 @@ impl Connection for Any {
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
 							accept_unmasked_frames: false,
+							write_buffer_size: engine::remote::ws::native::WRITE_BUFFER_SIZE,
+							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
 						};
 						let socket = engine::remote::ws::native::connect(
 							&url,
