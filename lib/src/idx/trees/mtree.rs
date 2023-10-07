@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::btree_map::Entry as BEntry;
-use std::collections::hash_map::Entry as HEntry;
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -30,9 +29,9 @@ pub(crate) type Vector = Vec<Number>;
 
 type MTreeNodeStore = TreeNodeStore<MTreeNode>;
 
-type InternalMap = HashMap<Arc<Vector>, RoutingProperties>;
+type InternalMap = BTreeMap<Arc<Vector>, RoutingProperties>;
 
-type LeafMap = HashMap<Arc<Vector>, ObjectProperties>;
+type LeafMap = BTreeMap<Arc<Vector>, ObjectProperties>;
 
 pub(crate) struct MTreeIndex {
 	state_key: Key,
@@ -225,10 +224,10 @@ impl MTree {
 						if Self::check_add(k, d, &res) {
 							let pr = PriorityResult(d);
 							match res.entry(pr) {
-								BEntry::Vacant(e) => {
+								Entry::Vacant(e) => {
 									e.insert(p.docs.clone());
 								}
-								BEntry::Occupied(mut e) => {
+								Entry::Occupied(mut e) => {
 									let docs = e.get_mut();
 									for doc in &p.docs {
 										docs.insert(doc);
@@ -324,7 +323,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
 		let p = ObjectProperties::new_root(id);
-		let mut objects = LeafMap::with_capacity(1);
+		let mut objects = LeafMap::new();
 		objects.insert(Arc::new(v), p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
 		store.set_node(new_root_node, true)?;
@@ -350,7 +349,7 @@ impl MTree {
 			o2.as_ref(),
 			p2.radius
 		);
-		let mut entries = InternalMap::with_capacity(2);
+		let mut entries = InternalMap::new();
 		entries.insert(o1, p1);
 		entries.insert(o2, p2);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Internal(entries))?;
@@ -513,7 +512,7 @@ impl MTree {
 		id: DocId,
 	) -> Result<InsertionResult, Error> {
 		match node.entry(object) {
-			HEntry::Occupied(mut e) => {
+			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(id);
 				store.set_node(
 					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
@@ -522,7 +521,7 @@ impl MTree {
 				return Ok(InsertionResult::DocAdded);
 			}
 			// Add Oi to N
-			HEntry::Vacant(e) => {
+			Entry::Vacant(e) => {
 				// Let parentDistance(Oi) = d(Oi, parent(N))
 				let parent_dist = parent_center
 					.as_ref()
@@ -623,33 +622,19 @@ impl MTree {
 	}
 
 	fn distribute_objects(
-		objects: Vec<Arc<Vector>>,
+		mut objects: Vec<Arc<Vector>>,
 		distances: &DistanceCache,
 		p1: Arc<Vector>,
 		p2: Arc<Vector>,
 	) -> (Vec<Arc<Vector>>, Arc<Vector>, Vec<Arc<Vector>>, Arc<Vector>) {
-		let l = objects.len();
-		let mut a1 = Vec::with_capacity(l);
-		let mut a2 = Vec::with_capacity(l);
-		for o in objects {
-			a1.push(o.clone());
-			a2.push(o.clone());
-		}
-		a1.sort_by(|o1, o2| {
+		objects.sort_by(|o1, o2| {
 			let d1 = *distances.0.get(&(o1.clone(), p1.clone())).unwrap_or(&0.0);
 			let d2 = *distances.0.get(&(o2.clone(), p1.clone())).unwrap_or(&0.0);
 			d1.total_cmp(&d2)
 		});
-		a2.sort_by(|o1, o2| {
-			let d1 = *distances.0.get(&(o1.clone(), p2.clone())).unwrap_or(&0.0);
-			let d2 = *distances.0.get(&(o2.clone(), p2.clone())).unwrap_or(&0.0);
-			d1.total_cmp(&d2)
-		});
-		let a1_size = l / 2;
-		let a2_size = l - a1_size;
-		let a1: Vec<Arc<Vector>> = a1.drain(0..a1_size).collect();
-		let a2: Vec<Arc<Vector>> = a2.drain(0..a2_size).collect();
-		(a1, p1, a2, p2)
+		let a1_size = objects.len() / 2;
+		let a1: Vec<Arc<Vector>> = objects.drain(0..a1_size).collect();
+		(a1, p1, objects, p2)
 	}
 
 	fn compute_internal_max_distance(&self, node: &InternalNode) -> f64 {
@@ -1060,7 +1045,7 @@ impl MTree {
 		debug!("delete_node_leaf - n_id: {} - obj: {:?} - doc: {}", node_id, od, id);
 		let mut entry_removed = false;
 		// If (Od E N)
-		if let HEntry::Occupied(mut e) = leaf_node.entry(od) {
+		if let Entry::Occupied(mut e) = leaf_node.entry(od) {
 			let p = e.get_mut();
 			// Remove Od from N
 			if p.docs.remove(id) {
@@ -1209,10 +1194,10 @@ impl MTreeNode {
 	fn merge_leaf(s: &mut LeafNode, o: LeafNode) {
 		for (o, p) in o {
 			match s.entry(o) {
-				HEntry::Occupied(mut e) => {
+				Entry::Occupied(mut e) => {
 					e.get_mut().docs |= p.docs;
 				}
-				HEntry::Vacant(e) => {
+				Entry::Vacant(e) => {
 					e.insert(p);
 				}
 			}
@@ -1312,11 +1297,12 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: HashMap<Arc<Vector>, ObjectProperties> = bincode::deserialize_from(c)?;
+				let objects: BTreeMap<Arc<Vector>, ObjectProperties> =
+					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
-				let entries: HashMap<Arc<Vector>, RoutingProperties> =
+				let entries: BTreeMap<Arc<Vector>, RoutingProperties> =
 					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
@@ -1408,10 +1394,11 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use std::collections::{BTreeMap, HashMap, VecDeque};
+	use rand::prelude::SliceRandom;
+	use rand::thread_rng;
+	use std::collections::{BTreeMap, VecDeque};
 	use std::sync::Arc;
 
-	//use rand::{thread_rng, Rng};
 	use roaring::RoaringTreemap;
 	use test_log::test;
 	use tokio::sync::{Mutex, MutexGuard};
@@ -1819,271 +1806,17 @@ mod tests {
 		}
 
 		// vec10 knn(2)
-		// {
-		// 	let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
-		// 	let mut s = s.lock().await;
-		// 	let res = t.knn_search(&mut tx, &mut s, &vec10, 2).await.unwrap();
-		// 	check_knn(&res.objects, vec![vec![10], vec![9]]);
-		// 	#[cfg(debug_assertions)]
-		// 	assert_eq!(res.visited_nodes, 7);
-		// }
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_deletion_doc_removed_and_none() {
-		let ds = Datastore::new("memory").await.unwrap();
-
-		let mut t = MTree::new(MState::new(4), Distance::Euclidean);
-
-		let vec1 = vec![1.into()];
-		let vec2 = vec![2.into()];
-
-		// Create the tree with vec1 and vec2 having two documents
 		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
-			t.insert(&mut tx, &mut s, vec1.clone(), 10).await.unwrap();
-			t.insert(&mut tx, &mut s, vec2.clone(), 20).await.unwrap();
-			t.insert(&mut tx, &mut s, vec2.clone(), 21).await.unwrap();
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20, 21]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(1, 1, Some(2), Some(2), 2, 3);
-		}
-
-		// Remove the doc 21
-		{
-			debug!("Remove vec 2/21");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(1, 1, Some(2), Some(2), 2, 2);
-		}
-
-		// Remove again vec2 / 21 => Deletion::None
-		{
-			debug!("Remove vec 2/21");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(!t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
-			assert!(!t.delete(&mut tx, &mut s, vec2.clone(), 21).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-
-		let vec3 = vec![3.into()];
-		let vec4 = vec![4.into()];
-		let vec5 = vec![5.into()];
-
-		// Add vec3, vec4 and vec5 having two documents
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			t.insert(&mut tx, &mut s, vec3.clone(), 30).await.unwrap();
-			t.insert(&mut tx, &mut s, vec4.clone(), 40).await.unwrap();
-			t.insert(&mut tx, &mut s, vec5.clone(), 50).await.unwrap();
-			t.insert(&mut tx, &mut s, vec5.clone(), 51).await.unwrap();
-			finish_operation(tx, s, true).await;
-		}
-		{
-			debug!("Remove vec 3/4/5");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![51]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(3, 2, Some(2), Some(3), 5, 6);
-		}
-
-		// Remove the doc 51
-		{
-			debug!("Remove vec 5/51");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![50]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(3, 2, Some(2), Some(3), 5, 5);
-		}
-
-		// Remove again vec5 / 51 => Deletion::None
-		{
-			debug!("Remove vec5/51 (again)");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(!t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
-			assert!(!t.delete(&mut tx, &mut s, vec5.clone(), 51).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40], vec![50]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(3, 2, Some(2), Some(3), 5, 5);
-		}
-
-		// Remove vec5 / 50 => DeleteResult::UnderflownLeafIndexMap
-		{
-			debug!("Remove vec5/50");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, vec5.clone(), 50).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![20], vec![30], vec![40]]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(1, 1, Some(4), Some(4), 4, 4);
-		}
-
-		// Remove vec 1/2/3/4 => Root = None
-		{
-			debug!("Remove vec 1/2/3/4");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, vec1.clone(), 10).await.unwrap());
-			assert!(t.delete(&mut tx, &mut s, vec2.clone(), 20).await.unwrap());
-			assert!(t.delete(&mut tx, &mut s, vec3.clone(), 30).await.unwrap());
-			assert!(t.delete(&mut tx, &mut s, vec4.clone(), 40).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![]);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(0, 0, None, None, 0, 0);
+			let res = t.knn_search(&mut tx, &mut s, &vec10, 2).await.unwrap();
+			check_knn(&res.objects, vec![vec![10], vec![9]]);
+			#[cfg(debug_assertions)]
+			assert_eq!(res.visited_nodes, 7);
 		}
 	}
 
-	#[test(tokio::test)]
-	async fn test_mtree_deletions_underflown_internal_node() {
-		let ds = Datastore::new("memory").await.unwrap();
-
-		let mut t = MTree::new(MState::new(4), Distance::Euclidean);
-
-		let v0 = vec![0.into()];
-		let v1 = vec![1.into()];
-		let v2 = vec![2.into()];
-		let v3 = vec![3.into()];
-		let v4 = vec![4.into()];
-		let v5 = vec![5.into()];
-		let v6 = vec![6.into()];
-		let v7 = vec![7.into()];
-		let v8 = vec![8.into()];
-		let v9 = vec![9.into()];
-		let v10 = vec![10.into()];
-		let v11 = vec![11.into()];
-		let v12 = vec![12.into()];
-		let v13 = vec![13.into()];
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			t.insert(&mut tx, &mut s, v9.clone(), 90).await.unwrap();
-			t.insert(&mut tx, &mut s, v10.clone(), 100).await.unwrap();
-			t.insert(&mut tx, &mut s, v11.clone(), 110).await.unwrap();
-			t.insert(&mut tx, &mut s, v12.clone(), 120).await.unwrap();
-			t.insert(&mut tx, &mut s, v13.clone(), 130).await.unwrap();
-			t.insert(&mut tx, &mut s, v1.clone(), 10).await.unwrap();
-			t.insert(&mut tx, &mut s, v2.clone(), 20).await.unwrap();
-			t.insert(&mut tx, &mut s, v3.clone(), 30).await.unwrap();
-			t.insert(&mut tx, &mut s, v4.clone(), 40).await.unwrap();
-			t.insert(&mut tx, &mut s, v5.clone(), 50).await.unwrap();
-			t.insert(&mut tx, &mut s, v6.clone(), 60).await.unwrap();
-			t.insert(&mut tx, &mut s, v7.clone(), 70).await.unwrap();
-			t.insert(&mut tx, &mut s, v8.clone(), 80).await.unwrap();
-			finish_operation(tx, s, true).await;
-		}
-
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			let res = t.knn_search(&mut tx, &mut s, &v0, 20).await.unwrap();
-			check_knn(
-				&res.objects,
-				vec![
-					vec![10],
-					vec![20],
-					vec![30],
-					vec![40],
-					vec![50],
-					vec![60],
-					vec![70],
-					vec![80],
-					vec![90],
-					vec![100],
-					vec![110],
-					vec![120],
-					vec![130],
-				],
-			);
-			check_tree_properties(&mut tx, &mut s, &t).await.check(8, 3, Some(2), Some(3), 13, 13);
-		}
-
-		// Remove v4 ->
-		{
-			debug!("Remove v4");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, v4.clone(), 40).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			check_tree_properties(&mut tx, &mut s, &t).await.check(8, 3, Some(2), Some(3), 12, 12);
-		}
-
-		// Remove v5 ->
-		{
-			debug!("Remove v5");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, v5.clone(), 50).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			check_tree_properties(&mut tx, &mut s, &t).await.check(5, 2, Some(2), Some(4), 11, 11);
-		}
-
-		// Remove v8 ->
-		{
-			debug!("Remove v8");
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-			let mut s = s.lock().await;
-			assert!(t.delete(&mut tx, &mut s, v8.clone(), 80).await.unwrap());
-			finish_operation(tx, s, true).await;
-		}
-		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
-			let mut s = s.lock().await;
-			check_tree_properties(&mut tx, &mut s, &t).await.check(5, 2, Some(2), Some(3), 10, 10);
-		}
-	}
-
-	async fn test_mtree_large_set(collection: BTreeMap<DocId, Vector>) {
-		//let mut rng = thread_rng();
-
+	async fn test_mtree_collection(collection: Vec<(DocId, Vector)>) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 
@@ -2108,8 +1841,13 @@ mod tests {
 			let mut s = s.lock().await;
 			for (doc_id, obj) in &collection {
 				let res = t.knn_search(&mut tx, &mut s, obj.as_ref(), 1).await.unwrap();
-				let docs = &res.objects[0];
-				assert!(docs.contains(*doc_id), "{} vs {:?}", doc_id, docs);
+				let mut found = false;
+				for docs in &res.objects {
+					if docs.contains(*doc_id) {
+						found = true;
+					}
+				}
+				assert!(found, "{} vs {:?}", doc_id, res.objects);
 			}
 		}
 
@@ -2150,19 +1888,48 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_large_set_no_duplicate() {
-		let mut collection = BTreeMap::new();
+	async fn test_mtree_unique_and_sorted() {
+		let mut collection = vec![];
 
 		// Prepare data set
-		for doc_id in 0..30 {
-			collection.insert(doc_id, vec![doc_id.into()]);
+		for doc_id in 0..500 {
+			collection.push((doc_id, vec![doc_id.into()]));
 		}
 
-		test_mtree_large_set(collection).await;
+		test_mtree_collection(collection).await;
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_unique_and_shuffled() {
+		let mut collection = vec![];
+
+		// Prepare data set
+		for doc_id in 0..500 {
+			collection.push((doc_id, vec![doc_id.into()]));
+		}
+
+		// Shuffle
+		let mut rng = thread_rng();
+		collection.shuffle(&mut rng);
+
+		test_mtree_collection(collection).await;
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_non_unique_and_sorted() {
+		let mut collection = vec![];
+
+		// Prepare data set
+		for doc_id in 0..6 {
+			let obj = doc_id % 4;
+			collection.push((doc_id, vec![obj.into()]));
+		}
+
+		test_mtree_collection(collection).await;
 	}
 
 	fn check_leaf_vec(
-		m: &HashMap<Arc<Vector>, ObjectProperties>,
+		m: &BTreeMap<Arc<Vector>, ObjectProperties>,
 		obj: &Vector,
 		parent_dist: f64,
 		docs: &[DocId],
@@ -2207,7 +1974,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&HashMap<Arc<Vector>, ObjectProperties>),
+		F: FnOnce(&BTreeMap<Arc<Vector>, ObjectProperties>),
 	{
 		check_node(tx, s, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
