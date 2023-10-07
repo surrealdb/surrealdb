@@ -87,7 +87,7 @@ pub(crate) async fn connect(
 			.await?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config).await?;
+	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config, false).await?; // TODO: should nagle be disabled?
 
 	Ok(socket)
 }
