@@ -119,7 +119,7 @@ impl Connection for Client {
 				accept_unmasked_frames: false,
 				write_buffer_size: Default::default(),
 				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
-				#[allow(clippy::deprecated)]
+				#[allow(deprecated)]
 				max_send_queue: None,
 			};
 
