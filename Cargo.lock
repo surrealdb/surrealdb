@@ -688,7 +688,7 @@ dependencies = [
  "http-body",
  "hyper",
  "pin-project-lite",
- "rustls 0.21.6",
+ "rustls",
  "rustls-pemfile",
  "tokio 1.32.0",
  "tokio-rustls",
@@ -2544,7 +2544,7 @@ dependencies = [
  "futures-util",
  "http",
  "hyper",
- "rustls 0.21.6",
+ "rustls",
  "tokio 1.32.0",
  "tokio-rustls",
 ]
@@ -4234,7 +4234,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.6",
+ "rustls",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -4596,18 +4596,6 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.4.5",
  "windows-sys",
-]
-
-[[package]]
-name = "rustls"
-version = "0.20.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff78fc74d175294f4e83b28343315ffcfb114b156f0185e9741cb5570f50e2f"
-dependencies = [
- "log",
- "ring",
- "sct",
- "webpki",
 ]
 
 [[package]]
@@ -5322,7 +5310,7 @@ dependencies = [
  "rquickjs",
  "rust-stemmers",
  "rust_decimal",
- "rustls 0.20.8",
+ "rustls",
  "scrypt",
  "semver 1.0.18",
  "serde",
@@ -5805,7 +5793,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.6",
+ "rustls",
  "tokio 1.32.0",
 ]
 
@@ -5894,7 +5882,7 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls 0.21.6",
+ "rustls",
  "tokio 1.32.0",
  "tokio-native-tls",
  "tokio-rustls",
@@ -6238,7 +6226,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
- "rustls 0.21.6",
+ "rustls",
  "sha1",
  "thiserror",
  "url",
@@ -6536,16 +6524,6 @@ checksum = "9b85cbef8c220a6abc02aefd892dfc0fc23afb1c6a426316ec33253a3877249b"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
-dependencies = [
- "ring",
- "untrusted",
 ]
 
 [[package]]
