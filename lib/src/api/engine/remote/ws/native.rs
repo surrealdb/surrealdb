@@ -55,6 +55,8 @@ type WsResult<T> = std::result::Result<T, WsError>;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
+pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // Recommended default size according to tungstenite documentation
+pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 
 pub(crate) enum Either {
 	Request(Option<Route>),
@@ -81,7 +83,8 @@ pub(crate) async fn connect(
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) =
-		tokio_tungstenite::connect_async_tls_with_config(url, config, maybe_connector).await?;
+		tokio_tungstenite::connect_async_tls_with_config(url, config, false, maybe_connector)
+			.await?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config).await?;
@@ -118,6 +121,8 @@ impl Connection for Client {
 				max_message_size: Some(MAX_MESSAGE_SIZE),
 				max_frame_size: Some(MAX_FRAME_SIZE),
 				accept_unmasked_frames: false,
+				write_buffer_size: Default::default(),
+				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
 			};
 
 			let socket = connect(&url, Some(config), maybe_connector.clone()).await?;
