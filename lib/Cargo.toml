@@ -119,7 +119,7 @@ url = "2.4.0"
 [dev-dependencies]
 criterion = { version="0.4", features= ["async_futures"] }
 env_logger = "0.10.0"
-pprof = { version = "0.11.1", features = ["flamegraph", "criterion"] }
+# pprof = { version = "0.11.1", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = { version="0.2.12", features = ["trace"] }
