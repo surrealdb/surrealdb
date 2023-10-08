@@ -247,21 +247,10 @@ pub mod from {
 	use chrono::{NaiveDateTime, Offset, TimeZone, Utc};
 
 	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
-		// Example unix nanoseconds timestamp: 1_696_537_096_309_565_400ns
-		// Get seconds part:                   1_696_537_096s
-		// Get nanoseconds part:               309_565_400ns
-		let s = val.to_string();
+		const NANOS_PER_SEC: i64 = 1_000_000_000;
 
-		let seconds: i64 = if s.len() > 9 {
-			s.as_str()[..(s.len() - 9)].parse().unwrap()
-		} else {
-			0
-		};
-		let nanoseconds: u32 = if s.len() > 9 {
-			s.as_str()[(s.len() - 9)..].parse().unwrap()
-		} else {
-			s.as_str().parse().unwrap()
-		};
+		let seconds: i64 = val.div_euclid(NANOS_PER_SEC);
+		let nanoseconds = val.rem_euclid(NANOS_PER_SEC);
 
 		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
 			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
