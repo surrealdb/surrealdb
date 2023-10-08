@@ -4,13 +4,13 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::base::Base;
-use crate::sql::comment::{mightbespace, shouldbespace};
+use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::value::Value;
 use derive::Store;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::bytes::streaming::tag;
 use nom::combinator::cut;
 use nom::multi::separated_list1;
 use nom::sequence::pair;
@@ -75,7 +75,7 @@ impl Display for RemoveTableStatement {
 pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, names) = separated_list1(pair(tag(","), mightbespace), cut(ident))(i)?;
+	let (i, names) = cut(separated_list1(pair(tag(","), shouldbespace), ident))(i)?;
 	Ok((
 		i,
 		RemoveTableStatement {
@@ -98,13 +98,6 @@ mod tests {
 	#[test]
 	fn test_table_multi() {
 		let (rem, res) = table("TABLE foo, bar").unwrap();
-		assert_eq!(rem, "");
-		assert_eq!(res.names, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
-	}
-
-	#[test]
-	fn test_table_multi_no_space() {
-		let (rem, res) = table("TABLE foo,bar").unwrap();
 		assert_eq!(rem, "");
 		assert_eq!(res.names, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
 	}
