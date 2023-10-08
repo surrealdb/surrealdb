@@ -249,7 +249,7 @@ pub mod from {
 	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;
 
-		let seconds: i64 = val.div_euclid(NANOS_PER_SEC);
+		let seconds = val.div_euclid(NANOS_PER_SEC);
 		let nanoseconds = val.rem_euclid(NANOS_PER_SEC);
 
 		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
