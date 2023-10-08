@@ -250,7 +250,7 @@ pub mod from {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 		let seconds = val.div_euclid(NANOS_PER_SEC);
-		let nanoseconds = val.rem_euclid(NANOS_PER_SEC);
+		let nanoseconds = val.rem_euclid(NANOS_PER_SEC) as u32;
 
 		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
 			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
