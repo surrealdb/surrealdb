@@ -116,6 +116,17 @@ impl IntoEndpoint for &str {
 			url if url.starts_with("ws") | url.starts_with("http") => {
 				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
 			}
+
+			url if url.starts_with("tikv") => {
+				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
+				let path = replace_tilde(self);
+				(
+					Url::parse(&format!("{scheme}://"))
+						.map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					Path::new(&path).display().to_string(),
+				)
+			}
+
 			_ => {
 				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
 				let path = replace_tilde(self);
