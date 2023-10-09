@@ -18,12 +18,12 @@ async fn delete() -> Result<(), Error> {
 		DELETE person:test;
 		SELECT * FROM person;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).result.unwrap();
 	let val = Value::parse(
 		"[
 			{
@@ -34,11 +34,11 @@ async fn delete() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).result.unwrap();
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).result.unwrap();
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
@@ -379,12 +379,13 @@ async fn check_permissions_auth_disabled() {
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
 	let node_id = uuid::Uuid::parse_str("bc52f447-831e-4fa2-834c-ed3e5c4e95bc").unwrap();
-	let dbs = new_ds().await?.with_notifications().with_node_id(sql::Uuid::from(node_id));
+	let dbs = new_ds().await.unwrap().with_notifications().with_node_id(sql::Uuid::from(node_id));
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
-	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
+	let res =
+		&mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await.unwrap();
 	assert_eq!(res.len(), 1);
 	// validate create response
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).result.unwrap();
 	let expected_record = Value::parse(
 		"[
 			{
@@ -396,19 +397,21 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, expected_record);
 
 	// Validate live query response
-	let res =
-		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
+	let res = &mut dbs
+		.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None)
+		.await
+		.unwrap();
 	assert_eq!(res.len(), 1);
-	let live_id = res.remove(0).result?;
+	let live_id = res.remove(0).result.unwrap();
 	let live_id = match live_id {
 		Value::Uuid(id) => id,
 		_ => panic!("expected uuid"),
 	};
 
 	// Validate delete response
-	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
+	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await.unwrap();
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).result.unwrap();
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 
