@@ -20,6 +20,8 @@ impl_module_def!(
 	"minute" => run,
 	"month" => run,
 	"nano" => run,
+	"micros" => run,
+	"millis" => run,
 	"now" => run,
 	"round" => run,
 	"second" => run,
