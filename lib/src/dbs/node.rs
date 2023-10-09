@@ -49,18 +49,18 @@ impl From<&Timestamp> for KeyTimestamp {
 	}
 }
 
-impl Add<Duration> for &Timestamp {
+impl Add<&Duration> for &Timestamp {
 	type Output = Timestamp;
-	fn add(self, rhs: Duration) -> Timestamp {
+	fn add(self, rhs: &Duration) -> Timestamp {
 		Timestamp {
 			value: self.value + rhs.as_millis() as u64,
 		}
 	}
 }
 
-impl Sub<Duration> for Timestamp {
+impl Sub<&Duration> for Timestamp {
 	type Output = Result<Timestamp, Error>;
-	fn sub(self, rhs: Duration) -> Self::Output {
+	fn sub(self, rhs: &Duration) -> Self::Output {
 		let millis = rhs.as_millis() as u64;
 		if self.value <= millis {
 			// Removing the duration from this timestamp will cause it to overflow
@@ -76,7 +76,7 @@ impl Sub<Duration> for Timestamp {
 }
 
 impl Timestamp {
-	pub(crate) fn get_and_inc(&mut self, rhs: Duration) -> Timestamp {
+	pub(crate) fn get_and_inc(&mut self, rhs: &Duration) -> Timestamp {
 		let get = self.clone();
 		self.value += rhs.as_secs();
 		get
@@ -87,4 +87,26 @@ impl Timestamp {
 	}
 }
 
-// TODO test
+mod test {
+	use crate::dbs::node::Timestamp;
+	use crate::sql::Duration;
+	use chrono::prelude::Utc;
+	use chrono::TimeZone;
+
+	#[test]
+	fn timestamps_are_commutative() {
+		let t = Utc.with_ymd_and_hms(2000, 1, 1, 12, 30, 0).unwrap();
+		let ts = Timestamp {
+			value: t.timestamp_millis() as u64,
+		};
+
+		let hour = Duration(core::time::Duration::from_secs(60 * 60));
+		let ts = &ts + &hour;
+		let ts = &ts + &hour;
+		let ts = &ts + &hour;
+
+		let end_time = Utc.timestamp_millis_opt(ts.value as i64).unwrap();
+		let expected_end_time = Utc.with_ymd_and_hms(2000, 1, 1, 15, 30, 0).unwrap();
+		assert_eq!(end_time, expected_end_time);
+	}
+}

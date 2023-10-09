@@ -64,7 +64,7 @@ impl IncFakeClock {
 	}
 
 	pub async fn now(&mut self) -> Timestamp {
-		self.now.get_and_inc(self.increment.clone())
+		self.now.get_and_inc(&self.increment)
 	}
 }
 
