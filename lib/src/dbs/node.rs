@@ -87,6 +87,7 @@ impl Timestamp {
 	}
 }
 
+#[cfg(test)]
 mod test {
 	use crate::dbs::node::Timestamp;
 	use crate::sql::Duration;
