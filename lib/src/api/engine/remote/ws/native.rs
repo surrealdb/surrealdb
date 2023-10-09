@@ -55,7 +55,7 @@ type WsResult<T> = std::result::Result<T, WsError>;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
-pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // Recommended default size according to tungstenite documentation
+pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // tungstenite default
 pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 
 pub(crate) enum Either {
