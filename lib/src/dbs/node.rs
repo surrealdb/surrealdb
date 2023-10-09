@@ -58,7 +58,7 @@ impl Add<&Duration> for &Timestamp {
 	}
 }
 
-impl Sub<&Duration> for Timestamp {
+impl Sub<&Duration> for &Timestamp {
 	type Output = Result<Timestamp, Error>;
 	fn sub(self, rhs: &Duration) -> Self::Output {
 		let millis = rhs.as_millis() as u64;
@@ -94,7 +94,7 @@ mod test {
 	use chrono::TimeZone;
 
 	#[test]
-	fn timestamps_are_commutative() {
+	fn timestamps_can_be_added_duration() {
 		let t = Utc.with_ymd_and_hms(2000, 1, 1, 12, 30, 0).unwrap();
 		let ts = Timestamp {
 			value: t.timestamp_millis() as u64,
@@ -107,6 +107,23 @@ mod test {
 
 		let end_time = Utc.timestamp_millis_opt(ts.value as i64).unwrap();
 		let expected_end_time = Utc.with_ymd_and_hms(2000, 1, 1, 15, 30, 0).unwrap();
+		assert_eq!(end_time, expected_end_time);
+	}
+
+	#[test]
+	fn timestamps_can_be_subtracted_duration() {
+		let t = Utc.with_ymd_and_hms(2000, 1, 1, 12, 30, 0).unwrap();
+		let ts = Timestamp {
+			value: t.timestamp_millis() as u64,
+		};
+
+		let hour = Duration(core::time::Duration::from_secs(60 * 60));
+		let ts = (&ts - &hour).unwrap();
+		let ts = (&ts - &hour).unwrap();
+		let ts = (&ts - &hour).unwrap();
+
+		let end_time = Utc.timestamp_millis_opt(ts.value as i64).unwrap();
+		let expected_end_time = Utc.with_ymd_and_hms(2000, 1, 1, 9, 30, 0).unwrap();
 		assert_eq!(end_time, expected_end_time);
 	}
 }
