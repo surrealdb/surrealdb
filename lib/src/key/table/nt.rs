@@ -93,7 +93,6 @@ impl<'a> Nt<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::key::debug;
 
 	#[test]
 	fn key() {

@@ -122,14 +122,7 @@ pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::dbs::{Action, Notification, Session};
-	use crate::iam::{Level, Role};
-	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::Write;
-	use crate::sql;
-	use crate::sql::{Ident, Param, Strand, Uuid};
-	use std::collections::BTreeMap;
+	use crate::sql::{Ident, Param, Uuid};
 
 	#[test]
 	fn kill_uuid() {
@@ -165,6 +158,15 @@ mod tests {
 	#[tokio::test]
 	#[cfg(feature = "kv-mem")]
 	async fn kill_removes_notifications() {
+		use crate::dbs::{Action, Notification, Session};
+		use crate::iam::{Level, Role};
+		use crate::kvs::Datastore;
+		use crate::kvs::LockType::Optimistic;
+		use crate::kvs::TransactionType::Write;
+		use crate::sql;
+		use crate::sql::Strand;
+		use std::collections::BTreeMap;
+
 		let ds = Datastore::new("memory").await.unwrap();
 		let remote_node = sql::Uuid::try_from("fe54b86e-d88e-462a-9835-9cb553a75619").unwrap();
 		let remote_not_id = sql::Uuid::try_from("3daf1c90-e251-4691-9542-df25b7aa787f").unwrap();

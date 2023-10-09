@@ -67,7 +67,6 @@ impl<'a> Lq<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::key::debug;
 
 	#[test]
 	fn key() {
