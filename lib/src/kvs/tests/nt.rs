@@ -3,6 +3,7 @@ use crate::key::table::nt::Nt;
 use crate::sql::uuid::Uuid as sqlUuid;
 
 #[tokio::test]
+#[serial]
 async fn can_scan_notifications() {
 	let namespace = "testns";
 	let database = "testdb";
@@ -61,6 +62,7 @@ async fn can_scan_notifications() {
 }
 
 #[tokio::test]
+#[serial]
 async fn can_delete_notifications() {
 	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
 	let clock_override = SizedClock::Fake(FakeClock::new(Timestamp::default()));
@@ -103,6 +105,7 @@ async fn can_delete_notifications() {
 }
 
 #[tokio::test]
+#[serial]
 async fn putc_tbnt_sanity_checks_key_with_value() {
 	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
 	let clock_override = SizedClock::Fake(FakeClock::new(Timestamp::default()));
