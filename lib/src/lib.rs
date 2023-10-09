@@ -107,8 +107,6 @@ extern crate tracing;
 mod mac;
 
 mod api;
-
-pub use api::opt::Config;
 mod cf;
 mod ctx;
 mod doc;
