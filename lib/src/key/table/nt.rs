@@ -110,7 +110,6 @@ mod tests {
 		let key = Nt::new("testns", "testdb", "testtb", live_query_id, ts, id);
 		// let enc = Nt::encode(&key).unwrap();
 		let key_enc = key.encode().unwrap();
-		println!("{:?}", debug::sprint_key(&key_enc));
 		assert_eq!(
 			key_enc,
 			b"/*testns\x00\

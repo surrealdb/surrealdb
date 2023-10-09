@@ -293,7 +293,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
-		println!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -1414,14 +1413,6 @@ impl Transaction {
 				if n == i + 1 {
 					nxt = Some(key.clone());
 				}
-				println!("Found key {:?}", debug::sprint_key(&key));
-				let key_dec = crate::key::table::nt::Nt::decode(key.as_slice())?;
-				println!("ns={:?}", key_dec.ns);
-				println!("db={:?}", key_dec.db);
-				println!("tb={:?}", key_dec.tb);
-				println!("lq={:?}", key_dec.lq);
-				println!("ts={:?}", key_dec.ts);
-				println!("id={:?}", key_dec.nt);
 
 				let val: Notification = value.into();
 				out.push(val);
@@ -1478,7 +1469,6 @@ impl Transaction {
 		nt: Notification,
 		expected: Option<Notification>,
 	) -> Result<(), Error> {
-		println!("putc_tbnt: key={:?}", debug::sprint_key(&key.clone().encode().unwrap().into()));
 		// Sanity check
 		if nt.timestamp != key.ts {
 			return Err(Error::InternalLiveQueryError(LiveQueryCause::TimestampMismatch));
