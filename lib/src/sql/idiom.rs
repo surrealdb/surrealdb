@@ -85,6 +85,11 @@ impl From<&[Part]> for Idiom {
 		Self(v.to_vec())
 	}
 }
+impl From<Part> for Idiom {
+	fn from(v: Part) -> Self {
+		Self(vec![v])
+	}
+}
 
 impl Idiom {
 	/// Appends a part to the end of this Idiom
@@ -208,6 +213,8 @@ pub fn local(i: &str) -> IResult<&str, Idiom> {
 }
 
 /// Used in a SPLIT, ORDER, and GROUP clauses
+///
+/// Doesnt allow flatten, computed values or where selectors.
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
 	expected("a basic idiom", |i| {
 		let (i, p) = first(i).explain("graphs are not allowed in a basic idioms.", dir)?;

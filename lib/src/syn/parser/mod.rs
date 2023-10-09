@@ -11,18 +11,21 @@ use self::token_buffer::TokenBuffer;
 
 mod basic;
 mod ending;
+mod fields;
 mod idiom;
 mod mac;
 mod object;
+mod operator;
 mod prime;
 mod stmt;
 mod token_buffer;
 mod value;
+mod kind;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ParseErrorKind {
 	/// The parser encountered an unexpected token.
 	Unexpected {
@@ -37,6 +40,11 @@ pub enum ParseErrorKind {
 		expected: TokenKind,
 		should_close: Span,
 	},
+	Retried {
+		first: Box<ParseError>,
+		then: Box<ParseError>,
+	},
+	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
 	InvalidToken,
 	/// A path in the parser which was not yet finished.
@@ -44,7 +52,7 @@ pub enum ParseErrorKind {
 	Todo,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,
@@ -71,14 +79,16 @@ impl<'a> Parser<'a> {
 	pub fn next_token(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
-		dbg!(res)
+		res
 	}
 
 	/// Consume the current peeked value.
 	///
 	/// Should only be called after peeking a value.
-	pub fn pop_peek(&mut self) {
-		self.token_buffer.pop();
+	pub fn pop_peek(&mut self) -> Token {
+		let res = self.token_buffer.pop().unwrap();
+		self.last_span = res.span;
+		res
 	}
 
 	/// Returns the next token without consuming it.
@@ -137,6 +147,32 @@ impl<'a> Parser<'a> {
 	pub fn backup_after(&mut self, span: Span) {
 		self.token_buffer.clear();
 		self.lexer.backup_after(span);
+	}
+
+	pub fn recover<Ff, Ft, R>(&mut self, to: Span, first: Ff, then: Ft) -> ParseResult<R>
+	where
+		Ff: FnOnce(&mut Parser) -> ParseResult<R>,
+		Ft: FnOnce(&mut Parser) -> ParseResult<R>,
+	{
+		match first(self) {
+			Ok(x) => Ok(x),
+			Err(e_first) => {
+				self.backup_before(to);
+				match then(self) {
+					Ok(x) => Ok(x),
+					Err(e_then) => {
+						let kind = ParseErrorKind::Retried {
+							first: Box::new(e_first),
+							then: Box::new(e_then),
+						};
+						Err(ParseError {
+							kind,
+							at: to,
+						})
+					}
+				}
+			}
+		}
 	}
 
 	/// Parse a full query.

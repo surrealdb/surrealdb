@@ -119,6 +119,8 @@ impl Expression {
 				let operand = v.compute(ctx, opt, txn, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
+					// TODO: Check if it is a number?
+					Operator::Add => Ok(operand),
 					Operator::Not => fnc::operate::not(operand),
 					op => unreachable!("{op:?} is not a unary op"),
 				};

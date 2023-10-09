@@ -1,8 +1,8 @@
 use crate::{
-	sql::{Duration, Ident, Number, Param, Strand},
+	sql::{Dir, Duration, Ident, Number, Param, Strand},
 	syn::{
 		parser::mac::{to_do, unexpected},
-		token::TokenKind,
+		token::{t, TokenKind},
 	},
 };
 
@@ -11,6 +11,15 @@ use super::{ParseResult, Parser};
 impl Parser<'_> {
 	pub fn parse_ident(&mut self) -> ParseResult<Ident> {
 		self.parse_raw_ident().map(Ident)
+	}
+
+	pub fn parse_dir(&mut self) -> ParseResult<Dir> {
+		match self.next_token().kind {
+			t!("<-") => Ok(Dir::In),
+			t!("<->") => Ok(Dir::Both),
+			t!("->") => Ok(Dir::Out),
+			x => unexpected!(self, x, "a direction"),
+		}
 	}
 
 	pub fn parse_raw_ident(&mut self) -> ParseResult<String> {

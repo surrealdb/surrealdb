@@ -1,3 +1,4 @@
+use crate::sql::Number;
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, TokenKind};
 
@@ -67,8 +68,12 @@ impl Lexer<'_> {
 					return self.lex_ident_from_next_byte(x);
 				}
 				_ => {
+					let Ok(number) = self.scratch.parse().map(Number::Int) else {
+						self.scratch.clear();
+						return self.invalid_token();
+					};
 					self.scratch.clear();
-					return self.finish_token(TokenKind::Number, None);
+					return self.finish_number_token(number);
 				}
 			}
 		}
@@ -86,14 +91,23 @@ impl Lexer<'_> {
 					self.reader.next();
 					self.scratch.push(x as char);
 				}
-				b'a'..=b'z' | b'A'..=b'Z' => {
+				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 					self.reader.backup(backup);
 					self.scratch.truncate(len);
-					return self.finish_token(TokenKind::Number, None);
+					let Ok(number) = self.scratch.parse().map(Number::Int) else {
+						self.scratch.clear();
+						return self.invalid_token();
+					};
+					self.scratch.clear();
+					return self.finish_number_token(number);
 				}
 				_ => {
+					let Ok(number) = self.scratch.parse().map(Number::Float) else {
+						self.scratch.clear();
+						return self.invalid_token();
+					};
 					self.scratch.clear();
-					return self.finish_token(TokenKind::Number, None);
+					return self.finish_number_token(number);
 				}
 			}
 		}

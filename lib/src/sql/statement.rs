@@ -46,6 +46,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::time::Duration;
 
+use super::block::Entry;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct Statements(pub Vec<Statement>);
@@ -113,6 +115,38 @@ pub enum Statement {
 }
 
 impl Statement {
+	pub fn into_entry(self) -> Option<Entry> {
+		match self {
+			Statement::Analyze(_)
+			| Statement::Begin(_)
+			| Statement::Info(_)
+			| Statement::Kill(_)
+			| Statement::Live(_)
+			| Statement::Option(_)
+			| Statement::Cancel(_)
+			| Statement::Commit(_)
+			| Statement::Show(_)
+			| Statement::Sleep(_)
+			| Statement::Use(_) => None,
+			Statement::Value(x) => Some(Entry::Value(x)),
+			Statement::Break(x) => Some(Entry::Break(x)),
+			Statement::Continue(x) => Some(Entry::Continue(x)),
+			Statement::Create(x) => Some(Entry::Create(x)),
+			Statement::Define(x) => Some(Entry::Define(x)),
+			Statement::Delete(x) => Some(Entry::Delete(x)),
+			Statement::Foreach(x) => Some(Entry::Foreach(x)),
+			Statement::Ifelse(x) => Some(Entry::Ifelse(x)),
+			Statement::Insert(x) => Some(Entry::Insert(x)),
+			Statement::Output(x) => Some(Entry::Output(x)),
+			Statement::Relate(x) => Some(Entry::Relate(x)),
+			Statement::Remove(x) => Some(Entry::Remove(x)),
+			Statement::Select(x) => Some(Entry::Select(x)),
+			Statement::Set(x) => Some(Entry::Set(x)),
+			Statement::Update(x) => Some(Entry::Update(x)),
+			Statement::Throw(x) => Some(Entry::Throw(x)),
+		}
+	}
+
 	/// Get the statement timeout duration, if any
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {

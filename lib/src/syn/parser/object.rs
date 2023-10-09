@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	sql::{Object, Value},
+	sql::{Block, Object, Value},
 	syn::{
-		parser::mac::{expected, to_do},
-		token::{t, TokenKind},
+		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
+		token::{t, Span, TokenKind},
 	},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::mac::unexpected;
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
@@ -17,21 +17,28 @@ impl Parser<'_> {
 	pub(super) fn parse_object_like(&mut self) -> ParseResult<Value> {
 		let object_start = expected!(self, "{").span;
 
+		if self.eat(t!("}")) {
+			// empty object, just return
+			return Ok(Value::Object(Object::default()));
+		}
+
 		// Check first if it can be an object.
 		if self.peek_token_at(1).kind == t!(":") {
 			// Could actually be an object, try that first
+			// No way to ensure that it actually is an object as grammar is ambiguous
+			//
 			// TODO: Do something with the error produced from trying to parse the object
-			if let Ok(object) = self.parse_object() {
+			if let Ok(object) = self.parse_object(object_start) {
 				return Ok(Value::Object(object));
 			}
 			self.backup_after(object_start);
 		}
 
 		// not an object so instead parse as a block.
-		to_do!(self)
+		self.parse_block(object_start).map(Box::new).map(Value::Block)
 	}
 
-	fn parse_object(&mut self) -> ParseResult<Object> {
+	pub(super) fn parse_object(&mut self, start: Span) -> ParseResult<Object> {
 		let mut map = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
@@ -43,10 +50,36 @@ impl Parser<'_> {
 			map.insert(key, value);
 
 			if !self.eat(t!(",")) {
-				expected!(self, "}");
+				self.expect_closing_delimiter(t!("}"), start)?;
 				return Ok(Object(map));
 			}
 		}
+	}
+
+	pub(super) fn parse_block(&mut self, start: Span) -> ParseResult<Block> {
+		let mut statements = Vec::new();
+		loop {
+			while self.eat(t!(";")) {}
+			if self.eat(t!("}")) {
+				break;
+			}
+
+			let statement_span = self.peek_token().span;
+			let stmt = self.parse_statement()?;
+			if let Some(x) = stmt.into_entry() {
+				statements.push(x);
+			} else {
+				return Err(ParseError {
+					kind: ParseErrorKind::DisallowedStatement,
+					at: statement_span,
+				});
+			}
+			if !self.eat(t!(";")) {
+				self.expect_closing_delimiter(t!("}"), start)?;
+				break;
+			}
+		}
+		Ok(Block(statements))
 	}
 
 	fn parse_object_entry(&mut self) -> ParseResult<(String, Value)> {

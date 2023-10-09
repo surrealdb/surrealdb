@@ -76,6 +76,17 @@ macro_rules! to_do {
 	};
 }
 
+#[cfg(test)]
+macro_rules! test_parse {
+	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
+		let mut parser = $crate::syn::parser::Parser::new($t);
+		parser.$func($($($e),*)*)
+	}};
+}
+
 pub(super) use expected;
 pub(super) use to_do;
 pub(super) use unexpected;
+
+#[cfg(test)]
+pub(super) use test_parse;

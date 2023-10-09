@@ -211,6 +211,8 @@ pub enum Keyword {
 	Point,
 	String,
 	Uuid,
+	Ulid,
+	Rand,
 }
 
 impl Keyword {
@@ -395,6 +397,8 @@ impl Keyword {
 			Keyword::Point => "POINT",
 			Keyword::String => "STRING",
 			Keyword::Uuid => "UUID",
+			Keyword::Ulid => "ULID",
+			Keyword::Rand => "RAND",
 		}
 	}
 }
@@ -408,8 +412,10 @@ pub enum Operator {
 	Add,
 	/// `-`
 	Subtract,
-	/// `/`
+	/// `÷`
 	Divide,
+	/// `×` or `∙`
+	Mult,
 	/// `||`
 	Or,
 	/// `&&`
@@ -480,9 +486,10 @@ impl Operator {
 			Operator::Not => "'!'",
 			Operator::Add => "'+'",
 			Operator::Subtract => "'-'",
-			Operator::Divide => "'/'",
+			Operator::Divide => "'÷'",
 			Operator::Or => "'||'",
 			Operator::And => "'&&'",
+			Operator::Mult => "'×'",
 			Operator::LessEqual => "'<='",
 			Operator::GreaterEqual => "'>='",
 			Operator::Star => "'*'",
@@ -561,6 +568,8 @@ pub enum TokenKind {
 	ArrowLeft,
 	/// `<->`
 	BiArrow,
+	/// '/'
+	ForwardSlash,
 	/// `.`
 	Dot,
 	/// `..`
@@ -623,6 +632,7 @@ impl TokenKind {
 			TokenKind::ArrowRight => "'->'",
 			TokenKind::ArrowLeft => "'<-'",
 			TokenKind::BiArrow => "'<->'",
+			TokenKind::ForwardSlash => "'/'",
 			TokenKind::Dot => "'.'",
 			TokenKind::DotDot => "'..'",
 			TokenKind::DotDotDot => "'...'",

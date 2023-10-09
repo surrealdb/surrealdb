@@ -184,4 +184,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("POINT") => TokenKind::Keyword(Keyword::Point),
 	UniCase::ascii("STRING") => TokenKind::Keyword(Keyword::String),
 	UniCase::ascii("UUID") => TokenKind::Keyword(Keyword::Uuid),
+	UniCase::ascii("ULID") => TokenKind::Keyword(Keyword::Ulid),
+	UniCase::ascii("RAND") => TokenKind::Keyword(Keyword::Rand),
 };

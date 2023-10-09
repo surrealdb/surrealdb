@@ -1,4 +1,7 @@
-use crate::syn::token::{DataIndex, Span, Token, TokenKind};
+use crate::{
+	sql::Number,
+	syn::token::{DataIndex, Span, Token, TokenKind},
+};
 
 mod byte;
 mod char;
@@ -19,6 +22,7 @@ pub struct Lexer<'a> {
 	pub reader: BytesReader<'a>,
 	last_offset: u32,
 	scratch: String,
+	pub numbers: Vec<Number>,
 	/// Strings build from the source.
 	pub strings: Vec<String>,
 	pub durations: Vec<Duration>,
@@ -37,6 +41,7 @@ impl<'a> Lexer<'a> {
 			reader,
 			last_offset: 0,
 			scratch: String::new(),
+			numbers: Vec::new(),
 			strings: Vec::new(),
 			durations: Vec::new(),
 		}
@@ -105,6 +110,12 @@ impl<'a> Lexer<'a> {
 		self.scratch.clear();
 		self.strings.push(string);
 		self.finish_token(kind, Some(id.into()))
+	}
+
+	fn finish_number_token(&mut self, number: Number) -> Token {
+		let id = self.strings.len() as u32;
+		self.numbers.push(number);
+		self.finish_token(TokenKind::Number, Some(id.into()))
 	}
 
 	pub fn backup_before(&mut self, span: Span) {

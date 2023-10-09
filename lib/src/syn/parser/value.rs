@@ -1,4 +1,4 @@
-use crate::sql::{Table, Value, Values};
+use crate::sql::{Value, Values};
 use crate::syn::{
 	parser::{mac::to_do, ParseResult, Parser},
 	token::{t, Token, TokenKind},
@@ -14,7 +14,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_value(&mut self) -> ParseResult<Value> {
-		to_do!(self)
+		self.parse_expression()
 	}
 
 	pub fn parse_whats(&mut self) -> ParseResult<Values> {
@@ -35,17 +35,9 @@ impl Parser<'_> {
 			t!("$param") => to_do!(self), // mock
 			t!("{") => to_do!(self),      // block
 			TokenKind::Identifier => {
-				let ident = self.parse_raw_ident()?;
-				if self.eat(t!(":")) {
-					return self.parse_thing_tail(ident);
-				}
-				Ok(Value::Table(Table(ident)))
+				to_do!(self)
 			}
 			_ => to_do!(self),
 		}
-	}
-
-	pub fn parse_thing_tail(&mut self, _start: String) -> ParseResult<Value> {
-		to_do!(self)
 	}
 }

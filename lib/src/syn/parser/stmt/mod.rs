@@ -1,17 +1,20 @@
 use crate::sql::{
-	output::Output,
 	statements::{
 		analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-		CommitStatement, ContinueStatement, CreateStatement, UseStatement,
+		CommitStatement, ContinueStatement, DefineStatement, DeleteStatement, IfelseStatement,
+		InsertStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
+		UpdateStatement, UseStatement,
 	},
-	Data, Operator, Statement,
+	Statement,
 };
-use crate::syn::{parser::mac::expected, token::t};
+use crate::syn::token::t;
 
 use super::{
-	mac::{to_do, unexpected},
+	mac::{expected, to_do},
 	ParseResult, Parser,
 };
+
+mod create;
 
 impl Parser<'_> {
 	pub(super) fn parse_stmt(&mut self) -> ParseResult<Statement> {
@@ -23,7 +26,7 @@ impl Parser<'_> {
 			t!("CANCEL") => self.parse_cancel(),
 			t!("COMMIT") => self.parse_commit(),
 			t!("CONTINUE") => self.parse_continue(),
-			t!("CREATE") => self.parse_create(),
+			t!("CREATE") => self.parse_create_stmt().map(Statement::Create),
 			t!("DEFINE") => self.parse_begin(),
 			t!("DELETE") => self.parse_begin(),
 			t!("FOR") => self.parse_begin(),
@@ -114,114 +117,6 @@ impl Parser<'_> {
 		Ok(Statement::Continue(ContinueStatement))
 	}
 
-	fn parse_create(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
-		debug_assert_eq!(keyword.kind, t!("CREATE"));
-
-		let only = if let t!("ONLY") = self.peek_token().kind {
-			self.next_token();
-			true
-		} else {
-			false
-		};
-
-		let what = self.parse_whats()?;
-
-		let data = match self.peek_token().kind {
-			t!("SET") => {
-				self.next_token();
-				let mut res = Vec::new();
-				loop {
-					let idiom = self.parse_plain_idiom()?;
-					let operator = match self.next_token().kind {
-						t!("=") => Operator::Equal,
-						t!("+=") => Operator::Inc,
-						t!("-=") => Operator::Dec,
-						t!("+?=") => Operator::Ext,
-						x => unexpected!(self, x, "an assignment operator"),
-					};
-					let value = self.parse_value()?;
-					res.push((idiom, operator, value));
-					if !self.eat(t!(",")) {
-						break;
-					}
-				}
-
-				Some(Data::SetExpression(res))
-			}
-			t!("UNSET") => {
-				self.next_token();
-				let mut res = Vec::new();
-				loop {
-					let idiom = self.parse_plain_idiom()?;
-					res.push(idiom);
-					if !self.eat(t!(",")) {
-						break;
-					}
-				}
-
-				Some(Data::UnsetExpression(res))
-			}
-			t!("PATCH") => {
-				self.next_token();
-				let value = self.parse_value()?;
-				Some(Data::PatchExpression(value))
-			}
-			t!("MERGE") => {
-				self.next_token();
-				let value = self.parse_value()?;
-				Some(Data::MergeExpression(value))
-			}
-			t!("REPLACE") => {
-				self.next_token();
-				let value = self.parse_value()?;
-				Some(Data::ReplaceExpression(value))
-			}
-			t!("CONTENT") => {
-				self.next_token();
-				let value = self.parse_value()?;
-				Some(Data::ContentExpression(value))
-			}
-			_ => None,
-		};
-
-		let output = if self.eat(t!("RETURN")) {
-			let output = match self.next_token().kind {
-				t!("NONE") => Output::None,
-				t!("NULL") => Output::Null,
-				t!("DIFF") => Output::Diff,
-				t!("AFTER") => Output::After,
-				t!("BEFORE") => Output::Before,
-				t!("VALUE") => {
-					let value = self.parse_value();
-					todo!()
-				}
-				// TODO: Field
-				x => unexpected!(self, x, "an output"),
-			};
-			Some(output)
-		} else {
-			None
-		};
-
-		let timeout = if self.eat(t!("TIMEOUT")) {
-			to_do!(self)
-		} else {
-			None
-		};
-
-		let parallel = self.eat(t!("PARALLEL"));
-		let res = CreateStatement {
-			only,
-			what,
-			data,
-			output,
-			timeout,
-			parallel,
-		};
-		Ok(Statement::Create(res))
-	}
-
 	fn parse_use(&mut self) -> ParseResult<Statement> {
 		let keyword = self.next_token();
 		debug_assert_eq!(keyword.kind, t!("USE"));
@@ -247,5 +142,41 @@ impl Parser<'_> {
 			db: db.map(|x| x.0),
 		};
 		Ok(Statement::Use(res))
+	}
+
+	pub(crate) fn parse_if_stmt(&mut self) -> ParseResult<IfelseStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_return_stmt(&mut self) -> ParseResult<OutputStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_update_stmt(&mut self) -> ParseResult<UpdateStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_delete_stmt(&mut self) -> ParseResult<DeleteStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_relate_stmt(&mut self) -> ParseResult<RelateStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_insert_stmt(&mut self) -> ParseResult<InsertStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_define_stmt(&mut self) -> ParseResult<DefineStatement> {
+		to_do!(self)
+	}
+
+	pub(crate) fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
+		to_do!(self)
 	}
 }

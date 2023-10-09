@@ -83,7 +83,7 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::AllLike)
 	};
 	("/") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Divide)
+		$crate::syn::token::TokenKind::ForwardSlash
 	};
 	("<=") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::LessEqual)
@@ -92,16 +92,19 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::GreaterEqual)
 	};
 	("@") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::At)
-	};
-	("@@") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Matches)
+		$crate::syn::token::TokenKind::At
 	};
 	("||") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Or)
 	};
 	("&&") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::And)
+	};
+	("×") => {
+		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Mult)
+	};
+	("÷") => {
+		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Divide)
 	};
 
 	("$param") => {
@@ -197,49 +200,6 @@ macro_rules! t {
 	("⊄") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::NoneInside)
 	};
-	("ALLINSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::AllInside)
-	};
-	("AND") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::And)
-	};
-	("ANYINSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::AnyInside)
-	};
-	("CONTAINS") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Contain)
-	};
-	("CONTAINSALL") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainAll)
-	};
-	("CONTAINSANY") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainAny)
-	};
-	("CONTAINSNONE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainNone)
-	};
-	("CONTAINSNOT") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::NotContain)
-	};
-	("INSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Inside)
-	};
-	("INTERSECTS") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Intersects)
-	};
-	("NONEINSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::NoneInside)
-	};
-	("NOTINSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::NotInside)
-	};
-	("OR") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Or)
-	};
-	("OUTSIDE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Outside)
-	};
-
 	("AFTER") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::After)
 	};
@@ -316,6 +276,9 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Danish)
 	};
 	("DATABASE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Database)
+	};
+	("DB") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Database)
 	};
 	("DEFAULT") => {
@@ -432,11 +395,14 @@ macro_rules! t {
 	("INTO") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Into)
 	};
+	("IF") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::If)
+	};
 	("ITALIAN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Italian)
 	};
-	("IF") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::If)
+	("IS") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Is)
 	};
 	("KILL") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Kill)
@@ -471,6 +437,9 @@ macro_rules! t {
 	("NAMESPACE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Namespace)
 	};
+	("NS") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Namespace)
+	};
 	("NGRAM") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ngram)
 	};
@@ -479,6 +448,9 @@ macro_rules! t {
 	};
 	("NONE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::None)
+	};
+	("NOT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Not)
 	};
 	("NORWEGIAN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Norwegian)
@@ -576,11 +548,11 @@ macro_rules! t {
 	("SELECT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Select)
 	};
-	("SET") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Set)
-	};
 	("SESSION") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Session)
+	};
+	("SET") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Set)
 	};
 	("SHOW") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Show)
@@ -678,6 +650,54 @@ macro_rules! t {
 	("WITH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::With)
 	};
+	("ANDKW") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::AndKw)
+	};
+	("AND") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::And)
+	};
+	("CONTAINSALL") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainsAll)
+	};
+	("CONTAINSANY") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainsAny)
+	};
+	("CONTAINSNONE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainsNone)
+	};
+	("CONTAINSNOT") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::ContainsNot)
+	};
+	("CONTAINS") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Contains)
+	};
+	("ALLINSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::AllInside)
+	};
+	("ANYINSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::AnyInside)
+	};
+	("NONEINSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::NoneInside)
+	};
+	("NOTINSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::NotInside)
+	};
+	("INSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Inside)
+	};
+	("INTERSECTS") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Intersects)
+	};
+	("IN") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::In)
+	};
+	("OUTSIDE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Outside)
+	};
+	("OR") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::OrKw)
+	};
 
 	("ANY") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Any)
@@ -720,6 +740,12 @@ macro_rules! t {
 	};
 	("UUID") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Uuid)
+	};
+	("ULID") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ulid)
+	};
+	("RAND") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Rand)
 	};
 }
 
