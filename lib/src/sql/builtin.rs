@@ -396,6 +396,8 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			min => { fn },
 			month => { fn },
 			nano => { fn },
+			micros => { fn },
+			millis => { fn },
 			now => { fn },
 			round => { fn },
 			second => { fn },
@@ -406,6 +408,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			yday => { fn },
 			year => { fn },
 			from => {
+				nanos => {fn},
 				micros => {fn},
 				millis => {fn},
 				unix => {fn},
