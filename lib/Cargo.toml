@@ -137,7 +137,7 @@ wasmtimer = { version = "0.2.0", default-features = false, features = ["tokio"] 
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.31.0", default-feaStures = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1.31.0", default-features = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
 tokio-tungstenite = { version = "0.20.1", optional = true }
 uuid = { version = "1.4.1", features = ["serde", "v4", "v7"] }
 
