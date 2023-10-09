@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -204,6 +204,8 @@ impl MTree {
 		v: &Vector,
 		k: usize,
 	) -> Result<KnnResult, Error> {
+		#[cfg(debug_assertions)]
+		debug!("knn_search - v: {:?} - k: {}", v, k);
 		let mut queue = BinaryHeap::new();
 		let mut res = BTreeMap::new();
 		if let Some(root_id) = self.state.root {
@@ -222,6 +224,8 @@ impl MTree {
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v);
 						if Self::check_add(k, d, &res) {
+							#[cfg(debug_assertions)]
+							debug!("Leaf found: {} - Obj: {:?} - Docs: {:?}", node.id, o, p.docs);
 							let pr = PriorityResult(d);
 							match res.entry(pr) {
 								Entry::Vacant(e) => {
@@ -299,18 +303,27 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		v: Vec<Number>,
+		obj: Vec<Number>,
 		id: DocId,
 	) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		debug!("Insert - obj: {:?} - doc: {}", obj, id);
+		let obj = Arc::new(obj);
 		if let Some(root_id) = self.state.root {
 			let node = store.get_node(tx, root_id).await?;
+			// First we check if we already have the object. In this case we just append the doc.
+			if self.append(tx, store, node, obj.clone(), id).await? {
+				return Ok(());
+			}
+			let node = store.get_node(tx, root_id).await?;
+			// Otherwise, we insert the object with possibly mutating the tree
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
-				self.insert_at_node(tx, store, node, &None, Arc::new(v), id).await?
+				self.insert_at_node(tx, store, node, &None, obj, id).await?
 			{
 				self.create_new_internal_root(store, o1, p1, o2, p2)?;
 			}
 		} else {
-			self.create_new_leaf_root(store, v, id)?;
+			self.create_new_leaf_root(store, obj, id)?;
 		}
 		Ok(())
 	}
@@ -318,13 +331,13 @@ impl MTree {
 	fn create_new_leaf_root(
 		&mut self,
 		store: &mut MTreeNodeStore,
-		v: Vec<Number>,
+		obj: Arc<Vec<Number>>,
 		id: DocId,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
 		let p = ObjectProperties::new_root(id);
 		let mut objects = LeafMap::new();
-		objects.insert(Arc::new(v), p);
+		objects.insert(obj, p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
 		store.set_node(new_root_node, true)?;
 		self.set_root(Some(new_root_id));
@@ -356,6 +369,44 @@ impl MTree {
 		store.set_node(new_root_node, true)?;
 		self.set_root(Some(new_root_id));
 		Ok(())
+	}
+
+	async fn append(
+		&self,
+		tx: &mut Transaction,
+		store: &mut MTreeNodeStore,
+		node: StoredNode<MTreeNode>,
+		object: Arc<Vector>,
+		id: DocId,
+	) -> Result<bool, Error> {
+		#[cfg(debug_assertions)]
+		debug!("append - node: {} - obj: {:?}", node.id, object);
+		let mut queue = BinaryHeap::new();
+		if let Some(root_id) = self.state.root {
+			queue.push(root_id);
+		}
+		while let Some(current) = queue.pop() {
+			let mut node = store.get_node(tx, current).await?;
+			match node.n {
+				MTreeNode::Leaf(ref mut n) => {
+					if let Some(p) = n.get_mut(&object) {
+						p.docs.insert(id);
+						store.set_node(node, true)?;
+						return Ok(true);
+					}
+				}
+				MTreeNode::Internal(ref n) => {
+					for (o, p) in n {
+						let d = self.calculate_distance(o.as_ref(), object.as_ref());
+						if d <= p.radius {
+							queue.push(p.node);
+						}
+					}
+				}
+			}
+			store.set_node(node, false)?;
+		}
+		Ok(false)
 	}
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
@@ -423,7 +474,10 @@ impl MTree {
 				// Remove ObestSubtree from N;
 				node.remove(&best_entry_obj);
 				// if (N U P will fit into N)
-				if node.len() + 2 <= self.state.capacity as usize {
+				let mut nup: HashSet<Arc<Vector>> = HashSet::from_iter(node.keys().cloned());
+				nup.insert(o1.clone());
+				nup.insert(o2.clone());
+				if nup.len() <= self.state.capacity as usize {
 					// Let parentDistance(Op) = d(Op, parent(N));
 					p1.parent_dist = parent_center
 						.as_ref()
@@ -486,13 +540,16 @@ impl MTree {
 		object: &Vector,
 	) -> Result<(Arc<Vector>, RoutingProperties), Error> {
 		let mut closest = None;
-		let dist = f64::MAX;
+		let mut dist = f64::MAX;
 		for (o, p) in node {
 			let d = self.calculate_distance(o.as_ref(), object);
 			if d < dist {
 				closest = Some((o.clone(), p.clone()));
+				dist = d;
 			}
 		}
+		#[cfg(debug_assertions)]
+		debug!("Find closest {:?} - Res: {:?}", object, closest);
 		if let Some((o, p)) = closest {
 			Ok((o, p))
 		} else {
@@ -561,9 +618,20 @@ impl MTree {
 	where
 		N: NodeVectors + Debug,
 	{
-		let objects = node.get_objects();
-		let (distances, o1, o2) = self.compute_distances_and_promoted_objects(&objects)?;
-		let (a1, o1, a2, o2) = Self::distribute_objects(objects, &distances, o1, o2);
+		#[cfg(debug_assertions)]
+		debug!("Split node: {:?}", node);
+		let mut a2 = node.get_objects();
+		let (distances, o1, o2) = self.compute_distances_and_promoted_objects(&a2)?;
+
+		// Distributed objects
+		a2.sort_by(|o1, o2| {
+			let d1 = *distances.0.get(&(o1.clone(), o1.clone())).unwrap_or(&0.0);
+			let d2 = *distances.0.get(&(o2.clone(), o2.clone())).unwrap_or(&0.0);
+			d1.total_cmp(&d2)
+		});
+		let a1_size = a2.len() / 2;
+		let a1: Vec<Arc<Vector>> = a2.drain(0..a1_size).collect();
+
 		let (node1, r1, o1) = node.extract_node(&distances, o1, a1)?;
 		let (node2, r2, o2) = node.extract_node(&distances, o2, a2)?;
 
@@ -600,8 +668,7 @@ impl MTree {
 		let n = objects.len();
 		let mut dist_cache = HashMap::with_capacity(n * 2);
 		for (i, o1) in objects.iter().enumerate() {
-			for j in i + 1..n {
-				let o2 = &objects[j];
+			for o2 in objects.iter().take(n).skip(i + 1) {
 				let distance = self.calculate_distance(o1, o2.as_ref());
 				dist_cache.insert((o1.clone(), o2.clone()), distance);
 				dist_cache.insert((o2.clone(), o1.clone()), distance); // Because the distance function is symmetric
@@ -619,22 +686,6 @@ impl MTree {
 			None => Err(Error::Unreachable),
 			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
 		}
-	}
-
-	fn distribute_objects(
-		mut objects: Vec<Arc<Vector>>,
-		distances: &DistanceCache,
-		p1: Arc<Vector>,
-		p2: Arc<Vector>,
-	) -> (Vec<Arc<Vector>>, Arc<Vector>, Vec<Arc<Vector>>, Arc<Vector>) {
-		objects.sort_by(|o1, o2| {
-			let d1 = *distances.0.get(&(o1.clone(), p1.clone())).unwrap_or(&0.0);
-			let d2 = *distances.0.get(&(o2.clone(), p1.clone())).unwrap_or(&0.0);
-			d1.total_cmp(&d2)
-		});
-		let a1_size = objects.len() / 2;
-		let a1: Vec<Arc<Vector>> = objects.drain(0..a1_size).collect();
-		(a1, p1, objects, p2)
 	}
 
 	fn compute_internal_max_distance(&self, node: &InternalNode) -> f64 {
@@ -1078,7 +1129,7 @@ impl MTree {
 		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
 			store.set_node(sn, true)?;
-			return Ok(DeletionResult::DocRemoved);
+			Ok(DeletionResult::DocRemoved)
 		}
 	}
 
@@ -1225,7 +1276,7 @@ impl NodeVectors for LeafNode {
 	}
 
 	fn get_objects(&self) -> Vec<Arc<Vector>> {
-		self.keys().map(|o| o.clone()).collect()
+		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
@@ -1259,7 +1310,7 @@ impl NodeVectors for InternalNode {
 	}
 
 	fn get_objects(&self) -> Vec<Arc<Vector>> {
-		self.keys().map(|o| o.clone()).collect()
+		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
@@ -1394,9 +1445,9 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
-	use std::collections::{BTreeMap, VecDeque};
+	use rand::prelude::{SliceRandom, StdRng};
+	use rand::SeedableRng;
+	use std::collections::{BTreeMap, HashSet, VecDeque};
 	use std::sync::Arc;
 
 	use roaring::RoaringTreemap;
@@ -1847,7 +1898,7 @@ mod tests {
 						found = true;
 					}
 				}
-				assert!(found, "{} vs {:?}", doc_id, res.objects);
+				assert!(found, "Search: {:?} - Expected: {} - Got: {:?}", obj, doc_id, res.objects);
 			}
 		}
 
@@ -1887,12 +1938,11 @@ mod tests {
 		}
 	}
 
-	#[test(tokio::test)]
-	async fn test_mtree_unique_and_sorted() {
+	async fn test_mtree_unique_and_sorted(size: usize) {
 		let mut collection = vec![];
 
 		// Prepare data set
-		for doc_id in 0..500 {
+		for doc_id in 0..size as DocId {
 			collection.push((doc_id, vec![doc_id.into()]));
 		}
 
@@ -1900,32 +1950,94 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_unique_and_shuffled() {
+	async fn test_mtree_unique_and_sorted_small() {
+		for i in 0..30 {
+			test_mtree_unique_and_sorted(i).await;
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_unique_and_sorted_large() {
+		test_mtree_unique_and_sorted(200).await;
+	}
+
+	async fn test_mtree_unique_and_shuffled(size: usize) {
 		let mut collection = vec![];
 
 		// Prepare data set
-		for doc_id in 0..500 {
+		for doc_id in 0..size as DocId {
 			collection.push((doc_id, vec![doc_id.into()]));
 		}
 
 		// Shuffle
-		let mut rng = thread_rng();
+		let mut rng = get_seed_rnd();
 		collection.shuffle(&mut rng);
 
 		test_mtree_collection(collection).await;
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_non_unique_and_sorted() {
+	async fn test_mtree_unique_and_shuffled_small() {
+		for i in 0..30 {
+			test_mtree_unique_and_shuffled(i).await;
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_unique_and_shuffled_large() {
+		test_mtree_unique_and_shuffled(200).await;
+	}
+
+	async fn test_mtree_non_unique_and_sorted(size: usize) {
 		let mut collection = vec![];
 
 		// Prepare data set
-		for doc_id in 0..6 {
-			let obj = doc_id % 4;
-			collection.push((doc_id, vec![obj.into()]));
+		for doc_id in 0..size {
+			let obj = doc_id % (size / 2);
+			collection.push((doc_id as DocId, vec![obj.into()]));
 		}
 
 		test_mtree_collection(collection).await;
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_non_unique_and_sorted_small() {
+		for i in 2..30 {
+			test_mtree_non_unique_and_sorted(i).await;
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_non_unique_and_sorted_large() {
+		test_mtree_non_unique_and_sorted(200).await;
+	}
+
+	async fn test_mtree_non_unique_and_shuffled(size: usize) {
+		let mut collection = vec![];
+
+		// Prepare data set
+		for doc_id in 0..size {
+			let obj = doc_id % (size / 2);
+			collection.push((doc_id as DocId, vec![obj.into()]));
+		}
+
+		// Shuffle
+		let mut rng = get_seed_rnd();
+		collection.shuffle(&mut rng);
+
+		test_mtree_collection(collection).await;
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_non_unique_and_shuffled_small() {
+		for i in 2..30 {
+			test_mtree_non_unique_and_shuffled(i).await;
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_mtree_non_unique_and_shuffled_large() {
+		test_mtree_non_unique_and_shuffled(200).await;
 	}
 
 	fn check_leaf_vec(
@@ -2062,6 +2174,7 @@ mod tests {
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
+		let mut leaf_objects = HashSet::new();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			checks.node_count += 1;
 			if depth > checks.max_depth {
@@ -2077,7 +2190,12 @@ mod tests {
 			);
 			assert_ne!(node.n.len(), 0, "Empty node! {}", node.id);
 			if Some(node_id) != t.state.root {
-				assert!(node.n.len() >= t.minimum && node.n.len() <= t.state.capacity as usize);
+				assert!(
+					node.n.len() >= t.minimum && node.n.len() <= t.state.capacity as usize,
+					"Wrong node size - Node: {} - Size: {}",
+					node_id,
+					node.n.len()
+				);
 			}
 			match node.n {
 				MTreeNode::Internal(entries) => {
@@ -2098,6 +2216,9 @@ mod tests {
 					update_min(&mut checks.min_leaf_depth, depth);
 					update_max(&mut checks.max_leaf_depth, depth);
 					for (o, p) in m {
+						if !leaf_objects.insert(o.clone()) {
+							panic!("Leaf object already exists: {:?}", o);
+						}
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center.as_ref(), o.as_ref());
 							assert_eq!(pd, p.parent_dist);
@@ -2128,5 +2249,15 @@ mod tests {
 		} else {
 			*max = Some(val);
 		}
+	}
+
+	fn get_seed_rnd() -> StdRng {
+		let seed: u64 = std::env::var("TEST_SEED")
+			.unwrap_or_else(|_| rand::random::<u64>().to_string())
+			.parse()
+			.expect("Failed to parse seed");
+		info!("Seed: {}", seed);
+		// Create a seeded RNG
+		StdRng::seed_from_u64(seed)
 	}
 }
