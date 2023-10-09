@@ -57,6 +57,7 @@ pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
 pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // Recommended default size according to tungstenite documentation
 pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
+pub(crate) const NAGLE_ALG: bool = false;
 
 pub(crate) enum Either {
 	Request(Option<Route>),
@@ -83,11 +84,11 @@ pub(crate) async fn connect(
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) =
-		tokio_tungstenite::connect_async_tls_with_config(url, config, false, maybe_connector)
+		tokio_tungstenite::connect_async_tls_with_config(url, config, NAGLE_ALG, maybe_connector)
 			.await?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config, false).await?; // TODO: should nagle be disabled?
+	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config, NAGLE_ALG).await?;
 
 	Ok(socket)
 }
