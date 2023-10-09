@@ -394,9 +394,11 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
-			let address = ("/etc/foundationdb/fdb.cluster", config);
-			surrealdb::engine::any::connect(address.clone()).await.unwrap();
-			let db = Surreal::new::<FDb>(address).await.unwrap();
+			let path = "/etc/foundationdb/fdb.cluster";
+			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
+				.await
+				.unwrap();
+			let db = Surreal::new::<FDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
