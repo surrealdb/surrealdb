@@ -309,12 +309,11 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
 		let obj = Arc::new(obj);
+		// First we check if we already have the object. In this case we just append the doc.
+		if self.append(tx, store, obj.clone(), id).await? {
+			return Ok(());
+		}
 		if let Some(root_id) = self.state.root {
-			let node = store.get_node(tx, root_id).await?;
-			// First we check if we already have the object. In this case we just append the doc.
-			if self.append(tx, store, node, obj.clone(), id).await? {
-				return Ok(());
-			}
 			let node = store.get_node(tx, root_id).await?;
 			// Otherwise, we insert the object with possibly mutating the tree
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
@@ -375,12 +374,9 @@ impl MTree {
 		&self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		node: StoredNode<MTreeNode>,
 		object: Arc<Vector>,
 		id: DocId,
 	) -> Result<bool, Error> {
-		#[cfg(debug_assertions)]
-		debug!("append - node: {} - obj: {:?}", node.id, object);
 		let mut queue = BinaryHeap::new();
 		if let Some(root_id) = self.state.root {
 			queue.push(root_id);
