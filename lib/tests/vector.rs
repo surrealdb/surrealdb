@@ -58,3 +58,48 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn delete_update_mtree_index() -> Result<(), Error> {
+	let sql = r"
+		CREATE pts:1 SET point = [1,2,3,4];
+		CREATE pts:2 SET point = [4,5,6,7];
+		CREATE pts:3 SET point = [2,3,4,5];
+		CREATE pts:4 SET point = [8,9,10,11];
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		UPDATE pts:3 SET point = [12,13,14,15];
+		LET $pt = [2,3,4,5];
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <5> $pt ORDER BY dist;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 8);
+	//
+	for _ in 0..7 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				dist: 2f,
+				id: pts:1
+			},
+			{
+				dist: 4f,
+				id: pts:2
+			},
+			{
+				dist: 12f,
+				id: pts:4
+			},
+			{
+				dist: 20f,
+				id: pts:3
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}

@@ -257,7 +257,7 @@ impl MTree {
 			store.set_node(node, false)?;
 		}
 		let mut objects = VecDeque::with_capacity(res.len());
-		for (_, d) in res {
+		for d in res.into_values() {
 			objects.push_back(d);
 		}
 		Ok(KnnResult {
