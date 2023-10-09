@@ -61,7 +61,7 @@ async fn live_creates_remote_notification_for_create() {
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -168,7 +168,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -307,7 +307,7 @@ async fn live_creates_remote_notification_for_update() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -428,7 +428,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
+	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive

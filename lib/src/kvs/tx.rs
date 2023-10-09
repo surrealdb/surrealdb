@@ -851,10 +851,15 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		println!(
+			"Delr {:?}..{:?} (limit: {limit})",
+			debug::sprint_key(&rng.start.clone().into()),
+			debug::sprint_key(&rng.end.clone().into())
+		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -1473,6 +1478,7 @@ impl Transaction {
 		nt: Notification,
 		expected: Option<Notification>,
 	) -> Result<(), Error> {
+		println!("putc_tbnt: key={:?}", debug::sprint_key(&key.clone().encode().unwrap().into()));
 		// Sanity check
 		if nt.timestamp != key.ts {
 			return Err(Error::InternalLiveQueryError(LiveQueryCause::TimestampMismatch));

@@ -70,6 +70,19 @@ impl KillStatement {
 					let key = crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
 					run.del(key).await?;
 					// Delete notifications
+					let start = crate::key::table::nt::prefix(
+						opt.ns(),
+						opt.db(),
+						tb,
+						live_query_id.clone(),
+					);
+					let end = crate::key::table::nt::suffix(
+						opt.ns(),
+						opt.db(),
+						tb,
+						live_query_id.clone(),
+					);
+					run.delr(start..end, 1000).await?
 				}
 				_ => {
 					return Err(Error::KillStatement {
@@ -109,13 +122,12 @@ pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::dbs::{Response, Session};
+	use crate::dbs::{Action, Notification, Session};
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::sql;
-	use crate::sql::statements::LiveStatement;
 	use crate::sql::{Ident, Param, Strand, Uuid};
 	use std::collections::BTreeMap;
 
@@ -154,11 +166,12 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	async fn kill_removes_notifications() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let nd = sql::Uuid::try_from("fe54b86e-d88e-462a-9835-9cb553a75619").unwrap();
+		let remote_node = sql::Uuid::try_from("fe54b86e-d88e-462a-9835-9cb553a75619").unwrap();
+		let remote_not_id = sql::Uuid::try_from("3daf1c90-e251-4691-9542-df25b7aa787f").unwrap();
 		let ns = "namespace_abc";
 		let db = "database_abc";
 		let tb = "table_abc";
-		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
+		let sess = Session::for_level(Level::Root, Role::Owner).with_ns(ns).with_db(db);
 
 		// Create a live query
 		let mut vars = BTreeMap::new();
@@ -166,14 +179,54 @@ mod tests {
 		let lq = ds.execute("LIVE SELECT * FROM table_abc", &sess, Some(vars)).await.unwrap();
 		assert_eq!(lq.len(), 1);
 		let lq = match lq.get(0) {
-			None => {}
-			Some(r) => match r.result.unwrap() {
-				Value::Uuid(uuid) => uuid,
-				_ => panic!("Expected the response to be a Uuid"),
+			None => {
+				panic!("Expected the response to contain a Uuid");
+			}
+			Some(r) => match &r.result {
+				Ok(Value::Uuid(uuid)) => uuid,
+				Ok(_) => panic!("Expected the response to be a Uuid"),
+				Err(e) => panic!("Unexpected error: %{}", e),
 			},
 		};
 
+		// Add notification artificially
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let ts = txn.clock().await;
+		let key =
+			crate::key::table::nt::new(ns, db, tb, lq.clone(), ts.clone(), remote_not_id.clone());
+		let nt = Notification {
+			live_id: lq.clone(),
+			node_id: remote_node.clone(),
+			notification_id: remote_not_id.clone(),
+			action: Action::Create,
+			result: Value::Strand(Strand::from("this would be an object")),
+			timestamp: ts,
+		};
+		txn.putc_tbnt(key, nt, None).await.unwrap();
+		txn.commit().await.unwrap();
+
 		// Kill
+		let mut vars = BTreeMap::new();
+		vars.insert("id".to_string(), Value::Uuid(lq.clone()));
+		let res = ds.execute("KILL $id", &sess, Some(vars)).await.unwrap();
+		assert_eq!(res.len(), 1);
+		// Verify the response is not an error
+		match res.get(0) {
+			None => {
+				panic!("Expected exactly 1 response")
+			}
+			Some(r) => match &r.result {
+				Ok(_) => {}
+				Err(e) => {
+					panic!("Expected kill to be successful, got error: {}", e)
+				}
+			},
+		}
+
 		// Verify garbage is removed
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let nots = txn.scan_tbnt(ns, db, tb, lq.clone(), 1000).await.unwrap();
+		txn.commit().await.unwrap();
+		assert_eq!(nots.len(), 0);
 	}
 }
