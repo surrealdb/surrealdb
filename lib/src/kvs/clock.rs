@@ -37,7 +37,7 @@ impl FakeClock {
 	}
 
 	pub fn now(&self) -> Timestamp {
-		self.now.read().unwrap().clone()
+		*self.now.read().unwrap()
 	}
 
 	pub fn set(&mut self, timestamp: Timestamp) {
