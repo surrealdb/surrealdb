@@ -76,10 +76,9 @@ impl Sub<Duration> for Timestamp {
 }
 
 impl Timestamp {
-	pub(crate) fn get_and_inc(&mut self, rhs: Duration) -> Timestamp {
-		let get = self.clone();
+	pub(crate) fn inc_and_get(&mut self, rhs: &Duration) -> &Timestamp {
 		self.value += rhs.as_secs();
-		get
+		self
 	}
 
 	pub(crate) fn set(&mut self, ts: Timestamp) {
