@@ -529,7 +529,7 @@ impl Datastore {
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
 		let timestamp = tx.clock().await;
-		self.register_membership(tx, node_id, &timestamp).await?;
+		self.register_membership(tx, node_id, timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
 		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
@@ -542,10 +542,10 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		timestamp: &Timestamp,
+		timestamp: Timestamp,
 	) -> Result<(), Error> {
 		tx.set_nd(node_id.0).await?;
-		tx.set_hb(timestamp.clone(), node_id.0).await?;
+		tx.set_hb(timestamp, node_id.0).await?;
 		Ok(())
 	}
 

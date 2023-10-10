@@ -204,7 +204,7 @@ async fn a_valid_notification(
 	live_stm.node = entry.node_id.clone().unwrap().into();
 
 	// Create heartbeat
-	tx.set_hb(entry.timestamp.clone().unwrap().into(), entry.node_id.clone().unwrap().0).await?;
+	tx.set_hb(entry.timestamp.unwrap().into(), entry.node_id.clone().unwrap().0).await?;
 	// Create cluster node entry
 	tx.set_nd(entry.node_id.clone().unwrap().0).await?;
 	// Create node live query registration

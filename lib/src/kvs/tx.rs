@@ -1065,7 +1065,7 @@ impl Transaction {
 
 	// Set heartbeat
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		// We do not need to do a read, we always want to overwrite
 		let key_enc = key.encode()?;
 		self.put(
@@ -1081,7 +1081,7 @@ impl Transaction {
 	}
 
 	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		self.del(key).await?;
 		Ok(())
 	}

@@ -19,7 +19,9 @@ pub struct ClusterMembership {
 // This struct is meant to represent a timestamp that can be used to partially order
 // events in a cluster. It should be derived from a timestamp oracle, such as the
 // one available in TiKV via the client `TimestampExt` implementation.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store, Default)]
+#[derive(
+	Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store, Default,
+)]
 #[revisioned(revision = 1)]
 pub struct Timestamp {
 	pub value: u64,
@@ -76,10 +78,9 @@ impl Sub<&Duration> for &Timestamp {
 }
 
 impl Timestamp {
-	pub(crate) fn get_and_inc(&mut self, rhs: &Duration) -> Timestamp {
-		let get = self.clone();
+	pub(crate) fn inc_and_get(&mut self, rhs: &Duration) -> &Timestamp {
 		self.value += rhs.as_secs();
-		get
+		self
 	}
 
 	pub(crate) fn set(&mut self, ts: Timestamp) {
