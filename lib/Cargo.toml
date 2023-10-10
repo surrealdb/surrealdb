@@ -159,3 +159,7 @@ harness = false
 [[bench]]
 name = "index_btree"
 harness = false
+
+[[bench]]
+name = "move_vs_clone"
+harness = false
