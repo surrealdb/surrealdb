@@ -106,8 +106,8 @@ impl<'a> Document<'a> {
 					// Send a DELETE notification
 					let thing = (*rid).clone();
 					let notification = Notification {
-						live_id: lv.id.clone(),
-						node_id: lv.node.clone(),
+						live_id: lv.id,
+						node_id: lv.node,
 						notification_id: not_id.clone(),
 						action: Action::Delete,
 						result: Value::Thing(thing),
