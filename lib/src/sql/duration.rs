@@ -27,7 +27,7 @@ static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
 #[revisioned(revision = 1)]
 pub struct Duration(pub time::Duration);

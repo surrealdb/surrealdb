@@ -49,7 +49,7 @@ impl FakeClock {
 /// This is useful when you need unique and partially deterministic timestamps for tests.
 /// Partially deterministic, because you do not have direct control over how many times a clock
 /// is accessed, and due to the nature of async - you neither have order guarantee.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct IncFakeClock {
 	now: Timestamp,
 	increment: Duration,
@@ -64,7 +64,8 @@ impl IncFakeClock {
 	}
 
 	pub async fn now(&mut self) -> Timestamp {
-		self.now.inc_and_get(&self.increment).clone()
+		self.now = &self.now + &self.increment;
+		self.now
 	}
 }
 
