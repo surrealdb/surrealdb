@@ -73,6 +73,12 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.4.1", features = ["serde", "js", "v4", "v7"] }
 
+# surrealml = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
+# surrealml_utils = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
+# surrealml = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration"}
+surrealml_utils = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration"}
+ndarray = "0.15.6"
+
 [target.'cfg(unix)'.dependencies]
 nix = "0.26.2"
 
