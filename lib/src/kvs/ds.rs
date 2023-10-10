@@ -531,7 +531,7 @@ impl Datastore {
 		let timestamp = tx.clock().await;
 		self.register_membership(tx, node_id, &timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
-		let ts_expired = (timestamp.clone() - sql::duration::Duration::from_secs(5))?;
+		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
 		trace!("Archiving dead nodes: {:?}", dead);
 		self.archive_dead_lqs(tx, &dead, node_id).await
