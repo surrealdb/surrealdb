@@ -497,7 +497,7 @@ mod tests {
 
 		// verify remote notifications have been consumed
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id, 0).await;
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", *lq_id, 0).await;
 		tx.commit().await.unwrap();
 		let results = results.unwrap();
 		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
