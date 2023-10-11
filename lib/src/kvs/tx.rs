@@ -652,7 +652,7 @@ impl Transaction {
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		println!(
+		trace!(
 			"Scan {:?} - {:?}",
 			debug::sprint_key(&rng.start.clone().into()),
 			debug::sprint_key(&rng.end.clone().into())
