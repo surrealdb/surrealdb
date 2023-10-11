@@ -96,6 +96,12 @@ mod api_integration {
 			db
 		}
 
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+		}
+
 		include!("api/mod.rs");
 	}
 
@@ -117,6 +123,12 @@ mod api_integration {
 			.await
 			.unwrap();
 			db
+		}
+
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -149,7 +161,14 @@ mod api_integration {
 		#[tokio::test]
 		async fn memory_allowed_as_address() {
 			init_logger();
-			any::connect("memory").await.unwrap();
+			surrealdb::engine::any::connect("memory").await.unwrap();
+		}
+
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			surrealdb::engine::any::connect("mem://").await.unwrap();
+			surrealdb::engine::any::connect("memory").await.unwrap();
 		}
 
 		#[tokio::test]
@@ -240,6 +259,14 @@ mod api_integration {
 			db
 		}
 
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			let path = Ulid::new();
+			surrealdb::engine::any::connect(format!("file://{path}.db")).await.unwrap();
+			surrealdb::engine::any::connect(format!("file:///tmp/{path}.db")).await.unwrap();
+		}
+
 		include!("api/mod.rs");
 		include!("api/backup.rs");
 	}
@@ -266,6 +293,14 @@ mod api_integration {
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
+		}
+
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			let path = Ulid::new();
+			surrealdb::engine::any::connect(format!("rocksdb://{path}.db")).await.unwrap();
+			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}.db")).await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -296,6 +331,14 @@ mod api_integration {
 			db
 		}
 
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			let path = Ulid::new();
+			surrealdb::engine::any::connect(format!("speedb://{path}.db")).await.unwrap();
+			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}.db")).await.unwrap();
+		}
+
 		include!("api/mod.rs");
 		include!("api/backup.rs");
 	}
@@ -323,6 +366,12 @@ mod api_integration {
 			db
 		}
 
+		#[tokio::test]
+		async fn any_engine_can_connect() {
+			init_logger();
+			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
+		}
+
 		include!("api/mod.rs");
 		include!("api/backup.rs");
 	}
@@ -345,7 +394,11 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
-			let db = Surreal::new::<FDb>(("/etc/foundationdb/fdb.cluster", config)).await.unwrap();
+			let path = "/etc/foundationdb/fdb.cluster";
+			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
+				.await
+				.unwrap();
+			let db = Surreal::new::<FDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
 		}
