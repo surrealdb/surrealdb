@@ -335,7 +335,7 @@ async fn live_creates_remote_notification_for_update() {
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
 
 	// Update to cause a remote notification
-	let thing = match create_value.get("id").ok_or(Error::Unreachabe).unwrap().clone() {
+	let thing = match create_value.get("id").ok_or(Error::Unreachable).unwrap().clone() {
 		Value::Thing(thing) => thing,
 		_ => panic!("Expected ID to be a thing"),
 	};
