@@ -2,7 +2,7 @@ use crate::{dbs::Capabilities, iam::Level};
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) strict: bool,
 	pub(crate) notifications: bool,
