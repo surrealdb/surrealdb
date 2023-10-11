@@ -72,11 +72,11 @@ impl IncFakeClock {
 /// SystemClock is a clock that uses the system time.
 /// Use this when there are no other alternatives.
 #[derive(Clone)]
-pub struct SystemClock {}
+pub struct SystemClock;
 
 impl SystemClock {
 	pub fn new() -> Self {
-		SystemClock {}
+		SystemClock
 	}
 	pub fn now(&self) -> Timestamp {
 		// Use a timestamp oracle if available

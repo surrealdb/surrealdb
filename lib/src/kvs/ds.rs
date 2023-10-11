@@ -197,12 +197,20 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		Self::new_full(path, None).await
+		Self::new_full_impl(path, None).await
 	}
 
-	// For testing
 	#[allow(dead_code)]
+	#[cfg(test)]
 	pub async fn new_full(
+		path: &str,
+		clock_override: Option<SizedClock>,
+	) -> Result<Datastore, Error> {
+		Self::new_full_impl(path, clock_override).await
+	}
+
+	#[allow(dead_code)]
+	async fn new_full_impl(
 		path: &str,
 		clock_override: Option<SizedClock>,
 	) -> Result<Datastore, Error> {
