@@ -769,7 +769,7 @@ impl Datastore {
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
 			error!("Clock may have gone backwards: {:?}", e.duration());
-			Error::Internal(InternalCause::ClockMayHaveGoneBackwards)
+			Error::InternalCause(InternalCause::ClockMayHaveGoneBackwards)
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;

@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::err::UnreachableCause::{ShouldHaveInner, ShouldHaveNextItem};
 use crate::idx::trees::btree::Payload;
 use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
@@ -102,7 +103,7 @@ impl BKeys for FstKeys {
 	}
 
 	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
-		Err(Error::Unreachable)
+		Err(Error::Unimplemented("FstKeys::collect_with_prefix".to_string()))
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -157,7 +158,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::UnreachableCause(ShouldHaveInner))
 		}
 	}
 
@@ -398,7 +399,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(Error::Unreachable);
+			return Err(Error::UnreachableCause(ShouldHaveNextItem));
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {

@@ -28,7 +28,7 @@ pub async fn read(
 			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
-				None => return Err(Error::Internal(InternalCause::NoVersionstamp)),
+				None => return Err(Error::InternalCause(InternalCause::NoVersionstamp)),
 			}
 		}
 	};

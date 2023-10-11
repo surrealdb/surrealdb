@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::err::UnreachableCause::{TreeNeverHasNode, TreeNodeAlwaysWrite, TreeOutSetNeverEmpty};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
 use lru::LruCache;
@@ -61,7 +62,7 @@ where
 			TreeNodeStore::Write(w) => w.set_node(node, updated),
 			TreeNodeStore::Read(r) => {
 				if updated {
-					Err(Error::Unreachable)
+					Err(Error::UnreachableCause(TreeNodeAlwaysWrite))
 				} else {
 					r.set_node(node);
 					Ok(())
@@ -74,14 +75,14 @@ where
 	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
 			TreeNodeStore::Write(w) => Ok(w.new_node(id, node)),
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(TreeNodeAlwaysWrite)),
 		}
 	}
 
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(TreeNodeAlwaysWrite)),
 		}
 	}
 
@@ -89,7 +90,7 @@ where
 		if let TreeNodeStore::Write(w) = self {
 			w.finish(tx).await
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::UnreachableCause(TreeNodeAlwaysWrite))
 		}
 	}
 }
@@ -141,7 +142,7 @@ where
 			self.updated.insert(node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(Error::Unreachable);
+			return Err(Error::UnreachableCause(TreeNeverHasNode));
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
@@ -162,7 +163,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if self.nodes.contains_key(&node_id) {
-				return Err(Error::Unreachable);
+				return Err(Error::UnreachableCause(TreeNeverHasNode));
 			}
 			self.out.remove(&node_id);
 		}
@@ -176,14 +177,14 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
-				return Err(Error::Unreachable);
+				return Err(Error::UnreachableCause(TreeOutSetNeverEmpty));
 			}
 		}
 		for node_id in &self.updated {
 			if let Some(node) = self.nodes.remove(node_id) {
 				self.np.save(tx, node).await?;
 			} else {
-				return Err(Error::Unreachable);
+				return Err(Error::UnreachableCause(TreeNeverHasNode));
 			}
 		}
 		self.updated.clear();

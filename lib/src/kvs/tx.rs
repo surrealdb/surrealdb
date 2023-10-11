@@ -2871,7 +2871,7 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(InternalCause::TimestampSkew));
+				return Err(Error::InternalCause(InternalCause::TimestampSkew));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2896,7 +2896,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::Internal(InternalCause::InvalidVersionstamp));
+				return Err(Error::InternalCause(InternalCause::InvalidVersionstamp));
 			}
 		}
 		Ok(None)

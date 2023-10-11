@@ -1,7 +1,4 @@
 use crate::dbs::{Action, Notification};
-use crate::err::UnreachableCause::{
-	CreateRecordsShouldAlwaysHaveID, NotificationsShouldAlwaysExist,
-};
 use crate::sql::statements::{CreateStatement, DeleteStatement, UpdateStatement};
 use crate::sql::Data::ContentExpression;
 use crate::sql::{Array, Data, Id, Object, Strand, Thing, Values};
@@ -107,7 +104,7 @@ async fn live_creates_remote_notification_for_create() {
 	println!("Created entry");
 
 	// Verify local node did not get notification
-	assert!(test.db.notifications().ok_or(Error::Unreachable).unwrap().try_recv().is_err());
+	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Verify there is a remote node notification entry
 	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
@@ -210,7 +207,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	println!("Created first entry - remote, now checking notifications queue before second entry");
 
 	// Verify local node did not get notification
-	assert!(test.db.notifications().ok_or(Error::Unreachable).unwrap().try_recv().is_err());
+	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Create a local notification to cause scanning of the lq notifications
 	test.db = test.db.with_node_id(sql::uuid::Uuid::from(local_node));
@@ -228,7 +225,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	println!("Created second entry - local. Now checking notifications channel");
 
 	// Validate the remote notification occurs before the local one
-	let nots = test.db.notifications().ok_or(Error::Unreachable).unwrap();
+	let nots = test.db.notifications().unwrap();
 
 	let mut first_not = nots.try_recv().unwrap();
 	// We cannot determine live query ID
@@ -335,7 +332,7 @@ async fn live_creates_remote_notification_for_update() {
 	assert_eq!(live_value, Value::Uuid(sql::uuid::Uuid::from(live_query_id)));
 
 	// Update to cause a remote notification
-	let thing = match create_value.get("id").ok_or(Error::Unreachable).unwrap().clone() {
+	let thing = match create_value.get("id").unwrap().clone() {
 		Value::Thing(thing) => thing,
 		_ => panic!("Expected ID to be a thing"),
 	};
@@ -352,7 +349,7 @@ async fn live_creates_remote_notification_for_update() {
 	tx.lock().await.commit().await.unwrap();
 
 	// Verify local node did not get notification
-	assert!(test.db.notifications().ok_or(Error::Unreachable).unwrap().try_recv().is_err());
+	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Verify there is a remote node notification entry
 	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
@@ -448,7 +445,7 @@ async fn live_creates_remote_notification_for_delete() {
 	println!("Created live query in test");
 
 	// Write locally to cause a remote notification
-	let thing = match create_value.get("id").ok_or(Error::Unreachable).unwrap().clone() {
+	let thing = match create_value.get("id").unwrap().clone() {
 		Value::Thing(thing) => thing,
 		_ => panic!("Expected ID to be a thing"),
 	};
@@ -459,7 +456,7 @@ async fn live_creates_remote_notification_for_delete() {
 	assert_eq!(Value::Array(Array::new()), delete_value);
 
 	// Verify local node did not get notification
-	assert!(test.db.notifications().ok_or(Error::Unreachable).unwrap().try_recv().is_err());
+	assert!(test.db.notifications().unwrap().try_recv().is_err());
 
 	// Verify there is a remote node notification entry
 	let tx = test.db.transaction(Write, Optimistic).await.unwrap().enclose();
