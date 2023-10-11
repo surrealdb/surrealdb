@@ -2,6 +2,7 @@ use super::capabilities::Capabilities;
 use crate::cnf;
 use crate::dbs::Notification;
 use crate::err::Error;
+use crate::err::UnreachableCause::NodeIdAlwaysSet;
 use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
 use channel::Sender;
@@ -414,9 +415,7 @@ impl Options {
 
 	/// Get current Node ID
 	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or(Error::Unreachable(
-			"The node id should always be set in the options".to_string(),
-		))
+		self.id.ok_or(Error::UnreachableCause(NodeIdAlwaysSet))
 	}
 
 	/// Get currently selected NS

@@ -61,7 +61,7 @@ where
 			TreeNodeStore::Write(w) => w.set_node(node, updated),
 			TreeNodeStore::Read(r) => {
 				if updated {
-					Err(Error::Unreachable("idx tree 1".to_string()))
+					Err(Error::Unreachable)
 				} else {
 					r.set_node(node);
 					Ok(())
@@ -74,14 +74,14 @@ where
 	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
 			TreeNodeStore::Write(w) => Ok(w.new_node(id, node)),
-			_ => Err(Error::Unreachable("idx tree 2".to_string())),
+			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
-			_ => Err(Error::Unreachable("idx tree 3".to_string())),
+			_ => Err(Error::Unreachable),
 		}
 	}
 
@@ -89,7 +89,7 @@ where
 		if let TreeNodeStore::Write(w) = self {
 			w.finish(tx).await
 		} else {
-			Err(Error::Unreachable("idx tree 4".to_string()))
+			Err(Error::Unreachable)
 		}
 	}
 }
@@ -141,7 +141,7 @@ where
 			self.updated.insert(node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(Error::Unreachable("idx tree 5".to_string()));
+			return Err(Error::Unreachable);
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
@@ -162,7 +162,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if self.nodes.contains_key(&node_id) {
-				return Err(Error::Unreachable("idx tree 6".to_string()));
+				return Err(Error::Unreachable);
 			}
 			self.out.remove(&node_id);
 		}
@@ -176,14 +176,14 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
-				return Err(Error::Unreachable("idx tree 7".to_string()));
+				return Err(Error::Unreachable);
 			}
 		}
 		for node_id in &self.updated {
 			if let Some(node) = self.nodes.remove(node_id) {
 				self.np.save(tx, node).await?;
 			} else {
-				return Err(Error::Unreachable("idx tree 8".to_string()));
+				return Err(Error::Unreachable);
 			}
 		}
 		self.updated.clear();

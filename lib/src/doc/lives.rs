@@ -108,13 +108,13 @@ impl<'a> Document<'a> {
 					let notification = Notification {
 						live_id: lv.id,
 						node_id: lv.node,
-						notification_id: not_id.clone(),
+						notification_id: not_id,
 						action: Action::Delete,
 						result: Value::Thing(thing),
-						timestamp: ts.clone(),
+						timestamp: ts,
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id.clone(), 1000).await;
+						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
@@ -123,9 +123,9 @@ impl<'a> Document<'a> {
 										&ns,
 										&db,
 										&tb,
-										not.live_id.clone(),
-										not.timestamp.clone(),
-										not.notification_id.clone(),
+										not.live_id,
+										not.timestamp,
+										not.notification_id,
 									);
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
@@ -141,29 +141,22 @@ impl<'a> Document<'a> {
 						}
 						chn.write().await.send(notification).await?;
 					} else {
-						let key = crate::key::table::nt::Nt::new(
-							&ns,
-							&db,
-							&tb,
-							lv.id.clone(),
-							ts,
-							not_id,
-						);
+						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
 					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
 					let notification = Notification {
-						live_id: lv.id.clone(),
-						node_id: lv.node.clone(),
-						notification_id: not_id.clone(),
+						live_id: lv.id,
+						node_id: lv.node,
+						notification_id: not_id,
 						action: Action::Create,
 						result: plucked,
-						timestamp: ts.clone(),
+						timestamp: ts,
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id.clone(), 1000).await;
+						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
 								let channel = chn.write().await;
@@ -173,9 +166,9 @@ impl<'a> Document<'a> {
 										opt.ns(),
 										opt.db(),
 										&tb,
-										not.live_id.clone(),
-										not.timestamp.clone(),
-										not.notification_id.clone(),
+										not.live_id,
+										not.timestamp,
+										not.notification_id,
 									);
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
@@ -192,29 +185,22 @@ impl<'a> Document<'a> {
 						}
 						chn.write().await.send(notification).await?;
 					} else {
-						let key = crate::key::table::nt::Nt::new(
-							&ns,
-							&db,
-							&tb,
-							lv.id.clone(),
-							ts,
-							not_id,
-						);
+						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
 					}
 				} else {
 					// Send a UPDATE notification
 					let notification = Notification {
-						live_id: lv.id.clone(),
-						node_id: lv.node.clone(),
-						notification_id: not_id.clone(),
+						live_id: lv.id,
+						node_id: lv.node,
+						notification_id: not_id,
 						action: Action::Update,
 						result: self.pluck(_ctx, opt, txn, &lq).await?,
-						timestamp: ts.clone(),
+						timestamp: ts,
 					};
 					if opt.id()? == lv.node.0 {
 						let previous_nots =
-							tx.scan_tbnt(opt.ns(), opt.db(), &tb, lv.id.clone(), 1000).await;
+							tx.scan_tbnt(opt.ns(), opt.db(), &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
 								for not in nots {
@@ -223,9 +209,9 @@ impl<'a> Document<'a> {
 										&ns,
 										&db,
 										&tb,
-										not.live_id.clone(),
-										not.timestamp.clone(),
-										not.notification_id.clone(),
+										not.live_id,
+										not.timestamp,
+										not.notification_id,
 									);
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
@@ -241,14 +227,7 @@ impl<'a> Document<'a> {
 						}
 						chn.write().await.send(notification).await?;
 					} else {
-						let key = crate::key::table::nt::Nt::new(
-							&ns,
-							&db,
-							&tb,
-							lv.id.clone(),
-							ts,
-							not_id,
-						);
+						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
 					}
 				};
@@ -343,22 +322,22 @@ mod tests {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
 		let not = Notification {
-			live_id: lq_id.clone(),
-			node_id: sql::uuid::Uuid::from(node_id.clone()),
-			notification_id: expected_not_id.clone(),
+			live_id: *lq_id,
+			node_id: sql::uuid::Uuid::from(node_id),
+			notification_id: expected_not_id,
 			action: Action::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
-			timestamp: ts.clone(),
+			timestamp: ts,
 		};
 		let key = crate::key::table::nt::Nt::new(
 			"testns",
 			"testdb",
 			"test_table",
-			lq_id.clone(),
+			*lq_id,
 			ts,
-			expected_not_id.clone(),
+			expected_not_id,
 		);
 		tx.putc_tbnt(key, not, None).await.unwrap();
 		tx.commit().await.unwrap();
@@ -378,7 +357,7 @@ mod tests {
 
 		// verify remote notifications have been consumed
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 1000).await;
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", *lq_id, 1000).await;
 		tx.commit().await.unwrap();
 		let results = results.unwrap();
 		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
@@ -413,22 +392,22 @@ mod tests {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
 		let not = Notification {
-			live_id: lq_id.clone(),
-			node_id: sql::uuid::Uuid::from(node_id.clone()),
-			notification_id: expected_not_id.clone(),
+			live_id: *lq_id,
+			node_id: sql::uuid::Uuid::from(node_id),
+			notification_id: expected_not_id,
 			action: Action::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
-			timestamp: ts.clone(),
+			timestamp: ts,
 		};
 		let key = crate::key::table::nt::Nt::new(
 			"testns",
 			"testdb",
 			"test_table",
-			lq_id.clone(),
+			*lq_id,
 			ts,
-			expected_not_id.clone(),
+			expected_not_id,
 		);
 		tx.putc_tbnt(key, not, None).await.unwrap();
 		tx.commit().await.unwrap();
@@ -448,7 +427,7 @@ mod tests {
 
 		// verify remote notifications have been consumed
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 0).await;
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", *lq_id, 0).await;
 		tx.commit().await.unwrap();
 		let results = results.unwrap();
 		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);
@@ -483,22 +462,22 @@ mod tests {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
 		let not = Notification {
-			live_id: lq_id.clone(),
-			node_id: sql::uuid::Uuid::from(node_id.clone()),
-			notification_id: expected_not_id.clone(),
+			live_id: *lq_id,
+			node_id: sql::uuid::Uuid::from(node_id),
+			notification_id: expected_not_id,
 			action: Action::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
-			timestamp: ts.clone(),
+			timestamp: ts,
 		};
 		let key = crate::key::table::nt::Nt::new(
 			"testns",
 			"testdb",
 			"test_table",
-			lq_id.clone(),
+			*lq_id,
 			ts,
-			expected_not_id.clone(),
+			expected_not_id,
 		);
 		tx.putc_tbnt(key, not, None).await.unwrap();
 		tx.commit().await.unwrap();
@@ -518,7 +497,7 @@ mod tests {
 
 		// verify remote notifications have been consumed
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id.clone(), 0).await;
+		let results = tx.scan_tbnt("testns", "testdb", "test_table", lq_id, 0).await;
 		tx.commit().await.unwrap();
 		let results = results.unwrap();
 		assert_eq!(results.len(), 0, "remote notifications have not been consumed: {:?}", results);

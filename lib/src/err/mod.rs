@@ -43,8 +43,9 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic: {0}")]
-	Unreachable(String),
+	#[error("The database encountered unreachable logic")]
+	#[deprecated(note = "Use UnreachableCause instead")]
+	Unreachable,
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -633,16 +634,8 @@ pub enum Error {
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
+	#[deprecated(note = "Use InternalCause instead")]
 	Internal(InternalCause),
-
-	/// Internal server error related to context
-	/// A classification of internal error, related directly to context
-	#[error("Internal database error due to context: {0}")]
-	InternalContextError(ContextCause),
-
-	/// Internal server error related to live query state
-	#[error("Internal live query error: {0}")]
-	InternalLiveQueryError(LiveQueryCause),
 
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
@@ -716,8 +709,48 @@ pub enum Error {
 	InvalidSignup,
 
 	/// Auth was expected to be set but was unknown
-	#[error("Auth was expected to be set but was unknown: {0}")]
-	UnknownAuth(String),
+	#[error("Auth was expected to be set but was unknown")]
+	UnknownAuth,
+
+	/// The database encountered unreachable logic
+	#[error("The database encountered unreachable logic: {0}")]
+	UnreachableCause(UnreachableCause),
+
+	/// Internal server error
+	/// This should be used extremely sporadically, since we lose the type of error as a consequence
+	/// There will be times when it is useful, such as with unusual type conversion errors
+	#[error("Internal database error: {0}")]
+	InternalCause(InternalCause),
+
+	/// Internal server error related to context
+	/// A classification of internal error, related directly to context
+	#[error("Internal database error due to context: {0}")]
+	InternalContextError(ContextCause),
+
+	/// Internal server error related to live query state
+	#[error("Internal live query error: {0}")]
+	InternalLiveQueryError(LiveQueryCause),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum UnreachableCause {
+	#[error("The node id should always be set in the options")]
+	NodeIdAlwaysSet,
+	#[error("unreachable index while getting vector in mtree internal node")]
+	UnreachableNodeIndex,
+	#[error("leaf while retrieving internal in mtree")]
+	UnexpectedLeaf,
+	#[error("The root node was different that what was expected")]
+	UnexpectedIndexRootNode,
+	// #[error("The timestamps in the key and the value do not match")]
+	// TimestampMismatch,
+	// #[error("The live query ID in the key and the value do not match")]
+	// LiveQueryIDMismatch,
+	// #[error("The notification ID in the key and the value do not match")]
+	// NotificationIDMismatch,
+	// #[error("Failed to decode a value while reading LQ")]
+	// FailedToDecodeNodeLiveQueryValue,
 }
 
 #[derive(Error, Debug)]
