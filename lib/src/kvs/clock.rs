@@ -1,11 +1,11 @@
 use crate::dbs::node::Timestamp;
 use crate::sql;
 use sql::Duration;
-use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub enum SizedClock {
 	Fake(FakeClock),
 	Inc(IncFakeClock),
@@ -24,24 +24,25 @@ impl SizedClock {
 
 /// FakeClock is a clock that is fully controlled externally.
 /// Use this clock for when you are testing timestamps.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct FakeClock {
-	now: Arc<RwLock<Timestamp>>,
+	now: Timestamp,
 }
 
+#[allow(dead_code)]
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
-			now: Arc::new(RwLock::new(now)),
+			now,
 		}
 	}
 
 	pub fn now(&self) -> Timestamp {
-		*self.now.read().unwrap()
+		self.now
 	}
 
 	pub fn set(&mut self, timestamp: Timestamp) {
-		self.now.write().unwrap().set(timestamp);
+		self.now.set(timestamp);
 	}
 }
 
@@ -55,6 +56,7 @@ pub struct IncFakeClock {
 	increment: Duration,
 }
 
+#[allow(dead_code)]
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
@@ -71,7 +73,7 @@ impl IncFakeClock {
 
 /// SystemClock is a clock that uses the system time.
 /// Use this when there are no other alternatives.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct SystemClock;
 
 impl SystemClock {
