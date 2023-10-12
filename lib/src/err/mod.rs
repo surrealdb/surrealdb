@@ -636,7 +636,7 @@ pub enum Error {
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
 	#[deprecated(note = "Use InternalCause instead")]
-	Internal(InternalCause),
+	Internal(String),
 
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
