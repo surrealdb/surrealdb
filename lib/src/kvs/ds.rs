@@ -920,7 +920,7 @@ impl Datastore {
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
-			clock: self.clock.clone(),
+			clock: self.clock,
 		})
 	}
 
