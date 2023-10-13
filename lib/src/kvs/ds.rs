@@ -113,7 +113,7 @@ pub struct Datastore {
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: SizedClock,
+	clock: Arc<RwLock<SizedClock>>,
 }
 
 /// We always want to be circulating the live query information
@@ -204,7 +204,7 @@ impl Datastore {
 	#[cfg(test)]
 	pub async fn new_full(
 		path: &str,
-		clock_override: Option<SizedClock>,
+		clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
 		Self::new_full_impl(path, clock_override).await
 	}
@@ -212,20 +212,18 @@ impl Datastore {
 	#[allow(dead_code)]
 	async fn new_full_impl(
 		path: &str,
-		clock_override: Option<SizedClock>,
+		clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
-		let default_clock: SizedClock = SizedClock::System(SystemClock::new());
+		let default_clock: Arc<RwLock<SizedClock>> =
+			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
-		let (inner, clock): (Result<Inner, Error>, SizedClock) = match path {
+		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store in {}", path);
 					Ok((v, clock))
 				}
@@ -240,10 +238,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store at {}", path);
 					Ok((v, clock))
 				}
@@ -259,10 +254,7 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -277,10 +269,7 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-speedb"))]
@@ -295,10 +284,7 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -313,10 +299,7 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -331,10 +314,7 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
-					let clock = match clock_override {
-						None => default_clock,
-						Some(c) => c,
-					};
+					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
@@ -919,7 +899,7 @@ impl Datastore {
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
-			clock: self.clock,
+			clock: self.clock.clone(),
 		})
 	}
 
