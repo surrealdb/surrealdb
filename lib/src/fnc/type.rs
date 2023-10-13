@@ -122,8 +122,9 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 			v => Err(Error::ConvertTo {
 				from: v,
 				into: "record".into(),
-			})
-		}?.into()
+			}),
+		}?
+		.into()
 	})
 }
 
