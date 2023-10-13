@@ -28,7 +28,8 @@ async fn can_scan_notifications() {
 		),
 	];
 
-	let clock_override = SizedClock::Fake(FakeClock::new(Timestamp::default()));
+	let clock_override =
+		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 
 	// Create all the data
@@ -65,7 +66,8 @@ async fn can_scan_notifications() {
 #[serial]
 async fn can_delete_notifications() {
 	let node_id = sql::uuid::Uuid::try_from("fed046f3-05a2-4dc9-8ce0-7fa92ceb7ec2").unwrap();
-	let clock_override = SizedClock::Fake(FakeClock::new(Timestamp::default()));
+	let clock_override =
+		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 	let ns = "testns";
 	let db = "testdb";
@@ -108,7 +110,8 @@ async fn can_delete_notifications() {
 #[serial]
 async fn putc_tbnt_sanity_checks_key_with_value() {
 	let node_id = sql::uuid::Uuid::try_from("5225d016-efad-40dc-8385-4340606894fc").unwrap();
-	let clock_override = SizedClock::Fake(FakeClock::new(Timestamp::default()));
+	let clock_override =
+		Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let ds = Datastore::new_full("memory", Some(clock_override)).await.unwrap();
 
 	// Test truths

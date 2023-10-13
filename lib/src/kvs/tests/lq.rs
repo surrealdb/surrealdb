@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[serial]
 async fn scan_node_lq() {
 	let node_id = Uuid::parse_str("63bb5c1a-b14e-4075-a7f8-680267fbe136").unwrap();
-	let clock = SizedClock::Fake(FakeClock::new(Timestamp::default()));
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
@@ -61,7 +61,7 @@ async fn live_creates_remote_notification_for_create() {
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
-	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -162,7 +162,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -291,7 +291,7 @@ async fn live_creates_remote_notification_for_update() {
 	};
 
 	// Init as local node, so we do not receive the notification
-	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive
@@ -401,7 +401,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
-	let clock = SizedClock::Fake(FakeClock::new(t1.clone()));
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(t1.clone()))));
 	let mut test = init(local_node, clock).await.unwrap();
 
 	// Bootstrap the remote node, so both nodes are alive

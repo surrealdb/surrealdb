@@ -47,6 +47,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub(crate) const NO_LIMIT: u32 = 0;
@@ -58,7 +59,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
-	pub(super) clock: SizedClock,
+	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1060,7 +1061,7 @@ impl Transaction {
 	pub async fn clock(&mut self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
-		self.clock.now().await
+		self.clock.write().await.now().await
 	}
 
 	// Set heartbeat

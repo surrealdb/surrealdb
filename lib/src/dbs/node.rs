@@ -77,12 +77,6 @@ impl Sub<&Duration> for &Timestamp {
 	}
 }
 
-impl Timestamp {
-	pub(crate) fn set(&mut self, ts: Timestamp) {
-		self.value = ts.value;
-	}
-}
-
 #[cfg(test)]
 mod test {
 	use crate::dbs::node::Timestamp;

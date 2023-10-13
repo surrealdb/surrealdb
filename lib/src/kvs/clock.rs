@@ -4,20 +4,24 @@ use sql::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
-#[derive(Clone, Copy)]
 #[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub enum SizedClock {
-	Fake(FakeClock),
-	Inc(IncFakeClock),
 	System(SystemClock),
+	#[cfg(test)]
+	Fake(FakeClock),
+	#[cfg(test)]
+	Inc(IncFakeClock),
 }
 
 impl SizedClock {
 	pub async fn now(&mut self) -> Timestamp {
 		match self {
-			SizedClock::Fake(c) => c.now(),
-			SizedClock::Inc(c) => c.now().await,
 			SizedClock::System(c) => c.now(),
+			#[cfg(test)]
+			SizedClock::Fake(c) => c.now().await,
+			#[cfg(test)]
+			SizedClock::Inc(c) => c.now().await,
 		}
 	}
 }
@@ -26,6 +30,7 @@ impl SizedClock {
 /// Use this clock for when you are testing timestamps.
 #[derive(Clone, Copy)]
 pub struct FakeClock {
+	// Locks necessary for Send
 	now: Timestamp,
 }
 
@@ -37,12 +42,12 @@ impl FakeClock {
 		}
 	}
 
-	pub fn now(&self) -> Timestamp {
+	pub async fn now(&self) -> Timestamp {
 		self.now
 	}
 
-	pub fn set(&mut self, timestamp: Timestamp) {
-		self.now.set(timestamp);
+	pub async fn set(&mut self, timestamp: Timestamp) {
+		self.now = timestamp;
 	}
 }
 
@@ -52,6 +57,7 @@ impl FakeClock {
 /// is accessed, and due to the nature of async - you neither have order guarantee.
 #[derive(Clone, Copy)]
 pub struct IncFakeClock {
+	// Locks necessary for Send
 	now: Timestamp,
 	increment: Duration,
 }

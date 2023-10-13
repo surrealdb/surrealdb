@@ -12,6 +12,7 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
 use test_log::test;
+use tokio::sync::RwLock;
 use uuid;
 
 #[tokio::test]
@@ -22,9 +23,9 @@ async fn expired_nodes_are_garbage_collected() {
 	let old_time = Timestamp {
 		value: 123000,
 	};
-	let mut fake_clock = FakeClock::new(old_time.clone());
-	let clock = SizedClock::Fake(fake_clock.clone());
-	let mut test = init(new_node, clock.clone()).await.unwrap();
+	let fake_clock = FakeClock::new(old_time);
+	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let mut test = init(new_node, fake_clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
 	test.db = test.db.with_node_id(sql::Uuid::from(old_node));
@@ -34,7 +35,7 @@ async fn expired_nodes_are_garbage_collected() {
 	let new_time = Timestamp {
 		value: 567000,
 	};
-	fake_clock.set(new_time.clone());
+	set_fake_clock(fake_clock.clone(), new_time).await;
 	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
 	test.db.bootstrap().await.unwrap();
 
@@ -63,9 +64,9 @@ async fn expired_nodes_get_live_queries_archived() {
 	let old_time = Timestamp {
 		value: 123000,
 	};
-	let mut fake_clock = FakeClock::new(old_time.clone());
-	let clock = SizedClock::Fake(fake_clock.clone());
-	let mut test = init(old_node, clock.clone()).await.unwrap();
+	let fake_clock = FakeClock::new(old_time);
+	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let mut test = init(old_node, fake_clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
 	test.db = test.db.with_node_id(sql::Uuid::from(old_node)).with_notifications();
@@ -111,7 +112,7 @@ async fn expired_nodes_get_live_queries_archived() {
 	let new_time = Timestamp {
 		value: 456000,
 	};
-	fake_clock.set(new_time.clone());
+	set_fake_clock(fake_clock.clone(), new_time).await;
 	test.db = test.db.with_node_id(sql::Uuid::from(new_node));
 	test.db.bootstrap().await.unwrap();
 
@@ -138,9 +139,9 @@ async fn single_live_queries_are_garbage_collected() {
 	let time = Timestamp {
 		value: 123000,
 	};
-	let fake_clock = FakeClock::new(time.clone());
-	let clock = SizedClock::Fake(fake_clock);
-	let mut test = init(node_id, clock).await.unwrap();
+	let fake_clock = FakeClock::new(time);
+	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let mut test = init(node_id, fake_clock).await.unwrap();
 	let options = Options::default()
 		.with_required(
 			node_id,
@@ -221,9 +222,9 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		value: 456_000,
 	};
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
-	let mut fake_clock = FakeClock::new(t1.clone());
-	let clock = SizedClock::Fake(fake_clock.clone());
-	let test = init(old_node_id, clock.clone()).await.unwrap();
+	let fake_clock = FakeClock::new(t1);
+	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let test = init(old_node_id, fake_clock.clone()).await.unwrap();
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
 	let database = database_owned.as_str();
@@ -274,7 +275,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let new_node_id = Uuid::parse_str("53f7355d-5be1-4a94-9803-5192b59c5244").unwrap();
 
 	// There should not be an error
-	fake_clock.set(t2.clone());
+	set_fake_clock(fake_clock.clone(), t2).await;
 	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
 	match second_node.bootstrap().await {
 		Ok(_) => {
@@ -368,4 +369,13 @@ async fn test_asymmetric_difference() {
 		count += 1;
 	}
 	assert_ne!(count, 0);
+}
+
+async fn set_fake_clock(fake_clock: Arc<RwLock<SizedClock>>, time: Timestamp) {
+	match &mut *fake_clock.write().await {
+		SizedClock::Fake(f) => f.set(time).await,
+		_ => {
+			panic!("Clock is not fake")
+		}
+	}
 }
