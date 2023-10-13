@@ -5361,6 +5361,7 @@ async fn function_type_thing() -> Result<(), Error> {
 	let sql = r#"
 		CREATE type::thing('person', 'test');
 		CREATE type::thing('person', 1434619);
+		CREATE type::thing(<string> person:john);
 		CREATE type::thing('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
 		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
