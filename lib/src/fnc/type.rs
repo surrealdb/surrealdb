@@ -114,13 +114,16 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 		})
 	} else {
 		match arg1 {
-			Value::Thing(v) => v.into(),
-			Value::Strand(v) => match Thing::try_from(v) {
-				Ok(v) => v.into(),
-				_ => Value::None,
-			},
-			_ => Value::None,
-		}
+			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
+				from: Value::Strand(v),
+				into: "record".into(),
+			}),
+			v => Err(Error::ConvertTo {
+				from: v,
+				into: "record".into(),
+			})
+		}?.into()
 	})
 }
 
