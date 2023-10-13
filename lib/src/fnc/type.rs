@@ -117,7 +117,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 			Value::Thing(v) => v.into(),
 			Value::Strand(v) => match Thing::try_from(v) {
 				Ok(v) => v.into(),
-				_ => Value::None
+				_ => Value::None,
 			},
 			_ => Value::None,
 		}
