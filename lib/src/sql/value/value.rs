@@ -2134,9 +2134,16 @@ impl Value {
 
 	/// Try to convert this value to a Record or `Thing`
 	pub(crate) fn convert_to_record(self) -> Result<Thing, Error> {
-		match self {
+		match self.clone() {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => match Thing::try_from(v) {
+				Ok(v) => Ok(v),
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "record".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
