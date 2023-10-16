@@ -20,7 +20,6 @@ use surrealml_utils::storage::surml_file::SurMlFile;
 
 use super::headers::Accept;
 
-
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -37,14 +36,13 @@ where
 }
 
 /// The body for the import endpoint.
-/// 
+///
 /// # Fields
 /// * `file` - The file containing all the information to store a model.
 #[derive(Deserialize)]
 struct Body {
 	pub file: Vec<u8>,
 }
-
 
 /// This endpoint allows the user to import the model into the database.
 async fn import(
@@ -54,7 +52,7 @@ async fn import(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// extract the bytes and file from the body
 	let body: Body = from_slice(&body.to_vec()).expect("Failed to deserialize");
-	let file = SurMlFile::from_bytes(body.file).map_err(|e| Error::Io(e))?; 
+	let file = SurMlFile::from_bytes(body.file).map_err(|e| Error::Io(e))?;
 
 	// define the key and value to be inserted
 	let id = format!("{}-{}", file.header.name.to_string(), file.header.version.to_string());
@@ -93,9 +91,8 @@ async fn import(
 	}
 }
 
-
 /// The body for the raw compute endpoint on the ML API for a model.
-/// 
+///
 /// # Fields
 /// * `id` - The id of the model to compute
 /// * `input` - The input to the model
@@ -106,7 +103,6 @@ pub struct RawComputeBody {
 	pub input: Vec<f32>,
 	pub dims: Option<[i64; 2]>,
 }
-
 
 /// This endpoint allows the user to compute the model with the given input of a raw tensor.
 async fn raw_compute(
@@ -142,8 +138,12 @@ async fn raw_compute(
 	};
 	let response = match unwrapped_result.pick(&[Part::from("data")]) {
 		Value::Bytes(unwrapped_bytes) => unwrapped_bytes,
-		// _ => return Err(Error::from("bytes not returned for the value from the database query for the model")),
-		_ => return Err(Error::Thrown("bytes not returned for the value from the database query for the model".to_string())),
+		_ => {
+			return Err(Error::Thrown(
+				"bytes not returned for the value from the database query for the model"
+					.to_string(),
+			))
+		}
 	};
 
 	let mut file = SurMlFile::from_bytes(response.to_vec()).map_err(|e| Error::from(e))?;
@@ -161,9 +161,8 @@ async fn raw_compute(
 	Ok(output::json(&output::simplify(output_tensor)))
 }
 
-
 /// The body for the buffered compute endpoint on the ML API for a model.
-/// 
+///
 /// # Fields
 /// * `id` - The id of the model to compute
 /// * `input` - The inputs for the model to compute
@@ -172,7 +171,6 @@ pub struct BufferedComputeBody {
 	pub id: String,
 	pub input: HashMap<String, f32>,
 }
-
 
 /// This endpoint allows the user to compute the model with the given input of a buffered compute.
 async fn buffered_compute(
@@ -206,7 +204,12 @@ async fn buffered_compute(
 	};
 	let response = match unwrapped_result.pick(&[Part::from("data")]) {
 		Value::Bytes(unwrapped_bytes) => unwrapped_bytes,
-		_ => return Err(Error::Thrown("bytes not returned for the value from the database query for the model".to_string())),
+		_ => {
+			return Err(Error::Thrown(
+				"bytes not returned for the value from the database query for the model"
+					.to_string(),
+			))
+		}
 	};
 
 	let mut file = SurMlFile::from_bytes(response.to_vec()).map_err(|e| Error::from(e))?;
