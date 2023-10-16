@@ -175,7 +175,6 @@ impl<'a> Document<'a> {
 									// Send the notification to the channel
 									if let Err(e) = channel.send(not.clone()).await {
 										error!("Error sending scanned notification: {}", e);
-									} else {
 									}
 								}
 							}

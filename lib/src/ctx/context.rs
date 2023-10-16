@@ -3,14 +3,13 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Session};
+use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
 use crate::sql::value::Value;
-use crate::sql::Strand;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -98,23 +97,6 @@ impl<'a> Context<'a> {
 			query_planner: parent.query_planner,
 			capabilities: parent.capabilities.clone(),
 		}
-	}
-
-	pub fn with_live_sess(mut self, session: &Session) -> Self {
-		self.add_value(SESSION_KEY, Value::None);
-		match &session.sd {
-			None => self.add_value(AUTH_KEY, Value::Null),
-			Some(s) => self.add_value(AUTH_KEY, s.clone()),
-		}
-		match &session.sc {
-			None => self.add_value(SCOPE_KEY, Value::Null),
-			Some(s) => self.add_value(SCOPE_KEY, Value::Strand(Strand::from(s.clone()))),
-		}
-		match &session.tk {
-			None => self.add_value(TOKEN_KEY, Value::Null),
-			Some(s) => self.add_value(TOKEN_KEY, s.clone()),
-		}
-		self
 	}
 
 	pub fn with_live_value(mut self, sess: Value) -> Self {

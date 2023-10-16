@@ -75,7 +75,8 @@ async fn expired_nodes_get_live_queries_archived() {
 	// Set up live query
 	let ses = Session::owner()
 		.with_ns(test.test_str("testns").as_str())
-		.with_db(test.test_str("testdb").as_str());
+		.with_db(test.test_str("testdb").as_str())
+		.with_rt(true);
 	let table = "my_table";
 	let lq = LiveStatement {
 		id: sql::Uuid(Uuid::parse_str("da60fa34-902d-4110-b810-7d435267a9f8").unwrap()),
@@ -88,7 +89,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&ses);
+	let ctx = ses.context(context::Context::background());
 	let sender = test.db.live_sender().unwrap();
 	let opt = Options::new()
 		.with_ns(ses.ns())
@@ -133,8 +134,11 @@ async fn single_live_queries_are_garbage_collected() {
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
-	let sess = Session::for_level(Level::Root, Role::Owner).with_ns(namespace).with_db(database);
-	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&sess);
+	let sess = Session::for_level(Level::Root, Role::Owner)
+		.with_ns(namespace)
+		.with_db(database)
+		.with_rt(true);
+	let ctx = sess.context(context::Context::background());
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let time = Timestamp {
 		value: 123000,
@@ -229,7 +233,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let database_owned = format!("test_db_{:?}", test.kvs);
 	let database = database_owned.as_str();
 	let sess = Session::for_level(Level::Root, Role::Owner).with_ns(namespace).with_db(database);
-	let ctx = context::Context::background().with_live_value(Value::None).with_live_sess(&sess);
+	let ctx = sess.context(context::Context::background());
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(

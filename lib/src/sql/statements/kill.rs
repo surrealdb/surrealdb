@@ -39,7 +39,7 @@ impl KillStatement {
 		opt.valid_for_db()?;
 		// Resolve live query id
 		let live_query_id = match &self.id {
-			Value::Uuid(id) => id.clone(),
+			Value::Uuid(id) => *id,
 			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
 				Value::Uuid(id) => id,
 				_ => {
@@ -70,18 +70,9 @@ impl KillStatement {
 					let key = crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
 					run.del(key).await?;
 					// Delete notifications
-					let start = crate::key::table::nt::prefix(
-						opt.ns(),
-						opt.db(),
-						tb,
-						live_query_id.clone(),
-					);
-					let end = crate::key::table::nt::suffix(
-						opt.ns(),
-						opt.db(),
-						tb,
-						live_query_id.clone(),
-					);
+					let start =
+						crate::key::table::nt::prefix(opt.ns(), opt.db(), tb, live_query_id);
+					let end = crate::key::table::nt::suffix(opt.ns(), opt.db(), tb, live_query_id);
 					run.delr(start..end, 1000).await?
 				}
 				_ => {

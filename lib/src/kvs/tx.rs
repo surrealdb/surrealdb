@@ -1335,7 +1335,7 @@ impl Transaction {
 					ns: lv.ns.to_string(),
 					db: lv.db.to_string(),
 					tb: lv.tb.to_string(),
-					lq: val.id.clone(),
+					lq: val.id,
 				});
 				// Count
 				if limit != NO_LIMIT {
@@ -1354,7 +1354,7 @@ impl Transaction {
 		lq: sql::Uuid,
 		limit: u32,
 	) -> Result<Vec<Notification>, Error> {
-		let beg = crate::key::table::nt::prefix(ns, db, tb, lq.clone());
+		let beg = crate::key::table::nt::prefix(ns, db, tb, lq);
 		let end = crate::key::table::nt::suffix(ns, db, tb, lq);
 		trace!(
 			"Scanning range from pref={}, suff={}",

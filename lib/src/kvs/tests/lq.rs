@@ -55,7 +55,7 @@ async fn live_creates_remote_notification_for_create() {
 	let table = "f3d4a40b50ba4221ab02fa406edb58cc";
 	let live_query_id = Uuid::parse_str("fddc6025-39c0-4ee4-9b4c-d51102fd0efe").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
-	let ctx = context::Context::background().with_live_sess(&ses);
+	let ctx = ses.context(context::Context::background());
 
 	// Init as local node, so we do not receive the notification
 	let t1 = Timestamp {
@@ -150,7 +150,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	let table = "6caaf95a53124920b093152048b5a06d";
 	let live_query_id = Uuid::parse_str("0bc4bfc2-4001-40ac-9dc2-6728c974cd68").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
-	let ctx = context::Context::background().with_live_sess(&ses);
+	let ctx = ses.context(context::Context::background());
 	let local_options = Options::new()
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(local_node)
@@ -285,7 +285,7 @@ async fn live_creates_remote_notification_for_update() {
 	let table = "862dc7a9-285b-4e25-988f-cf21c83127a3";
 	let live_query_id = Uuid::parse_str("6d7ccea8-5120-4cb0-9225-62e339ecd832").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
-	let ctx = context::Context::background().with_live_sess(&ses);
+	let ctx = ses.context(context::Context::background());
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
 	};
@@ -396,7 +396,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let table = "9ebc8a9a-46d7-4751-9077-ee1842684d12";
 	let live_query_id = Uuid::parse_str("1ef4da92-344c-4ce3-b9cf-7cc572956e3f").unwrap();
 	let ses = Session::owner().with_ns(namespace.as_str()).with_db(database.as_str());
-	let ctx = context::Context::background().with_live_sess(&ses);
+	let ctx = ses.context(context::Context::background());
 	// Init as local node, so we do not receive the notification
 	let t1 = Timestamp {
 		value: 0x0102030405060708u64,
