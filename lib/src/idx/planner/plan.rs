@@ -147,6 +147,11 @@ pub(super) struct Inner {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Array),
+	Contains(Value),
+	ContainsNot(Value),
+	ContainsAll(Value),
+	ContainsAny(Value),
+	ContainsNone(Value),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
@@ -183,6 +188,26 @@ impl IndexOption {
 				};
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
 				e.insert("value", v);
+			}
+			IndexOperator::Contains(v) => {
+				e.insert("operator", Value::from(Operator::Contains.to_string()));
+				e.insert("value", v.clone());
+			}
+			IndexOperator::ContainsNot(v) => {
+				e.insert("operator", Value::from(Operator::ContainsNot.to_string()));
+				e.insert("value", v.clone());
+			}
+			IndexOperator::ContainsNone(v) => {
+				e.insert("operator", Value::from(Operator::ContainsNone.to_string()));
+				e.insert("value", v.clone());
+			}
+			IndexOperator::ContainsAll(v) => {
+				e.insert("operator", Value::from(Operator::ContainsAll.to_string()));
+				e.insert("value", v.clone());
+			}
+			IndexOperator::ContainsAny(v) => {
+				e.insert("operator", Value::from(Operator::ContainsAny.to_string()));
+				e.insert("value", v.clone());
 			}
 			IndexOperator::Matches(qs, a) => {
 				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));

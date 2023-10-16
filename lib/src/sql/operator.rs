@@ -55,16 +55,16 @@ pub enum Operator {
 	MoreThan,        // >
 	MoreThanOrEqual, // >=
 	//
-	Contain,     // ∋
-	NotContain,  // ∌
-	ContainAll,  // ⊇
-	ContainAny,  // ⊃
-	ContainNone, // ⊅
-	Inside,      // ∈
-	NotInside,   // ∉
-	AllInside,   // ⊆
-	AnyInside,   // ⊂
-	NoneInside,  // ⊄
+	Contains,     // ∋
+	ContainsNot,  // ∌
+	ContainsAll,  // ⊇
+	ContainsAny,  // ⊃
+	ContainsNone, // ⊅
+	Inside,       // ∈
+	NotInside,    // ∉
+	AllInside,    // ⊆
+	AnyInside,    // ⊂
+	NoneInside,   // ⊄
 	//
 	Outside,
 	Intersects,
@@ -125,11 +125,11 @@ impl fmt::Display for Operator {
 			Self::LessThanOrEqual => f.write_str("<="),
 			Self::MoreThan => f.write_char('>'),
 			Self::MoreThanOrEqual => f.write_str(">="),
-			Self::Contain => f.write_str("CONTAINS"),
-			Self::NotContain => f.write_str("CONTAINSNOT"),
-			Self::ContainAll => f.write_str("CONTAINSALL"),
-			Self::ContainAny => f.write_str("CONTAINSANY"),
-			Self::ContainNone => f.write_str("CONTAINSNONE"),
+			Self::Contains => f.write_str("CONTAINS"),
+			Self::ContainsNot => f.write_str("CONTAINSNOT"),
+			Self::ContainsAll => f.write_str("CONTAINSALL"),
+			Self::ContainsAny => f.write_str("CONTAINSANY"),
+			Self::ContainsNone => f.write_str("CONTAINSNONE"),
 			Self::Inside => f.write_str("INSIDE"),
 			Self::NotInside => f.write_str("NOTINSIDE"),
 			Self::AllInside => f.write_str("ALLINSIDE"),
@@ -215,13 +215,13 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Div, char('÷')),
 		)),
 		alt((
-			value(Operator::Contain, char('∋')),
-			value(Operator::NotContain, char('∌')),
+			value(Operator::Contains, char('∋')),
+			value(Operator::ContainsNot, char('∌')),
 			value(Operator::Inside, char('∈')),
 			value(Operator::NotInside, char('∉')),
-			value(Operator::ContainAll, char('⊇')),
-			value(Operator::ContainAny, char('⊃')),
-			value(Operator::ContainNone, char('⊅')),
+			value(Operator::ContainsAll, char('⊇')),
+			value(Operator::ContainsAny, char('⊃')),
+			value(Operator::ContainsNone, char('⊅')),
 			value(Operator::AllInside, char('⊆')),
 			value(Operator::AnyInside, char('⊂')),
 			value(Operator::NoneInside, char('⊄')),
@@ -241,11 +241,11 @@ pub fn binary_phrases(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Equal, tag_no_case("IS")),
 		)),
 		alt((
-			value(Operator::ContainAll, tag_no_case("CONTAINSALL")),
-			value(Operator::ContainAny, tag_no_case("CONTAINSANY")),
-			value(Operator::ContainNone, tag_no_case("CONTAINSNONE")),
-			value(Operator::NotContain, tag_no_case("CONTAINSNOT")),
-			value(Operator::Contain, tag_no_case("CONTAINS")),
+			value(Operator::ContainsAll, tag_no_case("CONTAINSALL")),
+			value(Operator::ContainsAny, tag_no_case("CONTAINSANY")),
+			value(Operator::ContainsNone, tag_no_case("CONTAINSNONE")),
+			value(Operator::ContainsNot, tag_no_case("CONTAINSNOT")),
+			value(Operator::Contains, tag_no_case("CONTAINS")),
 			value(Operator::AllInside, tag_no_case("ALLINSIDE")),
 			value(Operator::AnyInside, tag_no_case("ANYINSIDE")),
 			value(Operator::NoneInside, tag_no_case("NONEINSIDE")),

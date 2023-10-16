@@ -222,6 +222,7 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_scalar() {
 			match op {
 				Operator::Equal => Some(IndexOperator::Equality(Array::from(v.clone()))),
+				Operator::Contains => Some(IndexOperator::Contains(v.clone())),
 				Operator::LessThan
 				| Operator::LessThanOrEqual
 				| Operator::MoreThan
