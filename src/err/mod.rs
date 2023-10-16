@@ -57,6 +57,10 @@ pub enum Error {
 
 	#[error("There was an error with the node agent")]
 	NodeAgent,
+
+	/// A custom error has been thrown
+	#[error("An error occurred: {0}")]
+	Thrown(String),
 }
 
 impl From<Error> for String {

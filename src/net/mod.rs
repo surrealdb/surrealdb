@@ -6,6 +6,7 @@ mod health;
 mod import;
 mod input;
 mod key;
+mod ml;
 mod output;
 mod params;
 mod rpc;
@@ -16,7 +17,6 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
-mod ml;
 
 use axum::response::Redirect;
 use axum::routing::get;
@@ -129,6 +129,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router())
+		.merge(ml::router())
 		.layer(service);
 
 	// Setup the graceful shutdown
