@@ -102,17 +102,17 @@ impl<'a> Context<'a> {
 
 	pub fn with_live_sess(mut self, session: &Session) -> Self {
 		self.add_value(SESSION_KEY, Value::None);
-		match session.sd.clone() {
+		match &session.sd {
 			None => self.add_value(AUTH_KEY, Value::Null),
-			Some(s) => self.add_value(AUTH_KEY, s),
+			Some(s) => self.add_value(AUTH_KEY, s.clone()),
 		}
-		match session.sc.clone() {
+		match &session.sc {
 			None => self.add_value(SCOPE_KEY, Value::Null),
-			Some(s) => self.add_value(SCOPE_KEY, Value::Strand(Strand::from(s))),
+			Some(s) => self.add_value(SCOPE_KEY, Value::Strand(Strand::from(s.clone()))),
 		}
-		match session.clone().tk {
+		match &session.tk {
 			None => self.add_value(TOKEN_KEY, Value::Null),
-			Some(s) => self.add_value(TOKEN_KEY, s),
+			Some(s) => self.add_value(TOKEN_KEY, s.clone()),
 		}
 		self
 	}

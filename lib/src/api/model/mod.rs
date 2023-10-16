@@ -1,7 +1,7 @@
 //! The model module describes public driver and protocol API structures
 //! The reason is that we have internal representations of these objects that contain excessive
 //! information that we do not want to expose or would like to version separately
-use crate::sql::{Object, Uuid, Value};
+use crate::sql::{Uuid, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
@@ -33,13 +33,11 @@ pub struct Notification {
 
 impl Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let obj: Object = map! {
-			"id".to_string() => self.id.to_string().into(),
-			"action".to_string() => self.action.to_string().into(),
-			"result".to_string() => self.result.clone(),
-		}
-		.into();
-		write!(f, "{}", obj)
+		write!(
+			f,
+			"Notification {{id: {}, action: {}, result: {}}}",
+			self.id, self.action, self.result
+		)
 	}
 }
 

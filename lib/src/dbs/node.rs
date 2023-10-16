@@ -4,6 +4,7 @@ use crate::sql::Duration;
 use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::ops::{Add, Sub};
 
 // NOTE: This is not a statement, but as per layering, keeping it here till we
@@ -32,6 +33,12 @@ impl From<u64> for Timestamp {
 		Timestamp {
 			value: ts,
 		}
+	}
+}
+
+impl Display for Timestamp {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Timestamp {{value: {}}}", self.value)
 	}
 }
 

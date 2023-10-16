@@ -1,5 +1,5 @@
 use crate::dbs::node::Timestamp;
-use crate::sql::{Object, Uuid, Value};
+use crate::sql::{Uuid, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -43,12 +43,10 @@ pub struct Notification {
 
 impl Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let obj: Object = map! {
-			"id".to_string() => self.live_id.to_string().into(),
-			"action".to_string() => self.action.to_string().into(),
-			"result".to_string() => self.result.clone(),
-		}
-		.into();
-		write!(f, "{}", obj)
+		write!(
+			f,
+			"Notification {{live_id: {}, node_id: {}, notification_id: {}, action: {}, result: {}, timestamp: {}}}",
+			self.live_id, self.node_id, self.notification_id, self.action, self.result, self.timestamp
+		)
 	}
 }
