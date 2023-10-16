@@ -111,7 +111,6 @@ mod cf;
 mod ctx;
 mod doc;
 mod exe;
-mod fnc;
 mod vs;
 
 pub mod sql;
@@ -124,6 +123,8 @@ pub mod dbs;
 pub mod env;
 #[doc(hidden)]
 pub mod err;
+#[doc(hidden)]
+pub mod fnc;
 #[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]
