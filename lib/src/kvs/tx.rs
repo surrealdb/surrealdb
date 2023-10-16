@@ -798,11 +798,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
-		println!(
-			"Getr {:?}..{:?} (limit: {limit})",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -855,11 +850,6 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
-		println!(
-			"Delr {:?}..{:?} (limit: {limit})",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -1364,15 +1354,6 @@ impl Transaction {
 		lq: sql::Uuid,
 		limit: u32,
 	) -> Result<Vec<Notification>, Error> {
-		println!(
-			"\nscan_tbnt\n\
-		ns={:?}\n\
-		db={:?}\n\
-		tb={:?}\n\
-		lq={:?}\n\
-		",
-			ns, db, tb, lq
-		);
 		let beg = crate::key::table::nt::prefix(ns, db, tb, lq.clone());
 		let end = crate::key::table::nt::suffix(ns, db, tb, lq);
 		trace!(
