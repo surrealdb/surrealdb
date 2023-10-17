@@ -147,7 +147,7 @@ pub(super) struct Inner {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Array),
-	Contains(Value),
+	Contains(Array),
 	ContainsNot(Value),
 	ContainsAll(Value),
 	ContainsAny(Value),
@@ -189,9 +189,14 @@ impl IndexOption {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
 				e.insert("value", v);
 			}
-			IndexOperator::Contains(v) => {
+			IndexOperator::Contains(a) => {
+				let v = if a.len() == 1 {
+					a[0].clone()
+				} else {
+					Value::Array(a.clone())
+				};
 				e.insert("operator", Value::from(Operator::Contains.to_string()));
-				e.insert("value", v.clone());
+				e.insert("value", v);
 			}
 			IndexOperator::ContainsNot(v) => {
 				e.insert("operator", Value::from(Operator::ContainsNot.to_string()));

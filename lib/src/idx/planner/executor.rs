@@ -225,7 +225,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperator::Equality(array) => {
+			IndexOperator::Equality(array) | IndexOperator::Contains(array) => {
 				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, array)?)))
 			}
 			IndexOperator::RangePart(_, _) => Ok(None), // TODO
