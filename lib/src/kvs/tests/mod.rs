@@ -1,4 +1,5 @@
 use crate::kvs::clock::SizedClock;
+use serial_test::serial;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -26,7 +27,6 @@ mod mem {
 	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
 	use crate::kvs::TransactionType;
-	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		(
@@ -70,7 +70,6 @@ mod rocksdb {
 	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
 	use crate::kvs::TransactionType;
-	use serial_test::serial;
 	use temp_dir::TempDir;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
@@ -115,7 +114,6 @@ mod speedb {
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use serial_test::serial;
 	use temp_dir::TempDir;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
@@ -160,7 +158,7 @@ mod tikv {
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use serial_test::serial;
+	use std::time::Duration;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		let ds = Datastore::new_full("tikv:127.0.0.1:2379", Some(clock_override))
@@ -168,9 +166,16 @@ mod tikv {
 			.unwrap()
 			.with_node_id(node_id);
 		// Clear any previous test entries
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.delp(vec![], u32::MAX).await.unwrap();
-		tx.commit().await.unwrap();
+		for _ in 0..10 {
+			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+			tx.delp(vec![], u32::MAX).await.unwrap();
+			if let Err(e) = tx.commit().await {
+				error!("Failed cluster wipe: {}", e);
+				tokio::time::sleep(Duration::from_millis(100)).await;
+			} else {
+				break;
+			}
+		}
 		// Return the datastore
 		(ds, Kvs::Tikv)
 	}
@@ -202,11 +207,10 @@ mod tikv {
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
-
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use serial_test::serial;
+	use std::time::Duration;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		let ds = Datastore::new_full("fdb:/etc/foundationdb/fdb.cluster", Some(clock_override))
@@ -214,9 +218,17 @@ mod fdb {
 			.unwrap()
 			.with_node_id(node_id);
 		// Clear any previous test entries
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.delp(vec![], u32::MAX).await.unwrap();
-		tx.commit().await.unwrap();
+		for _ in 0..10 {
+			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+			tx.delp(vec![], u32::MAX).await.unwrap();
+			tx.commit().await.unwrap();
+			if let Err(e) = tx.commit().await {
+				error!("Failed cluster wipe: {}", e);
+				tokio::time::sleep(Duration::from_millis(100)).await;
+			} else {
+				break;
+			}
+		}
 		// Return the datastore
 		(ds, Kvs::Fdb)
 	}
