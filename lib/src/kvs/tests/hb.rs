@@ -1,7 +1,7 @@
 #[tokio::test]
 #[serial]
 async fn write_scan_hb() {
-	let nd = uuid::Uuid::parse_str("e80540d4-2869-4bf3-ae27-790a538c53f3").unwrap();
+	let nd = Uuid::from_str("e80540d4-2869-4bf3-ae27-790a538c53f3").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(nd, clock).await.unwrap();
 
@@ -14,8 +14,12 @@ async fn write_scan_hb() {
 	let t3 = Timestamp {
 		value: t2.value + 1,
 	};
-	tx.set_hb(t1, Uuid::parse_str("6d1210a0-9224-4813-8090-ded787d51894").unwrap()).await.unwrap();
-	tx.set_hb(t2, Uuid::parse_str("b80ff454-c3e7-46a9-a0b0-7b40e9a62626").unwrap()).await.unwrap();
+	tx.set_hb(t1, uuid::Uuid::parse_str("6d1210a0-9224-4813-8090-ded787d51894").unwrap())
+		.await
+		.unwrap();
+	tx.set_hb(t2, uuid::Uuid::parse_str("b80ff454-c3e7-46a9-a0b0-7b40e9a62626").unwrap())
+		.await
+		.unwrap();
 	tx.commit().await.unwrap();
 
 	// Scan limit 1000

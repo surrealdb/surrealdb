@@ -2,7 +2,7 @@
 #[serial]
 async fn snapshot() {
 	// Create a new datastore
-	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
+	let node_id = Uuid::from_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Insert an initial key

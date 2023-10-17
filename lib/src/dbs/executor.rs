@@ -18,7 +18,6 @@ use crate::sql::Base;
 use channel::Receiver;
 use futures::lock::Mutex;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::instrument;
 use trice::Instant;
 
@@ -181,7 +180,7 @@ impl<'a> Executor<'a> {
 		// Create a notification channel that buffers notifications until transaction is committed
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
-		let mut opt = opt.new_with_sender(Arc::new(RwLock::new(send)));
+		let mut opt = opt.new_with_sender(send);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses

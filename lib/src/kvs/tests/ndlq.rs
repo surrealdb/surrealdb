@@ -3,7 +3,7 @@ use crate::kvs::{LqValue, NO_LIMIT};
 #[tokio::test]
 #[serial]
 async fn write_scan_ndlq() {
-	let nd = uuid::Uuid::parse_str("7a17446f-721f-4855-8fc7-81086752ca44").unwrap();
+	let nd = Uuid::from_str("7a17446f-721f-4855-8fc7-81086752ca44").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(nd, clock).await.unwrap();
 
@@ -12,9 +12,8 @@ async fn write_scan_ndlq() {
 	let ns = "namespace";
 	let db = "database";
 	let tb = "table";
-	let lq =
-		sql::Uuid::from(uuid::Uuid::parse_str("4c3dca4b-ec08-4e3e-b23a-6b03b5cdc3fc").unwrap());
-	tx.putc_ndlq(nd, lq.clone().0, ns, db, tb, None).await.unwrap();
+	let lq = Uuid::from_str("4c3dca4b-ec08-4e3e-b23a-6b03b5cdc3fc").unwrap();
+	tx.putc_ndlq(*nd, *lq, ns, db, tb, None).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Verify scan
@@ -25,7 +24,7 @@ async fn write_scan_ndlq() {
 	assert_eq!(
 		res_lim,
 		vec![LqValue {
-			nd: sql::Uuid::from(nd),
+			nd,
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),

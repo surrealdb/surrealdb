@@ -1,13 +1,12 @@
 use super::capabilities::Capabilities;
-use crate::cnf;
-use crate::dbs::Notification;
+use crate::dbs::{Notification, Session};
 use crate::err::Error;
 use crate::err::UnreachableCause::NodeIdAlwaysSet;
 use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
+use crate::{cnf, sql};
 use channel::Sender;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
@@ -53,7 +52,7 @@ pub struct Options {
 	/// The channel over which we send notifications
 	/// Must be set alongside live, and preferably populated via datastore notifications channel
 	/// TODO create ticket to sort this
-	pub sender: Option<Arc<RwLock<Sender<Notification>>>>,
+	pub sender: OnceLock<Sender<Notification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
 }
@@ -83,10 +82,26 @@ impl Options {
 			futures: false,
 			projections: false,
 			auth_enabled: true,
-			sender: None,
+			sender: OnceLock::new(),
 			auth: Arc::new(Auth::default()),
 			capabilities: Arc::new(Capabilities::default()),
 		}
+	}
+
+	pub fn new_from_sess(
+		sess: &Session,
+		node_id: &sql::uuid::Uuid,
+		strict: bool,
+		auth_enabled: bool,
+	) -> Options {
+		Options::default()
+			.with_id(node_id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(strict)
+			.with_auth_enabled(auth_enabled)
 	}
 
 	// --------------------------------------------------
@@ -368,13 +383,15 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Arc<RwLock<Sender<Notification>>>) -> Self {
+	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+		let once_lock = OnceLock::new();
+		once_lock.set(sender).unwrap();
 		Self {
 			auth: self.auth.clone(),
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
-			sender: Some(sender),
+			sender: once_lock,
 			live: true,
 			..*self
 		}

@@ -1,7 +1,7 @@
 #[tokio::test]
 #[serial]
 async fn write_scan_tblq() {
-	let node_id = uuid::Uuid::parse_str("0bee25e0-34d7-448c-abc0-48cdf3db3a53").unwrap();
+	let node_id = Uuid::from_str("0bee25e0-34d7-448c-abc0-48cdf3db3a53").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(node_id, clock).await.unwrap();
 
@@ -14,7 +14,7 @@ async fn write_scan_tblq() {
 		sql::Uuid::from(uuid::Uuid::parse_str("b5aab54e-d1ef-4a14-b537-9206dcde2209").unwrap());
 	let live_stm = LiveStatement {
 		id: live_id.clone(),
-		node: sql::Uuid::from(node_id),
+		node: node_id,
 		expr: Default::default(),
 		what: Default::default(),
 		cond: None,

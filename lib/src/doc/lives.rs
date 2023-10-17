@@ -26,9 +26,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
-		if let Some(chn) = &opt.sender {
-			// Clone the sending channel
-			let chn = chn.clone();
+		if let Some(chn) = &opt.sender.get() {
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
 				// Create a new statement
@@ -130,7 +128,7 @@ impl<'a> Document<'a> {
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
 									// Send the notification
-									if let Err(e) = chn.write().await.send(not).await {
+									if let Err(e) = chn.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
 								}
@@ -139,7 +137,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.write().await.send(notification).await?;
+						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
@@ -159,7 +157,6 @@ impl<'a> Document<'a> {
 						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
-								let channel = chn.write().await;
 								for not in &nots {
 									// Consume the notification entry
 									let key = crate::key::table::nt::Nt::new(
@@ -173,7 +170,7 @@ impl<'a> Document<'a> {
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
 									// Send the notification to the channel
-									if let Err(e) = channel.send(not.clone()).await {
+									if let Err(e) = chn.send(not.clone()).await {
 										error!("Error sending scanned notification: {}", e);
 									}
 								}
@@ -182,7 +179,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.write().await.send(notification).await?;
+						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
@@ -215,7 +212,7 @@ impl<'a> Document<'a> {
 									let key_enc = key.encode()?;
 									tx.del(key_enc).await?;
 									// Send the consumed notification
-									if let Err(e) = chn.write().await.send(not).await {
+									if let Err(e) = chn.send(not).await {
 										error!("Error sending scanned notification: {}", e);
 									}
 								}
@@ -224,7 +221,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.write().await.send(notification).await?;
+						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
 						tx.putc_tbnt(key, notification, None).await?;
