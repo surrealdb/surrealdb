@@ -18,6 +18,9 @@ pub(crate) enum Kvs {
 
 type ClockType = Arc<RwLock<SizedClock>>;
 
+const DIST_RETRIES: u32 = 100;
+const DIST_SLEEP_MS: u64 = 100;
+
 #[cfg(feature = "kv-mem")]
 mod mem {
 
@@ -157,7 +160,7 @@ mod speedb {
 #[cfg(feature = "kv-tikv")]
 mod tikv {
 
-	use crate::kvs::tests::{ClockType, Kvs};
+	use crate::kvs::tests::{ClockType, Kvs, DIST_RETRIES, DIST_SLEEP_MS};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use serial_test::serial;
@@ -170,13 +173,13 @@ mod tikv {
 			.with_node_id(node_id);
 		// Clear any previous test entries
 		let mut tx_err: Option<Error> = None;
-		for _ in 0..10 {
+		for _ in 0..DIST_RETRIES {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			tx.delp(vec![], u32::MAX).await.unwrap();
 			if let Err(e) = tx.commit().await {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
-				tokio::time::sleep(Duration::from_millis(100)).await;
+				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
 			} else {
 				tx_err = None;
 				break;
@@ -216,7 +219,7 @@ mod tikv {
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
-	use crate::kvs::tests::{ClockType, Kvs};
+	use crate::kvs::tests::{ClockType, Kvs, DIST_RETRIES, DIST_SLEEP_MS};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use serial_test::serial;
@@ -229,14 +232,14 @@ mod fdb {
 			.with_node_id(node_id);
 		// Clear any previous test entries
 		let mut tx_err: Option<Error> = None;
-		for _ in 0..10 {
+		for _ in 0..DIST_RETRIES {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			tx.delp(vec![], u32::MAX).await.unwrap();
 			tx.commit().await.unwrap();
 			if let Err(e) = tx.commit().await {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
-				tokio::time::sleep(Duration::from_millis(100)).await;
+				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
 			} else {
 				tx_err = None;
 				break;
