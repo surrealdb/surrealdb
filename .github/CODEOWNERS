@@ -9,49 +9,49 @@
 # Configuration for GitHub
 /.github/ @tobiemh @sgirones
 
-./lib/tests/ @surrealdb/API
+./lib/tests/ @surrealdb/api
 
-./lib/examples @surrealdb/API
+./lib/examples @surrealdb/api
 
-./lib/benches @surrealdb/API
+./lib/benches @surrealdb/api
 
 # Code for fuzzing configuration
-./lib/fuzz @surrealdb/Monitoring
+./lib/fuzz @surrealdb/monitoring
 
 # All lib/src paths go here
-./lib/src/vs @surrealdb/CDC
-./lib/src/idx @surrealdb/Indexing
-./lib/src/kvs @surrealdb/API
-./lib/src/dbs @surrealdb/API
-./lib/src/err @surrealdb/API
-./lib/src/cf @surrealdb/CDC
-./lib/src/key @surrealdb/API
+./lib/src/vs @surrealdb/cdc
+./lib/src/idx @surrealdb/indexing
+./lib/src/kvs @surrealdb/api
+./lib/src/dbs @surrealdb/api
+./lib/src/err @surrealdb/api
+./lib/src/cf @surrealdb/cdc
+./lib/src/key @surrealdb/api
 ./lib/src/env @rushmorem
-./lib/src/cnf @surrealdb/API
+./lib/src/cnf @surrealdb/api
 ./lib/src/mac @rushmorem
-./lib/src/iam @surrealdb/Monitoring
-./lib/src/idg @surrealdb/API
-./lib/src/api @surrealdb/API
-./lib/src/doc @surrealdb/API
-./lib/src/fnc @surrealdb/SQL
-./lib/src/ctx @surrealdb/API
-./lib/src/exe @usrrealdb/API
-./lib/src/sql @surrealdb/API
-./lib/src/* @surrealdb/API
+./lib/src/iam @surrealdb/monitoring
+./lib/src/idg @surrealdb/api
+./lib/src/api @surrealdb/api
+./lib/src/doc @surrealdb/api
+./lib/src/fnc @surrealdb/sql
+./lib/src/ctx @surrealdb/api
+./lib/src/exe @usrrealdb/api
+./lib/src/sql @surrealdb/api
+./lib/src/* @surrealdb/api
 
-./dev @surrealdb/Monitoring
-./doc @surrealdb/API
+./dev @surrealdb/monitoring
+./doc @surrealdb/api
 ./pkg @sgirones @rushmorem
 
 # ./src/* paths
-./src/net @surrealdb/API
-./src/dbs @surrealdb/CLI
-./src/err @surrealdb/CLI
-./src/cli @surrealdb/CLI
-./src/env @sureraldb/CLI
-./src/cnf @surrealdb/CLI
-./src/mac @surrealdb/CLI
-./src/telemetry @surrealdb/Monitoring
-./src/node @surrealdb/CLI
-./src/rpc @surrealdb/API
-./src/* @surrealdb/CLI
+./src/net @surrealdb/api
+./src/dbs @surrealdb/cli
+./src/err @surrealdb/cli
+./src/cli @surrealdb/cli
+./src/env @sureraldb/cli
+./src/cnf @surrealdb/cli
+./src/mac @surrealdb/cli
+./src/telemetry @surrealdb/monitoring
+./src/node @surrealdb/cli
+./src/rpc @surrealdb/api
+./src/* @surrealdb/cli
