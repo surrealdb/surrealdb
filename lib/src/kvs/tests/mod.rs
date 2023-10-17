@@ -18,7 +18,9 @@ pub(crate) enum Kvs {
 
 type ClockType = Arc<RwLock<SizedClock>>;
 
+#[cfg(feature = "kv-tikv,kv-fdb")]
 const DIST_RETRIES: u32 = 100;
+#[cfg(feature = "kv-tikv,kv-fdb")]
 const DIST_SLEEP_MS: u64 = 100;
 
 #[cfg(feature = "kv-mem")]
