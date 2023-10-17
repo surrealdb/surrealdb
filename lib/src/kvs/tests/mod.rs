@@ -166,15 +166,21 @@ mod tikv {
 			.unwrap()
 			.with_node_id(node_id);
 		// Clear any previous test entries
+		let mut tx_err: Option<Error> = None;
 		for _ in 0..10 {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			tx.delp(vec![], u32::MAX).await.unwrap();
 			if let Err(e) = tx.commit().await {
 				error!("Failed cluster wipe: {}", e);
+				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(100)).await;
 			} else {
+				tx_err = None;
 				break;
 			}
+		}
+		if let Some(e) = tx_err {
+			panic!("Failed cluster wipe: {}", e);
 		}
 		// Return the datastore
 		(ds, Kvs::Tikv)
@@ -218,16 +224,22 @@ mod fdb {
 			.unwrap()
 			.with_node_id(node_id);
 		// Clear any previous test entries
+		let mut tx_err: Option<Error> = None;
 		for _ in 0..10 {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			tx.delp(vec![], u32::MAX).await.unwrap();
 			tx.commit().await.unwrap();
 			if let Err(e) = tx.commit().await {
 				error!("Failed cluster wipe: {}", e);
+				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(100)).await;
 			} else {
+				tx_err = None;
 				break;
 			}
+		}
+		if let Some(e) = tx_err {
+			panic!("Failed cluster wipe: {}", e);
 		}
 		// Return the datastore
 		(ds, Kvs::Fdb)
