@@ -1,5 +1,4 @@
 use crate::kvs::clock::SizedClock;
-use serial_test::serial;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -27,6 +26,7 @@ mod mem {
 	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
 	use crate::kvs::TransactionType;
+	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		(
@@ -70,6 +70,7 @@ mod rocksdb {
 	use crate::kvs::LockType;
 	use crate::kvs::Transaction;
 	use crate::kvs::TransactionType;
+	use serial_test::serial;
 	use temp_dir::TempDir;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
@@ -114,6 +115,7 @@ mod speedb {
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
+	use serial_test::serial;
 	use temp_dir::TempDir;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
@@ -158,6 +160,7 @@ mod tikv {
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
+	use serial_test::serial;
 	use std::time::Duration;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
@@ -216,6 +219,7 @@ mod fdb {
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
+	use serial_test::serial;
 	use std::time::Duration;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
