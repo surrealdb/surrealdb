@@ -154,3 +154,72 @@ impl fmt::Display for Snippet {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod test {
+	use crate::sql::error::{Location, Truncation};
+
+	use super::Snippet;
+
+	#[test]
+	fn truncate_whitespace() {
+		let source = "\n\n\n\t      $     \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::None);
+		assert_eq!(snippet.offset, 0);
+		assert_eq!(snippet.source.as_str(), "$");
+	}
+
+	#[test]
+	fn truncate_start() {
+		let source = "     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $     \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::Start);
+		assert_eq!(snippet.offset, 10);
+		assert_eq!(snippet.source.as_str(), "aaaaaaaaa $");
+	}
+
+	#[test]
+	fn truncate_end() {
+		let source = "\n\n  a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::End);
+		assert_eq!(snippet.offset, 2);
+		assert_eq!(
+			snippet.source.as_str(),
+			"a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		);
+	}
+
+	#[test]
+	fn truncate_both() {
+		let source = "\n\n\n\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::Both);
+		assert_eq!(snippet.offset, 10);
+		assert_eq!(
+			snippet.source.as_str(),
+			"aaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		);
+	}
+}
