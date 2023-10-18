@@ -102,7 +102,12 @@ pub(crate) fn router(
 			_ => None,
 		};
 
-		let kvs = match Datastore::new(&address.path).await {
+		let endpoint = match address.url.scheme() {
+			"tikv" => address.url.as_str(),
+			_ => &address.path,
+		};
+
+		let kvs = match Datastore::new(endpoint).await {
 			Ok(kvs) => {
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
