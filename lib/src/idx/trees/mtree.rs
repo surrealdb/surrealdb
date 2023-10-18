@@ -25,13 +25,14 @@ use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Array, Number, Object, Thing, Value};
 
+/// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
 pub(crate) type Vector = Vec<Number>;
 
-type MTreeNodeStore = TreeNodeStore<MTreeNode>;
-
-type InternalMap = BTreeMap<Arc<Vector>, RoutingProperties>;
-
-type LeafMap = BTreeMap<Arc<Vector>, ObjectProperties>;
+/// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
+/// So the requirement is multiple ownership but not thread safety.
+/// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
+/// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
+type SharedVector = Arc<Vector>;
 
 pub(crate) struct MTreeIndex {
 	state_key: Key,
@@ -281,7 +282,7 @@ impl MTree {
 enum InsertionResult {
 	DocAdded,
 	CoveringRadius(f64),
-	PromotedEntries(Arc<Vector>, RoutingProperties, Arc<Vector>, RoutingProperties),
+	PromotedEntries(SharedVector, RoutingProperties, SharedVector, RoutingProperties),
 }
 
 enum DeletionResult {
@@ -346,9 +347,9 @@ impl MTree {
 	fn create_new_internal_root(
 		&mut self,
 		store: &mut MTreeNodeStore,
-		o1: Arc<Vector>,
+		o1: SharedVector,
 		p1: RoutingProperties,
-		o2: Arc<Vector>,
+		o2: SharedVector,
 		p2: RoutingProperties,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -374,7 +375,7 @@ impl MTree {
 		&self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		object: Arc<Vector>,
+		object: SharedVector,
 		id: DocId,
 	) -> Result<bool, Error> {
 		let mut queue = BinaryHeap::new();
@@ -413,7 +414,7 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<Arc<Vector>>,
-		object: Arc<Vector>,
+		object: SharedVector,
 		id: DocId,
 	) -> Result<InsertionResult, Error> {
 		#[cfg(debug_assertions)]
@@ -449,7 +450,7 @@ impl MTree {
 		node_key: Key,
 		mut node: InternalNode,
 		parent_center: &Option<Arc<Vector>>,
-		object: Arc<Vector>,
+		object: SharedVector,
 		id: DocId,
 	) -> Result<InsertionResult, Error> {
 		// Choose `best` substree entry ObestSubstree from N;
@@ -534,7 +535,7 @@ impl MTree {
 		&self,
 		node: &InternalNode,
 		object: &Vector,
-	) -> Result<(Arc<Vector>, RoutingProperties), Error> {
+	) -> Result<(SharedVector, RoutingProperties), Error> {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
@@ -561,7 +562,7 @@ impl MTree {
 		node_key: Key,
 		mut node: LeafNode,
 		parent_center: &Option<Arc<Vector>>,
-		object: Arc<Vector>,
+		object: SharedVector,
 		id: DocId,
 	) -> Result<InsertionResult, Error> {
 		match node.entry(object) {
@@ -610,7 +611,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: N,
-	) -> Result<(Arc<Vector>, RoutingProperties, Arc<Vector>, RoutingProperties), Error>
+	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties), Error>
 	where
 		N: NodeVectors + Debug,
 	{
@@ -657,8 +658,8 @@ impl MTree {
 	// Compute the distance cache, and return the most distant objects
 	fn compute_distances_and_promoted_objects(
 		&self,
-		objects: &[Arc<Vector>],
-	) -> Result<(DistanceCache, Arc<Vector>, Arc<Vector>), Error> {
+		objects: &[SharedVector],
+	) -> Result<(DistanceCache, SharedVector, SharedVector), Error> {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
@@ -765,7 +766,7 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<Arc<Vector>>,
-		object: Arc<Vector>,
+		object: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -814,7 +815,7 @@ impl MTree {
 		node_key: Key,
 		mut n_node: InternalNode,
 		parent_center: &Option<Arc<Vector>>,
-		od: Arc<Vector>,
+		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -928,7 +929,7 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		parent_center: &Option<Arc<Vector>>,
 		n_node: &mut InternalNode,
-		on_obj: Arc<Vector>,
+		on_obj: SharedVector,
 		p: StoredNode<MTreeNode>,
 		p_updated: bool,
 	) -> Result<bool, Error> {
@@ -980,9 +981,9 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeNodeStore,
 		n_node: &mut InternalNode,
-		on_obj: Arc<Vector>,
+		on_obj: SharedVector,
 		p: StoredNode<MTreeNode>,
-		onn_obj: Arc<Vector>,
+		onn_obj: SharedVector,
 		mut onn_entry: RoutingProperties,
 		mut onn_child: StoredNode<MTreeNode>,
 	) -> Result<(), Error> {
@@ -1046,8 +1047,8 @@ impl MTree {
 		store: &mut MTreeNodeStore,
 		parent_center: &Option<Arc<Vector>>,
 		n_node: &mut InternalNode,
-		on_obj: Arc<Vector>,
-		onn_obj: Arc<Vector>,
+		on_obj: SharedVector,
+		onn_obj: SharedVector,
 		mut p: StoredNode<MTreeNode>,
 		onn_child: StoredNode<MTreeNode>,
 	) -> Result<(), Error> {
@@ -1084,7 +1085,7 @@ impl MTree {
 		node_key: Key,
 		mut leaf_node: LeafNode,
 		parent_center: &Option<Arc<Vector>>,
-		od: Arc<Vector>,
+		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -1137,7 +1138,7 @@ impl MTree {
 	}
 }
 
-struct DistanceCache(HashMap<(Arc<Vector>, Arc<Vector>), f64>);
+struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
 
 #[derive(PartialEq)]
 struct PriorityNode(f64, NodeId);
@@ -1190,7 +1191,19 @@ impl Ord for PriorityResult {
 	}
 }
 
+type MTreeNodeStore = TreeNodeStore<MTreeNode>;
+
+type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
+
+type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
+
 #[derive(Debug)]
+/// A node in this tree structure holds entries.
+/// Each entry is a tuple consisting of an object and its associated properties.
+/// It's essential to note that the properties vary between a LeafNode and an InternalNode.
+/// Both LeafNodes and InternalNodes are implemented as a map.
+/// In this map, the key is an object, and the values correspond to its properties.
+/// In essence, an entry can be visualized as a tuple of the form (object, properties).
 enum MTreeNode {
 	Internal(InternalNode),
 	Leaf(LeafNode),
@@ -1259,9 +1272,9 @@ trait NodeVectors: Sized {
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: Arc<Vector>,
+		p: SharedVector,
 		a: Vec<Arc<Vector>>,
-	) -> Result<(Self, f64, Arc<Vector>), Error>;
+	) -> Result<(Self, f64, SharedVector), Error>;
 
 	fn into_mtree_node(self) -> MTreeNode;
 }
@@ -1278,9 +1291,9 @@ impl NodeVectors for LeafNode {
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: Arc<Vector>,
+		p: SharedVector,
 		a: Vec<Arc<Vector>>,
-	) -> Result<(Self, f64, Arc<Vector>), Error> {
+	) -> Result<(Self, f64, SharedVector), Error> {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
@@ -1312,9 +1325,9 @@ impl NodeVectors for InternalNode {
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: Arc<Vector>,
+		p: SharedVector,
 		a: Vec<Arc<Vector>>,
-	) -> Result<(Self, f64, Arc<Vector>), Error> {
+	) -> Result<(Self, f64, SharedVector), Error> {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
@@ -1344,12 +1357,12 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: BTreeMap<Arc<Vector>, ObjectProperties> =
+				let objects: BTreeMap<SharedVector, ObjectProperties> =
 					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
-				let entries: BTreeMap<Arc<Vector>, RoutingProperties> =
+				let entries: BTreeMap<SharedVector, RoutingProperties> =
 					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
@@ -1452,7 +1465,8 @@ mod tests {
 
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{
-		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties, Vector,
+		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties, SharedVector,
+		Vector,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 	use crate::kvs::Datastore;
@@ -2037,7 +2051,7 @@ mod tests {
 	}
 
 	fn check_leaf_vec(
-		m: &BTreeMap<Arc<Vector>, ObjectProperties>,
+		m: &BTreeMap<SharedVector, ObjectProperties>,
 		obj: &Vector,
 		parent_dist: f64,
 		docs: &[DocId],
@@ -2082,7 +2096,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&BTreeMap<Arc<Vector>, ObjectProperties>),
+		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
 	{
 		check_node(tx, s, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
