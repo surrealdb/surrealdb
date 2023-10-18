@@ -48,7 +48,7 @@
 ./src/dbs @surrealdb/cli
 ./src/err @surrealdb/cli
 ./src/cli @surrealdb/cli
-./src/env @sureraldb/cli
+./src/env @surrealdb/cli
 ./src/cnf @surrealdb/cli
 ./src/mac @surrealdb/cli
 ./src/telemetry @surrealdb/monitoring
