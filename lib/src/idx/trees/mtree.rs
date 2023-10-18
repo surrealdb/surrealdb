@@ -12,31 +12,22 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::err::Error;
-use crate::fnc::util::math::vector::{
-	CosineSimilarity, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
-};
+
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::{
 	NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 };
+use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, Val};
-use crate::sql::index::{Distance, MTreeParams};
-use crate::sql::{Array, Number, Object, Thing, Value};
-
-/// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-pub type Vector = Vec<Number>;
-
-/// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
-/// So the requirement is multiple ownership but not thread safety.
-/// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
-/// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-type SharedVector = Arc<Vector>;
+use crate::sql::index::{Distance, MTreeParams, VectorType};
+use crate::sql::{Array, Object, Thing, Value};
 
 pub(crate) struct MTreeIndex {
 	state_key: Key,
 	dim: usize,
+	vector_type: VectorType,
 	doc_ids: Arc<RwLock<DocIds>>,
 	mtree: Arc<RwLock<MTree>>,
 	store: Arc<Mutex<MTreeNodeStore>>,
@@ -63,6 +54,7 @@ impl MTreeIndex {
 		Ok(Self {
 			state_key,
 			dim: p.dimension as usize,
+			vector_type: p.vector_type,
 			doc_ids,
 			mtree,
 			store,
@@ -110,10 +102,10 @@ impl MTreeIndex {
 				expected: self.dim,
 			});
 		}
-		let mut vec = Vec::with_capacity(a.len());
+		let mut vec = Vector::new(self.vector_type, a.len());
 		for v in a.0 {
 			if let Value::Number(n) = v {
-				vec.push(n);
+				vec.add(n);
 			} else {
 				return Err(Error::InvalidVectorType {
 					current: v.clone().to_string(),
@@ -223,7 +215,7 @@ impl MTree {
 			match node.n {
 				MTreeNode::Leaf(ref n) => {
 					for (o, p) in n {
-						let d = self.calculate_distance(o.as_ref(), v);
+						let d = self.calculate_distance(o.as_ref(), v)?;
 						if Self::check_add(k, d, &res) {
 							#[cfg(debug_assertions)]
 							debug!("Leaf found: {} - Obj: {:?} - Docs: {:?}", node.id, o, p.docs);
@@ -247,7 +239,7 @@ impl MTree {
 				}
 				MTreeNode::Internal(ref n) => {
 					for (o, p) in n {
-						let d = self.calculate_distance(o.as_ref(), v);
+						let d = self.calculate_distance(o.as_ref(), v)?;
 						let min_dist = (d - p.radius).max(0.0);
 						if Self::check_add(k, min_dist, &res) {
 							queue.push(PriorityNode(min_dist, p.node));
@@ -304,7 +296,7 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		obj: Vec<Number>,
+		obj: Vector,
 		id: DocId,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
@@ -331,7 +323,7 @@ impl MTree {
 	fn create_new_leaf_root(
 		&mut self,
 		store: &mut MTreeNodeStore,
-		obj: Arc<Vec<Number>>,
+		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -394,7 +386,7 @@ impl MTree {
 				}
 				MTreeNode::Internal(ref n) => {
 					for (o, p) in n {
-						let d = self.calculate_distance(o.as_ref(), object.as_ref());
+						let d = self.calculate_distance(o.as_ref(), object.as_ref())?;
 						if d <= p.radius {
 							queue.push(p.node);
 						}
@@ -476,12 +468,12 @@ impl MTree {
 				nup.insert(o2.clone());
 				if nup.len() <= self.state.capacity as usize {
 					// Let parentDistance(Op) = d(Op, parent(N));
-					p1.parent_dist = parent_center
-						.as_ref()
-						.map_or(0.0, |pd| self.calculate_distance(o1.as_ref(), pd.as_ref()));
-					p2.parent_dist = parent_center
-						.as_ref()
-						.map_or(0.0, |pd| self.calculate_distance(o2.as_ref(), pd.as_ref()));
+					p1.parent_dist = parent_center.as_ref().map_or(0.0, |pd| {
+						self.calculate_distance(o1.as_ref(), pd.as_ref()).unwrap_or(0.0)
+					});
+					p2.parent_dist = parent_center.as_ref().map_or(0.0, |pd| {
+						self.calculate_distance(o2.as_ref(), pd.as_ref()).unwrap_or(0.0)
+					});
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					let max_dist = self.compute_internal_max_distance(&node);
@@ -539,7 +531,7 @@ impl MTree {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
-			let d = self.calculate_distance(o.as_ref(), object);
+			let d = self.calculate_distance(o.as_ref(), object)?;
 			if d < dist {
 				closest = Some((o.clone(), p.clone()));
 				dist = d;
@@ -579,7 +571,7 @@ impl MTree {
 				// Let parentDistance(Oi) = d(Oi, parent(N))
 				let parent_dist = parent_center
 					.as_ref()
-					.map_or(0f64, |v| self.calculate_distance(v.as_ref(), e.key()));
+					.map_or(0.0, |v| self.calculate_distance(v.as_ref(), e.key()).unwrap_or(0.0));
 				e.insert(ObjectProperties::new(parent_dist, id));
 			}
 		};
@@ -666,7 +658,7 @@ impl MTree {
 		let mut dist_cache = HashMap::with_capacity(n * 2);
 		for (i, o1) in objects.iter().enumerate() {
 			for o2 in objects.iter().take(n).skip(i + 1) {
-				let distance = self.calculate_distance(o1, o2.as_ref());
+				let distance = self.calculate_distance(o1, o2.as_ref())?;
 				dist_cache.insert((o1.clone(), o2.clone()), distance);
 				dist_cache.insert((o2.clone(), o1.clone()), distance); // Because the distance function is symmetric
 				#[cfg(debug_assertions)]
@@ -697,20 +689,20 @@ impl MTree {
 		parent.as_ref().map_or(0.0, |p| {
 			let mut max_dist = 0f64;
 			for o in node.keys() {
-				max_dist = max_dist.max(self.calculate_distance(p.as_ref(), o.as_ref()));
+				max_dist =
+					max_dist.max(self.calculate_distance(p.as_ref(), o.as_ref()).unwrap_or(0.0));
 			}
 			max_dist
 		})
 	}
 
-	fn calculate_distance(&self, v1: &Vector, v2: &Vector) -> f64 {
+	fn calculate_distance(&self, v1: &Vector, v2: &Vector) -> Result<f64, Error> {
 		match &self.distance {
-			Distance::Euclidean => v1.euclidean_distance(v2).unwrap().as_float(),
-			Distance::Manhattan => v1.manhattan_distance(v2).unwrap().as_float(),
-			Distance::Cosine => v1.cosine_similarity(v2).unwrap().as_float(),
-			Distance::Hamming => v1.hamming_distance(v2).unwrap().as_float(),
-			Distance::Mahalanobis => v1.manhattan_distance(v2).unwrap().as_float(),
-			Distance::Minkowski(order) => v1.minkowski_distance(v2, order).unwrap().as_float(),
+			Distance::Euclidean => v1.euclidean_distance(v2),
+			Distance::Manhattan => v1.manhattan_distance(v2),
+			Distance::Cosine => v1.cosine_similarity(v2),
+			Distance::Hamming => v1.hamming_distance(v2),
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order),
 		}
 	}
 
@@ -825,7 +817,7 @@ impl MTree {
 		let mut n_updated = false;
 		// For each On E N
 		for (on_obj, on_entry) in &n_node {
-			let on_od_dist = self.calculate_distance(on_obj.as_ref(), od.as_ref());
+			let on_od_dist = self.calculate_distance(on_obj.as_ref(), od.as_ref())?;
 			#[cfg(debug_assertions)]
 			debug!("on_od_dist: {:?} / {} / {}", on_obj.as_ref(), on_od_dist, on_entry.radius);
 			// If (d(Od, On) <= r(On))
@@ -940,7 +932,7 @@ impl MTree {
 		// Find node entry Onn € N, e <> 0, for which d(On, Onn) is a minimum
 		for (onn_obj, onn_entry) in n_node.iter() {
 			if onn_entry.node != p.id {
-				let d = self.calculate_distance(on_obj.as_ref(), onn_obj.as_ref());
+				let d = self.calculate_distance(on_obj.as_ref(), onn_obj.as_ref())?;
 				if min.is_nan() || d < min {
 					onn = Some((onn_obj.clone(), onn_entry.clone()));
 				}
@@ -997,7 +989,8 @@ impl MTree {
 				// for each Op E P
 				for (p_obj, mut p_entry) in p_node {
 					// Let parentDistance(Op) = d(Op, Onn);
-					p_entry.parent_dist = self.calculate_distance(p_obj.as_ref(), onn_obj.as_ref());
+					p_entry.parent_dist =
+						self.calculate_distance(p_obj.as_ref(), onn_obj.as_ref())?;
 					// Add Op to S;
 					s.insert(p_obj, p_entry);
 				}
@@ -1019,7 +1012,8 @@ impl MTree {
 				// for each Op E P
 				for (p_obj, mut p_entry) in p_node {
 					// Let parentDistance(Op) = d(Op, Onn);
-					p_entry.parent_dist = self.calculate_distance(p_obj.as_ref(), onn_obj.as_ref());
+					p_entry.parent_dist =
+						self.calculate_distance(p_obj.as_ref(), onn_obj.as_ref())?;
 					// Add Op to S;
 					s.insert(p_obj, p_entry);
 				}
@@ -1066,10 +1060,10 @@ impl MTree {
 		};
 		e1.parent_dist = parent_center
 			.as_ref()
-			.map_or(0.0, |pd| self.calculate_distance(o1.as_ref(), pd.as_ref()));
+			.map_or(0.0, |pd| self.calculate_distance(o1.as_ref(), pd.as_ref()).unwrap_or(0.0));
 		e2.parent_dist = parent_center
 			.as_ref()
-			.map_or(0.0, |pd| self.calculate_distance(o2.as_ref(), pd.as_ref()));
+			.map_or(0.0, |pd| self.calculate_distance(o2.as_ref(), pd.as_ref()).unwrap_or(0.0));
 		// Add new child pointer entries to N;
 		n_node.insert(o1, e1);
 		n_node.insert(o2, e2);
@@ -1465,10 +1459,10 @@ mod tests {
 
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{
-		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties, SharedVector,
-		Vector,
+		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
@@ -1496,12 +1490,16 @@ mod tests {
 		}
 	}
 
+	fn new_vec(n: i64) -> Vector {
+		Vector::I64(vec![n])
+	}
+
 	#[test(tokio::test)]
 	async fn test_mtree_insertions() {
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let vec1 = vec![1.into()];
+		let vec1 = new_vec(1);
 		// First the index is empty
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
@@ -1536,7 +1534,7 @@ mod tests {
 		}
 
 		// insert second element
-		let vec2 = vec![2.into()];
+		let vec2 = new_vec(2);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1596,7 +1594,7 @@ mod tests {
 		}
 
 		// insert third vector
-		let vec3 = vec![3.into()];
+		let vec3 = new_vec(3);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1623,7 +1621,7 @@ mod tests {
 		}
 
 		// Check split leaf node
-		let vec4 = vec![4.into()];
+		let vec4 = new_vec(4);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1661,7 +1659,7 @@ mod tests {
 		}
 
 		// Insert vec extending the radius of the last node, calling compute_leaf_radius
-		let vec6 = vec![6.into()];
+		let vec6 = new_vec(6);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1702,7 +1700,7 @@ mod tests {
 		// Insert check split internal node
 
 		// Insert vec8
-		let vec8 = vec![8.into()];
+		let vec8 = new_vec(8);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1743,7 +1741,7 @@ mod tests {
 			.await;
 		}
 
-		let vec9 = vec![9.into()];
+		let vec9 = new_vec(9);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1785,7 +1783,7 @@ mod tests {
 			.await;
 		}
 
-		let vec10 = vec![10.into()];
+		let vec10 = new_vec(10);
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 			let mut s = s.lock().await;
@@ -1901,7 +1899,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			for (doc_id, obj) in &collection {
-				let res = t.knn_search(&mut tx, &mut s, obj.as_ref(), 1).await.unwrap();
+				let res = t.knn_search(&mut tx, &mut s, obj, 1).await.unwrap();
 				let mut found = false;
 				for docs in &res.objects {
 					if docs.contains(*doc_id) {
@@ -1929,7 +1927,7 @@ mod tests {
 			{
 				let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 				let mut s = s.lock().await;
-				let res = t.knn_search(&mut tx, &mut s, obj.as_ref(), 1).await.unwrap();
+				let res = t.knn_search(&mut tx, &mut s, obj, 1).await.unwrap();
 				for docs in res.objects {
 					assert!(!docs.contains(*doc_id), "Found: {} {:?}", doc_id, obj);
 				}
@@ -1953,7 +1951,7 @@ mod tests {
 
 		// Prepare data set
 		for doc_id in 0..size as DocId {
-			collection.push((doc_id, vec![doc_id.into()]));
+			collection.push((doc_id, new_vec(doc_id as i64)));
 		}
 
 		test_mtree_collection(collection).await;
@@ -1976,7 +1974,7 @@ mod tests {
 
 		// Prepare data set
 		for doc_id in 0..size as DocId {
-			collection.push((doc_id, vec![doc_id.into()]));
+			collection.push((doc_id, new_vec(doc_id as i64)));
 		}
 
 		// Shuffle
@@ -2004,7 +2002,7 @@ mod tests {
 		// Prepare data set
 		for doc_id in 0..size {
 			let obj = doc_id % (size / 2);
-			collection.push((doc_id as DocId, vec![obj.into()]));
+			collection.push((doc_id as DocId, new_vec(obj as i64)));
 		}
 
 		test_mtree_collection(collection).await;
@@ -2028,7 +2026,7 @@ mod tests {
 		// Prepare data set
 		for doc_id in 0..size {
 			let obj = doc_id % (size / 2);
-			collection.push((doc_id as DocId, vec![obj.into()]));
+			collection.push((doc_id as DocId, new_vec(obj as i64)));
 		}
 
 		// Shuffle
@@ -2212,7 +2210,7 @@ mod tests {
 					let next_depth = depth + 1;
 					entries.iter().for_each(|(o, p)| {
 						if let Some(center) = center.as_ref() {
-							let pd = t.calculate_distance(center.as_ref(), o.as_ref());
+							let pd = t.calculate_distance(center.as_ref(), o.as_ref()).unwrap();
 							assert_eq!(pd, p.parent_dist, "Incorrect parent distance");
 							assert!(pd + p.radius <= radius);
 						}
@@ -2230,7 +2228,7 @@ mod tests {
 							panic!("Leaf object already exists: {:?}", o);
 						}
 						if let Some(center) = center.as_ref() {
-							let pd = t.calculate_distance(center.as_ref(), o.as_ref());
+							let pd = t.calculate_distance(center.as_ref(), o.as_ref()).unwrap();
 							assert_eq!(pd, p.parent_dist);
 						}
 						checks.doc_count += p.docs.len() as usize;

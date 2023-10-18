@@ -4,48 +4,43 @@ use rand::prelude::ThreadRng;
 use rand::{thread_rng, Rng};
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
-use surrealdb::idx::trees::mtree::{MState, MTree, Vector};
+use surrealdb::idx::trees::mtree::{MState, MTree};
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use surrealdb::idx::trees::vector::Vector;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::index::Distance;
-use surrealdb::sql::Number;
+
+fn bench_index_mtree_insert_dim_3(c: &mut Criterion) {
+	bench_index_mtree_insert(c, "index_mtree_insert_dim_10", 1_000, 100_000, 3, 10);
+}
 
 fn bench_index_mtree_insert_dim_50(c: &mut Criterion) {
-	let samples_len = if cfg!(debug_assertions) {
-		100 // debug is much slower!
-	} else {
-		10_000
-	};
-	bench_index_mtree_insert(c, "index_mtree_insert_dim_50", samples_len, 50, 20);
+	bench_index_mtree_insert(c, "index_mtree_insert_dim_50", 100, 10_000, 50, 20);
 }
 
 fn bench_index_mtree_insert_dim_300(c: &mut Criterion) {
-	let samples_len = if cfg!(debug_assertions) {
-		50 // debug is much slower!
-	} else {
-		5_000
-	};
-	bench_index_mtree_insert(c, "index_mtree_insert_dim_300", samples_len, 300, 40);
+	bench_index_mtree_insert(c, "index_mtree_insert_dim_300", 50, 5_000, 300, 40);
 }
 
 fn bench_index_mtree_insert_dim_2048(c: &mut Criterion) {
-	let samples_len = if cfg!(debug_assertions) {
-		10 // debug is much slower!
-	} else {
-		1_000
-	};
-	bench_index_mtree_insert(c, "index_mtree_insert_dim_2048", samples_len, 2048, 60);
+	bench_index_mtree_insert(c, "index_mtree_insert_dim_2048", 10, 1_000, 2048, 60);
 }
 
 fn bench_index_mtree_insert(
 	c: &mut Criterion,
 	group_name: &str,
-	samples_len: usize,
+	debug_samples_len: usize,
+	release_samples_len: usize,
 	vector_dimension: usize,
 	measurement_secs: u64,
 ) {
+	let samples_len = if cfg!(debug_assertions) {
+		debug_samples_len
+	} else {
+		release_samples_len
+	};
 	let mut group = c.benchmark_group(group_name);
 	group.throughput(Throughput::Elements(samples_len as u64));
 	group.sample_size(10);
@@ -59,10 +54,9 @@ fn bench_index_mtree_insert(
 fn get_vector(rng: &mut ThreadRng, vector_size: usize) -> Vector {
 	let mut vec = Vec::with_capacity(vector_size);
 	for _ in 0..vector_size {
-		let v: f32 = rng.gen_range(-1.0..=1.0);
-		vec.push(Number::from(v));
+		vec.push(rng.gen_range(-1.0..=1.0));
 	}
-	vec
+	Vector::F32(vec)
 }
 
 async fn bench(samples_size: usize, vector_size: usize) {
@@ -82,6 +76,7 @@ async fn bench(samples_size: usize, vector_size: usize) {
 
 criterion_group!(
 	benches,
+	bench_index_mtree_insert_dim_3,
 	bench_index_mtree_insert_dim_50,
 	bench_index_mtree_insert_dim_300,
 	bench_index_mtree_insert_dim_2048
