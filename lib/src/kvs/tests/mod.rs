@@ -176,9 +176,8 @@ mod tikv {
 		// Clear any previous test entries
 		let mut tx_err: Option<Error> = None;
 		for _ in 0..DIST_RETRIES {
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			tx.delp(vec![], u32::MAX).await.unwrap();
-			if let Err(e) = tx.commit().await {
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			if let Err(e) = clear_cluster(tx) {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
@@ -192,6 +191,11 @@ mod tikv {
 		}
 		// Return the datastore
 		(ds, Kvs::Tikv)
+	}
+
+	async fn clear_cluster(mut tx: Transaction) -> Result<(), Error> {
+		tx.delp(vec![], u32::MAX).await?;
+		tx.commit().await
 	}
 
 	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
@@ -235,10 +239,8 @@ mod fdb {
 		// Clear any previous test entries
 		let mut tx_err: Option<Error> = None;
 		for _ in 0..DIST_RETRIES {
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			tx.delp(vec![], u32::MAX).await.unwrap();
-			tx.commit().await.unwrap();
-			if let Err(e) = tx.commit().await {
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			if let Err(e) = clear_cluster(tx) {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
@@ -252,6 +254,11 @@ mod fdb {
 		}
 		// Return the datastore
 		(ds, Kvs::Fdb)
+	}
+
+	async fn clear_cluster(mut tx: Transaction) -> Result<(), Error> {
+		tx.delp(vec![], u32::MAX).await?;
+		tx.commit().await
 	}
 
 	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
