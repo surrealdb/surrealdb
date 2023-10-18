@@ -90,7 +90,7 @@ docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:
 Access to the surrealdb CLI with:
 
 ```bash
-docker exec -it <container_name> /surreal sql -c http://localhost:8000 -u root -p root --ns test --db test --pretty
+docker exec -it <container_name> /surreal sql -e http://localhost:8000 -u root -p root --ns test --db test --pretty
 ```
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Run using Docker Compose</h2>

@@ -14,6 +14,7 @@ use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
@@ -46,11 +47,8 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const NO_LIMIT: u32 = 0;
 
@@ -61,6 +59,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
+	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -795,7 +794,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
@@ -1023,7 +1022,7 @@ impl Transaction {
 			None => {
 				let value = ClusterMembership {
 					name: id.to_string(),
-					heartbeat: self.clock(),
+					heartbeat: self.clock().await,
 				};
 				self.put(key.key_category(), key, value).await?;
 				Ok(())
@@ -1041,21 +1040,23 @@ impl Transaction {
 		}
 	}
 
-	// Public for tests, but we might not want to expose this
-	pub fn clock(&self) -> Timestamp {
+	/// Clock retrieves the current timestamp, without guaranteeing
+	/// monotonicity in all implementations.
+	///
+	/// It is used for unreliable ordering of events as well as
+	/// handling of timeouts. Operations that are not guaranteed to be correct.
+	/// But also allows for lexicographical ordering.
+	///
+	/// Public for tests, but not required for usage from a user perspective.
+	pub async fn clock(&mut self) -> Timestamp {
 		// Use a timestamp oracle if available
-		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
-			Ok(duration) => duration.as_millis(),
-			Err(error) => panic!("Clock may have gone backwards: {:?}", error.duration()),
-		};
-		Timestamp {
-			value: now as u64,
-		}
+		// Match, because we cannot have sized traits or async traits
+		self.clock.write().await.now().await
 	}
 
 	// Set heartbeat
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		// We do not need to do a read, we always want to overwrite
 		let key_enc = key.encode()?;
 		self.put(
@@ -1071,7 +1072,7 @@ impl Transaction {
 	}
 
 	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		self.del(key).await?;
 		Ok(())
 	}
@@ -1345,6 +1346,7 @@ impl Transaction {
 		Ok(out)
 	}
 
+	/// Add live query to table
 	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
