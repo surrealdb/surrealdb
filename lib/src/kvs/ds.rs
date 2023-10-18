@@ -237,23 +237,6 @@ impl Datastore {
 					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-
-					let s = if s.starts_with('~')
-						&& dirs::home_dir().is_some()
-						&& dirs::home_dir().unwrap().as_os_str().to_str().is_some()
-					{
-						let s = s.replacen(
-							'~',
-							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
-							1,
-						);
-						s
-					} else {
-						s.to_string()
-					};
-
-					let s = s.as_str();
-
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store at {}", path);
@@ -269,23 +252,6 @@ impl Datastore {
 					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-
-					let s = if s.starts_with('~')
-						&& dirs::home_dir().is_some()
-						&& dirs::home_dir().unwrap().as_os_str().to_str().is_some()
-					{
-						let s = s.replacen(
-							'~',
-							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
-							1,
-						);
-						s
-					} else {
-						s.to_string()
-					};
-
-					let s = s.as_str();
-
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
 					let clock = clock_override.unwrap_or(default_clock);
@@ -301,23 +267,6 @@ impl Datastore {
 					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("speedb://");
 					let s = s.trim_start_matches("speedb:");
-
-					let s = if s.starts_with('~')
-						&& dirs::home_dir().is_some()
-						&& dirs::home_dir().unwrap().as_os_str().to_str().is_some()
-					{
-						let s = s.replacen(
-							'~',
-							dirs::home_dir().unwrap().as_os_str().to_str().unwrap(),
-							1,
-						);
-						s
-					} else {
-						s.to_string()
-					};
-
-					let s = s.as_str();
-
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
 					let clock = clock_override.unwrap_or(default_clock);
@@ -333,7 +282,6 @@ impl Datastore {
 					info!("Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
 					let clock = clock_override.unwrap_or(default_clock);
@@ -349,7 +297,6 @@ impl Datastore {
 					info!("Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
 					let clock = clock_override.unwrap_or(default_clock);
@@ -365,7 +312,6 @@ impl Datastore {
 					info!("Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
 					let clock = clock_override.unwrap_or(default_clock);
