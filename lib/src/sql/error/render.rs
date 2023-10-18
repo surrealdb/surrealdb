@@ -69,24 +69,34 @@ impl Snippet {
 		}
 	}
 
-	/// Trims whitespace of an line and additionally truncates a string if it is too long.
-	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
-		let full_line_length = line.chars().count();
-		line = line.trim_start();
-		// Saturate in case the error occurred in invalid leading whitespace.
-		let mut offset = around_offset.saturating_sub(full_line_length - line.chars().count());
+	/// Trims whitespace of an line and additionally truncates the string around the target_col_offset if it is too long.
+	///
+	/// returns the trimmed string, how it is truncated, and the offset into truncated the string where the target_col is located.
+	fn truncate_line(mut line: &str, target_col: usize) -> (&str, Truncation, usize) {
+		// offset in characters from the start of the string.
+		let mut offset = 0;
+		for (i, (idx, c)) in line.char_indices().enumerate() {
+			// if i == target_col the error is in the leading whitespace. so return early.
+			if i == target_col || !c.is_whitespace() {
+				line = &line[idx..];
+				offset = target_col - i;
+				break;
+			}
+		}
+
 		line = line.trim_end();
+		// truncation none because only truncated non-whitespace counts.
 		let mut truncation = Truncation::None;
 
-		if around_offset > Self::MAX_ERROR_LINE_OFFSET {
+		if offset > Self::MAX_ERROR_LINE_OFFSET {
 			// Actual error is to far to the right, just truncated everything to the left.
 			// show some prefix for some extra context.
-			let extra_offset = around_offset - 10;
+			let too_much_offset = offset - 10;
 			let mut chars = line.chars();
-			for _ in 0..extra_offset {
+			for _ in 0..too_much_offset {
 				chars.next();
 			}
-			offset -= extra_offset;
+			offset = 10;
 			line = chars.as_str();
 			truncation = Truncation::Start;
 		}
@@ -130,11 +140,12 @@ impl fmt::Display for Snippet {
 				writeln!(f, "...{}...", self.source)?;
 			}
 		}
+
 		let error_offset = self.offset
 			+ if matches!(self.truncation, Truncation::Start | Truncation::Both) {
-				3
+				4
 			} else {
-				0
+				1
 			};
 		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "^",)?;
 		if let Some(ref explain) = self.explain {
