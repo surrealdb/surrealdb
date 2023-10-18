@@ -266,7 +266,19 @@ mod fdb {
 	}
 
 	async fn clear_cluster(mut tx: Transaction) -> Result<(), Error> {
-		tx.delp(vec![], u32::MAX).await?;
+		if let Err(err) = tx.delp(vec![], u32::MAX).await {
+			let second_err = tx.cancel().await;
+			match second_err {
+				Ok(_) => Err(err),
+				Err(e2) => {
+					error!(
+						"Failed to cancel transaction: {}, original error cause was: {}",
+						e2, err
+					);
+					Err(e2)
+				}
+			}
+		}
 		tx.commit().await
 	}
 
