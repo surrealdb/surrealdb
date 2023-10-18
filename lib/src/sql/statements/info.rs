@@ -64,6 +64,17 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
+
+				// Process cluster membership
+				let mut memberships: Vec<Value> = vec![];
+				for cluster_member in run.scan_nd(0).await? {
+					let mut tmp = Object::default();
+					tmp.insert("nodeId".to_string(), cluster_member.name.into());
+					tmp.insert("heartbeat".to_string(), cluster_member.heartbeat.value.into());
+					memberships.push(tmp.into());
+				}
+
+				res.insert("members".to_owned(), memberships.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
