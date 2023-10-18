@@ -177,7 +177,7 @@ mod tikv {
 		let mut tx_err: Option<Error> = None;
 		for _ in 0..DIST_RETRIES {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
-			if let Err(e) = clear_cluster(tx) {
+			if let Err(e) = clear_cluster(tx).await {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
@@ -240,7 +240,7 @@ mod fdb {
 		let mut tx_err: Option<Error> = None;
 		for _ in 0..DIST_RETRIES {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
-			if let Err(e) = clear_cluster(tx) {
+			if let Err(e) = clear_cluster(tx).await {
 				error!("Failed cluster wipe: {}", e);
 				tx_err = Some(e);
 				tokio::time::sleep(Duration::from_millis(DIST_SLEEP_MS)).await;
