@@ -35,7 +35,7 @@
 ./lib/src/doc @surrealdb/api
 ./lib/src/fnc @surrealdb/sql
 ./lib/src/ctx @surrealdb/api
-./lib/src/exe @usrrealdb/api
+./lib/src/exe @surrealdb/api
 ./lib/src/sql @surrealdb/api
 ./lib/src/* @surrealdb/api
 
