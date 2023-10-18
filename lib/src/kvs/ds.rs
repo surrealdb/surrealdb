@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -741,17 +742,16 @@ impl Datastore {
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, tx).await {
-			error!("Error saving timestamp for versionstamp: {:?}", e);
-			match tx.cancel() {
+		let tx = Arc::new(RwLock::new(self.transaction(Write, Optimistic).await?));
+		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, tx.clone()).await {
+			return match tx.write().await.cancel().await {
 				Ok(_) => {
 					Err(e)
 				}
 				Err(txe) => {
 					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
 				}
-			}
+			};
 		}
 		Ok(())
 	}
@@ -759,8 +759,9 @@ impl Datastore {
 	async fn save_timestamp_for_versionstamp_impl(
 		&self,
 		ts: u64,
-		mut tx: Transaction,
+		tx: Arc<RwLock<Transaction>>,
 	) -> Result<(), Error> {
+		let mut tx = tx.write().await;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -778,17 +779,16 @@ impl Datastore {
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, tx).await {
-			error!("Error garbage collecting stale change feeds: {:?}", e);
-			match tx.cancel() {
+		let tx = Arc::new(RwLock::new(self.transaction(Write, Optimistic).await?));
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, tx.clone()).await {
+			return match tx.write().await.cancel().await {
 				Ok(_) => {
 					Err(e)
 				}
 				Err(txe) => {
 					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
 				}
-			}
+			};
 		}
 		Ok(())
 	}
@@ -796,9 +796,10 @@ impl Datastore {
 	async fn garbage_collect_stale_change_feeds_impl(
 		&self,
 		ts: u64,
-		mut tx: Transaction,
+		tx: Arc<RwLock<Transaction>>,
 	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
+		let mut tx = tx.write().await;
 		cf::gc_all_at(&mut tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
