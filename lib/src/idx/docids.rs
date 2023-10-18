@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub(crate) type DocId = u64;
+pub type DocId = u64;
 
 pub(crate) const NO_DOC_ID: u64 = u64::MAX;
 

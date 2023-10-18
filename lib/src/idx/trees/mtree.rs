@@ -26,7 +26,7 @@ use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Array, Number, Object, Thing, Value};
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-pub(crate) type Vector = Vec<Number>;
+pub type Vector = Vec<Number>;
 
 /// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
 /// So the requirement is multiple ownership but not thread safety.
@@ -180,7 +180,7 @@ struct KnnResult {
 
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
-struct MTree {
+pub struct MTree {
 	state: MState,
 	distance: Distance,
 	minimum: usize,
@@ -188,7 +188,7 @@ struct MTree {
 }
 
 impl MTree {
-	fn new(state: MState, distance: Distance) -> Self {
+	pub fn new(state: MState, distance: Distance) -> Self {
 		let minimum = (state.capacity + 1) as usize / 2;
 		Self {
 			state,
@@ -300,7 +300,7 @@ impl MTree {
 		new_node_id
 	}
 
-	async fn insert(
+	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
@@ -1204,7 +1204,7 @@ type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
 /// Both LeafNodes and InternalNodes are implemented as a map.
 /// In this map, the key is an object, and the values correspond to its properties.
 /// In essence, an entry can be visualized as a tuple of the form (object, properties).
-enum MTreeNode {
+pub enum MTreeNode {
 	Internal(InternalNode),
 	Leaf(LeafNode),
 }
@@ -1348,8 +1348,8 @@ impl NodeVectors for InternalNode {
 	}
 }
 
-type InternalNode = InternalMap;
-type LeafNode = LeafMap;
+pub type InternalNode = InternalMap;
+pub type LeafNode = LeafMap;
 
 impl TreeNode for MTreeNode {
 	fn try_from_val(val: Val) -> Result<Self, Error> {
@@ -1400,7 +1400,7 @@ impl From<MtStatistics> for Value {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
-struct MState {
+pub struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
@@ -1418,7 +1418,7 @@ impl MState {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub(in crate::idx) struct RoutingProperties {
+pub struct RoutingProperties {
 	// Reference to the node
 	node: NodeId,
 	// Distance to its parent object
@@ -1428,7 +1428,7 @@ pub(in crate::idx) struct RoutingProperties {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(in crate::idx) struct ObjectProperties {
+pub struct ObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,
 	// The documents pointing to this vector
