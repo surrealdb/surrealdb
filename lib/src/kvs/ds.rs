@@ -23,8 +23,6 @@ use crate::sql::Base;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
 use crate::vs::Oracle;
-use channel::Receiver;
-use channel::Sender;
 use futures::lock::Mutex;
 use futures::Future;
 use std::cmp::Ordering;
@@ -34,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -43,6 +42,7 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
 const LQ_CHANNEL_SIZE: usize = 100;
+const LQ_CLEANUP_BATCH_SIZE: usize = 1000;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -456,7 +456,7 @@ impl Datastore {
 
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
+		let archived = match self.register_and_remove_dead_nodes(&mut tx, &self.id, send).await {
 			Ok(archived) => {
 				tx.commit().await?;
 				archived
@@ -467,6 +467,28 @@ impl Datastore {
 				return Err(e);
 			}
 		};
+
+		// In several new transactions, scan all removed node live queries
+		let (scan_send, scan_recv): (
+			Sender<BootstrapOperationResult>,
+			Receiver<BootstrapOperationResult>,
+		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
+		let scan_task = tokio::spawn(self.scan_node_live_queries(deleted_nodes, scan_send));
+
+		// In several new transactions, archive removed node live queries
+		let (archive_send, archive_recv): (
+			Sender<BootstrapOperationResult>,
+			Receiver<BootstrapOperationResult>,
+		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
+		let archive_task = tokio::spawn(self.archive_live_queries(scan_recv, archive_send));
+
+		// In several new transactions, delete archived node live queries
+		let (delete_send, delete_recv): (
+			Sender<BootstrapOperationResult>,
+			Receiver<BootstrapOperationResult>,
+		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
+		let delete_task = tokio::spawn(self.delete_live_queries(archive_recv, delete_send));
+
 		// Filtered includes all lqs that should be used in subsequent step
 		// Currently that is all of them, no matter the error encountered
 		let mut filtered: Vec<LqValue> = vec![];
@@ -509,11 +531,75 @@ impl Datastore {
 		Ok(())
 	}
 
+	async fn scan_node_live_queries(
+		&self,
+		nodes: Vec<Uuid>,
+		sender: Sender<BootstrapOperationResult>,
+	) -> Result<(), Error> {
+		let mut tx = self.transaction(Read, Optimistic).await?;
+		for nd in nodes {
+			match tx.scan_ndlq(&nd, NO_LIMIT).await {
+				Ok(node_lqs) => {
+					for lq in node_lqs {
+						sender.send((lq, None)).await.unwrap();
+					}
+				}
+				Err(e) => {
+					sender.send((LqValue::default(), Some(e))).await?;
+				}
+			}
+		}
+		tx.cancel().await
+	}
+
+	async fn archive_live_queries(
+		&self,
+		scan_recv: Receiver<BootstrapOperationResult>,
+		sender: Sender<BootstrapOperationResult>,
+	) -> Result<(), Error> {
+		let mut archived = vec![];
+		while let Some(res) = scan_recv.recv().await {
+			let (lq, e) = res;
+			let node_archived_lqs =
+				match self.archive_lv_for_node(&mut tx, &lq.nd, this_node_id.clone()).await {
+					Ok(lq) => lq,
+					Err(e) => {
+						error!("Error archiving lqs during bootstrap phase: {:?}", e);
+						vec![]
+					}
+				};
+			// We need to add lv nodes not found so that they can be deleted in second stage
+			for lq_value in node_archived_lqs {
+				archived.push(lq_value);
+			}
+		}
+		for lq in archived {
+			sender.send((lq, None)).await.unwrap();
+		}
+		Ok(())
+	}
+
+	async fn delete_live_queries(
+		&self,
+		mut archived_recv: Receiver<BootstrapOperationResult>,
+		sender: Sender<BootstrapOperationResult>,
+	) -> Result<(), Error> {
+		let mut tx = self.transaction(Write, Optimistic).await?;
+		while let Some(res) = archived_recv.recv().await {
+			let (lq, e) = res;
+			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
+			tx.del(key).await?;
+			sender.send((lq, e)).await.unwrap();
+		}
+		tx.commit().await
+	}
+
 	// Node registration + "mark" stage of mark-and-sweep gc
-	pub async fn register_remove_and_archive(
+	pub async fn register_and_remove_dead_nodes(
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
+		lq_send: Sender<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
 		let timestamp = tx.clock().await;
@@ -522,7 +608,7 @@ impl Datastore {
 		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
 		trace!("Archiving dead nodes: {:?}", dead);
-		self.archive_dead_lqs(tx, &dead, node_id).await
+		self.archive_dead_lqs(tx, &dead, node_id, lq_send).await
 	}
 
 	// Adds entries to the KV store indicating membership information
@@ -567,12 +653,13 @@ impl Datastore {
 		tx: &mut Transaction,
 		nodes: &[Uuid],
 		this_node_id: &Uuid,
+		sender: Sender<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut archived = vec![];
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, NO_LIMIT).await?;
+			let node_lqs = tx.scan_ndlq(nd, LQ_CLEANUP_BATCH_SIZE as u32).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
@@ -844,11 +931,11 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(
 		&self,
-		write: TransactionType,
+		tx_type: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
-		let write = match write {
+		let write = match tx_type {
 			TransactionType::Read => false,
 			TransactionType::Write => true,
 		};
