@@ -198,10 +198,10 @@ mod tikv {
 			let second_err = tx.cancel().await;
 			return match second_err {
 				Ok(_) => Err(e),
-				Err(e2) => {
-					error!("Failed to cancel transaction: {}, original error cause was: {}", e2, e);
-					Err(e2)
-				}
+				Err(e2) => Err(Error::Internal(format!(
+					"Failed to cancel transaction: {}, original error cause was: {}",
+					e2, e
+				))),
 			};
 		}
 		tx.commit().await
@@ -270,13 +270,10 @@ mod fdb {
 			let second_err = tx.cancel().await;
 			return match second_err {
 				Ok(_) => Err(err),
-				Err(e2) => {
-					error!(
-						"Failed to cancel transaction: {}, original error cause was: {}",
-						e2, err
-					);
-					Err(e2)
-				}
+				Err(e2) => Err(Error::Internal(format!(
+					"Failed to cancel transaction: {}, original error cause was: {}",
+					e2, err
+				))),
 			};
 		}
 		tx.commit().await
