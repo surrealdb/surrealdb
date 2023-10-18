@@ -794,7 +794,7 @@ fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
 	let (i, mut e) =
 		delimited_list1(openbracket, commas, terminated(line_vals, mightbespace), char(']'))(i)?;
 	let v = e.split_off(1);
-	// delimited_list1 guarentees there is atleast one value.
+	// delimited_list1 guarantees there is atleast one value.
 	let e = e.into_iter().next().unwrap();
 	Ok((i, Polygon::new(e, v)))
 }

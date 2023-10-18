@@ -23,6 +23,7 @@ args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "r
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
+env = { RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
 args = ["test", "--workspace", "--no-fail-fast"]
 
 # Check
@@ -52,6 +53,10 @@ args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 [tasks.check]
 category = "LOCAL USAGE"
 dependencies = ["cargo-check", "cargo-fmt", "cargo-fmt-unlinked", "cargo-clippy"]
+
+[tasks.check-wasm]
+category = "LOCAL USAGE"
+dependencies = ["ci-check-wasm"]
 
 # Clean
 [tasks.clean]

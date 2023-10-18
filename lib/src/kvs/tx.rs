@@ -7,7 +7,10 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+use crate::idx::trees::store::TreeStoreType;
 use crate::key::debug;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -48,6 +51,8 @@ use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+pub(crate) const NO_LIMIT: u32 = 0;
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -71,6 +76,35 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
+}
+
+pub enum TransactionType {
+	Read,
+	Write,
+}
+
+impl From<bool> for TransactionType {
+	fn from(value: bool) -> Self {
+		match value {
+			true => TransactionType::Write,
+			false => TransactionType::Read,
+		}
+	}
+}
+
+impl From<TreeStoreType> for TransactionType {
+	fn from(value: TreeStoreType) -> Self {
+		match value {
+			TreeStoreType::Write => TransactionType::Write,
+			TreeStoreType::Read => TransactionType::Read,
+			TreeStoreType::Traversal => TransactionType::Read,
+		}
+	}
+}
+
+pub enum LockType {
+	Pessimistic,
+	Optimistic,
 }
 
 impl fmt::Display for Transaction {
@@ -568,7 +602,7 @@ impl Transaction {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[allow(unused_variables)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -585,12 +619,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -600,12 +634,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -979,7 +1013,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -990,7 +1024,7 @@ impl Transaction {
 					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
-				self.put(key, value).await?;
+				self.put(key.key_category(), key, value).await?;
 				Ok(())
 			}
 		}
@@ -1006,7 +1040,8 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) fn clock(&self) -> Timestamp {
+	// Public for tests, but we might not want to expose this
+	pub fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
 			Ok(duration) => duration.as_millis(),
@@ -1021,8 +1056,10 @@ impl Transaction {
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
 		// We do not need to do a read, we always want to overwrite
+		let key_enc = key.encode()?;
 		self.put(
-			key,
+			key.key_category(),
+			key_enc,
 			ClusterMembership {
 				name: id.to_string(),
 				heartbeat: timestamp,
@@ -1039,19 +1076,17 @@ impl Transaction {
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
-		self.del(key).await
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Delete the live query notification registry on the table
-	// Return the Table ID
-	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
-		// This isn't implemented because it is covered by del_nd
-		// Will add later for remote node kill
-		Err(Error::NdNotFound {
-			value: format!("Missing cluster node {:?}", nd),
-		})
+	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
+		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
@@ -1068,21 +1103,23 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while num > 0 {
+		while limit == NO_LIMIT || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
 			// Get records batch
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 			};
 			// Get total results
@@ -1099,14 +1136,18 @@ impl Transaction {
 				}
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
 				// Count
-				num -= 1;
+				if limit > 0 {
+					num -= 1;
+				}
 			}
 		}
 		trace!("scan_hb: {:?}", out);
 		Ok(out)
 	}
 
-	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	/// scan_nd will scan all the cluster membership registers
+	/// setting limit to 0 will result in scanning all entries
+	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
@@ -1115,21 +1156,23 @@ impl Transaction {
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while num > 0 {
+		while (limit == NO_LIMIT) || (num > 0) {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
 			// Get records batch
 			let res = match nxt {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(min..max, batch_size).await?
 				}
 			};
 			// Get total results
@@ -1146,10 +1189,12 @@ impl Transaction {
 				}
 				out.push((&v).into());
 				// Count
-				num -= 1;
+				if limit > 0 {
+					num -= 1;
+				}
 			}
 		}
-		trace!("scan_hb: {:?}", out);
+		trace!("scan_nd: {:?}", out);
 		Ok(out)
 	}
 
@@ -1173,30 +1218,64 @@ impl Transaction {
 	}
 
 	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::node::lq::prefix_nd(node);
-		let suff = crate::key::node::lq::suffix_nd(node);
+		let beg = crate::key::node::lq::prefix_nd(node);
+		let end = crate::key::node::lq::suffix_nd(node);
 		trace!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
 		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_lq: key={:?} value={:?}", &key, &value);
-			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
-			let tb: String = String::from_utf8(value).unwrap();
-			trace!("scan_lq Found tb: {:?}", tb);
-			res.push(LqValue {
-				nd: lq.nd.into(),
-				ns: lq.ns.to_string(),
-				db: lq.db.to_string(),
-				tb,
-				lq: lq.lq.into(),
-			});
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<LqValue> = vec![];
+		while limit == NO_LIMIT || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (key, value)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(key.clone());
+				}
+				let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
+				let tb: String = String::from_utf8(value).unwrap();
+				trace!("scan_lq Found tb: {:?}", tb);
+				out.push(LqValue {
+					nd: lq.nd.into(),
+					ns: lq.ns.to_string(),
+					db: lq.db.to_string(),
+					tb,
+					lq: lq.lq.into(),
+				});
+				// Count
+				if limit != NO_LIMIT {
+					num -= 1;
+				}
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
 	pub async fn scan_tblq<'a>(
@@ -1206,29 +1285,63 @@ impl Transaction {
 		tb: &str,
 		limit: u32,
 	) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::table::lq::prefix(ns, db, tb);
-		let suff = crate::key::table::lq::suffix(ns, db, tb);
+		let beg = crate::key::table::lq::prefix(ns, db, tb);
+		let end = crate::key::table::lq::suffix(ns, db, tb);
 		trace!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
 		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_lv: key={:?} value={:?}", &key, &value);
-			let val: LiveStatement = value.into();
-			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
-			res.push(LqValue {
-				nd: val.node,
-				ns: lv.ns.to_string(),
-				db: lv.db.to_string(),
-				tb: lv.tb.to_string(),
-				lq: val.id.clone(),
-			});
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<LqValue> = vec![];
+		while limit == NO_LIMIT || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (key, value)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(key.clone());
+				}
+				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
+				let val: LiveStatement = value.into();
+				out.push(LqValue {
+					nd: val.node,
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
+					tb: lv.tb.to_string(),
+					lq: val.id.clone(),
+				});
+				// Count
+				if limit != NO_LIMIT {
+					num -= 1;
+				}
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
 	pub async fn putc_tblq(
@@ -1241,7 +1354,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
 
@@ -1860,7 +1973,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::NsNotFound {
@@ -1889,7 +2002,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::DbNotFound {
@@ -1919,7 +2032,7 @@ impl Transaction {
 						name: sc.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::ScNotFound {
@@ -1950,7 +2063,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::TbNotFound {
@@ -2120,7 +2233,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::NsNotFound {
@@ -2149,7 +2262,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::DbNotFound {
@@ -2180,7 +2293,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::TbNotFound {
@@ -2610,7 +2723,7 @@ impl Transaction {
 	//
 	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
 	// Every change must be recorded by calling this struct's `record_change` function beforehand.
-	// If there was no preceeding `record_change` function calls for this transaction, this function will do nothing.
+	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
 	//
 	// This function should be called only after all the changes have been made to the transaction.
 	// Otherwise, changes are missed in the change feed.
@@ -2735,14 +2848,14 @@ impl Transaction {
 #[cfg(feature = "kv-mem")]
 mod tests {
 	use crate::{
-		kvs::Datastore,
+		kvs::{Datastore, LockType::*, TransactionType::*},
 		sql::{statements::DefineUserStatement, Base},
 	};
 
 	#[tokio::test]
 	async fn test_get_root_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent KV user
 		let res = txn.get_root_user("nonexistent").await;
@@ -2755,7 +2868,7 @@ mod tests {
 			..Default::default()
 		};
 		let key = crate::key::root::us::new("user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap()
@@ -2764,7 +2877,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_ns_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent NS user
 		let res = txn.get_ns_user("ns", "nonexistent").await;
@@ -2781,7 +2894,7 @@ mod tests {
 		};
 
 		let key = crate::key::namespace::us::new("ns", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_ns_user("ns", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -2790,7 +2903,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_db_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent DB user
 		let res = txn.get_db_user("ns", "db", "nonexistent").await;
@@ -2807,7 +2920,7 @@ mod tests {
 		};
 
 		let key = crate::key::database::us::new("ns", "db", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -2816,7 +2929,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_root_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_root_users().await.unwrap();
@@ -2831,8 +2944,8 @@ mod tests {
 
 		let key1 = crate::key::root::us::new("user1");
 		let key2 = crate::key::root::us::new("user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 		let res = txn.all_root_users().await.unwrap();
 
 		assert_eq!(res.len(), 2);
@@ -2843,7 +2956,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_ns_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_ns_users("ns").await.unwrap();
@@ -2858,8 +2971,8 @@ mod tests {
 
 		let key1 = crate::key::namespace::us::new("ns", "user1");
 		let key2 = crate::key::namespace::us::new("ns", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 
@@ -2873,7 +2986,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_db_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_db_users("ns", "db").await.unwrap();
@@ -2888,8 +3001,8 @@ mod tests {
 
 		let key1 = crate::key::database::us::new("ns", "db", "user1");
 		let key2 = crate::key::database::us::new("ns", "db", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 
@@ -2904,41 +3017,41 @@ mod tests {
 	async fn test_seqs() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let nsid = txn.get_next_ns_id().await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(nsid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let dbid = txn.get_next_db_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(dbid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid1 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid1, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid2 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid2, 1);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_tb_id(nsid, dbid, tbid1).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_db_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_ns_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();

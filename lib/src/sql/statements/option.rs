@@ -37,7 +37,7 @@ pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, n) = ident(i)?;
 	let (i, v) = expected(
-		"'=' follwed by a value for the option",
+		"'=' followed by a value for the option",
 		cut(opt(alt((
 			value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
 			value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),

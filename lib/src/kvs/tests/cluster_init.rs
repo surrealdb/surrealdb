@@ -1,10 +1,12 @@
 use futures::lock::Mutex;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Role};
+use crate::kvs::{LockType::*, LqType, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -21,18 +23,18 @@ async fn expired_nodes_are_garbage_collected() {
 
 	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_time = Timestamp {
-		value: 567,
+		value: 567000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
 	// Now scan the heartbeats to validate there is only one node left
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx.scan_hb(&new_time, 100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for hb in scanned.iter() {
@@ -40,7 +42,7 @@ async fn expired_nodes_are_garbage_collected() {
 	}
 
 	// And scan the nodes to verify its just the latest also
-	let scanned = tx.scan_cl(100).await.unwrap();
+	let scanned = tx.scan_nd(100).await.unwrap();
 	assert_eq!(scanned.len(), 1);
 	for cl in scanned.iter() {
 		assert_eq!(&cl.name, &new_node.to_string());
@@ -57,7 +59,7 @@ async fn expired_nodes_get_live_queries_archived() {
 
 	// Set up the first node at an early timestamp
 	let old_time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	test.bootstrap_at_time(sql::Uuid::from(old_node), old_time.clone()).await.unwrap();
 
@@ -86,7 +88,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_live(true)
 		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
 	match res {
 		Value::Uuid(_) => {}
@@ -99,12 +101,12 @@ async fn expired_nodes_get_live_queries_archived() {
 	// Set up second node at a later timestamp
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
 	let new_time = Timestamp {
-		value: 456,
+		value: 456000,
 	}; // TODO These timestsamps are incorrect and should really be derived; Also check timestamp errors
 	test.bootstrap_at_time(sql::Uuid::from(new_node), new_time.clone()).await.unwrap();
 
 	// Now validate lq was removed
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx
 		.all_tb_lives(ses.ns().unwrap().as_ref(), ses.db().unwrap().as_ref(), table)
 		.await
@@ -121,14 +123,14 @@ async fn single_live_queries_are_garbage_collected() {
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let test = init(node_id).await.unwrap();
 	let time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let namespace = "test_namespace";
 	let database = "test_db";
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
-			node_id.clone(),
+			node_id,
 			Some(Arc::from(namespace)),
 			Some(Arc::from(database)),
 			Arc::new(Auth::for_root(Role::Owner)),
@@ -141,7 +143,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_delete),
@@ -184,7 +186,7 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// Validate
 	trace!("Validating live queries");
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx.all_tb_lives(namespace, database, table).await.unwrap();
 	assert_eq!(scanned.len(), 1, "The scanned values are {:?}", scanned);
 	assert_eq!(&scanned[0].id.0, &live_query_to_keep);
@@ -202,7 +204,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let test = init(old_node_id).await.unwrap();
 	let time = Timestamp {
-		value: 123,
+		value: 123000,
 	};
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
@@ -210,7 +212,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let table = "test_table";
 	let options = Options::default()
 		.with_required(
-			old_node_id.clone(),
+			old_node_id,
 			Some(Arc::from(namespace)),
 			Some(Arc::from(database)),
 			Arc::new(Auth::for_root(Role::Owner)),
@@ -223,7 +225,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(true, false).await.unwrap()));
+	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let live_query_to_corrupt = Uuid::parse_str("d4cee7ce-5c78-4a30-9fa9-2444d58029f6").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_corrupt),
@@ -254,23 +256,15 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	let second_node = test.db.with_node_id(crate::sql::uuid::Uuid::from(new_node_id));
 	match second_node.bootstrap().await {
 		Ok(_) => {
-			panic!("Expected an error because of missing live query")
+			// The behaviour has now changed to remove all broken entries without raising errors
 		}
-		Err(Error::Tx(e)) => match e {
-			_ if e.contains("LvNotFound") => {
-				// This is what we want... an LvNotFound error, but it gets wrapped into a string so that Tx doesnt carry vecs
-			}
-			_ => {
-				panic!("Expected an LvNotFound error but got: {:?}", e);
-			}
-		},
 		Err(e) => {
-			panic!("Missing live query error: {:?}", e)
+			panic!("Bootstrapping should not generate errors: {:?}", e)
 		}
 	}
 
 	// Verify node live query was deleted
-	let mut tx = second_node.transaction(true, false).await.unwrap();
+	let mut tx = second_node.transaction(Write, Optimistic).await.unwrap();
 	let found = tx
 		.scan_ndlq(&old_node_id, 100)
 		.await
@@ -292,4 +286,64 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		.unwrap();
 	assert_eq!(0, found.len(), "Found: {:?}", found);
 	tx.cancel().await.unwrap();
+}
+
+#[test(tokio::test)]
+async fn test_asymmetric_difference() {
+	let nd1 = Uuid::parse_str("7da0b3bb-1811-4c0e-8d8d-5fc08b8200a5").unwrap();
+	let nd2 = Uuid::parse_str("8fd394df-7f96-4395-9c9a-3abf1e2386ea").unwrap();
+	let nd3 = Uuid::parse_str("aa53cb74-1d6b-44df-b063-c495e240ae9e").unwrap();
+	let ns1 = "namespace_one";
+	let ns2 = "namespace_two";
+	let ns3 = "namespace_three";
+	let db1 = "database_one";
+	let db2 = "database_two";
+	let db3 = "database_three";
+	let tb1 = "table_one";
+	let tb2 = "table_two";
+	let tb3 = "table_three";
+	let lq1 = Uuid::parse_str("95f0e060-d301-4dfc-9d35-f150e802873b").unwrap();
+	let lq2 = Uuid::parse_str("acf60c04-5819-4a23-9874-aeb0ae1be425").unwrap();
+	let lq3 = Uuid::parse_str("5d591ae7-db79-4e4f-aa02-a83a4a25ce3f").unwrap();
+	let left_set = BTreeSet::from_iter(vec![
+		LqType::Nd(LqValue {
+			nd: nd1.into(),
+			ns: ns1.to_string(),
+			db: db1.to_string(),
+			tb: tb1.to_string(),
+			lq: lq1.into(),
+		}),
+		LqType::Nd(LqValue {
+			nd: nd2.into(),
+			ns: ns2.to_string(),
+			db: db2.to_string(),
+			tb: tb2.to_string(),
+			lq: lq2.into(),
+		}),
+	]);
+
+	let right_set = BTreeSet::from_iter(vec![
+		LqType::Tb(LqValue {
+			nd: nd2.into(),
+			ns: ns2.to_string(),
+			db: db2.to_string(),
+			tb: tb2.to_string(),
+			lq: lq2.into(),
+		}),
+		LqType::Tb(LqValue {
+			nd: nd3.into(),
+			ns: ns3.to_string(),
+			db: db3.to_string(),
+			tb: tb3.to_string(),
+			lq: lq3.into(),
+		}),
+	]);
+
+	let diff = left_set.symmetric_difference(&right_set);
+	// TODO but also poorman's count
+	let mut count = 0;
+	for _ in diff {
+		count += 1;
+	}
+	assert_ne!(count, 0);
 }

@@ -1,4 +1,6 @@
 //! Stores a DEFINE SCOPE config definition
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +31,12 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b's', b'c', 0xff]);
 	k
+}
+
+impl KeyRequirements for Sc<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseScope
+	}
 }
 
 impl<'a> Sc<'a> {

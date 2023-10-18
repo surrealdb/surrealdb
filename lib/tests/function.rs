@@ -13,7 +13,7 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			let desired_value = Value::parse(*desired_response);
+			let desired_value = Value::parse(desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
 				assert_eq!(
@@ -3756,7 +3756,7 @@ async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -3788,7 +3788,7 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -4260,6 +4260,48 @@ async fn function_time_nano() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_micros() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::micros();
+		RETURN time::micros("1987-06-22T08:30:45Z");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_number());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(551349045000000i64);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_millis() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::millis();
+		RETURN time::millis("1987-06-22T08:30:45Z");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_number());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(551349045000i64);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_now() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::now();
@@ -4418,6 +4460,28 @@ async fn function_time_year() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(1987);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_from_nanos() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::nanos(384025770384840000);
+		RETURN time::from::nanos(2840257704384440000);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'1982-03-03T17:49:30.384840Z'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'2060-01-02T08:28:24.384440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -5117,11 +5181,21 @@ async fn function_type_is_record() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::is::record(person:john);
 		RETURN type::is::record("123");
+		RETURN type::is::record(person:john, 'person');
+		RETURN type::is::record(person:john, 'user');
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);

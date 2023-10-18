@@ -697,7 +697,8 @@ mod tests {
 		NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 	};
 	use crate::idx::VersionedSerdeState;
-	use crate::kvs::{Datastore, Key, Transaction};
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
@@ -757,11 +758,11 @@ mod tests {
 		let mut s = s.lock().await;
 		let mut t = BTree::new(BState::new(5));
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		insertions_test::<_, FstKeys>(&mut tx, &mut s, &mut t, 100, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
 			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
@@ -782,12 +783,12 @@ mod tests {
 		let mut s = s.lock().await;
 		let mut t = BTree::new(BState::new(6));
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		insertions_test::<_, TrieKeys>(&mut tx, &mut s, &mut t, 100, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
 			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
@@ -807,7 +808,7 @@ mod tests {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut t = BTree::new(BState::new(8));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
@@ -817,7 +818,7 @@ mod tests {
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let s = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
@@ -831,7 +832,7 @@ mod tests {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut t = BTree::new(BState::new(75));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
@@ -841,7 +842,7 @@ mod tests {
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let s = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
@@ -855,13 +856,13 @@ mod tests {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 		insertions_test::<_, FstKeys>(&mut tx, &mut s, &mut t, 10000, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
 			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
@@ -881,13 +882,13 @@ mod tests {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 		insertions_test::<_, TrieKeys>(&mut tx, &mut s, &mut t, 10000, get_key_value).await;
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
 			t.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 				.await
@@ -915,7 +916,7 @@ mod tests {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 		insertions_test::<_, BK>(&mut tx, &mut s, &mut t, REAL_WORLD_TERMS.len(), |i| {
 			(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
@@ -924,7 +925,7 @@ mod tests {
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let statistics = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
@@ -1024,14 +1025,14 @@ mod tests {
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
-		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		for (key, payload) in CLRS_EXAMPLE {
 			t.insert(&mut tx, &mut s, key.into(), payload).await.unwrap();
 		}
 		s.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let s = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
@@ -1116,7 +1117,7 @@ mod tests {
 		{
 			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 			let mut s = s.lock().await;
-			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
 				t.insert(&mut tx, &mut s, key.into(), payload).await.unwrap();
 			}
@@ -1128,7 +1129,7 @@ mod tests {
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
 				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 				let mut s = s.lock().await;
-				let mut tx = ds.transaction(true, false).await.unwrap();
+				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 				debug!("Delete {}", key);
 				assert_eq!(t.delete(&mut tx, &mut s, key.into()).await.unwrap(), Some(payload));
 				s.finish(&mut tx).await.unwrap();
@@ -1136,7 +1137,7 @@ mod tests {
 			}
 		}
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let s = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await
@@ -1224,7 +1225,7 @@ mod tests {
 		{
 			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 			let mut s = s.lock().await;
-			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
 				t.insert(&mut tx, &mut s, key.into(), payload).await.unwrap();
@@ -1234,8 +1235,8 @@ mod tests {
 		}
 
 		{
-			let mut tx = ds.transaction(true, false).await.unwrap();
-			print_tree(&mut tx, &mut t).await;
+			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+			print_tree(&mut tx, &t).await;
 			tx.commit().await.unwrap();
 		}
 
@@ -1243,7 +1244,7 @@ mod tests {
 			debug!("------------------------");
 			debug!("Delete {}", key);
 			{
-				let mut tx = ds.transaction(true, false).await.unwrap();
+				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 				let mut s = s.lock().await;
 				t.delete(&mut tx, &mut s, key.into()).await.unwrap();
@@ -1256,7 +1257,7 @@ mod tests {
 			expected_keys.remove(key);
 
 			{
-				let mut tx = ds.transaction(true, false).await.unwrap();
+				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20);
 				let mut s = s.lock().await;
 				for (key, payload) in &expected_keys {
@@ -1269,7 +1270,7 @@ mod tests {
 			}
 		}
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
+		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let s = t
 			.statistics(&mut tx, &mut TreeNodeStore::Traversal(TreeNodeProvider::Debug))
 			.await

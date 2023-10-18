@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::iam::token::Claims;
 use crate::iam::Auth;
 use crate::iam::{Actor, Level, Role};
-use crate::kvs::Datastore;
+use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::json;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::Algorithm;
@@ -152,7 +152,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to scope `{}` with token `{}`", sc, tk);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let id = match id {
 				Some(id) => crate::sql::thing(&id)?.into(),
@@ -189,7 +189,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to scope `{}`", sc);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let id = crate::sql::thing(&id)?;
 			// Get the scope
@@ -222,7 +222,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with token `{}`", db, tk);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
 			let cf = config(de.kind, de.code)?;
@@ -263,7 +263,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
 			let de = tx.get_db_user(&ns, &db, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
@@ -291,7 +291,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with token `{}`", ns, tk);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
 			let cf = config(de.kind, de.code)?;
@@ -327,7 +327,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_ns_user(&ns, &id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
@@ -353,7 +353,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root level with user `{}`", id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(false, false).await?;
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_root_user(&id).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
@@ -436,7 +436,7 @@ async fn verify_root_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(false, false).await?;
+	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_root_user(user).await?;
 	// Verify the specified password for the user
@@ -452,7 +452,7 @@ async fn verify_ns_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(false, false).await?;
+	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_ns_user(ns, user).await?;
 	// Verify the specified password for the user
@@ -469,7 +469,7 @@ async fn verify_db_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(false, false).await?;
+	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_db_user(ns, db, user).await?;
 	// Verify the specified password for the user
@@ -561,7 +561,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 
@@ -632,7 +632,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 
@@ -705,7 +705,7 @@ mod tests {
 			};
 			let res = basic(&ds, &mut sess, "user", "invalid").await;
 
-			assert!(res.is_err(), "Unexpect successful signin: {:?}", res);
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
 

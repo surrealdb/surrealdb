@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use http_body::Body as HttpBody;
+use surrealdb::kvs::{LockType::*, TransactionType::*};
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -17,7 +18,7 @@ async fn handler() -> impl IntoResponse {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Attempt to open a transaction
-	match db.transaction(false, false).await {
+	match db.transaction(Read, Optimistic).await {
 		// The transaction failed to start
 		Err(_) => Err(Error::InvalidStorage),
 		// The transaction was successful

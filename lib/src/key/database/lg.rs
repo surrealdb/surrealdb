@@ -1,4 +1,6 @@
 //! Stores a DEFINE LOGIN ON DATABASE config definition
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +31,12 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'g', 0xff]);
 	k
+}
+
+impl KeyRequirements for Lg<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::DatabaseLog
+	}
 }
 
 impl<'a> Lg<'a> {

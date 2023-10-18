@@ -7,7 +7,8 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
+use crate::kvs::TransactionType;
+use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
@@ -44,10 +45,10 @@ impl<'a> Executor<'a> {
 	/// - false if
 	///   - couldn't create transaction (sets err flag)
 	///   - a transaction has already begun
-	async fn begin(&mut self, write: bool) -> bool {
+	async fn begin(&mut self, write: TransactionType) -> bool {
 		match self.txn.as_ref() {
 			Some(_) => false,
-			None => match self.kvs.transaction(write, false).await {
+			None => match self.kvs.transaction(write, Optimistic).await {
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -64,7 +65,7 @@ impl<'a> Executor<'a> {
 	///
 	/// # Return
 	///
-	/// An `Err` if the transaction could not be commited;
+	/// An `Err` if the transaction could not be committed;
 	/// otherwise returns `Ok`.
 	async fn commit(&mut self, local: bool) -> Result<(), Error> {
 		if local {
@@ -222,7 +223,7 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
-					self.begin(true).await;
+					self.begin(Write).await;
 					continue;
 				}
 				// Cancel a running transaction
@@ -258,7 +259,7 @@ impl<'a> Executor<'a> {
 				// Process param definition statements
 				Statement::Set(stm) => {
 					// Create a transaction
-					let loc = self.begin(stm.writeable()).await;
+					let loc = self.begin(stm.writeable().into()).await;
 					// Check the transaction
 					match self.err {
 						// We failed to create a transaction
@@ -311,7 +312,7 @@ impl<'a> Executor<'a> {
 					// Compute the statement normally
 					false => {
 						// Create a transaction
-						let loc = self.begin(stm.writeable()).await;
+						let loc = self.begin(stm.writeable().into()).await;
 						// Check the transaction
 						match self.err {
 							// We failed to create a transaction
@@ -435,7 +436,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, &session, None).await;
+				let res = ds.execute(statement, session, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);

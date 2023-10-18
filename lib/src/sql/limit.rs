@@ -32,7 +32,7 @@ impl Limit {
 			Ok(v) => Err(Error::InvalidLimit {
 				value: v.as_string(),
 			}),
-			// A different error occured
+			// A different error occurred
 			Err(e) => Err(e),
 		}
 	}

@@ -71,7 +71,7 @@ impl DefineFunctionStatement {
 
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION fn::{}(", self.name)?;
+		write!(f, "DEFINE FUNCTION fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

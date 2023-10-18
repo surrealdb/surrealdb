@@ -89,7 +89,7 @@ async fn concurrency() -> Result<(), Error> {
 		)
 	}
 
-	/// Returns `true` iif `limit` futures are concurrently executed.
+	/// Returns `true` if `limit` futures are concurrently executed.
 	async fn test_limit(limit: usize) -> Result<bool, Error> {
 		let sql = query(limit, MILLIS);
 		let dbs = new_ds().await?;

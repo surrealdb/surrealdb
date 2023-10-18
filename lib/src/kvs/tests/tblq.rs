@@ -5,7 +5,7 @@ async fn write_scan_tblq() {
 	let test = init(node_id).await.unwrap();
 
 	// Write some data
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let ns = "namespace";
 	let db = "database";
 	let tb = "table";
@@ -26,8 +26,10 @@ async fn write_scan_tblq() {
 	tx.commit().await.unwrap();
 
 	// Verify scan
-	let mut tx = test.db.transaction(true, false).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let res = tx.scan_tblq(ns, db, tb, 100).await.unwrap();
+	let no_limit = tx.scan_tblq(ns, db, tb, NO_LIMIT).await.unwrap();
+	tx.commit().await.unwrap();
 	assert_eq!(
 		res,
 		vec![LqValue {
@@ -38,5 +40,5 @@ async fn write_scan_tblq() {
 			lq: live_id
 		}]
 	);
-	tx.commit().await.unwrap();
+	assert_eq!(res, no_limit);
 }
