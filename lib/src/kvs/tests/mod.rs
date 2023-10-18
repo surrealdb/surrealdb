@@ -194,7 +194,16 @@ mod tikv {
 	}
 
 	async fn clear_cluster(mut tx: Transaction) -> Result<(), Error> {
-		tx.delp(vec![], u32::MAX).await?;
+		if let Err(e) = tx.delp(vec![], u32::MAX).await {
+			let second_err = tx.cancel().await;
+			match second_err {
+				Ok(_) => Err(e),
+				Err(e2) => {
+					error!("Failed to cancel transaction: {}, original error cause was: {}", e2, e);
+					Err(e2)
+				}
+			}
+		}
 		tx.commit().await
 	}
 
