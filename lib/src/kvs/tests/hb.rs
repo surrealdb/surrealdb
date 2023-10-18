@@ -2,11 +2,12 @@
 #[serial]
 async fn write_scan_hb() {
 	let nd = uuid::Uuid::parse_str("e80540d4-2869-4bf3-ae27-790a538c53f3").unwrap();
-	let test = init(nd).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(nd, clock).await.unwrap();
 
 	// Add 2 nodes
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let t1 = tx.clock();
+	let t1 = tx.clock().await;
 	let t2 = Timestamp {
 		value: t1.value + 1,
 	};
