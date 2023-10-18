@@ -13,17 +13,35 @@ async fn multireader() {
 
 	// Create a readonly transaction
 	let mut tx1 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx1.get("test").await.unwrap().unwrap();
+	let val = tx1
+		.get("test")
+		.await
+		.map_err(|e| format!("Failed to get value in tx1: {}", e))
+		.unwrap()
+		.ok_or(format!("value from tx1 was None"))
+		.unwrap();
 	assert_eq!(val, b"some text");
 
 	// Create a readonly transaction
 	let mut tx2 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx2.get("test").await.unwrap().unwrap();
+	let val = tx2
+		.get("test")
+		.await
+		.map_err(|e| format!("Failed to get value in tx2: {}", e))
+		.unwrap()
+		.ok_or(format!("value from tx2 was None"))
+		.unwrap();
 	assert_eq!(val, b"some text");
 
 	// Create a readonly transaction
 	let mut tx3 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx3.get("test").await.unwrap().unwrap();
+	let val = tx3
+		.get("test")
+		.await
+		.map_err(|e| format!("Failed to get value in tx3: {}", e))
+		.unwrap()
+		.ok_or(format!("value from tx3 was None"))
+		.unwrap();
 	assert_eq!(val, b"some text");
 
 	// Cancel both readonly transactions
