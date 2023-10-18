@@ -1,5 +1,11 @@
 /// A shorthand for token kinds.
 macro_rules! t {
+	("invalid") => {
+		$crate::syn::token::TokenKind::Invalid
+	};
+	("eof") => {
+		$crate::syn::token::TokenKind::Eof
+	};
 	("[") => {
 		$crate::syn::token::TokenKind::OpenDelim($crate::syn::token::Delim::Bracket)
 	};
@@ -209,9 +215,6 @@ macro_rules! t {
 	("ANALYZE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Analyze)
 	};
-	("ARABIC") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Arabic)
-	};
 	("AS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::As)
 	};
@@ -272,9 +275,6 @@ macro_rules! t {
 	("CREATE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Create)
 	};
-	("DANISH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Danish)
-	};
 	("DATABASE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Database)
 	};
@@ -293,29 +293,17 @@ macro_rules! t {
 	("DIFF") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Diff)
 	};
+	("DIMENSION") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Dimension)
+	};
+	("DIST") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Dist)
+	};
 	("DROP") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Drop)
 	};
-	("DUTCH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Dutch)
-	};
-	("EDDSA") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::EdDSA)
-	};
 	("EDGENGRAM") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Edgengram)
-	};
-	("ENGLISH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::English)
-	};
-	("ES256") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Es256)
-	};
-	("ES384") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Es384)
-	};
-	("ES512") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Es512)
 	};
 	("EUCLIDEAN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Euclidean)
@@ -332,20 +320,23 @@ macro_rules! t {
 	("FETCH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Fetch)
 	};
+	("FIELD") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Field)
+	};
 	("FIELDS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Fields)
 	};
 	("FILTERS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Filters)
 	};
-	("FLEXIBILE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Flexibile)
+	("FLEXIBLE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Flexible)
+	};
+	("fn") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Fn)
 	};
 	("FOR") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::For)
-	};
-	("FRENCH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::French)
 	};
 	("FROM") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::From)
@@ -356,29 +347,11 @@ macro_rules! t {
 	("FUNCTION") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Function)
 	};
-	("GERMAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::German)
-	};
-	("GREEK") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Greek)
-	};
 	("GROUP") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Group)
 	};
 	("HAMMING") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Hamming)
-	};
-	("HS256") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Hs256)
-	};
-	("HS384") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Hs384)
-	};
-	("HS512") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Hs512)
-	};
-	("HUNGARIAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Hungarian)
 	};
 	("IGNORE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ignore)
@@ -397,9 +370,6 @@ macro_rules! t {
 	};
 	("IF") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::If)
-	};
-	("ITALIAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Italian)
 	};
 	("IS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Is)
@@ -434,6 +404,9 @@ macro_rules! t {
 	("MODEL") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Model)
 	};
+	("MTREE") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::MTree)
+	};
 	("NAMESPACE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Namespace)
 	};
@@ -451,9 +424,6 @@ macro_rules! t {
 	};
 	("NOT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Not)
-	};
-	("NORWEGIAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Norwegian)
 	};
 	("NULL") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Null)
@@ -482,23 +452,14 @@ macro_rules! t {
 	("PASSHASH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Passhash)
 	};
+	("PASSWORD") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Password)
+	};
 	("PATCH") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Patch)
 	};
 	("PERMISSIONS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Permissions)
-	};
-	("PORTUGUESE") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Portuguese)
-	};
-	("PS256") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ps256)
-	};
-	("PS384") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ps384)
-	};
-	("PS512") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Ps512)
 	};
 	("PUNCT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Punct)
@@ -518,23 +479,8 @@ macro_rules! t {
 	("ROLES") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Roles)
 	};
-	("ROMANIAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Romanian)
-	};
 	("ROOT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Root)
-	};
-	("RS256") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Rs256)
-	};
-	("RS384") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Rs384)
-	};
-	("RS512") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Rs512)
-	};
-	("RUSSIAN") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Russian)
 	};
 	("SCHEMAFULL") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Schemafull)
@@ -544,6 +490,9 @@ macro_rules! t {
 	};
 	("SCOPE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Scope)
+	};
+	("SEARCH") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Search)
 	};
 	("SELECT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Select)
@@ -557,7 +506,7 @@ macro_rules! t {
 	("SHOW") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Show)
 	};
-	("SIGNIM") => {
+	("SIGNIN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Signim)
 	};
 	("SIGNUP") => {
@@ -581,14 +530,8 @@ macro_rules! t {
 	("START") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Start)
 	};
-	("SWEDISH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Swedish)
-	};
 	("TABLE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Table)
-	};
-	("TAMIL") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Tamil)
 	};
 	("THEN") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Then)
@@ -602,14 +545,14 @@ macro_rules! t {
 	("TOKEIZERS") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Tokeizers)
 	};
+	("TOKEN") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Token)
+	};
 	("TRANSACTION") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Transaction)
 	};
 	("TRUE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::True)
-	};
-	("TURKISH") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Turkish)
 	};
 	("TYPE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Type)
@@ -699,6 +642,48 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::OrKw)
 	};
 
+	// algorithms
+	("EDDSA") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::EdDSA)
+	};
+	("ES256") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es256)
+	};
+	("ES384") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es384)
+	};
+	("ES512") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es512)
+	};
+	("HS256") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs256)
+	};
+	("HS384") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs384)
+	};
+	("HS512") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs512)
+	};
+	("PS256") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps256)
+	};
+	("PS384") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps384)
+	};
+	("PS512") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps512)
+	};
+	("RS256") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs256)
+	};
+	("RS384") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs384)
+	};
+	("RS512") => {
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs512)
+	};
+
+	// case sensitive keywords.
 	("ANY") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Any)
 	};

@@ -10,9 +10,8 @@ use crate::{
 use self::token_buffer::TokenBuffer;
 
 mod basic;
-mod ending;
-mod fields;
 mod idiom;
+mod kind;
 mod mac;
 mod object;
 mod operator;
@@ -20,7 +19,6 @@ mod prime;
 mod stmt;
 mod token_buffer;
 mod value;
-mod kind;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
@@ -76,7 +74,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next token.
-	pub fn next_token(&mut self) -> Token {
+	pub fn next(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
 		res
@@ -92,11 +90,20 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next token without consuming it.
-	pub fn peek_token(&mut self) -> Token {
+	pub fn peek(&mut self) -> Token {
 		let Some(x) = self.token_buffer.first() else {
 			let res = self.lexer.next_token();
 			self.token_buffer.push(res);
 			return res;
+		};
+		x
+	}
+
+	pub fn peek_kind(&mut self) -> TokenKind {
+		let Some(x) = self.token_buffer.first().map(|x| x.kind) else {
+			let res = self.lexer.next_token();
+			self.token_buffer.push(res);
+			return res.kind;
 		};
 		x
 	}
@@ -116,7 +123,7 @@ impl<'a> Parser<'a> {
 	/// Eat the next token if it is of the given kind.
 	/// Returns whether a token was eaten.
 	pub fn eat(&mut self, token: TokenKind) -> bool {
-		if token == self.peek_token().kind {
+		if token == self.peek().kind {
 			self.token_buffer.pop();
 			true
 		} else {
@@ -181,14 +188,14 @@ impl<'a> Parser<'a> {
 		while self.eat(t!(";")) {
 			while self.eat(t!(";")) {}
 
-			if let TokenKind::Eof = self.peek_token().kind {
+			if let TokenKind::Eof = self.peek().kind {
 				break;
 			};
 
 			statements.push(self.parse_stmt()?);
 		}
-		let token = self.peek_token();
-		let TokenKind::Eof = token.kind else {
+		let token = self.peek();
+		if TokenKind::Eof != token.kind {
 			unexpected!(self, token.kind, ";");
 		};
 		Ok(sql::Query(sql::Statements(statements)))

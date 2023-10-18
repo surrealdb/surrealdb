@@ -56,6 +56,11 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parses a block of statements
+	///
+	/// # Parser State
+	/// Expects the starting `{` to have already been eaten and its span to be handed to this
+	/// functions as the `start` parameter.
 	pub(super) fn parse_block(&mut self, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
@@ -64,7 +69,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let statement_span = self.peek_token().span;
+			let statement_span = self.peek().span;
 			let stmt = self.parse_statement()?;
 			if let Some(x) = stmt.into_entry() {
 				statements.push(x);
@@ -90,13 +95,9 @@ impl Parser<'_> {
 	}
 
 	fn parse_object_key(&mut self) -> ParseResult<String> {
-		let token = self.peek_token();
+		let token = self.peek();
 		match token.kind {
-			TokenKind::Keyword(_)
-			| TokenKind::Number
-			| TokenKind::Duration {
-				valid_identifier: true,
-			} => {
+			TokenKind::Keyword(_) => {
 				let str = self.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let str = std::str::from_utf8(str).unwrap().to_owned();

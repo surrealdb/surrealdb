@@ -89,7 +89,7 @@ impl Parser<'_> {
 	}
 
 	fn parse_prefix_op(&mut self, min_bp: u8) -> ParseResult<Value> {
-		let token = self.next_token();
+		let token = self.next();
 		let operator = match token.kind {
 			t!("+") => Operator::Add,
 			t!("-") => Operator::Sub,
@@ -112,7 +112,7 @@ impl Parser<'_> {
 	}
 
 	fn parse_infix_op(&mut self, min_bp: u8, lhs: Value) -> ParseResult<Value> {
-		let token = self.next_token();
+		let token = self.next();
 		let operator = match token.kind {
 			// TODO: change operator name?
 			t!("||") | t!("OR") => Operator::Or,
@@ -188,14 +188,14 @@ impl Parser<'_> {
 	}
 
 	fn pratt_parse_expr(&mut self, min_bp: u8) -> ParseResult<Value> {
-		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(self.peek_token().kind) {
+		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(self.peek().kind) {
 			self.parse_prefix_op(r_bp)?
 		} else {
-			self.parse_prime_value()?
+			self.parse_idiom_expression()?
 		};
 
 		loop {
-			let token = self.peek_token();
+			let token = self.peek();
 			let Some((l_bp, r_bp)) = Self::infix_binding_power(token.kind) else {
 				break;
 			};

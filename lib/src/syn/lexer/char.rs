@@ -20,7 +20,10 @@ impl<'a> Lexer<'a> {
 			'⊆' => t!("⊆"),
 			'⊂' => t!("⊂"),
 			'⊄' => t!("⊄"),
-			_ => return self.finish_token(TokenKind::Invalid, None),
+			'⊄' => t!("⊄"),
+			'×' => t!("×"),
+			'÷' => t!("÷"),
+			_ => return self.invalid_token(),
 		};
 		self.finish_token(kind, None)
 	}

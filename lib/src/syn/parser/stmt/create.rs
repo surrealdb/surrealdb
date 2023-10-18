@@ -1,119 +1,23 @@
 use crate::{
-	sql::{statements::CreateStatement, Data, Operator, Output},
+	sql::{statements::CreateStatement, Values},
 	syn::{
-		parser::{
-			mac::{to_do, unexpected},
-			ParseResult, Parser,
-		},
+		parser::{ParseResult, Parser},
 		token::t,
 	},
 };
 
 impl Parser<'_> {
 	pub fn parse_create_stmt(&mut self) -> ParseResult<CreateStatement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("CREATE"));
 
 		let only = self.eat(t!("ONLY"));
-		let what = self.parse_whats()?;
-		let data = match self.peek_token().kind {
-			t!("SET") => {
-				self.pop_peek();
-				let mut res = Vec::new();
-				loop {
-					let idiom = self.parse_plain_idiom()?;
-					let operator = match self.next_token().kind {
-						t!("=") => Operator::Equal,
-						t!("+=") => Operator::Inc,
-						t!("-=") => Operator::Dec,
-						t!("+?=") => Operator::Ext,
-						x => unexpected!(self, x, "an assignment operator"),
-					};
-					let value = self.parse_value()?;
-					res.push((idiom, operator, value));
-					if !self.eat(t!(",")) {
-						break;
-					}
-				}
-
-				Some(Data::SetExpression(res))
-			}
-			t!("UNSET") => {
-				self.pop_peek();
-				let mut res = Vec::new();
-				loop {
-					let idiom = self.parse_plain_idiom()?;
-					res.push(idiom);
-					if !self.eat(t!(",")) {
-						break;
-					}
-				}
-
-				Some(Data::UnsetExpression(res))
-			}
-			t!("PATCH") => {
-				self.pop_peek();
-				let value = self.parse_value()?;
-				Some(Data::PatchExpression(value))
-			}
-			t!("MERGE") => {
-				self.pop_peek();
-				let value = self.parse_value()?;
-				Some(Data::MergeExpression(value))
-			}
-			t!("REPLACE") => {
-				self.pop_peek();
-				let value = self.parse_value()?;
-				Some(Data::ReplaceExpression(value))
-			}
-			t!("CONTENT") => {
-				self.pop_peek();
-				let value = self.parse_value()?;
-				Some(Data::ContentExpression(value))
-			}
-			_ => None,
-		};
-
-		let output = if self.eat(t!("RETURN")) {
-			let output = match self.peek_token().kind {
-				t!("NONE") => {
-					self.pop_peek();
-					Output::None
-				}
-				t!("NULL") => {
-					self.pop_peek();
-					Output::Null
-				}
-				t!("DIFF") => {
-					self.pop_peek();
-					Output::Diff
-				}
-				t!("AFTER") => {
-					self.pop_peek();
-					Output::After
-				}
-				t!("BEFORE") => {
-					self.pop_peek();
-					Output::Before
-				}
-				// if the next token is a `,` then the value was an identifier.
-				_ => {
-					let fields = self.parse_fields()?;
-					Output::Fields(fields)
-				}
-			};
-			Some(output)
-		} else {
-			None
-		};
-
-		let timeout = if self.eat(t!("TIMEOUT")) {
-			to_do!(self)
-		} else {
-			None
-		};
-
+		let what = Values(self.parse_what_list()?);
+		let data = self.try_parse_data()?;
+		let output = self.try_parse_output()?;
+		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
+
 		Ok(CreateStatement {
 			only,
 			what,

@@ -1,12 +1,12 @@
 use crate::{
-	sql::{Dir, Ident, Idiom, Part, Value},
+	sql::{Dir, Field, Fields, Graph, Idiom, Part, Table, Tables, Value},
 	syn::{
-		parser::mac::{expected, to_do, unexpected},
-		token::{t, TokenKind},
+		parser::mac::to_do,
+		token::{t, Span, TokenKind},
 	},
 };
 
-use super::{ParseResult, Parser};
+use super::{mac::unexpected, ParseResult, Parser};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum IdiomKind {
@@ -16,105 +16,314 @@ pub enum IdiomKind {
 }
 
 impl Parser<'_> {
-	pub fn parse_idiom(&mut self, kind: IdiomKind) -> ParseResult<Value> {
-		let start = self.parse_prime_value()?;
-		let peek = self.peek_token();
-		if !start.can_start_idiom() {
-			return Ok(start);
-		}
-		if let Some(next_part) = self.parse_next_part(kind)? {
-			let mut idiom = match start {
-				Value::Idiom(mut x) => {
-					x.0.push(next_part);
-					x
+	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
+		if self.eat(t!("VALUE")) {
+			let expr = self.parse_value()?;
+			let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+			Ok(Fields(
+				vec![Field::Single {
+					expr,
+					alias,
+				}],
+				true,
+			))
+		} else {
+			let mut fields = Vec::new();
+			loop {
+				let field = if self.eat(t!("*")) {
+					Field::All
+				} else {
+					let expr = self.parse_value()?;
+					let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+					Field::Single {
+						expr,
+						alias,
+					}
+				};
+				fields.push(field);
+				if !self.eat(t!(",")) {
+					break;
 				}
-				Value::Table(x) => Idiom(vec![Part::Field(Ident(x.0)), next_part]),
-				x => Idiom(vec![Part::Start(x), next_part]),
+			}
+			Ok(Fields(fields, false))
+		}
+	}
+
+	/// Parses a list of idioms seperated by a `,`
+	pub fn parse_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_plain_idiom()?];
+		while self.eat(t!(",")) {
+			res.push(self.parse_plain_idiom()?);
+		}
+		Ok(res)
+	}
+
+	/// Parses the remaining idiom parts after the start.
+	fn parse_remaining_idiom(&mut self, start: Part) -> ParseResult<Idiom> {
+		let mut res = vec![start];
+		loop {
+			match self.peek_kind() {
+				t!("...") => {
+					self.pop_peek();
+					res.push(Part::Flatten);
+				}
+				t!(".") => {
+					self.pop_peek();
+					res.push(self.parse_dot_part()?)
+				}
+				t!("[") => {
+					let span = self.pop_peek().span;
+					res.push(self.parse_bracket_part(span)?)
+				}
+				t!("->") => {
+					self.pop_peek();
+					res.push(Part::Graph(self.parse_graph(Dir::In)?))
+				}
+				t!("<->") => {
+					self.pop_peek();
+					res.push(Part::Graph(self.parse_graph(Dir::Both)?))
+				}
+				t!("<-") => {
+					self.pop_peek();
+					res.push(Part::Graph(self.parse_graph(Dir::Out)?))
+				}
+				t!("..") => {
+					// TODO: error message suggesting `..`
+					to_do!(self)
+				}
+				_ => break,
+			}
+		}
+		Ok(Idiom(res))
+	}
+
+	/// Returns if the token kind could continua an idiom
+	pub fn continues_idiom(kind: TokenKind) -> bool {
+		matches!(kind, t!("->") | t!("<->") | t!("<-") | t!("[") | t!(".") | t!("..."))
+	}
+
+	/// Parse a idiom which can only start with a graph or an identifier.
+	/// Other expressions are not allowed as start of this idiom
+	pub fn parse_plain_idiom(&mut self) -> ParseResult<Idiom> {
+		let start = match self.peek_kind() {
+			t!("->") => {
+				self.pop_peek();
+				Part::Graph(self.parse_graph(Dir::In)?)
+			}
+			t!("<->") => {
+				self.pop_peek();
+				Part::Graph(self.parse_graph(Dir::Both)?)
+			}
+			t!("<-") => {
+				self.pop_peek();
+				Part::Graph(self.parse_graph(Dir::Out)?)
+			}
+			_ => Part::Field(self.parse_ident()?),
+		};
+		self.parse_remaining_idiom(start)
+	}
+
+	pub fn parse_dot_part(&mut self) -> ParseResult<Part> {
+		let res = match self.peek_kind() {
+			t!("*") => {
+				self.pop_peek();
+				Part::All
+			}
+			_ => Part::Field(self.parse_ident()?),
+		};
+		Ok(res)
+	}
+
+	pub fn parse_bracket_part(&mut self, start: Span) -> ParseResult<Part> {
+		let res = match self.peek_kind() {
+			t!("*") => {
+				self.pop_peek();
+				Part::All
+			}
+			t!("$") => {
+				self.pop_peek();
+				Part::Last
+			}
+			t!("123") => Part::Index(self.parse_number()?),
+			t!("?") | t!("WHERE") => {
+				self.pop_peek();
+				Part::Where(self.parse_value()?)
+			}
+			t!("$param") => Part::Value(Value::Param(self.parse_param()?)),
+			TokenKind::Strand => Part::Value(Value::Strand(self.parse_strand()?)),
+			x => {
+				let idiom = self.parse_basic_idiom()?;
+				Part::Value(Value::Idiom(idiom))
+			}
+		};
+		self.expect_closing_delimiter(t!("]"), start)?;
+		Ok(res)
+	}
+
+	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
+		let start = self.parse_ident()?;
+		let mut parts = vec![Part::Field(start)];
+		loop {
+			let token = self.peek();
+			let part = match token.kind {
+				t!(".") => {
+					self.pop_peek();
+					self.parse_dot_part()?
+				}
+				t!("[") => {
+					self.pop_peek();
+					let res = match self.peek_kind() {
+						t!("*") => {
+							self.pop_peek();
+							Part::All
+						}
+						t!("$") => {
+							self.pop_peek();
+							Part::Last
+						}
+						t!("123") => {
+							let number = self.parse_number()?;
+							Part::Index(number)
+						}
+						x => unexpected!(self, x, "$, * or a number"),
+					};
+					self.expect_closing_delimiter(t!("]"), token.span)?;
+					res
+				}
+				_ => break,
+			};
+			parts.push(part);
+		}
+		Ok(Idiom(parts))
+	}
+
+	pub fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
+		let start = self.parse_ident()?;
+		let mut parts = vec![Part::Field(start)];
+		loop {
+			let token = self.peek();
+			let part = match token.kind {
+				t!(".") => {
+					self.pop_peek();
+					self.parse_dot_part()?
+				}
+				t!("[") => {
+					self.pop_peek();
+					let res = match self.peek_kind() {
+						t!("*") => {
+							self.pop_peek();
+							Part::All
+						}
+						t!("123") => {
+							let number = self.parse_number()?;
+							Part::Index(number)
+						}
+						x => unexpected!(self, x, "$, * or a number"),
+					};
+					self.expect_closing_delimiter(t!("]"), token.span)?;
+					res
+				}
+				_ => break,
 			};
 
-			while let Some(x) = self.parse_next_part(kind)? {
-				idiom.push(next_part);
-			}
+			parts.push(part);
+		}
 
-			return Ok(Value::Idiom(idiom));
+		if self.eat(t!("...")) {
+			parts.push(Part::Flatten);
+			if let t!(".") | t!("[") = self.peek_kind() {
+				// TODO: Error message that flatten can only be last.
+				to_do!(self)
+			}
+		}
+
+		Ok(Idiom(parts))
+	}
+
+	/// Parses a list of what values seperated by comma's
+	///
+	/// # Parser state
+	/// Expects to be at the start of a what list.
+	pub fn parse_what_list(&mut self) -> ParseResult<Vec<Value>> {
+		let mut res = vec![self.parse_what_value()?];
+		while self.eat(t!(",")) {
+			res.push(self.parse_what_value()?)
+		}
+		Ok(res)
+	}
+
+	/// Parses a single what value,
+	///
+	/// # Parser state
+	/// Expects to be at the start of a what value
+	pub fn parse_what_value(&mut self) -> ParseResult<Value> {
+		let start = self.parse_what_primary()?;
+		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
+			let idiom = self.parse_remaining_idiom(Part::Value(start))?;
+			Ok(Value::Idiom(idiom))
 		} else {
-			return Ok(start);
+			Ok(start)
 		}
 	}
 
-	pub fn parse_next_part(&mut self, kind: IdiomKind) -> ParseResult<Option<Part>> {
-		let peek = self.peek_token();
-		let part = match peek.kind {
-			t!(".") => {
+	/// Parses a graph value
+	///
+	/// # Parser state
+	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at the field like part
+	/// of the graph
+	pub fn parse_graph(&mut self, dir: Dir) -> ParseResult<Graph> {
+		match self.peek_kind() {
+			t!("?") => {
 				self.pop_peek();
-				if self.eat(t!("*")) {
-					Part::All
-				} else {
-					let ident = self.parse_ident()?;
-					Part::Field(ident)
-				}
+				Ok(Graph {
+					dir,
+					..Default::default()
+				})
 			}
-			t!("...") => {
-				self.pop_peek();
-				if kind == IdiomKind::Basic {
-					unexpected!(self, t!("..."), "a basic idiom");
-				}
-				Part::Flatten
-			}
-			t!("[") => {
-				let token = self.next_token();
-				let part = match token.kind {
-					t!("*") => {
-						self.next_token();
-						Part::All
+			t!("(") => {
+				let span = self.pop_peek().span;
+				let what = match self.peek_kind() {
+					t!("?") => {
+						self.pop_peek();
+						Tables::default()
 					}
-					t!("$") => {
-						if kind == IdiomKind::Local {
-							unexpected(self, token.kind, "a local idiom");
+					x if x.can_be_identifier() => {
+						// The following function should always succeed here,
+						// returning an error here would be a bug, so unwrap.
+						let table = self.parse_raw_ident().unwrap();
+						let mut tables = Tables(vec![Table(table)]);
+						while self.eat(t!(",")) {
+							tables.0.push(Table(self.parse_raw_ident()?));
 						}
-						self.next_token();
-						Part::Last
+						tables
 					}
-					t!("WHERE") => {
-						// recover from WHERE condition when WHERE is a idiom
-						self.recover(
-							token.span,
-							|this| this.parse_value().map(Part::Where),
-							|this| this.parse_bracketed_value().map(Part::Where),
-						)?
-					}
-					t!("?") => self.parse_value().map(Part::Where)?,
-					TokenKind::Number => Part::Index(self.parse_number()?),
-					// TODO: Value.
-					x => unexpected!(self, x, "*, $, WHERE, ?, or a simple value"),
+					x => unexpected!(self, x, "`?` or an identifier"),
 				};
-				self.expect_closing_delimiter(t!("]"), peek.span)?;
-				part
-			}
-			t!("->") => {
-				match kind {
-					// TODO: Check direction
-					IdiomKind::Plain => self.parse_graph(Dir::Out)?,
-					IdiomKind::Basic => unexpected!(self, peek.kind, "a basic idiom"),
-					IdiomKind::Local => unexpected!(self, peek.kind, "a local idiom"),
-				}
-			}
-			t!("<->") => match kind {
-				IdiomKind::Plain => self.parse_graph(Dir::Both)?,
-				IdiomKind::Basic => unexpected!(self, peek.kind, "a basic idiom"),
-				IdiomKind::Local => unexpected!(self, peek.kind, "a local idiom"),
-			},
-			t!("<-") => match kind {
-				IdiomKind::Plain => self.parse_graph(Dir::In)?,
-				IdiomKind::Basic => unexpected!(self, peek.kind, "a basic idiom"),
-				IdiomKind::Local => unexpected!(self, peek.kind, "a local idiom"),
-			},
-			_ => return Ok(None),
-		};
-		Ok(Some(part))
-	}
 
-	pub fn parse_bracketed_value(&mut self) -> ParseResult<Value> {
-		to_do!(self)
+				let cond = self.try_parse_condition()?;
+				let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+
+				self.expect_closing_delimiter(t!(")"), span)?;
+
+				Ok(Graph {
+					dir,
+					what,
+					cond,
+					alias,
+					..Default::default()
+				})
+			}
+			x if x.can_be_identifier() => {
+				// The following function should always succeed here,
+				// returning an error here would be a bug, so unwrap.
+				let identifier = self.parse_raw_ident().unwrap();
+				Ok(Graph {
+					dir,
+					what: Tables(vec![Table(identifier)]),
+					..Default::default()
+				})
+			}
+			x => unexpected!(self, x, "`?`, `(` or an identifier"),
+		}
 	}
 }

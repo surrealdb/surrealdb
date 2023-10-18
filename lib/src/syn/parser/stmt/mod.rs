@@ -1,11 +1,10 @@
 use crate::sql::{
 	statements::{
 		analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-		CommitStatement, ContinueStatement, DefineStatement, DeleteStatement, IfelseStatement,
-		InsertStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
-		UpdateStatement, UseStatement,
+		CommitStatement, ContinueStatement, DeleteStatement, IfelseStatement, InsertStatement,
+		OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UseStatement,
 	},
-	Statement,
+	Expression, Operator, Statement, Statements, Value,
 };
 use crate::syn::token::t;
 
@@ -15,10 +14,32 @@ use super::{
 };
 
 mod create;
+mod define;
+mod parts;
+mod update;
 
 impl Parser<'_> {
+	pub fn parse_stmt_list(&mut self) -> ParseResult<Statements> {
+		let mut res = Vec::new();
+		loop {
+			match self.peek_kind() {
+				t!(";") => continue,
+				t!("eof") => break,
+				_ => {
+					let stmt = self.parse_stmt()?;
+					res.push(stmt);
+					if !self.eat(t!(";")) {
+						expected!(self, "eof");
+						break;
+					}
+				}
+			}
+		}
+		Ok(Statements(res))
+	}
+
 	pub(super) fn parse_stmt(&mut self) -> ParseResult<Statement> {
-		let token = self.peek_token();
+		let token = self.peek();
 		match token.kind {
 			t!("ANALYZE") => self.parse_analyze(),
 			t!("BEGIN") => self.parse_begin(),
@@ -27,8 +48,8 @@ impl Parser<'_> {
 			t!("COMMIT") => self.parse_commit(),
 			t!("CONTINUE") => self.parse_continue(),
 			t!("CREATE") => self.parse_create_stmt().map(Statement::Create),
-			t!("DEFINE") => self.parse_begin(),
-			t!("DELETE") => self.parse_begin(),
+			t!("DEFINE") => self.parse_define_stmt().map(Statement::Define),
+			t!("DELETE") => self.parse_delete_stmt().map(Statement::Delete),
 			t!("FOR") => self.parse_begin(),
 			t!("IF") => self.parse_begin(),
 			t!("INFO") => self.parse_begin(),
@@ -44,26 +65,45 @@ impl Parser<'_> {
 			t!("SHOW") => self.parse_begin(),
 			t!("SLEEP") => self.parse_begin(),
 			t!("THROW") => self.parse_begin(),
-			t!("UPDATE") => self.parse_begin(),
+			t!("UPDATE") => self.parse_update_stmt().map(Statement::Update),
 			t!("USE") => self.parse_use(),
-			_ => to_do!(self),
+			_ => {
+				// TODO: Provide information about keywords.
+				let value = self.parse_value()?;
+				return Ok(Self::refine_stmt_value(value));
+			}
+		}
+	}
+
+	/// Turns [Param] `=` [Value] into a set statment.
+	fn refine_stmt_value(value: Value) -> Statement {
+		match value {
+			Value::Expression(x) => {
+				match *x {
+					Expression::Binary {
+						l: Value::Param(x),
+						o: Operator::Equal,
+						r,
+					} => {
+						return Statement::Set(crate::sql::statements::SetStatement {
+							name: x.0 .0,
+							what: r,
+						})
+					}
+					x => {}
+				}
+				Statement::Value(Value::Expression(x))
+			}
+			x => Statement::Value(value),
 		}
 	}
 
 	/// Parsers a analyze statement.
 	fn parse_analyze(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("ANALYZE"));
 
-		let index = self.peek_token();
-		let t!("INDEX") = index.kind else {
-			// Failed to parse next keyword, might be a value.
-			// TODO: Check the token could continue a value statement?
-			// Possibly check for some form of operator.
-			let value = self.parse_fallback_value(keyword)?;
-			return Ok(Statement::Value(value));
-		};
-		self.next_token();
+		expected!(self, "INDEX");
 
 		let index = self.parse_ident()?;
 		expected!(self, "ON");
@@ -74,61 +114,57 @@ impl Parser<'_> {
 	}
 
 	fn parse_begin(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("BEGIN"));
 
-		if let t!("TRANSACTION") = self.peek_token().kind {
-			self.next_token();
+		if let t!("TRANSACTION") = self.peek().kind {
+			self.next();
 		}
 		Ok(Statement::Begin(BeginStatement))
 	}
 
 	fn parse_break(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("BREAK"));
 
 		Ok(Statement::Break(BreakStatement))
 	}
 
 	fn parse_cancel(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("CANCEL"));
 
-		if let t!("TRANSACTION") = self.peek_token().kind {
-			self.next_token();
+		if let t!("TRANSACTION") = self.peek().kind {
+			self.next();
 		}
 		Ok(Statement::Cancel(CancelStatement))
 	}
 
 	fn parse_commit(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("COMMIT"));
 
-		if let t!("TRANSACTION") = self.peek_token().kind {
-			self.next_token();
+		if let t!("TRANSACTION") = self.peek().kind {
+			self.next();
 		}
 		Ok(Statement::Commit(CommitStatement))
 	}
 
 	fn parse_continue(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("CONTINUE"));
 
 		Ok(Statement::Continue(ContinueStatement))
 	}
 
 	fn parse_use(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next_token();
+		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("USE"));
 
 		let (ns, db) = if self.eat(t!("NAMESPACE")) {
 			let ns = self.parse_ident()?;
 
-			let db = if self.eat(t!("DATABASE")) {
-				Some(self.parse_ident()?)
-			} else {
-				None
-			};
+			let db = self.eat(t!("DATABASE")).then(|| self.parse_ident()).transpose()?;
 			(Some(ns), db)
 		} else {
 			expected!(self, "DATABASE");
@@ -156,10 +192,6 @@ impl Parser<'_> {
 		to_do!(self)
 	}
 
-	pub(crate) fn parse_update_stmt(&mut self) -> ParseResult<UpdateStatement> {
-		to_do!(self)
-	}
-
 	pub(crate) fn parse_delete_stmt(&mut self) -> ParseResult<DeleteStatement> {
 		to_do!(self)
 	}
@@ -169,10 +201,6 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_insert_stmt(&mut self) -> ParseResult<InsertStatement> {
-		to_do!(self)
-	}
-
-	pub(crate) fn parse_define_stmt(&mut self) -> ParseResult<DefineStatement> {
 		to_do!(self)
 	}
 
