@@ -735,6 +735,12 @@ pub enum Error {
 	/// Internal server error related to live query state
 	#[error("Internal live query error: {0}")]
 	InternalLiveQueryError(LiveQueryCause),
+
+	/// Error that can happen at any point during bootstrap
+	/// TODO change this to heartbeat? cleanup? cluster lifecycle?
+	/// there is overlap between bootstrap and heartbeat, but then there will be errors in lq that
+	/// arent bootstrap (definitely) or heartbeat (maybe)
+	BootstrapError(BootstrapCause),
 }
 
 #[derive(Error, Debug)]

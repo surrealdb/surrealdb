@@ -726,7 +726,7 @@ impl Datastore {
 					// Timeout expired
 					let results = self.delete_live_query_batch(&mut msg).await?;
 					for boresult in results {
-						sender.send(boresult).await?;
+						sender.send(boresult).await.map_err(|e| Error::BootstrapError(Boot))?;
 					}
 					// msg should always be drained but in case it isn't, we clear
 					msg.clear();
