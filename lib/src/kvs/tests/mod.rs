@@ -198,7 +198,7 @@ mod tikv {
 			let second_err = tx.cancel().await;
 			return match second_err {
 				Ok(_) => Err(e),
-				Err(e2) => Err(Error::Internal(format!(
+				Err(e2) => Err(Error::TxRollbackFailed(format!(
 					"Failed to cancel transaction: {}, original error cause was: {}",
 					e2, e
 				))),
@@ -270,7 +270,7 @@ mod fdb {
 			let second_err = tx.cancel().await;
 			return match second_err {
 				Ok(_) => Err(err),
-				Err(e2) => Err(Error::Internal(format!(
+				Err(e2) => Err(Error::TxRollbackFailed(format!(
 					"Failed to cancel transaction: {}, original error cause was: {}",
 					e2, err
 				))),

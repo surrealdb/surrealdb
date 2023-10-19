@@ -724,6 +724,8 @@ pub enum Error {
 	/// Internal server error
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
+	/// If you are able to categorically classify the error (ex its part of a collection of errors
+	/// in a part of the code) then you should create a new enum - also with cause.
 	#[error("Internal database error: {0}")]
 	InternalCause(InternalCause),
 
@@ -735,6 +737,10 @@ pub enum Error {
 	/// Internal server error related to live query state
 	#[error("Internal live query error: {0}")]
 	InternalLiveQueryError(LiveQueryCause),
+
+	/// When a transaction rollback fails, the error will be captured here
+	#[error("Transaction rollback failed: {0}")]
+	TxRollbackFailed(String),
 }
 
 #[derive(Error, Debug)]
