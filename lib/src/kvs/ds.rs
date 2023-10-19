@@ -616,8 +616,7 @@ impl Datastore {
 					// Consume the input message vector of live queries to archive
 					if msg.len() > 0 {
 						for (lq, e) in msg.drain(..) {
-							// Retrieve the existing table record
-							// TODO what about node record?
+							// Retrieve the existing table live query
 							let lv_res = tx
 								.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq)
 								.await;
@@ -677,7 +676,7 @@ impl Datastore {
 	) -> Result<(), Error> {
 		let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(BOOTSTRAP_BATCH_SIZE);
 		loop {
-			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
+			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 				Ok(Some(bor)) => {
 					if bor.1.is_some() {
 						sender.send(bor)
@@ -713,6 +712,72 @@ impl Datastore {
 			}
 		}
 		Ok(())
+	}
+
+	async fn delete_live_query_batch(
+		&self,
+		mut msg: &mut Vec<BootstrapOperationResult>,
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
+		let mut ret: Vec<BootstrapOperationResult> = vec![];
+		// TODO test failed tx retries
+		let mut last_err = None;
+		for _ in 0..BOOTSTRAP_TX_RETRIES {
+			match self.transaction(Write, Optimistic).await {
+				Ok(mut tx) => {
+					// In case this is a retry, we re-hydrate the msg vector
+					for (lq, e) in ret.drain(..) {
+						msg.push((lq, e));
+					}
+					// Consume the input message vector of live queries to archive
+					if msg.len() > 0 {
+						for (lq, e) in msg.drain(..) {
+							// Delete the node live query
+							if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await
+							{
+								// TODO wrap error with context that this step failed; requires self-ref error
+								ret.push((lq, Some(e)));
+								continue;
+							}
+							// Delete the table live query
+							if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *(&lq).lq).await {
+								// TODO wrap error with context that this step failed; requires self-ref error
+								ret.push((lq, Some(e)));
+								continue;
+							}
+							// Delete the notifications
+							// TODO hypothetical impl
+							if let Err(e) = Ok(()) {
+								// TODO wrap error with context that this step failed; requires self-ref error
+								ret.push((lq, Some(e)));
+							}
+						}
+						// TODO where can the above transaction hard fail? Every op needs rollback?
+						if let Err(e) = tx.commit().await {
+							// TODO wrap?
+							last_err = Some(e);
+							continue;
+						} else {
+							break;
+						}
+					}
+				}
+				Err(e) => {
+					last_err = Some(e);
+				}
+			}
+			if last_err.is_some() {
+				// If there are 2 conflicting bootstraps, we don't want them to continue
+				// continue colliding at the same time. So we scatter the retry sleep
+				let scatter_sleep = rand::thread_rng()
+					.gen_range(BOOTSTRAP_TX_RETRY_LOW_MILLIS..BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
+				tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
+			} else {
+				// Successful transaction 🎉
+				break;
+			}
+		}
+		last_err?;
+		Ok(ret)
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
