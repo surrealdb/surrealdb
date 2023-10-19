@@ -846,3 +846,43 @@ async fn select_index_single_range_operator_more_or_equal() -> Result<(), Error>
 async fn select_unique_single_range_operator_more_or_equal() -> Result<(), Error> {
 	select_single_range_operator(true, ">=", EXPLAIN_MORE_OR_EQUAL, RESULT_MORE_OR_EQUAL).await
 }
+
+#[tokio::test]
+async fn select_with_idiom_param_value() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let sql = format!("
+		CREATE person:tobie SET name = 'Tobie', genre='m', company='SurrealDB';
+		CREATE person:jaime SET name = 'Jaime', genre='m', company='SurrealDB';
+		DEFINE INDEX name ON TABLE person COLUMNS name UNIQUE;
+		LET $name = 'Tobie';
+		LET $nameObj = {{name:'Tobie'}};
+		SELECT name FROM person WHERE name = $nameObj.name EXPLAIN;");
+	let mut res = dbs
+		.execute(&sql, &ses, None)
+		.await?;
+	assert_eq!(res.len(), 6);
+	res.remove(0).result?;
+	res.remove(0).result?;
+	res.remove(0).result?;
+	res.remove(0).result?;
+	res.remove(0).result?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'name',
+							operator: '=',
+							value: 'Tobie'
+						},
+						table: 'person'
+					},
+					operation: 'Iterate Index'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}

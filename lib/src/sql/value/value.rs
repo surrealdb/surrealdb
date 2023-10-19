@@ -991,6 +991,12 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value is a Param
+	pub fn is_param(&self) -> bool {
+		matches!(self, Value::Param(_))
+	}
+
+
 	/// Check if this Value is a Geometry of a specific type
 	pub fn is_geometry_type(&self, types: &[String]) -> bool {
 		match self {
