@@ -724,6 +724,8 @@ pub enum Error {
 	/// Internal server error
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
+	/// If you are able to categorically classify the error (ex its part of a collection of errors
+	/// in a part of the code) then you should create a new enum - also with cause.
 	#[error("Internal database error: {0}")]
 	InternalCause(InternalCause),
 
@@ -736,11 +738,34 @@ pub enum Error {
 	#[error("Internal live query error: {0}")]
 	InternalLiveQueryError(LiveQueryCause),
 
+	/// When a transaction rollback fails, the error will be captured here
+	#[error("Transaction rollback failed: {0}")]
+	TxRollbackFailed(String),
+
 	/// Error that can happen at any point during bootstrap
 	/// TODO change this to heartbeat? cleanup? cluster lifecycle?
 	/// there is overlap between bootstrap and heartbeat, but then there will be errors in lq that
 	/// arent bootstrap (definitely) or heartbeat (maybe)
+	#[error("Bootstrap failure: {0}")]
 	BootstrapError(BootstrapCause),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum BootstrapCause {
+	#[error("Failed to send to channel: {0}")]
+	ChannelSendError(ChannelVariant),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum ChannelVariant {
+	#[error("Bootstrap scan channel")]
+	BootstrapScan,
+	#[error("Bootstrap archive channel")]
+	BootstrapArchive,
+	#[error("Bootstrap delete channel")]
+	BootstrapDelete,
 }
 
 #[derive(Error, Debug)]

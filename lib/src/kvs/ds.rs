@@ -10,6 +10,8 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
+use crate::err::BootstrapCause::ChannelSendError;
+use crate::err::ChannelVariant::{BootstrapArchive, BootstrapDelete, BootstrapScan};
 use crate::err::{Error, InternalCause};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
@@ -557,7 +559,10 @@ impl Datastore {
 		for nd in nodes {
 			let node_lqs = tx.scan_ndlq(&nd, NO_LIMIT).await?;
 			for lq in node_lqs {
-				sender.send((lq, None)).await.unwrap();
+				sender
+					.send((lq, None))
+					.await
+					.map_err(|e| Error::BootstrapError(ChannelSendError(BootstrapScan)))?;
 			}
 		}
 		tx.cancel().await
@@ -580,13 +585,17 @@ impl Datastore {
 						// send any errors further on, because we don't need to process them
 						// unless we can handle them. Currently we can't.
 						// if we error on send, then we bubble up because this shouldn't happen
-						sender.send(bor).await?;
+						sender.send(bor).await.map_err(|_| {
+							Error::BootstrapError(ChannelSendError(BootstrapArchive))
+						})?;
 					} else {
 						msg.push(bor);
 						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
 							let results = self.archive_live_query_batch(&mut msg).await?;
 							for boresult in results {
-								sender.send(boresult).await?;
+								sender.send(boresult).await.map_err(|_| {
+									Error::BootstrapError(ChannelSendError(BootstrapArchive))
+								})?;
 							}
 							// msg should always be drained but in case it isn't, we clear
 							msg.clear();
@@ -597,7 +606,9 @@ impl Datastore {
 					// Channel closed, process whatever is remaining
 					let results = self.archive_live_query_batch(&mut msg).await?;
 					for boresult in results {
-						sender.send(boresult).await?;
+						sender.send(boresult).await.map_err(|_| {
+							Error::BootstrapError(ChannelSendError(BootstrapArchive))
+						})?;
 					}
 					break;
 				}
@@ -605,7 +616,9 @@ impl Datastore {
 					// Timeout expired
 					let results = self.archive_live_query_batch(&mut msg).await?;
 					for boresult in results {
-						sender.send(boresult).await?;
+						sender.send(boresult).await.map_err(|_| {
+							Error::BootstrapError(ChannelSendError(BootstrapArchive))
+						})?;
 					}
 					// msg should always be drained but in case it isn't, we clear
 					msg.clear();
@@ -701,13 +714,17 @@ impl Datastore {
 			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 				Ok(Some(bor)) => {
 					if bor.1.is_some() {
-						sender.send(bor)
+						sender.send(bor).await.map_err(|_e| {
+							Error::BootstrapError(ChannelSendError(BootstrapDelete))
+						})?;
 					} else {
 						msg.push(bor);
 						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
 							let results = self.delete_live_query_batch(&mut msg).await?;
 							for boresult in results {
-								sender.send(boresult).await?;
+								sender.send(boresult).await.map_err(|_e| {
+									Error::BootstrapError(ChannelSendError(BootstrapDelete))
+								})?;
 							}
 							// msg should always be drained but in case it isn't, we clear
 							msg.clear();
@@ -718,7 +735,9 @@ impl Datastore {
 					// Channel closed, process whatever is remaining
 					let results = self.delete_live_query_batch(&mut msg).await?;
 					for boresult in results {
-						sender.send(boresult).await?;
+						sender.send(boresult).await.map_err(|_e| {
+							Error::BootstrapError(ChannelSendError(BootstrapDelete))
+						})?;
 					}
 					break;
 				}
@@ -726,7 +745,9 @@ impl Datastore {
 					// Timeout expired
 					let results = self.delete_live_query_batch(&mut msg).await?;
 					for boresult in results {
-						sender.send(boresult).await.map_err(|e| Error::BootstrapError(Boot))?;
+						sender.send(boresult).await.map_err(|_e| {
+							Error::BootstrapError(ChannelSendError(BootstrapDelete))
+						})?;
 					}
 					// msg should always be drained but in case it isn't, we clear
 					msg.clear();
@@ -754,7 +775,7 @@ impl Datastore {
 					}
 					// Consume the input message vector of live queries to archive
 					if msg.len() > 0 {
-						for (lq, e) in msg.drain(..) {
+						for (lq, _e) in msg.drain(..) {
 							// Delete the node live query
 							if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await
 							{
