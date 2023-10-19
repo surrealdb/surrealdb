@@ -1100,10 +1100,10 @@ impl Datastore {
 	async fn garbage_collect_stale_change_feeds_impl(
 		&self,
 		ts: u64,
-		mut tx: &mut Transaction,
+		tx: &mut Transaction,
 	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
-		cf::gc_all_at(&mut tx, ts, Some(100)).await?;
+		cf::gc_all_at(tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
