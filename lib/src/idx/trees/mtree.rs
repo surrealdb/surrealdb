@@ -166,6 +166,7 @@ impl MTreeIndex {
 pub struct KnnResult {
 	objects: VecDeque<RoaringTreemap>,
 	#[cfg(debug_assertions)]
+	#[allow(dead_code)]
 	visited_nodes: usize,
 }
 
