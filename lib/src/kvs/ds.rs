@@ -25,6 +25,7 @@ use crate::sql::{Query, Uuid};
 use crate::vs::Oracle;
 use futures::lock::Mutex;
 use futures::Future;
+use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -34,15 +35,27 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
+use tokio::time::Timeout;
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+/// Bootstrap dead node garbage collection has a limit in size in case of catastrophe
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
-const LQ_CHANNEL_SIZE: usize = 100;
-const LQ_CLEANUP_BATCH_SIZE: usize = 1000;
+/// This is the channel size for live query notifications from the engine
+const TX_LQ_CHANNEL_SIZE: usize = 100;
+/// This is the general batch size for database operations and channel sizes in bootstrap
+const BOOTSTRAP_BATCH_SIZE: usize = 1000;
+/// When processing batches from channels in bootstrap, this is the latency
+/// to decide if a batch is big enough
+const BOOTSTRAP_BATCH_LATENCY: Duration = Duration::from_millis(100);
+/// The number of transaction retries before a bootstrap transaction is aborted completely
+const BOOTSTRAP_TX_RETRIES: u32 = 3;
+/// The duration between retries lower bound, for scatter
+const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
+/// The duration between retries higher bound, for scatter
+const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -355,7 +368,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
+		self.notification_channel = Some(tokio::sync::mpsc::channel(TX_LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -456,7 +469,7 @@ impl Datastore {
 
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		let archived = match self.register_and_remove_dead_nodes(&mut tx, &self.id, send).await {
+		let dead_nodes = match self.register_and_remove_dead_nodes(&mut tx, &self.id).await {
 			Ok(archived) => {
 				tx.commit().await?;
 				archived
@@ -472,61 +485,43 @@ impl Datastore {
 		let (scan_send, scan_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
-		let scan_task = tokio::spawn(self.scan_node_live_queries(deleted_nodes, scan_send));
+		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let scan_task = tokio::spawn(self.scan_node_live_queries(dead_nodes, scan_send));
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
+		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		let archive_task = tokio::spawn(self.archive_live_queries(scan_recv, archive_send));
 
 		// In several new transactions, delete archived node live queries
-		let (delete_send, delete_recv): (
+		let (delete_send, mut delete_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(LQ_CLEANUP_BATCH_SIZE);
+		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		let delete_task = tokio::spawn(self.delete_live_queries(archive_recv, delete_send));
 
-		// Filtered includes all lqs that should be used in subsequent step
-		// Currently that is all of them, no matter the error encountered
-		let mut filtered: Vec<LqValue> = vec![];
-		// err is used to aggregate all errors across all stages
-		let mut err = vec![];
-		for res in archived {
-			match res {
-				(lq, Some(e)) => {
-					filtered.push(lq);
-					err.push(e);
-				}
-				(lq, None) => {
-					filtered.push(lq);
+		// We then need to collect and log the errors
+		// It's also important to consume from the channel otherwise things will block
+		let delete_handler_task = tokio::spawn(async {
+			while let Some(res) = delete_recv.recv().await {
+				let (_lq, e) = res;
+				if let Some(e) = e {
+					error!("Error deleting lq during bootstrap: {:?}", e);
 				}
 			}
-		}
+		});
 
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let val = self.remove_archived(&mut tx, filtered).await;
-		let resolve_err = match val {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				error!("Error bootstrapping sweep phase: {:?}", e);
-				match tx.cancel().await {
-					Ok(_) => Err(e),
-					Err(e) => {
-						// We have a nested error
-						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
-					}
-				}
-			}
-		};
-		if let Err(e) = resolve_err {
-			err.push(e);
-		}
-		if !err.is_empty() {
-			error!("Error bootstrapping sweep phase: {:?}", err);
-			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
+		// Now run everything together and return any errors that arent captured per record
+		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
+			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
+		let scan_err = join_scan_err?;
+		let arch_err = join_arch_err?;
+		let del_err = join_del_err?;
+		join_log_err?;
+		if let Err(err) = scan_err.err().or(arch_err.err()).or(del_err.err()) {
+			return err;
 		}
 		Ok(())
 	}
@@ -552,46 +547,172 @@ impl Datastore {
 		tx.cancel().await
 	}
 
+	/// This task will read input live queries from a receiver in batches and
+	/// archive them and finally send them to the output channel.
+	/// The task terminates if there is an irrecoverable error or if the input
+	/// channel has been closed (dropped, from previous task).
 	async fn archive_live_queries(
 		&self,
-		scan_recv: Receiver<BootstrapOperationResult>,
+		mut scan_recv: Receiver<BootstrapOperationResult>,
 		sender: Sender<BootstrapOperationResult>,
 	) -> Result<(), Error> {
-		let mut archived = vec![];
-		while let Some(res) = scan_recv.recv().await {
-			let (lq, e) = res;
-			let node_archived_lqs =
-				match self.archive_lv_for_node(&mut tx, &lq.nd, this_node_id.clone()).await {
-					Ok(lq) => lq,
-					Err(e) => {
-						error!("Error archiving lqs during bootstrap phase: {:?}", e);
-						vec![]
+		let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(BOOTSTRAP_BATCH_SIZE);
+		loop {
+			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
+				Ok(Some(bor)) => {
+					if bor.1.is_some() {
+						sender.send(bor)
+					} else {
+						msg.push(bor);
+						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
+							let results = self.archive_live_query_batch(&mut msg).await?;
+							for boresult in results {
+								sender.send(boresult).await?;
+							}
+							// msg should always be drained but in case it isn't, we clear
+							msg.clear();
+						}
 					}
-				};
-			// We need to add lv nodes not found so that they can be deleted in second stage
-			for lq_value in node_archived_lqs {
-				archived.push(lq_value);
+				}
+				Ok(None) => {
+					// Channel closed, process whatever is remaining
+					let results = self.archive_live_query_batch(&mut msg).await?;
+					for boresult in results {
+						sender.send(boresult).await?;
+					}
+					break;
+				}
+				Err(_elapsed) => {
+					// Timeout expired
+					let results = self.archive_live_query_batch(&mut msg).await?;
+					for boresult in results {
+						sender.send(boresult).await?;
+					}
+					// msg should always be drained but in case it isn't, we clear
+					msg.clear();
+				}
 			}
-		}
-		for lq in archived {
-			sender.send((lq, None)).await.unwrap();
 		}
 		Ok(())
 	}
 
+	/// Given a batch of messages that indicate live queries to archive,
+	/// try to mark them as archived and send to the sender channel
+	/// for further processing.
+	async fn archive_live_query_batch(
+		&self,
+		mut msg: &mut Vec<BootstrapOperationResult>,
+	) -> Result<Vec<BootstrapOperationResult>, Error> {
+		let mut ret: Vec<BootstrapOperationResult> = vec![];
+		// TODO test failed tx retries
+		let mut last_err = None;
+		for _ in 0..BOOTSTRAP_TX_RETRIES {
+			match self.transaction(Write, Optimistic).await {
+				Ok(mut tx) => {
+					// In case this is a retry, we re-hydrate the msg vector
+					for (lq, e) in ret.drain(..) {
+						msg.push((lq, e));
+					}
+					// Consume the input message vector of live queries to archive
+					if msg.len() > 0 {
+						for (lq, e) in msg.drain(..) {
+							// Retrieve the existing table record
+							// TODO what about node record?
+							let lv_res = tx
+								.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq)
+								.await;
+							// Maybe it won't work. Not handled atm, so treat as valid error
+							if let Err(e) = lv_res {
+								// TODO wrap error with context that this step failed; requires self-ref error
+								ret.push((lq, Some(e)));
+								continue;
+							}
+							let lv = lv_res.unwrap();
+							// If the lq is already archived, we can remove it from bootstrap
+							if !lv.archived.is_some() {
+								// Mark as archived by us (this node) and write back
+								let archived_lvs = lv.archive(self.id);
+								match tx
+									.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv))
+									.await
+								{
+									Ok(_) => {
+										ret.push((lq, None));
+									}
+									Err(e) => {
+										ret.push((lq, Some(e)));
+									}
+								}
+							}
+						}
+						// TODO where can the above transaction hard fail? Every op needs rollback?
+						tx.commit().await?;
+					}
+				}
+				Err(e) => {
+					last_err = Some(e);
+				}
+			}
+			if last_err.is_some() {
+				// If there are 2 conflicting bootstraps, we don't want them to continue
+				// continue colliding at the same time. So we scatter the retry sleep
+				let scatter_sleep = rand::thread_rng()
+					.gen_range(BOOTSTRAP_TX_RETRY_LOW_MILLIS..BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
+				tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
+			} else {
+				// Successful transaction 🎉
+				break;
+			}
+		}
+		last_err?;
+		Ok(ret)
+	}
+
+	/// Given a receiver channel of archived live queries,
+	/// Delete the node lq, table lq, and notifications
 	async fn delete_live_queries(
 		&self,
 		mut archived_recv: Receiver<BootstrapOperationResult>,
 		sender: Sender<BootstrapOperationResult>,
 	) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		while let Some(res) = archived_recv.recv().await {
-			let (lq, e) = res;
-			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
-			tx.del(key).await?;
-			sender.send((lq, e)).await.unwrap();
+		let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(BOOTSTRAP_BATCH_SIZE);
+		loop {
+			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
+				Ok(Some(bor)) => {
+					if bor.1.is_some() {
+						sender.send(bor)
+					} else {
+						msg.push(bor);
+						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
+							let results = self.delete_live_query_batch(&mut msg).await?;
+							for boresult in results {
+								sender.send(boresult).await?;
+							}
+							// msg should always be drained but in case it isn't, we clear
+							msg.clear();
+						}
+					}
+				}
+				Ok(None) => {
+					// Channel closed, process whatever is remaining
+					let results = self.delete_live_query_batch(&mut msg).await?;
+					for boresult in results {
+						sender.send(boresult).await?;
+					}
+					break;
+				}
+				Err(_elapsed) => {
+					// Timeout expired
+					let results = self.delete_live_query_batch(&mut msg).await?;
+					for boresult in results {
+						sender.send(boresult).await?;
+					}
+					// msg should always be drained but in case it isn't, we clear
+					msg.clear();
+				}
+			}
 		}
-		tx.commit().await
+		Ok(())
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -599,16 +720,13 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		lq_send: Sender<BootstrapOperationResult>,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
+	) -> Result<Vec<Uuid>, Error> {
 		trace!("Registering node {}", node_id);
 		let timestamp = tx.clock().await;
 		self.register_membership(tx, node_id, timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
 		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
-		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
-		trace!("Archiving dead nodes: {:?}", dead);
-		self.archive_dead_lqs(tx, &dead, node_id, lq_send).await
+		self.remove_dead_nodes(tx, &ts_expired).await
 	}
 
 	// Adds entries to the KV store indicating membership information
@@ -659,7 +777,7 @@ impl Datastore {
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, LQ_CLEANUP_BATCH_SIZE as u32).await?;
+			let node_lqs = tx.scan_ndlq(nd, BOOTSTRAP_BATCH_SIZE as u32).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
