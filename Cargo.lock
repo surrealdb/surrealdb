@@ -3547,6 +3547,7 @@ dependencies = [
  "half 2.3.1",
  "lazy_static",
  "libc",
+ "libloading",
  "ndarray",
  "tar",
  "thiserror",
@@ -5394,7 +5395,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
- "surrealml_utils",
+ "surrealml_utils 0.1.0 (git+https://github.com/surrealdb/surrealml.git?branch=onnx-build)",
  "temp-env",
  "tempfile",
  "test-log",
@@ -5484,7 +5485,7 @@ dependencies = [
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
  "surrealml",
- "surrealml_utils",
+ "surrealml_utils 0.1.0 (git+https://github.com/surrealdb/surrealml.git?branch=onnx-integration)",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5568,8 +5569,19 @@ dependencies = [
  "ndarray",
  "once_cell",
  "pyo3",
- "surrealml_utils",
+ "surrealml_utils 0.1.0 (git+https://github.com/surrealdb/surrealml.git?branch=onnx-integration)",
  "uuid",
+]
+
+[[package]]
+name = "surrealml_utils"
+version = "0.1.0"
+source = "git+https://github.com/surrealdb/surrealml.git?branch=onnx-build#188dc25c03e0166b375719f4464b736736dc5260"
+dependencies = [
+ "ndarray",
+ "once_cell",
+ "ort",
+ "regex",
 ]
 
 [[package]]
