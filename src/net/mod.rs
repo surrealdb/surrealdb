@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::sensitive_headers::{
@@ -75,6 +76,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.catch_panic()
 		.set_x_request_id(MakeRequestUuid)
 		.propagate_x_request_id()
+		.layer(CompressionLayer::new())
 		.layer(AddExtensionLayer::new(app_state))
 		.layer(middleware::from_fn(client_ip::client_ip_middleware))
 		.layer(SetSensitiveRequestHeadersLayer::from_shared(Arc::clone(&headers)))
@@ -102,6 +104,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 				])
 				.allow_headers([
 					http::header::ACCEPT,
+					http::header::ACCEPT_ENCODING,
 					http::header::AUTHORIZATION,
 					http::header::CONTENT_TYPE,
 					http::header::ORIGIN,
