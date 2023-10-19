@@ -35,7 +35,6 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
-use tokio::time::Timeout;
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -516,12 +515,35 @@ impl Datastore {
 		// Now run everything together and return any errors that arent captured per record
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
 			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
-		let scan_err = join_scan_err?;
-		let arch_err = join_arch_err?;
-		let del_err = join_del_err?;
-		join_log_err?;
-		if let Err(err) = scan_err.err().or(arch_err.err()).or(del_err.err()) {
-			return err;
+
+		// Throw errors from join tasks
+		let scan_err = join_scan_err.map_err(|e| {
+			Error::Internal(format!("an error occurred in the join scan task: {:?}", e))
+		})?;
+		let arch_err = join_arch_err.map_err(|e| {
+			Error::Internal(format!("an error occurred in the join archive task: {:?}", e))
+		})?;
+		let del_err = join_del_err.map_err(|e| {
+			Error::Internal(format!("an error occurred in the join delete task: {:?}", e))
+		})?;
+		join_log_err.map_err(|e| {
+			Error::Internal(format!("an error occurred in the join log task: {:?}", e))
+		})?;
+
+		// Handle all the possible hard errors from tasks
+		if let Some(err) = scan_err
+			.map_err(|e| Error::Internal(format!("an error occurred in the scan task: {:?}", e)))
+			.err()
+			.or(arch_err
+				.map_err(|e| {
+					Error::Internal(format!("an error occurred in the archive task: {:?}", e))
+				})
+				.err())
+			.or(del_err
+				.map_err(|e| Error::Internal(format!("an error occurred in the del task: {:?}", e)))
+				.err())
+		{
+			return Err(err);
 		}
 		Ok(())
 	}
@@ -533,15 +555,9 @@ impl Datastore {
 	) -> Result<(), Error> {
 		let mut tx = self.transaction(Read, Optimistic).await?;
 		for nd in nodes {
-			match tx.scan_ndlq(&nd, NO_LIMIT).await {
-				Ok(node_lqs) => {
-					for lq in node_lqs {
-						sender.send((lq, None)).await.unwrap();
-					}
-				}
-				Err(e) => {
-					sender.send((LqValue::default(), Some(e))).await?;
-				}
+			let node_lqs = tx.scan_ndlq(&nd, NO_LIMIT).await?;
+			for lq in node_lqs {
+				sender.send((lq, None)).await.unwrap();
 			}
 		}
 		tx.cancel().await
@@ -561,7 +577,10 @@ impl Datastore {
 			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
 				Ok(Some(bor)) => {
 					if bor.1.is_some() {
-						sender.send(bor)
+						// send any errors further on, because we don't need to process them
+						// unless we can handle them. Currently we can't.
+						// if we error on send, then we bubble up because this shouldn't happen
+						sender.send(bor).await?;
 					} else {
 						msg.push(bor);
 						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
@@ -601,7 +620,7 @@ impl Datastore {
 	/// for further processing.
 	async fn archive_live_query_batch(
 		&self,
-		mut msg: &mut Vec<BootstrapOperationResult>,
+		msg: &mut Vec<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		// TODO test failed tx retries
@@ -615,7 +634,7 @@ impl Datastore {
 					}
 					// Consume the input message vector of live queries to archive
 					if msg.len() > 0 {
-						for (lq, e) in msg.drain(..) {
+						for (lq, _error_should_not_exist) in msg.drain(..) {
 							// Retrieve the existing table live query
 							let lv_res = tx
 								.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq)
@@ -630,7 +649,7 @@ impl Datastore {
 							// If the lq is already archived, we can remove it from bootstrap
 							if !lv.archived.is_some() {
 								// Mark as archived by us (this node) and write back
-								let archived_lvs = lv.archive(self.id);
+								let archived_lvs = lv.clone().archive(self.id);
 								match tx
 									.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv))
 									.await
@@ -663,12 +682,15 @@ impl Datastore {
 				break;
 			}
 		}
-		last_err?;
+		if let Some(e) = last_err {
+			return Err(e);
+		}
 		Ok(ret)
 	}
 
 	/// Given a receiver channel of archived live queries,
 	/// Delete the node lq, table lq, and notifications
+	/// and send the results to the sender channel
 	async fn delete_live_queries(
 		&self,
 		mut archived_recv: Receiver<BootstrapOperationResult>,
@@ -714,9 +736,11 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Given a batch of archived live queries,
+	/// Delete the node lq, table lq, and notifications
 	async fn delete_live_query_batch(
 		&self,
-		mut msg: &mut Vec<BootstrapOperationResult>,
+		msg: &mut Vec<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		// TODO test failed tx retries
@@ -776,7 +800,9 @@ impl Datastore {
 				break;
 			}
 		}
-		last_err?;
+		if let Some(e) = last_err {
+			return Err(e);
+		}
 		Ok(ret)
 	}
 
@@ -1397,7 +1423,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?.with_notifications();
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
+	///     	while let Ok(v) = channel.clone().recv().await {
 	///     	    println!("Received notification: {v}");
 	///     	}
 	/// 	}
@@ -1406,7 +1432,7 @@ impl Datastore {
 	/// ```
 	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.get().map(|v| v.1.clone())
+		self.notification_channel.get().map(|v| v.1)
 	}
 
 	#[allow(dead_code)]
@@ -1421,7 +1447,7 @@ impl Datastore {
 		sess: &Session,
 		ns: String,
 		db: String,
-		chn: Sender<Vec<u8>>,
+		chn: channel::Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
