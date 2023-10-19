@@ -825,61 +825,6 @@ impl Datastore {
 		Ok(nodes)
 	}
 
-	/// Accepts cluster IDs
-	/// Archives related live queries
-	/// Returns live query keys that can be used for deletes
-	///
-	/// The reason we archive first is to stop other nodes from picking it up for further updates
-	/// This means it will be easier to wipe the range in a subsequent transaction
-	pub async fn archive_dead_lqs(
-		&self,
-		tx: &mut Transaction,
-		nodes: &[Uuid],
-		this_node_id: &Uuid,
-		sender: Sender<BootstrapOperationResult>,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut archived = vec![];
-		for nd in nodes.iter() {
-			trace!("Archiving node {}", &nd);
-			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, BOOTSTRAP_BATCH_SIZE as u32).await?;
-			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
-			for lq in node_lqs {
-				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
-						Ok(lq) => lq,
-						Err(e) => {
-							error!("Error archiving lqs during bootstrap phase: {:?}", e);
-							vec![]
-						}
-					};
-				// We need to add lv nodes not found so that they can be deleted in second stage
-				for lq_value in node_archived_lqs {
-					archived.push(lq_value);
-				}
-			}
-		}
-		Ok(archived)
-	}
-
-	pub async fn remove_archived(
-		&self,
-		tx: &mut Transaction,
-		archived: Vec<LqValue>,
-	) -> Result<(), Error> {
-		trace!("Gone into removing archived: {:?}", archived.len());
-		for lq in archived {
-			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
-			tx.del(key).await?;
-			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
-			tx.del(key).await?;
-		}
-		Ok(())
-	}
-
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
 		let cluster = tx.scan_nd(NO_LIMIT).await?;
