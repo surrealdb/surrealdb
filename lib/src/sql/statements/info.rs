@@ -69,12 +69,15 @@ impl InfoStatement {
 				let mut memberships: Vec<Value> = vec![];
 				for cluster_member in run.scan_nd(0).await? {
 					let mut tmp = Object::default();
-					tmp.insert("nodeId".to_string(), cluster_member.name.into());
-					tmp.insert("heartbeat".to_string(), cluster_member.heartbeat.value.into());
+					tmp.insert("nodeId".to_string(), Value::Strand(cluster_member.name.into()));
+					tmp.insert(
+						"heartbeat".to_string(),
+						Value::Number(cluster_member.heartbeat.value.into()),
+					);
 					memberships.push(tmp.into());
 				}
 
-				res.insert("members".to_owned(), memberships.into());
+				res.insert("members".to_owned(), Value::Array(memberships.into()));
 				// Ok all good
 				Value::from(res).ok()
 			}
