@@ -89,7 +89,8 @@ impl Parser<'_> {
 
 			let param = self.parse_param()?.0;
 			expected!(self, ":");
-			let kind = self.parse_kind()?;
+			let delim = expected!(self, "<").span;
+			let kind = self.parse_kind(delim)?;
 
 			args.push((param, kind));
 
@@ -342,7 +343,8 @@ impl Parser<'_> {
 					res.flex = true;
 				}
 				t!("TYPE") => {
-					res.kind = Some(self.parse_kind()?);
+					let delim = expected!(self, "<").span;
+					res.kind = Some(self.parse_kind(delim)?);
 				}
 				t!("VALUE") => {
 					res.value = Some(self.parse_value()?);

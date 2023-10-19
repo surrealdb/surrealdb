@@ -1,6 +1,6 @@
 use crate::{
 	sql::{language::Language, Algorithm},
-	syn::token::{Keyword, TokenKind},
+	syn::token::{GeometryName, Keyword, TokenKind},
 };
 use phf::phf_map;
 use unicase::UniCase;
@@ -216,6 +216,9 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RS512") => TokenKind::Algorithm(Algorithm::Rs512),
 
 	UniCase::ascii("ANY") => TokenKind::Keyword(Keyword::Any),
+	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
+	UniCase::ascii("RECORD") => TokenKind::Keyword(Keyword::Record),
+	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
 	UniCase::ascii("FUTURE") => TokenKind::Keyword(Keyword::Future),
 	UniCase::ascii("BOOL") => TokenKind::Keyword(Keyword::Bool),
 	UniCase::ascii("BYTES") => TokenKind::Keyword(Keyword::Bytes),
@@ -226,9 +229,18 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("INT") => TokenKind::Keyword(Keyword::Int),
 	UniCase::ascii("NUMBER") => TokenKind::Keyword(Keyword::Number),
 	UniCase::ascii("OBJECT") => TokenKind::Keyword(Keyword::Object),
-	UniCase::ascii("POINT") => TokenKind::Keyword(Keyword::Point),
 	UniCase::ascii("STRING") => TokenKind::Keyword(Keyword::String),
 	UniCase::ascii("UUID") => TokenKind::Keyword(Keyword::Uuid),
 	UniCase::ascii("ULID") => TokenKind::Keyword(Keyword::Ulid),
 	UniCase::ascii("RAND") => TokenKind::Keyword(Keyword::Rand),
+
+	UniCase::ascii("FEATURE") => TokenKind::Geometry(GeometryName::Feature),
+	UniCase::ascii("LINE") => TokenKind::Geometry(GeometryName::Line),
+	UniCase::ascii("POINT") => TokenKind::Geometry(GeometryName::Point),
+	UniCase::ascii("POLYGON") => TokenKind::Geometry(GeometryName::Polygon),
+	UniCase::ascii("MULTIPOINT") => TokenKind::Geometry(GeometryName::Point),
+	UniCase::ascii("MULTILINE") => TokenKind::Geometry(GeometryName::Point),
+	UniCase::ascii("MULTIPOLYGON") => TokenKind::Geometry(GeometryName::Point),
+	UniCase::ascii("COLLECTION") => TokenKind::Geometry(GeometryName::Point),
+
 };

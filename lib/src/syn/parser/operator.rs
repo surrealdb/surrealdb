@@ -95,8 +95,7 @@ impl Parser<'_> {
 			t!("-") => Operator::Sub,
 			t!("!") => Operator::Neg,
 			t!("<") => {
-				let kind = self.parse_kind()?;
-				self.expect_closing_delimiter(t!(">"), token.span)?;
+				let kind = self.parse_kind(token.span)?;
 				let value = self.pratt_parse_expr(min_bp)?;
 				let cast = Cast(kind, value);
 				return Ok(Value::Cast(Box::new(cast)));

@@ -687,6 +687,15 @@ macro_rules! t {
 	("ANY") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Any)
 	};
+	("ARRAY") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Array)
+	};
+	("GEOMETRY") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Geometry)
+	};
+	("RECORD") => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Record)
+	};
 	("FUTURE") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Future)
 	};
@@ -717,9 +726,6 @@ macro_rules! t {
 	("OBJECT") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Object)
 	};
-	("POINT") => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Point)
-	};
 	("STRING") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::String)
 	};
@@ -731,6 +737,30 @@ macro_rules! t {
 	};
 	("RAND") => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::Keyword::Rand)
+	};
+	("FEATURE") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Feature)
+	};
+	("LINE") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Line)
+	};
+	("POINT") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Point)
+	};
+	("POLYGON") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Polygon)
+	};
+	("MULTIPOINT") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Point)
+	};
+	("MULTILINE") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Point)
+	};
+	("MULTIPOLYGON") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Point)
+	};
+	("COLLECTION") => {
+		$crate::syn::token::TokenKind::Geometry($crate::syn::token::GeometryName::Point)
 	};
 }
 
