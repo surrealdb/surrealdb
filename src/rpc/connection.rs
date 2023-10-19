@@ -248,6 +248,8 @@ impl Connection {
 				tokio::select! {
 					msg = channel.recv() => {
 						if let Ok(notification) = msg {
+							// Convert internal notification representation to external
+							let notification = surrealdb::api::model::Notification::from(notification);
 							// Find which WebSocket the notification belongs to
 							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
 								// Check to see if the WebSocket exists

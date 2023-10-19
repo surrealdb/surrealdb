@@ -1,5 +1,5 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
-use crate::err::Error;
+use crate::err::{Error, InternalCause};
 use crate::key::change;
 use crate::kvs::Transaction;
 use crate::sql::statements::show::ShowSince;
@@ -28,11 +28,7 @@ pub async fn read(
 			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
-				None => {
-					return Err(Error::Internal(
-						"no versionstamp associated to this timestamp exists yet".to_string(),
-					))
-				}
+				None => return Err(Error::InternalCause(InternalCause::NoVersionstamp)),
 			}
 		}
 	};

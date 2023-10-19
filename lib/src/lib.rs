@@ -106,7 +106,7 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
-mod api;
+pub mod api;
 mod cf;
 mod ctx;
 mod doc;

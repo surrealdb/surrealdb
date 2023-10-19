@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::err::UnreachableCause::UnexpectedIndexRootNode;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
 use crate::idx::VersionedSerdeState;
@@ -10,6 +11,7 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
+
 pub type Payload = u64;
 
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
@@ -426,7 +428,9 @@ where
 								if let Some(root_id) = self.state.root {
 									// Delete the old root node
 									if root_id != node.id {
-										return Err(Error::Unreachable);
+										return Err(Error::UnreachableCause(
+											UnexpectedIndexRootNode,
+										));
 									}
 								}
 								store.remove_node(node_id, node.key)?;

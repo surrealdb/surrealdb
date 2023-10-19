@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
-use crate::err::Error;
+use crate::err::{Error, InternalCause};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
@@ -29,7 +29,7 @@ use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -124,7 +124,7 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: OnceLock<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -347,7 +347,7 @@ impl Datastore {
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: None,
+			notification_channel: OnceLock::new(),
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -368,7 +368,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(tokio::sync::mpsc::channel(TX_LQ_CHANNEL_SIZE));
+		self.notification_channel.set(tokio::sync::mpsc::channel(TX_LQ_CHANNEL_SIZE)).unwrap();
 		self
 	}
 
@@ -847,7 +847,7 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
 						Ok(lq) => lq,
 						Err(e) => {
 							error!("Error archiving lqs during bootstrap phase: {:?}", e);
@@ -999,7 +999,7 @@ impl Datastore {
 				continue;
 			}
 			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			let archived_lvs = lv.clone().archive(this_node_id);
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
 			ret.push((lq, None));
 		}
@@ -1026,7 +1026,8 @@ impl Datastore {
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+			error!("Clock may have gone backwards: {:?}", e.duration());
+			Error::InternalCause(InternalCause::ClockMayHaveGoneBackwards)
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
@@ -1047,6 +1048,24 @@ impl Datastore {
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn save_timestamp_for_versionstamp_impl(
+		&self,
+		ts: u64,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -1065,8 +1084,26 @@ impl Datastore {
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn garbage_collect_stale_change_feeds_impl(
+		&self,
+		ts: u64,
+		mut tx: &mut Transaction,
+	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
-		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
+		cf::gc_all_at(&mut tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -1077,7 +1114,7 @@ impl Datastore {
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock().await;
-		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
+		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
 		tx.commit().await
 	}
 
@@ -1237,14 +1274,7 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id.0)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = Options::new_from_sess(sess, &self.id, self.strict, self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -1255,7 +1285,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1319,7 +1349,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1388,7 +1418,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1431,12 +1461,12 @@ impl Datastore {
 	/// ```
 	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
+		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
-		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
+	pub(crate) fn live_sender(&self) -> Option<Sender<Notification>> {
+		self.notification_channel.get().map(|v| v.0.clone())
 	}
 
 	/// Performs a full database export as SQL

@@ -1,4 +1,4 @@
-use crate::err::Error;
+use crate::err::{Error, UnreachableCause};
 use crate::fnc::util::math::vector::{
 	CosineSimilarity, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 };
@@ -22,6 +22,7 @@ use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+use UnreachableCause::UnreachableNodeIndex;
 
 pub(crate) type Vector = Vec<Number>;
 
@@ -886,13 +887,15 @@ impl MTreeNode {
 	fn internal(self) -> Result<InternalNode, Error> {
 		match self {
 			MTreeNode::Internal(n) => Ok(n),
-			MTreeNode::Leaf(_) => Err(Error::Unreachable),
+			MTreeNode::Leaf(_) => Err(Error::UnreachableCause(UnreachableCause::UnexpectedLeaf)),
 		}
 	}
 
 	fn leaf(self) -> Result<LeafNode, Error> {
 		match self {
-			MTreeNode::Internal(_) => Err(Error::Unreachable),
+			MTreeNode::Internal(_) => {
+				Err(Error::UnreachableCause(UnreachableCause::UnexpectedLeaf))
+			}
 			MTreeNode::Leaf(n) => Ok(n),
 		}
 	}
@@ -917,7 +920,9 @@ impl NodeVectors for LeafNode {
 	}
 
 	fn get_vector(&self, i: usize) -> Result<Arc<Vector>, Error> {
-		self.get_index(i).ok_or(Error::Unreachable).map(|(v, _)| v.clone())
+		self.get_index(i)
+			.ok_or(Error::UnreachableCause(UnreachableNodeIndex))
+			.map(|(v, _)| v.clone())
 	}
 
 	fn distribute_entries(
@@ -960,7 +965,7 @@ impl NodeVectors for InternalNode {
 	}
 
 	fn get_vector(&self, i: usize) -> Result<Arc<Vector>, Error> {
-		self.get(i).ok_or(Error::Unreachable).map(|e| e.center.clone())
+		self.get(i).ok_or(Error::UnreachableCause(UnreachableNodeIndex)).map(|e| e.center.clone())
 	}
 
 	fn distribute_entries(

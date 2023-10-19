@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::{ContextCause, Error};
 use crate::iam::Auth;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -32,6 +32,7 @@ pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
+	// Param or Table
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -71,6 +72,9 @@ impl LiveStatement {
 		// Get the Node ID
 		let nid = opt.id()?;
 		// Check that auth has been set
+		if ctx.value("session").is_none() {
+			return Err(Error::InternalContextError(ContextCause::MissingSession));
+		}
 		let mut stm = LiveStatement {
 			// Use the current session authentication
 			// for when we store the LIVE Statement

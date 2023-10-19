@@ -177,7 +177,7 @@ impl<'a> Executor<'a> {
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
-		// Create a notification channel
+		// Create a notification channel that buffers notifications until transaction is committed
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
 		let mut opt = opt.new_with_sender(send);

@@ -44,6 +44,7 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic")]
+	#[deprecated(note = "Use UnreachableCause instead")]
 	Unreachable,
 
 	/// Statement has been deprecated
@@ -79,8 +80,9 @@ pub enum Error {
 	TxConditionNotMet,
 
 	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExists(KeyCategory),
+	#[error("The key being inserted already exists")]
+	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
+	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
 	#[error("Record id or key is too large")]
@@ -633,6 +635,7 @@ pub enum Error {
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
+	#[deprecated(note = "Use InternalCause instead")]
 	Internal(String),
 
 	/// Unimplemented functionality
@@ -709,6 +712,93 @@ pub enum Error {
 	/// Auth was expected to be set but was unknown
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
+
+	/// The key being inserted in the transaction already exists
+	#[error("The key being inserted already exists: {0}")]
+	TxKeyAlreadyExistsCategory(KeyCategory),
+
+	/// The database encountered unreachable logic
+	#[error("The database encountered unreachable logic: {0}")]
+	UnreachableCause(UnreachableCause),
+
+	/// Internal server error
+	/// This should be used extremely sporadically, since we lose the type of error as a consequence
+	/// There will be times when it is useful, such as with unusual type conversion errors
+	#[error("Internal database error: {0}")]
+	InternalCause(InternalCause),
+
+	/// Internal server error related to context
+	/// A classification of internal error, related directly to context
+	#[error("Internal database error due to context: {0}")]
+	InternalContextError(ContextCause),
+
+	/// Internal server error related to live query state
+	#[error("Internal live query error: {0}")]
+	InternalLiveQueryError(LiveQueryCause),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum UnreachableCause {
+	#[error("The node id should always be set in the options")]
+	NodeIdAlwaysSet,
+
+	#[error("unreachable index while getting vector in mtree internal node")]
+	UnreachableNodeIndex,
+
+	#[error("leaf while retrieving internal in mtree")]
+	UnexpectedLeaf,
+
+	#[error("The root node was different that what was expected")]
+	UnexpectedIndexRootNode,
+
+	#[error("This will always be a write type")]
+	TreeNodeAlwaysWrite,
+
+	#[error("This key will never exist in the tree")]
+	TreeNeverHasNode,
+
+	#[error("The tree out set will never be empty")]
+	TreeOutSetNeverEmpty,
+
+	#[error("The iterable should have a next item")]
+	ShouldHaveNextItem,
+
+	#[error("The struct should have an inner set")]
+	ShouldHaveInner,
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum LiveQueryCause {
+	#[error("The timestamps in the key and the value do not match")]
+	TimestampMismatch,
+	#[error("The live query ID in the key and the value do not match")]
+	LiveQueryIDMismatch,
+	#[error("The notification ID in the key and the value do not match")]
+	NotificationIDMismatch,
+	#[error("Failed to decode a value while reading LQ")]
+	FailedToDecodeNodeLiveQueryValue,
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum ContextCause {
+	#[error("Expected the context to include 'session'")]
+	MissingSession,
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum InternalCause {
+	#[error("no versionstamp associated to this timestamp exists yet")]
+	NoVersionstamp,
+	#[error("ts is less than or equal to the latest ts")]
+	TimestampSkew,
+	#[error("Clock may have gone backwards")]
+	ClockMayHaveGoneBackwards,
+	#[error("versionstamp is not 10 bytes")]
+	InvalidVersionstamp,
 }
 
 impl From<Error> for String {
@@ -734,7 +824,7 @@ impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
 			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -747,7 +837,7 @@ impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
 			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -760,7 +850,7 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,

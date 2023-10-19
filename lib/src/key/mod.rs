@@ -39,6 +39,7 @@
 /// crate::key::table::ft                /*{ns}*{db}*{tb}!ft{ft}
 /// crate::key::table::ix                /*{ns}*{db}*{tb}!ix{ix}
 /// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
+/// crate::key::table::nt                /*{ns}*{db}*{tb}!lq{lq}!nt{ts}{id}
 ///
 /// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
 /// crate::key::index::bc                /*{ns}*{db}*{tb}+{ix}!bc{id}

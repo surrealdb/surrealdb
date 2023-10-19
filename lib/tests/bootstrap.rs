@@ -144,7 +144,6 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 
 	// Verify invalid table live query is deleted
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-
 	let res = tx
 		.scan_tblq(&valid_data.namespace, &valid_data.database, &valid_data.table, 1000)
 		.await

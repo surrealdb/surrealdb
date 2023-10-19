@@ -5,7 +5,8 @@ use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
-use crate::err::Error;
+use crate::dbs::Notification;
+use crate::err::{Error, InternalCause, LiveQueryCause};
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
 use crate::key::debug;
@@ -845,7 +846,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
@@ -1334,8 +1335,69 @@ impl Transaction {
 					ns: lv.ns.to_string(),
 					db: lv.db.to_string(),
 					tb: lv.tb.to_string(),
-					lq: val.id.clone(),
+					lq: val.id,
 				});
+				// Count
+				if limit != NO_LIMIT {
+					num -= 1;
+				}
+			}
+		}
+		Ok(out)
+	}
+
+	pub async fn scan_tbnt<'a>(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		lq: sql::Uuid,
+		limit: u32,
+	) -> Result<Vec<Notification>, Error> {
+		let beg = crate::key::table::nt::prefix(ns, db, tb, lq);
+		let end = crate::key::table::nt::suffix(ns, db, tb, lq);
+		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(&end),
+		);
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<Notification> = vec![];
+		while limit == NO_LIMIT || num > 0 {
+			let batch_size = match num {
+				0 => 1000,
+				_ => std::cmp::min(1000, num),
+			};
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					self.scan(min..max, batch_size).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (key, value)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(key.clone());
+				}
+
+				let val: Notification = value.into();
+				out.push(val);
 				// Count
 				if limit != NO_LIMIT {
 					num -= 1;
@@ -1380,6 +1442,27 @@ impl Transaction {
 		let val = self.getr(beg..end, u32::MAX).await?;
 		let val = val.convert().into();
 		Ok(val)
+	}
+
+	/// Add live notification to table live query
+	pub async fn putc_tbnt<'a>(
+		&mut self,
+		key: crate::key::table::nt::Nt<'a>,
+		nt: Notification,
+		expected: Option<Notification>,
+	) -> Result<(), Error> {
+		// Sanity check
+		if nt.timestamp != key.ts {
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::TimestampMismatch));
+		}
+		if nt.live_id.0 != key.lq {
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::LiveQueryIDMismatch));
+		}
+		if nt.notification_id.0 != key.nt {
+			return Err(Error::InternalLiveQueryError(LiveQueryCause::NotificationIDMismatch));
+		}
+		let key_enc = crate::key::table::nt::Nt::encode(&key)?;
+		self.putc(key_enc, nt, expected).await
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
@@ -1772,7 +1855,8 @@ impl Transaction {
 			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
-				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
+				error!("Error decoding live query value: {:?}", e);
+				Error::InternalLiveQueryError(LiveQueryCause::FailedToDecodeNodeLiveQueryValue)
 			})?;
 			let lqv = LqValue {
 				nd: (*nd).into(),
@@ -2769,9 +2853,7 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				return Err(Error::InternalCause(InternalCause::TimestampSkew));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2796,7 +2878,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+				return Err(Error::InternalCause(InternalCause::InvalidVersionstamp));
 			}
 		}
 		Ok(None)
