@@ -755,6 +755,8 @@ pub enum Error {
 pub enum BootstrapCause {
 	#[error("Failed to send to channel: {0}")]
 	ChannelSendError(ChannelVariant),
+	#[error("Failed to recv from channel: {0}")]
+	ChannelRecvError(ChannelVariant),
 }
 
 #[derive(Error, Debug)]
@@ -766,6 +768,8 @@ pub enum ChannelVariant {
 	BootstrapArchive,
 	#[error("Bootstrap delete channel")]
 	BootstrapDelete,
+	#[error("Bootstrap scan tx supplier")]
+	BootstrapScanTxSupplier,
 }
 
 #[derive(Error, Debug)]

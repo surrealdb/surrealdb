@@ -10,8 +10,10 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
-use crate::err::BootstrapCause::ChannelSendError;
-use crate::err::ChannelVariant::{BootstrapArchive, BootstrapDelete, BootstrapScan};
+use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
+use crate::err::ChannelVariant::{
+	BootstrapArchive, BootstrapDelete, BootstrapScan, BootstrapScanTxSupplier,
+};
 use crate::err::{Error, InternalCause};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
@@ -35,6 +37,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::instrument;
@@ -44,19 +47,34 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 /// Bootstrap dead node garbage collection has a limit in size in case of catastrophe
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
+
 /// This is the channel size for live query notifications from the engine
 const TX_LQ_CHANNEL_SIZE: usize = 100;
+
 /// This is the general batch size for database operations and channel sizes in bootstrap
 const BOOTSTRAP_BATCH_SIZE: usize = 1000;
+
 /// When processing batches from channels in bootstrap, this is the latency
 /// to decide if a batch is big enough
 const BOOTSTRAP_BATCH_LATENCY: Duration = Duration::from_millis(100);
+
 /// The number of transaction retries before a bootstrap transaction is aborted completely
 const BOOTSTRAP_TX_RETRIES: u32 = 3;
+
 /// The duration between retries lower bound, for scatter
 const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
+
 /// The duration between retries higher bound, for scatter
 const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
+
+/// Bitmap indicating the scan tx channel is operating
+const BMAP_SCAN_CHAN: u8 = 0x1;
+
+/// Bitmap indicating the archive tx channel is operating
+const BMAP_ARCH_CHAN: u8 = 0x2;
+
+/// Bitmap indicating the delete tx channel is operating
+const BMAP_DEL_CHAN: u8 = 0x4;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -487,21 +505,38 @@ impl Datastore {
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let scan_task = tokio::spawn(self.scan_node_live_queries(dead_nodes, scan_send));
+		let (scan_tx_send, scan_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
+			tokio::sync::mpsc::channel(1);
+		let scan_task =
+			tokio::spawn(Self::scan_node_live_queries(scan_tx_recv, dead_nodes, scan_send));
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let archive_task = tokio::spawn(self.archive_live_queries(scan_recv, archive_send));
+		let (archive_tx_send, archive_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
+			tokio::sync::mpsc::channel(1);
+		let archive_task = tokio::spawn(Self::archive_live_queries(
+			archive_tx_recv,
+			self.id,
+			scan_recv,
+			archive_send,
+		));
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, mut delete_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let delete_task = tokio::spawn(self.delete_live_queries(archive_recv, delete_send));
+		let (delete_tx_send, delete_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
+			tokio::sync::mpsc::channel(1);
+		let delete_task = tokio::spawn(Self::delete_live_queries(
+			delete_tx_recv,
+			self.id,
+			archive_recv,
+			delete_send,
+		));
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
@@ -513,6 +548,51 @@ impl Datastore {
 				}
 			}
 		});
+
+		// Bitmap of available channels
+		let mut channels_open: u8 = BMAP_SCAN_CHAN | BMAP_ARCH_CHAN | BMAP_DEL_CHAN;
+		// While the tasks are running, send transactions to them
+		while channels_open > 0 {
+			if channels_open & BMAP_SCAN_CHAN {
+				let tx = self.transaction(Read, Optimistic).await?;
+				match scan_tx_send.try_send(tx) {
+					Ok(_) => {}
+					Err(TrySendError::Closed(mut tx)) => {
+						channels_open &= !BMAP_SCAN_CHAN;
+						tx.cancel().await?;
+					}
+					Err(TrySendError::Full(mut tx)) => {
+						tx.cancel().await?;
+					}
+				}
+			}
+			if channels_open & BMAP_ARCH_CHAN {
+				let tx = self.transaction(Write, Optimistic).await?;
+				match archive_tx_send.try_send(tx) {
+					Ok(_) => {}
+					Err(TrySendError::Closed(mut tx)) => {
+						channels_open &= !BMAP_ARCH_CHAN;
+						tx.cancel().await?;
+					}
+					Err(TrySendError::Full(mut tx)) => {
+						tx.cancel().await?;
+					}
+				}
+			}
+			if channels_open & BMAP_DEL_CHAN {
+				let tx = self.transaction(Write, Optimistic).await?;
+				match delete_tx_send.try_send(tx) {
+					Ok(_) => {}
+					Err(TrySendError::Closed(mut tx)) => {
+						channels_open &= !BMAP_DEL_CHAN;
+						tx.cancel().await?;
+					}
+					Err(TrySendError::Full(mut tx)) => {
+						tx.cancel().await?;
+					}
+				}
+			}
+		}
 
 		// Now run everything together and return any errors that arent captured per record
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
@@ -551,11 +631,14 @@ impl Datastore {
 	}
 
 	async fn scan_node_live_queries(
-		&self,
+		mut tx_recv: Receiver<Transaction>,
 		nodes: Vec<Uuid>,
 		sender: Sender<BootstrapOperationResult>,
 	) -> Result<(), Error> {
-		let mut tx = self.transaction(Read, Optimistic).await?;
+		let mut tx = tx_recv
+			.recv()
+			.await
+			.ok_or(Error::BootstrapError(ChannelRecvError(BootstrapScanTxSupplier)))?;
 		for nd in nodes {
 			let node_lqs = tx.scan_ndlq(&nd, NO_LIMIT).await?;
 			for lq in node_lqs {
@@ -573,7 +656,7 @@ impl Datastore {
 	/// The task terminates if there is an irrecoverable error or if the input
 	/// channel has been closed (dropped, from previous task).
 	async fn archive_live_queries(
-		&self,
+		mut tx_supplier: Receiver<Transaction>,
 		mut scan_recv: Receiver<BootstrapOperationResult>,
 		sender: Sender<BootstrapOperationResult>,
 	) -> Result<(), Error> {
@@ -591,7 +674,8 @@ impl Datastore {
 					} else {
 						msg.push(bor);
 						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
-							let results = self.archive_live_query_batch(&mut msg).await?;
+							let results =
+								Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
 							for boresult in results {
 								sender.send(boresult).await.map_err(|_| {
 									Error::BootstrapError(ChannelSendError(BootstrapArchive))
@@ -604,7 +688,8 @@ impl Datastore {
 				}
 				Ok(None) => {
 					// Channel closed, process whatever is remaining
-					let results = self.archive_live_query_batch(&mut msg).await?;
+					let results =
+						Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
 					for boresult in results {
 						sender.send(boresult).await.map_err(|_| {
 							Error::BootstrapError(ChannelSendError(BootstrapArchive))
@@ -614,7 +699,8 @@ impl Datastore {
 				}
 				Err(_elapsed) => {
 					// Timeout expired
-					let results = self.archive_live_query_batch(&mut msg).await?;
+					let results =
+						Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
 					for boresult in results {
 						sender.send(boresult).await.map_err(|_| {
 							Error::BootstrapError(ChannelSendError(BootstrapArchive))
@@ -632,14 +718,15 @@ impl Datastore {
 	/// try to mark them as archived and send to the sender channel
 	/// for further processing.
 	async fn archive_live_query_batch(
-		&self,
+		mut tx_supplier: &mut Receiver<Transaction>,
 		msg: &mut Vec<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		// TODO test failed tx retries
 		let mut last_err = None;
 		for _ in 0..BOOTSTRAP_TX_RETRIES {
-			match self.transaction(Write, Optimistic).await {
+			match tx_supplier.recv() {
+				// TODO
 				Ok(mut tx) => {
 					// In case this is a retry, we re-hydrate the msg vector
 					for (lq, e) in ret.drain(..) {
@@ -705,7 +792,7 @@ impl Datastore {
 	/// Delete the node lq, table lq, and notifications
 	/// and send the results to the sender channel
 	async fn delete_live_queries(
-		&self,
+		mut tx_recv: Receiver<Transaction>,
 		mut archived_recv: Receiver<BootstrapOperationResult>,
 		sender: Sender<BootstrapOperationResult>,
 	) -> Result<(), Error> {
@@ -720,7 +807,7 @@ impl Datastore {
 					} else {
 						msg.push(bor);
 						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
-							let results = self.delete_live_query_batch(&mut msg).await?;
+							let results = Self::delete_live_query_batch(&mut msg).await?;
 							for boresult in results {
 								sender.send(boresult).await.map_err(|_e| {
 									Error::BootstrapError(ChannelSendError(BootstrapDelete))
@@ -733,7 +820,7 @@ impl Datastore {
 				}
 				Ok(None) => {
 					// Channel closed, process whatever is remaining
-					let results = self.delete_live_query_batch(&mut msg).await?;
+					let results = Self::delete_live_query_batch(&mut msg).await?;
 					for boresult in results {
 						sender.send(boresult).await.map_err(|_e| {
 							Error::BootstrapError(ChannelSendError(BootstrapDelete))
@@ -743,7 +830,7 @@ impl Datastore {
 				}
 				Err(_elapsed) => {
 					// Timeout expired
-					let results = self.delete_live_query_batch(&mut msg).await?;
+					let results = Self::delete_live_query_batch(&mut msg).await?;
 					for boresult in results {
 						sender.send(boresult).await.map_err(|_e| {
 							Error::BootstrapError(ChannelSendError(BootstrapDelete))
@@ -760,14 +847,14 @@ impl Datastore {
 	/// Given a batch of archived live queries,
 	/// Delete the node lq, table lq, and notifications
 	async fn delete_live_query_batch(
-		&self,
+		mut tx_supplier: &mut Receiver<Transaction>,
 		msg: &mut Vec<BootstrapOperationResult>,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		let mut ret: Vec<BootstrapOperationResult> = vec![];
 		// TODO test failed tx retries
 		let mut last_err = None;
 		for _ in 0..BOOTSTRAP_TX_RETRIES {
-			match self.transaction(Write, Optimistic).await {
+			match tx_supplier.recv().await {
 				Ok(mut tx) => {
 					// In case this is a retry, we re-hydrate the msg vector
 					for (lq, e) in ret.drain(..) {
