@@ -52,29 +52,20 @@ const HEARTBEAT_BATCH_SIZE: u32 = 1000;
 const TX_LQ_CHANNEL_SIZE: usize = 100;
 
 /// This is the general batch size for database operations and channel sizes in bootstrap
-const BOOTSTRAP_BATCH_SIZE: usize = 1000;
+pub(crate) const BOOTSTRAP_BATCH_SIZE: usize = 1000;
 
 /// When processing batches from channels in bootstrap, this is the latency
 /// to decide if a batch is big enough
-const BOOTSTRAP_BATCH_LATENCY: Duration = Duration::from_millis(100);
+pub(crate) const BOOTSTRAP_BATCH_LATENCY: Duration = Duration::from_millis(100);
 
 /// The number of transaction retries before a bootstrap transaction is aborted completely
-const BOOTSTRAP_TX_RETRIES: u32 = 3;
+pub(crate) const BOOTSTRAP_TX_RETRIES: u32 = 3;
 
 /// The duration between retries lower bound, for scatter
-const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
+pub(crate) const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
 
 /// The duration between retries higher bound, for scatter
-const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
-
-/// Bitmap indicating the scan tx channel is operating
-const BMAP_SCAN_CHAN: u8 = 0x1;
-
-/// Bitmap indicating the archive tx channel is operating
-const BMAP_ARCH_CHAN: u8 = 0x2;
-
-/// Bitmap indicating the delete tx channel is operating
-const BMAP_DEL_CHAN: u8 = 0x4;
+pub(crate) const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -124,11 +115,12 @@ impl Ord for LqType {
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Datastore {
 	// The inner datastore type
-	inner: Inner,
+	inner: Arc<Inner>,
 	// The unique id of this datastore, used in notifications
-	id: Uuid,
+	pub(crate) id: Uuid,
 	// Whether this datastore runs in strict mode by default
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
@@ -143,7 +135,7 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: OnceLock<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: Arc<OnceLock<(Sender<Notification>, Receiver<Notification>)>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -171,7 +163,7 @@ pub(super) enum Inner {
 impl fmt::Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#![allow(unused_variables)]
-		match &self.inner {
+		match self.inner.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
@@ -361,12 +353,12 @@ impl Datastore {
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
 			id: Uuid::new_v4(),
-			inner,
+			inner: Arc::new(inner),
 			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: OnceLock::new(),
+			notification_channel: Arc::new(OnceLock::new()),
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -500,43 +492,31 @@ impl Datastore {
 			}
 		};
 
+		let ds = Arc::new(self.clone());
+
 		// In several new transactions, scan all removed node live queries
 		let (scan_send, scan_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let (scan_tx_send, scan_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
-			tokio::sync::mpsc::channel(1);
 		let scan_task =
-			tokio::spawn(Self::scan_node_live_queries(scan_tx_recv, dead_nodes, scan_send));
+			tokio::spawn(Self::scan_node_live_queries(ds.clone(), dead_nodes, scan_send));
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let (archive_tx_send, archive_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
-			tokio::sync::mpsc::channel(1);
-		let archive_task = tokio::spawn(Self::archive_live_queries(
-			archive_tx_recv,
-			self.id,
-			scan_recv,
-			archive_send,
-		));
+		let archive_task =
+			tokio::spawn(Self::archive_live_queries(ds.clone(), scan_recv, archive_send));
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, mut delete_recv): (
 			Sender<BootstrapOperationResult>,
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let (delete_tx_send, delete_tx_recv): (Sender<Transaction>, Receiver<Transaction>) =
-			tokio::sync::mpsc::channel(1);
-		let delete_task = tokio::spawn(Self::delete_live_queries(
-			delete_tx_recv,
-			self.id,
-			archive_recv,
-			delete_send,
-		));
+		let delete_task =
+			tokio::spawn(Self::delete_live_queries(ds.clone(), archive_recv, delete_send));
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
@@ -548,51 +528,6 @@ impl Datastore {
 				}
 			}
 		});
-
-		// Bitmap of available channels
-		let mut channels_open: u8 = BMAP_SCAN_CHAN | BMAP_ARCH_CHAN | BMAP_DEL_CHAN;
-		// While the tasks are running, send transactions to them
-		while channels_open > 0 {
-			if channels_open & BMAP_SCAN_CHAN {
-				let tx = self.transaction(Read, Optimistic).await?;
-				match scan_tx_send.try_send(tx) {
-					Ok(_) => {}
-					Err(TrySendError::Closed(mut tx)) => {
-						channels_open &= !BMAP_SCAN_CHAN;
-						tx.cancel().await?;
-					}
-					Err(TrySendError::Full(mut tx)) => {
-						tx.cancel().await?;
-					}
-				}
-			}
-			if channels_open & BMAP_ARCH_CHAN {
-				let tx = self.transaction(Write, Optimistic).await?;
-				match archive_tx_send.try_send(tx) {
-					Ok(_) => {}
-					Err(TrySendError::Closed(mut tx)) => {
-						channels_open &= !BMAP_ARCH_CHAN;
-						tx.cancel().await?;
-					}
-					Err(TrySendError::Full(mut tx)) => {
-						tx.cancel().await?;
-					}
-				}
-			}
-			if channels_open & BMAP_DEL_CHAN {
-				let tx = self.transaction(Write, Optimistic).await?;
-				match delete_tx_send.try_send(tx) {
-					Ok(_) => {}
-					Err(TrySendError::Closed(mut tx)) => {
-						channels_open &= !BMAP_DEL_CHAN;
-						tx.cancel().await?;
-					}
-					Err(TrySendError::Full(mut tx)) => {
-						tx.cancel().await?;
-					}
-				}
-			}
-		}
 
 		// Now run everything together and return any errors that arent captured per record
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
@@ -628,290 +563,6 @@ impl Datastore {
 			return Err(err);
 		}
 		Ok(())
-	}
-
-	async fn scan_node_live_queries(
-		mut tx_recv: Receiver<Transaction>,
-		nodes: Vec<Uuid>,
-		sender: Sender<BootstrapOperationResult>,
-	) -> Result<(), Error> {
-		let mut tx = tx_recv
-			.recv()
-			.await
-			.ok_or(Error::BootstrapError(ChannelRecvError(BootstrapScanTxSupplier)))?;
-		for nd in nodes {
-			let node_lqs = tx.scan_ndlq(&nd, NO_LIMIT).await?;
-			for lq in node_lqs {
-				sender
-					.send((lq, None))
-					.await
-					.map_err(|e| Error::BootstrapError(ChannelSendError(BootstrapScan)))?;
-			}
-		}
-		tx.cancel().await
-	}
-
-	/// This task will read input live queries from a receiver in batches and
-	/// archive them and finally send them to the output channel.
-	/// The task terminates if there is an irrecoverable error or if the input
-	/// channel has been closed (dropped, from previous task).
-	async fn archive_live_queries(
-		mut tx_supplier: Receiver<Transaction>,
-		mut scan_recv: Receiver<BootstrapOperationResult>,
-		sender: Sender<BootstrapOperationResult>,
-	) -> Result<(), Error> {
-		let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(BOOTSTRAP_BATCH_SIZE);
-		loop {
-			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
-				Ok(Some(bor)) => {
-					if bor.1.is_some() {
-						// send any errors further on, because we don't need to process them
-						// unless we can handle them. Currently we can't.
-						// if we error on send, then we bubble up because this shouldn't happen
-						sender.send(bor).await.map_err(|_| {
-							Error::BootstrapError(ChannelSendError(BootstrapArchive))
-						})?;
-					} else {
-						msg.push(bor);
-						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
-							let results =
-								Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
-							for boresult in results {
-								sender.send(boresult).await.map_err(|_| {
-									Error::BootstrapError(ChannelSendError(BootstrapArchive))
-								})?;
-							}
-							// msg should always be drained but in case it isn't, we clear
-							msg.clear();
-						}
-					}
-				}
-				Ok(None) => {
-					// Channel closed, process whatever is remaining
-					let results =
-						Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
-					for boresult in results {
-						sender.send(boresult).await.map_err(|_| {
-							Error::BootstrapError(ChannelSendError(BootstrapArchive))
-						})?;
-					}
-					break;
-				}
-				Err(_elapsed) => {
-					// Timeout expired
-					let results =
-						Self::archive_live_query_batch(&mut tx_supplier, &mut msg).await?;
-					for boresult in results {
-						sender.send(boresult).await.map_err(|_| {
-							Error::BootstrapError(ChannelSendError(BootstrapArchive))
-						})?;
-					}
-					// msg should always be drained but in case it isn't, we clear
-					msg.clear();
-				}
-			}
-		}
-		Ok(())
-	}
-
-	/// Given a batch of messages that indicate live queries to archive,
-	/// try to mark them as archived and send to the sender channel
-	/// for further processing.
-	async fn archive_live_query_batch(
-		mut tx_supplier: &mut Receiver<Transaction>,
-		msg: &mut Vec<BootstrapOperationResult>,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut ret: Vec<BootstrapOperationResult> = vec![];
-		// TODO test failed tx retries
-		let mut last_err = None;
-		for _ in 0..BOOTSTRAP_TX_RETRIES {
-			match tx_supplier.recv() {
-				// TODO
-				Ok(mut tx) => {
-					// In case this is a retry, we re-hydrate the msg vector
-					for (lq, e) in ret.drain(..) {
-						msg.push((lq, e));
-					}
-					// Consume the input message vector of live queries to archive
-					if msg.len() > 0 {
-						for (lq, _error_should_not_exist) in msg.drain(..) {
-							// Retrieve the existing table live query
-							let lv_res = tx
-								.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq)
-								.await;
-							// Maybe it won't work. Not handled atm, so treat as valid error
-							if let Err(e) = lv_res {
-								// TODO wrap error with context that this step failed; requires self-ref error
-								ret.push((lq, Some(e)));
-								continue;
-							}
-							let lv = lv_res.unwrap();
-							// If the lq is already archived, we can remove it from bootstrap
-							if !lv.archived.is_some() {
-								// Mark as archived by us (this node) and write back
-								let archived_lvs = lv.clone().archive(self.id);
-								match tx
-									.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv))
-									.await
-								{
-									Ok(_) => {
-										ret.push((lq, None));
-									}
-									Err(e) => {
-										ret.push((lq, Some(e)));
-									}
-								}
-							}
-						}
-						// TODO where can the above transaction hard fail? Every op needs rollback?
-						tx.commit().await?;
-					}
-				}
-				Err(e) => {
-					last_err = Some(e);
-				}
-			}
-			if last_err.is_some() {
-				// If there are 2 conflicting bootstraps, we don't want them to continue
-				// continue colliding at the same time. So we scatter the retry sleep
-				let scatter_sleep = rand::thread_rng()
-					.gen_range(BOOTSTRAP_TX_RETRY_LOW_MILLIS..BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
-				tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
-			} else {
-				// Successful transaction 🎉
-				break;
-			}
-		}
-		if let Some(e) = last_err {
-			return Err(e);
-		}
-		Ok(ret)
-	}
-
-	/// Given a receiver channel of archived live queries,
-	/// Delete the node lq, table lq, and notifications
-	/// and send the results to the sender channel
-	async fn delete_live_queries(
-		mut tx_recv: Receiver<Transaction>,
-		mut archived_recv: Receiver<BootstrapOperationResult>,
-		sender: Sender<BootstrapOperationResult>,
-	) -> Result<(), Error> {
-		let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(BOOTSTRAP_BATCH_SIZE);
-		loop {
-			match tokio::time::timeout(BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
-				Ok(Some(bor)) => {
-					if bor.1.is_some() {
-						sender.send(bor).await.map_err(|_e| {
-							Error::BootstrapError(ChannelSendError(BootstrapDelete))
-						})?;
-					} else {
-						msg.push(bor);
-						if msg.len() >= BOOTSTRAP_BATCH_SIZE {
-							let results = Self::delete_live_query_batch(&mut msg).await?;
-							for boresult in results {
-								sender.send(boresult).await.map_err(|_e| {
-									Error::BootstrapError(ChannelSendError(BootstrapDelete))
-								})?;
-							}
-							// msg should always be drained but in case it isn't, we clear
-							msg.clear();
-						}
-					}
-				}
-				Ok(None) => {
-					// Channel closed, process whatever is remaining
-					let results = Self::delete_live_query_batch(&mut msg).await?;
-					for boresult in results {
-						sender.send(boresult).await.map_err(|_e| {
-							Error::BootstrapError(ChannelSendError(BootstrapDelete))
-						})?;
-					}
-					break;
-				}
-				Err(_elapsed) => {
-					// Timeout expired
-					let results = Self::delete_live_query_batch(&mut msg).await?;
-					for boresult in results {
-						sender.send(boresult).await.map_err(|_e| {
-							Error::BootstrapError(ChannelSendError(BootstrapDelete))
-						})?;
-					}
-					// msg should always be drained but in case it isn't, we clear
-					msg.clear();
-				}
-			}
-		}
-		Ok(())
-	}
-
-	/// Given a batch of archived live queries,
-	/// Delete the node lq, table lq, and notifications
-	async fn delete_live_query_batch(
-		mut tx_supplier: &mut Receiver<Transaction>,
-		msg: &mut Vec<BootstrapOperationResult>,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut ret: Vec<BootstrapOperationResult> = vec![];
-		// TODO test failed tx retries
-		let mut last_err = None;
-		for _ in 0..BOOTSTRAP_TX_RETRIES {
-			match tx_supplier.recv().await {
-				Ok(mut tx) => {
-					// In case this is a retry, we re-hydrate the msg vector
-					for (lq, e) in ret.drain(..) {
-						msg.push((lq, e));
-					}
-					// Consume the input message vector of live queries to archive
-					if msg.len() > 0 {
-						for (lq, _e) in msg.drain(..) {
-							// Delete the node live query
-							if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await
-							{
-								// TODO wrap error with context that this step failed; requires self-ref error
-								ret.push((lq, Some(e)));
-								continue;
-							}
-							// Delete the table live query
-							if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *(&lq).lq).await {
-								// TODO wrap error with context that this step failed; requires self-ref error
-								ret.push((lq, Some(e)));
-								continue;
-							}
-							// Delete the notifications
-							// TODO hypothetical impl
-							if let Err(e) = Ok(()) {
-								// TODO wrap error with context that this step failed; requires self-ref error
-								ret.push((lq, Some(e)));
-							}
-						}
-						// TODO where can the above transaction hard fail? Every op needs rollback?
-						if let Err(e) = tx.commit().await {
-							// TODO wrap?
-							last_err = Some(e);
-							continue;
-						} else {
-							break;
-						}
-					}
-				}
-				Err(e) => {
-					last_err = Some(e);
-				}
-			}
-			if last_err.is_some() {
-				// If there are 2 conflicting bootstraps, we don't want them to continue
-				// continue colliding at the same time. So we scatter the retry sleep
-				let scatter_sleep = rand::thread_rng()
-					.gen_range(BOOTSTRAP_TX_RETRY_LOW_MILLIS..BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
-				tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
-			} else {
-				// Successful transaction 🎉
-				break;
-			}
-		}
-		if let Some(e) = last_err {
-			return Err(e);
-		}
-		Ok(ret)
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
@@ -1235,13 +886,13 @@ impl Datastore {
 	) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let write = match tx_type {
-			TransactionType::Read => false,
-			TransactionType::Write => true,
+			Read => false,
+			Write => true,
 		};
 
 		let lock = match lock {
-			LockType::Pessimistic => true,
-			LockType::Optimistic => false,
+			Pessimistic => true,
+			Optimistic => false,
 		};
 
 		let inner = match &self.inner {
