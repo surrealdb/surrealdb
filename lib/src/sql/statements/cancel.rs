@@ -69,7 +69,7 @@ mod tests {
 		let sql = "CANCEL AS DRYRUN";
 		let res = cancel(sql);
 		let out = res.unwrap().1;
-		assert_eq!("CANCEL TRANSACTION AS DRYRYN", format!("{}", out))
+		assert_eq!("CANCEL TRANSACTION AS DRYRUN", format!("{}", out))
 	}
 
 	#[test]
@@ -77,6 +77,6 @@ mod tests {
 		let sql = "CANCEL TRANSACTION AS DRYRUN";
 		let res = cancel(sql);
 		let out = res.unwrap().1;
-		assert_eq!("CANCEL TRANSACTION AS DRYRYN", format!("{}", out))
+		assert_eq!("CANCEL TRANSACTION AS DRYRUN", format!("{}", out))
 	}
 }
