@@ -185,3 +185,29 @@ async fn transaction_with_throw_and_return() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn transaction_as_dryrun() -> Result<(), Error> {
+	let sql = "
+		BEGIN;
+		CREATE person:tobie;
+		CREATE person:jaime;
+		RETURN { tobie: person:tobie, jaime: person:jaime };
+		CANCEL AS DRYRUN;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			tobie: person:tobie,
+			jaime: person:jaime,
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

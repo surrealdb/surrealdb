@@ -9,19 +9,34 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
-pub struct CancelStatement;
+#[revisioned(revision = 2)]
+pub struct CancelStatement {
+	#[revision(start = 2)]
+	pub dryrun: bool,
+}
 
 impl fmt::Display for CancelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("CANCEL TRANSACTION")
+		write!(f, "CANCEL TRANSACTION")?;
+		if self.dryrun {
+			write!(f, " AS DRYRUN")?
+		};
+		Ok(())
 	}
 }
 
 pub fn cancel(i: &str) -> IResult<&str, CancelStatement> {
 	let (i, _) = tag_no_case("CANCEL")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TRANSACTION"))))(i)?;
-	Ok((i, CancelStatement))
+	let (i, dryrun) = opt(dryrun)(i)?;
+	Ok((i, CancelStatement {
+		dryrun: dryrun.is_some_and(|d| d)
+	}))
+}
+
+pub fn dryrun(i: &str) -> IResult<&str, bool> {
+	let (i, _) = tuple((shouldbespace, tag_no_case("AS"), shouldbespace, tag_no_case("DRYRUN")))(i)?;
+	Ok((i, true))
 }
 
 #[cfg(test)]
@@ -43,5 +58,21 @@ mod tests {
 		let res = cancel(sql);
 		let out = res.unwrap().1;
 		assert_eq!("CANCEL TRANSACTION", format!("{}", out))
+	}
+
+	#[test]
+	fn cancel_dryrun_basic() {
+		let sql = "CANCEL AS DRYRUN";
+		let res = cancel(sql);
+		let out = res.unwrap().1;
+		assert_eq!("CANCEL TRANSACTION AS DRYRYN", format!("{}", out))
+	}
+
+	#[test]
+	fn cancel_dryrun_query() {
+		let sql = "CANCEL TRANSACTION AS DRYRUN";
+		let res = cancel(sql);
+		let out = res.unwrap().1;
+		assert_eq!("CANCEL TRANSACTION AS DRYRYN", format!("{}", out))
 	}
 }

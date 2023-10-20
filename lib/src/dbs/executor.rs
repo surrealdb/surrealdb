@@ -13,6 +13,7 @@ use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
+use crate::sql::statements::CancelStatement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 use channel::Receiver;
@@ -23,6 +24,7 @@ use trice::Instant;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
+	dryrun: bool,
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 }
@@ -33,6 +35,7 @@ impl<'a> Executor<'a> {
 			kvs,
 			txn: None,
 			err: false,
+			dryrun: false
 		}
 	}
 
@@ -109,10 +112,13 @@ impl<'a> Executor<'a> {
 	}
 
 	fn buf_cancel(&self, v: Response) -> Response {
-		Response {
-			time: v.time,
-			result: Err(Error::QueryCancelled),
-			query_type: QueryType::Other,
+		match self.dryrun {
+			false => Response {
+				time: v.time,
+				result: Err(Error::QueryCancelled),
+				query_type: QueryType::Other,
+			},
+			true => v
 		}
 	}
 
@@ -227,7 +233,8 @@ impl<'a> Executor<'a> {
 					continue;
 				}
 				// Cancel a running transaction
-				Statement::Cancel(_) => {
+				Statement::Cancel(CancelStatement { dryrun }) => {
+					self.dryrun = dryrun;
 					self.cancel(true).await;
 					self.clear(&ctx, recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
