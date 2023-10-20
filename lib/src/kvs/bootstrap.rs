@@ -22,7 +22,7 @@ pub(crate) async fn scan_node_live_queries(
 			sender
 				.send((lq, None))
 				.await
-				.map_err(|e| Error::BootstrapError(ChannelSendError(BootstrapScan)))?;
+				.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapScan)))?;
 		}
 	}
 	tx.cancel().await

@@ -520,7 +520,7 @@ impl Datastore {
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
-		let delete_handler_task = tokio::spawn(async {
+		let delete_handler_task = tokio::spawn(async move {
 			while let Some(res) = delete_recv.recv().await {
 				let (_lq, e) = res;
 				if let Some(e) = e {
@@ -895,7 +895,7 @@ impl Datastore {
 			Optimistic => false,
 		};
 
-		let inner = match &self.inner {
+		let inner = match &*self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -1190,8 +1190,8 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.get().map(|v| v.1)
+	pub fn notifications(&self) -> Option<&Receiver<Notification>> {
+		self.notification_channel.get().map(|v| &v.1)
 	}
 
 	#[allow(dead_code)]
