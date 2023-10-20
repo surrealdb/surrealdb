@@ -35,7 +35,7 @@ impl<'a> Executor<'a> {
 			kvs,
 			txn: None,
 			err: false,
-			dryrun: false
+			dryrun: false,
 		}
 	}
 
@@ -118,7 +118,7 @@ impl<'a> Executor<'a> {
 				result: Err(Error::QueryCancelled),
 				query_type: QueryType::Other,
 			},
-			true => v
+			true => v,
 		}
 	}
 
@@ -233,7 +233,9 @@ impl<'a> Executor<'a> {
 					continue;
 				}
 				// Cancel a running transaction
-				Statement::Cancel(CancelStatement { dryrun }) => {
+				Statement::Cancel(CancelStatement {
+					dryrun,
+				}) => {
 					self.dryrun = dryrun;
 					self.cancel(true).await;
 					self.clear(&ctx, recv.clone()).await;

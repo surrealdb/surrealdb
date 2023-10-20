@@ -29,13 +29,17 @@ pub fn cancel(i: &str) -> IResult<&str, CancelStatement> {
 	let (i, _) = tag_no_case("CANCEL")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TRANSACTION"))))(i)?;
 	let (i, dryrun) = opt(dryrun)(i)?;
-	Ok((i, CancelStatement {
-		dryrun: dryrun.is_some_and(|d| d)
-	}))
+	Ok((
+		i,
+		CancelStatement {
+			dryrun: dryrun.is_some_and(|d| d),
+		},
+	))
 }
 
 pub fn dryrun(i: &str) -> IResult<&str, bool> {
-	let (i, _) = tuple((shouldbespace, tag_no_case("AS"), shouldbespace, tag_no_case("DRYRUN")))(i)?;
+	let (i, _) =
+		tuple((shouldbespace, tag_no_case("AS"), shouldbespace, tag_no_case("DRYRUN")))(i)?;
 	Ok((i, true))
 }
 

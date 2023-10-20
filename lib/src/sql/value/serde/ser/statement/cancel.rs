@@ -23,7 +23,9 @@ impl ser::Serializer for Serializer {
 	#[inline]
 	fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Error> {
 		match name {
-			"CancelStatement" => Ok(CancelStatement { dryrun: false }),
+			"CancelStatement" => Ok(CancelStatement {
+				dryrun: false,
+			}),
 			name => Err(Error::custom(format!("unexpected unit struct `{name}`"))),
 		}
 	}
@@ -37,7 +39,9 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = CancelStatement { dryrun: false };
+		let stmt = CancelStatement {
+			dryrun: false,
+		};
 		let value: CancelStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
