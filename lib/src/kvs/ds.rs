@@ -19,7 +19,7 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -500,7 +500,7 @@ impl Datastore {
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		let scan_task =
-			tokio::spawn(Self::scan_node_live_queries(ds.clone(), dead_nodes, scan_send));
+			tokio::spawn(bootstrap::scan_node_live_queries(ds.clone(), dead_nodes, scan_send));
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
@@ -508,7 +508,7 @@ impl Datastore {
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		let archive_task =
-			tokio::spawn(Self::archive_live_queries(ds.clone(), scan_recv, archive_send));
+			tokio::spawn(bootstrap::archive_live_queries(ds.clone(), scan_recv, archive_send));
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, mut delete_recv): (
@@ -516,7 +516,7 @@ impl Datastore {
 			Receiver<BootstrapOperationResult>,
 		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		let delete_task =
-			tokio::spawn(Self::delete_live_queries(ds.clone(), archive_recv, delete_send));
+			tokio::spawn(bootstrap::delete_live_queries(ds.clone(), archive_recv, delete_send));
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block

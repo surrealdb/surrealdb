@@ -5,13 +5,12 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::{Read, Write};
 use crate::kvs::{ds, BootstrapOperationResult, Datastore, NO_LIMIT};
 use crate::sql::Uuid;
-use futures::channel::mpsc::Receiver;
 use rand::Rng;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-async fn scan_node_live_queries(
+pub(crate) async fn scan_node_live_queries(
 	ds: Arc<Datastore>,
 	nodes: Vec<Uuid>,
 	sender: Sender<BootstrapOperationResult>,
@@ -33,7 +32,7 @@ async fn scan_node_live_queries(
 /// archive them and finally send them to the output channel.
 /// The task terminates if there is an irrecoverable error or if the input
 /// channel has been closed (dropped, from previous task).
-async fn archive_live_queries(
+pub(crate) async fn archive_live_queries(
 	ds: Arc<Datastore>,
 	mut scan_recv: Receiver<BootstrapOperationResult>,
 	sender: Sender<BootstrapOperationResult>,
@@ -167,7 +166,7 @@ async fn archive_live_query_batch(
 /// Given a receiver channel of archived live queries,
 /// Delete the node lq, table lq, and notifications
 /// and send the results to the sender channel
-async fn delete_live_queries(
+pub(crate) async fn delete_live_queries(
 	ds: Arc<Datastore>,
 	mut archived_recv: Receiver<BootstrapOperationResult>,
 	sender: Sender<BootstrapOperationResult>,
