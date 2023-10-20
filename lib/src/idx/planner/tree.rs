@@ -110,7 +110,7 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				self.eval_idiom(i).await
-			},
+			}
 			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
 				Ok(Node::Scalar(v.to_owned()))
 			}
