@@ -242,12 +242,12 @@ impl Connection {
 
 	/// Send live query notifications to the client
 	async fn notifications(rpc: Arc<RwLock<Connection>>) {
-		if let Some(channel) = DB.get().unwrap().notifications() {
+		if let Some(&mut channel) = DB.get().unwrap().clone().notifications() {
 			let cancel_token = rpc.read().await.graceful_shutdown.clone();
 			loop {
 				tokio::select! {
 					msg = channel.recv() => {
-						if let Ok(notification) = msg {
+						if let Some(notification) = msg {
 							// Convert internal notification representation to external
 							let notification = surrealdb::api::model::Notification::from(notification);
 							// Find which WebSocket the notification belongs to
