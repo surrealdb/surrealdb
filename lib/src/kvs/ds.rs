@@ -540,6 +540,7 @@ impl Datastore {
 
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
+		trace!("Handling bootstrap transaction requests");
 		loop {
 			match tx_req_recv.recv().await {
 				None => {
@@ -555,6 +556,7 @@ impl Datastore {
 				}
 			}
 		}
+		trace!("Finished handling requests");
 
 		// Now run everything together and return any errors that arent captured per record
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =

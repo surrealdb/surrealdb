@@ -25,15 +25,24 @@ pub(crate) async fn scan_node_live_queries(
 	if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
 		return Err(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 	}
+	trace!("Receiving a tx response in scan");
 	match tx_res_oneshot.await {
 		Ok(mut tx) => {
+			trace!("Received tx in scan");
 			for nd in nodes {
-				let node_lqs = tx.scan_ndlq(&nd, NO_LIMIT).await?;
-				for lq in node_lqs {
-					sender
-						.send((lq, None))
-						.await
-						.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapScan)))?;
+				match tx.scan_ndlq(&nd, NO_LIMIT).await {
+					Ok(node_lqs) => {
+						for lq in node_lqs {
+							sender.send((lq, None)).await.map_err(|_| {
+								Error::BootstrapError(ChannelSendError(BootstrapScan))
+							})?;
+						}
+					}
+					Err(e) => {
+						error!("Failed scanning node live queries: {:?}", e);
+						tx.cancel().await?;
+						return Err(e);
+					}
 				}
 			}
 			tx.commit().await
@@ -84,14 +93,17 @@ pub(crate) async fn archive_live_queries(
 			}
 			Ok(None) => {
 				// Channel closed, process whatever is remaining
-				let results = archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
-				for boresult in results {
-					sender
-						.send(boresult)
-						.await
-						.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapArchive)))?;
+				match archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await {
+					Ok(results) => {
+						for boresult in results {
+							sender.send(boresult).await.map_err(|_| {
+								Error::BootstrapError(ChannelSendError(BootstrapArchive))
+							})?;
+						}
+						break;
+					}
+					Err(e) => {}
 				}
-				break;
 			}
 			Err(_elapsed) => {
 				// Timeout expired
@@ -128,14 +140,18 @@ async fn archive_live_query_batch(
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
+		trace!("Receiving a tx response in archive");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
+				trace!("Received tx in archive");
 				// In case this is a retry, we re-hydrate the msg vector
 				for (lq, e) in ret.drain(..) {
 					msg.push((lq, e));
 				}
 				// Fast-return
 				if msg.len() <= 0 {
+					trace!("archive fast return because msg.len() <= 0");
+					last_err = tx.cancel().await.err();
 					break;
 				}
 				// Consume the input message vector of live queries to archive
@@ -172,23 +188,38 @@ async fn archive_live_query_batch(
 						// TODO wrap?
 						last_err = Some(e);
 					}
-					continue;
+				} else {
+					trace!("archive committed tx happy path");
+					break;
+				}
+				// TODO second happy path commit?
+				trace!("archive committing tx second happy");
+				if let Err(e) = tx.commit().await {
+					trace!("failed to commit tx: {:?}", e);
+					last_err = Some(e);
+					if let Err(e) = tx.cancel().await {
+						trace!("failed to rollback tx: {:?}", e);
+						// TODO wrap?
+						last_err = Some(e);
+					}
 				} else {
 					break;
 				}
-				if last_err.is_some() {
-					// If there are 2 conflicting bootstraps, we don't want them to continue
-					// continue colliding at the same time. So we scatter the retry sleep
-					let scatter_sleep = rand::thread_rng().gen_range(
-						ds::BOOTSTRAP_TX_RETRY_LOW_MILLIS..ds::BOOTSTRAP_TX_RETRY_HIGH_MILLIS,
-					);
-					tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
-				} else {
-					// Successful transaction 🎉
-					break;
-				}
+				trace!("outside the commit check");
 			}
-			Err(_) => {}
+			Err(e) => {
+				last_err = Some(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)));
+			}
+		}
+		if last_err.is_some() {
+			// If there are 2 conflicting bootstraps, we don't want them to continue
+			// continue colliding at the same time. So we scatter the retry sleep
+			let scatter_sleep = rand::thread_rng()
+				.gen_range(ds::BOOTSTRAP_TX_RETRY_LOW_MILLIS..ds::BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
+			tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
+		} else {
+			// Successful transaction 🎉
+			break;
 		}
 	}
 	if let Some(e) = last_err {
@@ -272,23 +303,33 @@ async fn delete_live_query_batch(
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
+		trace!("Receiving a tx response in delete");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
+				trace!("Received tx in delete");
 				// In case this is a retry, we re-hydrate the msg vector
 				for (lq, e) in ret.drain(..) {
 					msg.push((lq, e));
+				}
+				// Fast-return
+				if msg.len() <= 0 {
+					trace!("Delete fast return because msg.len() <= 0");
+					last_err = tx.cancel().await.err();
+					break;
 				}
 				// Consume the input message vector of live queries to archive
 				if msg.len() > 0 {
 					for (lq, _e) in msg.drain(..) {
 						// Delete the node live query
 						if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await {
+							error!("Failed deleting node live query: {:?}", e);
 							// TODO wrap error with context that this step failed; requires self-ref error
 							ret.push((lq, Some(e)));
 							continue;
 						}
 						// Delete the table live query
 						if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *(&lq).lq).await {
+							error!("Failed deleting table live query: {:?}", e);
 							// TODO wrap error with context that this step failed; requires self-ref error
 							ret.push((lq, Some(e)));
 							continue;
@@ -296,6 +337,7 @@ async fn delete_live_query_batch(
 						// Delete the notifications
 						// TODO hypothetical impl
 						if let Err(e) = Ok(()) {
+							error!("Failed deleting notifications: {:?}", e);
 							// TODO wrap error with context that this step failed; requires self-ref error
 							ret.push((lq, Some(e)));
 						}
@@ -303,16 +345,22 @@ async fn delete_live_query_batch(
 					// TODO where can the above transaction hard fail? Every op needs rollback?
 					if let Err(e) = tx.commit().await {
 						// TODO wrap?
-						last_err = Some(e);
 						match tx.cancel().await {
-							Ok(_) => {}
-							Err(e) => {
-								// TODO wrap?
+							Ok(_) => {
+								trace!(
+									"Commit failed, but rollback succeeded when deleting ndlq+tblq"
+								);
 								last_err = Some(e);
+							}
+							Err(e2) => {
+								// TODO wrap?
+								error!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
+								last_err = Some(e2);
 							}
 						}
 						continue;
 					} else {
+						trace!("delete lq committed tx happy path");
 						break;
 					}
 				}
