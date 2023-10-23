@@ -435,6 +435,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compression"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62b74f44609f0f91493e3082d3734d98497e094777144380ea4db9f9905dd5b6"
+dependencies = [
+ "brotli",
+ "flate2",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio 1.32.0",
+ "zstd",
+ "zstd-safe",
+]
+
+[[package]]
 name = "async-executor"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4214,6 +4230,7 @@ version = "0.11.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
 dependencies = [
+ "async-compression",
  "base64 0.21.2",
  "bytes 1.4.0",
  "encoding_rs",
@@ -6053,6 +6070,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55ae70283aba8d2a8b411c695c437fe25b8b5e44e23e780662002fc72fb47a82"
 dependencies = [
+ "async-compression",
  "base64 0.21.2",
  "bitflags 2.4.0",
  "bytes 1.4.0",
@@ -6063,6 +6081,8 @@ dependencies = [
  "http-range-header",
  "mime",
  "pin-project-lite",
+ "tokio 1.32.0",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
