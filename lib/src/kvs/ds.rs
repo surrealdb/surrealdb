@@ -10,10 +10,6 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
-use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
-use crate::err::ChannelVariant::{
-	BootstrapArchive, BootstrapDelete, BootstrapScan, BootstrapScanTxSupplier,
-};
 use crate::err::{Error, InternalCause};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
@@ -29,7 +25,6 @@ use crate::sql::{Query, Uuid};
 use crate::vs::Oracle;
 use futures::lock::Mutex;
 use futures::Future;
-use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -37,9 +32,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -135,7 +128,8 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Arc<OnceLock<(Sender<Notification>, Receiver<Notification>)>>,
+	notification_channel:
+		OnceLock<(channel::Sender<Notification>, channel::Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -358,7 +352,7 @@ impl Datastore {
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: Arc::new(OnceLock::new()),
+			notification_channel: OnceLock::new(),
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -379,7 +373,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel.set(tokio::sync::mpsc::channel(TX_LQ_CHANNEL_SIZE)).unwrap();
+		self.notification_channel.set(channel::bounded(TX_LQ_CHANNEL_SIZE)).unwrap();
 		self
 	}
 
@@ -492,31 +486,46 @@ impl Datastore {
 			}
 		};
 
-		let ds = Arc::new(self.clone());
+		// The transaction request pair is used for receiving requests for new transactions
+		// it contains one-shot senders so that the transaction can be sent and forgotten
+		let (tx_req_send, mut tx_req_recv): (
+			mpsc::Sender<oneshot::Sender<Transaction>>,
+			mpsc::Receiver<oneshot::Sender<Transaction>>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
 		// In several new transactions, scan all removed node live queries
 		let (scan_send, scan_recv): (
-			Sender<BootstrapOperationResult>,
-			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let scan_task =
-			tokio::spawn(bootstrap::scan_node_live_queries(ds.clone(), dead_nodes, scan_send));
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
+			tx_req_send.clone(),
+			dead_nodes,
+			scan_send,
+		));
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
-			Sender<BootstrapOperationResult>,
-			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let archive_task =
-			tokio::spawn(bootstrap::archive_live_queries(ds.clone(), scan_recv, archive_send));
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
+			tx_req_send.clone(),
+			self.id,
+			scan_recv,
+			archive_send,
+		));
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, mut delete_recv): (
-			Sender<BootstrapOperationResult>,
-			Receiver<BootstrapOperationResult>,
-		) = tokio::sync::mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let delete_task =
-			tokio::spawn(bootstrap::delete_live_queries(ds.clone(), archive_recv, delete_send));
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
+			tx_req_send.clone(),
+			archive_recv,
+			delete_send,
+		));
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
@@ -528,6 +537,24 @@ impl Datastore {
 				}
 			}
 		});
+
+		// Handle transaction requests
+		// This loop will continue to run until all channels have been closed above
+		loop {
+			match tx_req_recv.recv().await {
+				None => {
+					// closed
+					break;
+				}
+				Some(sender) => {
+					let tx = self.transaction(Write, Optimistic).await?;
+					if let Err(mut tx) = sender.send(tx) {
+						// The receiver has been dropped, so we need to cancel the transaction
+						tx.cancel().await?;
+					}
+				}
+			}
+		}
 
 		// Now run everything together and return any errors that arent captured per record
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
@@ -1190,12 +1217,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<&Receiver<Notification>> {
-		self.notification_channel.get().map(|v| &v.1)
+	pub fn notifications(&self) -> Option<channel::Receiver<Notification>> {
+		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn live_sender(&self) -> Option<channel::Sender<Notification>> {
 		self.notification_channel.get().map(|v| v.0.clone())
 	}
 

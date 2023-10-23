@@ -10,6 +10,7 @@ use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
 use crate::sql::value::Value;
+use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -17,7 +18,6 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;

@@ -768,8 +768,8 @@ pub enum ChannelVariant {
 	BootstrapArchive,
 	#[error("Bootstrap delete channel")]
 	BootstrapDelete,
-	#[error("Bootstrap scan tx supplier")]
-	BootstrapScanTxSupplier,
+	#[error("Bootstrap tx supplier")]
+	BootstrapTxSupplier,
 }
 
 #[derive(Error, Debug)]
