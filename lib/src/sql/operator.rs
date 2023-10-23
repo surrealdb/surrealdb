@@ -70,6 +70,8 @@ pub enum Operator {
 	Intersects,
 	//
 	Knn(u32), // <{k}>
+	//
+	Rem, // %
 }
 
 impl Default for Operator {
@@ -90,6 +92,7 @@ impl Operator {
 			Self::Add => 7,
 			Self::Mul => 8,
 			Self::Div => 9,
+			Self::Rem => 10,
 			_ => 5,
 		}
 	}
@@ -108,6 +111,7 @@ impl fmt::Display for Operator {
 			Self::Sub => f.write_char('-'),
 			Self::Mul => f.write_char('*'),
 			Self::Div => f.write_char('/'),
+			Self::Rem => f.write_char('%'),
 			Self::Pow => f.write_str("**"),
 			Self::Inc => f.write_str("+="),
 			Self::Dec => f.write_str("-="),
@@ -213,6 +217,7 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Mul, char('∙')),
 			value(Operator::Div, char('/')),
 			value(Operator::Div, char('÷')),
+			value(Operator::Rem, char('%')),
 		)),
 		alt((
 			value(Operator::Contains, char('∋')),
