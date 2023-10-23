@@ -68,7 +68,7 @@ impl Parser<'_> {
 		match next.kind {
 			TokenKind::Parameter => {
 				let index = u32::from(next.data_index.unwrap());
-				let param = self.lexer.strings[index as usize];
+				let param = self.lexer.strings[index as usize].clone();
 				Ok(Param(Ident(param)))
 			}
 			x => unexpected!(self, x, "a parameter"),
@@ -92,7 +92,7 @@ impl Parser<'_> {
 		match next.kind {
 			TokenKind::Strand => {
 				let index = u32::from(next.data_index.unwrap());
-				let strand = self.lexer.strings[index as usize];
+				let strand = self.lexer.strings[index as usize].clone();
 				Ok(Strand(strand))
 			}
 			x => unexpected!(self, x, "a strand"),

@@ -81,9 +81,9 @@ impl Parser<'_> {
 		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			let part = self.parse_ident()?;
-			name.push(':');
-			name.push(':');
-			name.push_str(part.as_str());
+			name.0.push(':');
+			name.0.push(':');
+			name.0.push_str(part.as_str());
 		}
 		let token = expected!(self, "(").span;
 		let mut args = Vec::new();
@@ -523,6 +523,7 @@ impl Parser<'_> {
 									x => unexpected!(self, x, "a language"),
 								};
 								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Snowball(language))
 							}
 							_ => break,
 						}
@@ -538,7 +539,7 @@ impl Parser<'_> {
 							t!("CAMEL") => Tokenizer::Camel,
 							t!("CLASS") => Tokenizer::Class,
 							t!("PUNCT") => Tokenizer::Punct,
-							x => break,
+							_ => break,
 						};
 						tokenizers.push(tokenizer);
 					}
@@ -547,7 +548,7 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					res.comment = Some(self.parse_strand()?);
 				}
-				x => break,
+				_ => break,
 			}
 		}
 		Ok(res)

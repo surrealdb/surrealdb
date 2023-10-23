@@ -16,7 +16,6 @@ impl<'a> Lexer<'a> {
 	///
 	/// Expects any number but at least one numeric characters be pushed into scratch.
 	pub fn lex_duration(&mut self) -> Token {
-		let mut valid_identifier = true;
 		let mut duration = Duration::ZERO;
 
 		loop {

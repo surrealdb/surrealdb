@@ -70,7 +70,6 @@ impl Parser<'_> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
-		let token = self.next();
 		let duration = self.parse_duration()?;
 		Ok(Some(Timeout(duration)))
 	}

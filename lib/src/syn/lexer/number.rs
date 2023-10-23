@@ -95,7 +95,6 @@ impl Lexer<'_> {
 
 	/// Lexes the mantissa of a number, i.e. `.8` in `1.8`
 	pub fn lex_mantissa(&mut self, backup: usize) -> Token {
-		let len = self.scratch.len();
 		self.scratch.push('.');
 		loop {
 			let Some(x) = self.reader.peek() else {

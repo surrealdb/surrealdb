@@ -14,16 +14,14 @@ impl Parser<'_> {
 		let into = match self.next().kind {
 			t!("$param") => {
 				self.pop_peek();
-				let str = self.lexer.strings[next.data_index.unwrap() as usize].clone();
+				let str = self.lexer.strings[u32::from(next.data_index.unwrap()) as usize].clone();
 				Value::Param(Param(Ident(str)))
 			}
-			x => {
+			_ => {
 				let table = self.parse_raw_ident()?;
 				Value::Table(Table(table))
 			}
 		};
-
-		let update = self.eat(t!("ON")).then(|| self.parse_insert_update()).transpose()?;
 
 		let data = match self.peek().kind {
 			t!("(") => {
@@ -31,13 +29,26 @@ impl Parser<'_> {
 				let fields = self.parse_idiom_list()?;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				expected!(self, "VALUES");
+
 				let start = expected!(self, "(").span;
-				let values = vec![self.parse_value()?];
+				let mut values = vec![self.parse_value()?];
 				while self.eat(t!(",")) {
 					values.push(self.parse_value()?);
 				}
 				self.expect_closing_delimiter(t!(")"), start)?;
-				Data::ValuesExperssion(
+
+				let mut values = vec![values];
+				while self.eat(t!(",")) {
+					let start = expected!(self, "(").span;
+					let mut inner_values = vec![self.parse_value()?];
+					while self.eat(t!(",")) {
+						inner_values.push(self.parse_value()?);
+					}
+					values.push(inner_values);
+					self.expect_closing_delimiter(t!(")"), start)?;
+				}
+
+				Data::ValuesExpression(
 					values
 						.into_iter()
 						.map(|row| fields.iter().cloned().zip(row).collect())
@@ -50,10 +61,10 @@ impl Parser<'_> {
 			}
 		};
 
-		let data = self.eat(t!("ON")).then(|| self.parse_insert_update()).transpose()?;
+		let update = self.eat(t!("ON")).then(|| self.parse_insert_update()).transpose()?;
 		let output = self.try_parse_output()?;
 		let timeout = self.try_parse_timeout()?;
-		let parallel = self.eat(t!("PARALLEL"))?;
+		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
 			into,
 			data,

@@ -5,4 +5,8 @@ impl Parser<'_> {
 	pub fn parse_value(&mut self) -> ParseResult<Value> {
 		to_do!(self)
 	}
+
+	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {
+		to_do!(self)
+	}
 }

@@ -26,7 +26,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Strand => {
 				let index = u32::from(token.data_index.unwrap());
-				let strand = Strand(self.lexer.strings[index as usize]);
+				let strand = Strand(self.lexer.strings[index as usize].clone());
 				Ok(Value::Strand(strand))
 			}
 			TokenKind::Duration => {
@@ -36,12 +36,12 @@ impl Parser<'_> {
 			}
 			TokenKind::Number => {
 				let index = u32::from(token.data_index.unwrap());
-				let number = self.lexer.numbers[index as usize];
+				let number = self.lexer.numbers[index as usize].clone();
 				Ok(Value::Number(number))
 			}
 			t!("$param") => {
 				let index = u32::from(token.data_index.unwrap());
-				let param = Param(Ident(self.lexer.strings[index as usize]));
+				let param = Param(Ident(self.lexer.strings[index as usize].clone()));
 				Ok(Value::Param(param))
 			}
 			t!("FUNCTION") => {

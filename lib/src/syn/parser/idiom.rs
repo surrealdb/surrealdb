@@ -151,7 +151,7 @@ impl Parser<'_> {
 			}
 			t!("$param") => Part::Value(Value::Param(self.parse_param()?)),
 			TokenKind::Strand => Part::Value(Value::Strand(self.parse_strand()?)),
-			x => {
+			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
 			}

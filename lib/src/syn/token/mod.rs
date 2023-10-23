@@ -290,8 +290,8 @@ impl TokenKind {
 		match *self {
 			TokenKind::Keyword(x) => x.as_str(),
 			TokenKind::Operator(x) => x.as_str(),
-			TokenKind::Algorithm(x) => todo!(),
-			TokenKind::Language(x) => todo!(),
+			TokenKind::Algorithm(_) => todo!(),
+			TokenKind::Language(_) => todo!(),
 			TokenKind::Geometry(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",

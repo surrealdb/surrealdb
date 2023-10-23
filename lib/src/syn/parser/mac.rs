@@ -43,22 +43,21 @@ macro_rules! expected {
 					at: $parser.last_span(),
 				})
 			}
-			$crate::syn::token::TokenKind::Eof => {
-				let expected = $kind;
-				return Err($crate::syn::parser::ParseError {
-					kind: $crate::syn::parser::ParseErrorKind::UnexpectedEof {
-						expected,
-					},
-					at: $parser.last_span(),
-				});
-			}
 			x => {
 				let expected = $kind;
-				return Err($crate::syn::parser::ParseError {
-					kind: $crate::syn::parser::ParseErrorKind::Unexpected {
+				let kind = if let $crate::syn::token::TokenKind::Eof = x {
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+						expected,
+					}
+				} else {
+					$crate::syn::parser::ParseErrorKind::Unexpected {
 						found: x,
 						expected,
-					},
+					}
+				};
+
+				return Err($crate::syn::parser::ParseError {
+					kind,
 					at: $parser.last_span(),
 				});
 			}

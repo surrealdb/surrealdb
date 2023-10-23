@@ -6,7 +6,7 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			RelateStatement, RemoveStatement, SelectStatement, UseStatement,
+			RemoveStatement, SelectStatement, UseStatement,
 		},
 		Expression, Operator, Statement, Statements, Value,
 	},
@@ -99,11 +99,11 @@ impl Parser<'_> {
 							what: r,
 						})
 					}
-					x => {}
+					_ => {}
 				}
 				Statement::Value(Value::Expression(x))
 			}
-			x => Statement::Value(value),
+			_ => Statement::Value(value),
 		}
 	}
 
@@ -214,11 +214,11 @@ impl Parser<'_> {
 				InfoStatement::Sc(ident)
 			}
 			t!("TABLE") => {
-				let ident = self.parse_table()?;
+				let ident = self.parse_ident()?;
 				InfoStatement::Tb(ident)
 			}
 			t!("USER") => {
-				let ident = self.parse_table()?;
+				let ident = self.parse_ident()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 				InfoStatement::User(ident, base)
 			}

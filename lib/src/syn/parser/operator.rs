@@ -199,7 +199,8 @@ impl Parser<'_> {
 	}
 
 	fn pratt_parse_expr(&mut self, min_bp: u8) -> ParseResult<Value> {
-		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(self.peek().kind) {
+		let peek = self.peek();
+		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(peek.kind) {
 			self.parse_prefix_op(r_bp)?
 		} else {
 			self.parse_idiom_expression()?
