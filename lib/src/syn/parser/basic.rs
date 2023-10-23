@@ -47,6 +47,18 @@ impl Parser<'_> {
 		to_do!(self)
 	}
 
+	pub(super) fn parse_u32(&mut self) -> ParseResult<u32> {
+		to_do!(self)
+	}
+
+	pub(super) fn parse_u16(&mut self) -> ParseResult<u16> {
+		to_do!(self)
+	}
+
+	pub(super) fn parse_f32(&mut self) -> ParseResult<f32> {
+		to_do!(self)
+	}
+
 	pub(super) fn parse_number(&mut self) -> ParseResult<Number> {
 		to_do!(self)
 	}

@@ -2,15 +2,15 @@
 
 use crate::{
 	sql::{
-		changefeed::ChangeFeed, Base, Cond, Data, Group, Groups, Operator, Output, Permission,
-		Permissions, Table, Tables, Timeout, View,
+		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Fetch, Fetchs, Group, Groups,
+		Operator, Output, Permission, Permissions, Table, Tables, Timeout, View,
 	},
 	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
-		token::t,
+		token::{t, DistanceKind, TokenKind},
 	},
 };
 
@@ -73,6 +73,14 @@ impl Parser<'_> {
 		let token = self.next();
 		let duration = self.parse_duration()?;
 		Ok(Some(Timeout(duration)))
+	}
+
+	pub fn try_parse_fetch(&mut self) -> ParseResult<Option<Fetchs>> {
+		if !self.eat(t!("FETCH")) {
+			return Ok(None);
+		}
+		let v = self.parse_idiom_list()?.into_iter().map(Fetch).collect();
+		Ok(Some(Fetchs(v)))
 	}
 
 	pub fn try_parse_condition(&mut self) -> ParseResult<Option<Cond>> {
@@ -234,5 +242,28 @@ impl Parser<'_> {
 			cond,
 			group,
 		})
+	}
+
+	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
+		if !self.eat(t!("DISTANCE")) {
+			return Ok(None);
+		}
+
+		let dist = match self.next().kind {
+			TokenKind::Distance(x) => match x {
+				DistanceKind::Euclidean => Distance::Euclidean,
+				DistanceKind::Manhattan => Distance::Manhattan,
+				DistanceKind::Cosine => Distance::Cosine,
+				DistanceKind::Hamming => Distance::Hamming,
+				DistanceKind::Mahalanobis => Distance::Mahalanobis,
+				DistanceKind::Minkowski => {
+					let distance = self.parse_number()?;
+					Distance::Minkowski(distance)
+				}
+			},
+			x => unexpected!(self, x, "a distance measure"),
+		};
+
+		Ok(Some(dist))
 	}
 }

@@ -1,5 +1,5 @@
 use crate::{
-	sql::statements::DeleteStatement,
+	sql::{statements::DeleteStatement, Values},
 	syn::{
 		parser::{ParseResult, Parser},
 		token::t,
@@ -12,7 +12,7 @@ impl Parser<'_> {
 		debug_assert_eq!(keyword.kind, t!("DELETE"));
 		self.eat(t!("FROM"));
 		let only = self.eat(t!("ONLY"));
-		let what = self.parse_what_list()?;
+		let what = Values(self.parse_what_list()?);
 		let cond = self.try_parse_condition()?;
 		let output = self.try_parse_output()?;
 		let timeout = self.try_parse_timeout()?;

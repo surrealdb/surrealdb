@@ -18,8 +18,8 @@ impl Parser<'_> {
 		match token.kind {
 			t!("NONE") => Ok(Value::None),
 			t!("NULL") => Ok(Value::Null),
-			t!("TRUE") => Ok(Value::Bool(true)),
-			t!("FALSE") => Ok(Value::Bool(false)),
+			t!("true") => Ok(Value::Bool(true)),
+			t!("false") => Ok(Value::Bool(false)),
 			t!("<") => {
 				// future
 				to_do!(self)

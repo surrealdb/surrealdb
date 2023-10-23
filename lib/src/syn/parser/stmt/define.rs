@@ -1,16 +1,20 @@
 use crate::{
+	idx::ft::analyzer::Analyzers,
 	sql::{
+		filter::Filter,
+		index::Distance,
 		statements::{
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineScopeStatement, DefineStatement, DefineTableStatement,
-			DefineTokenStatement, DefineUserStatement,
+			DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+			DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
+			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
-		Idioms, Index, Values,
+		tokenizer::Tokenizer,
+		Ident, Idioms, Index, Scoring, Values,
 	},
 	syn::{
 		parser::{
-			mac::{expected, to_do, unexpected},
+			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::{t, TokenKind},
@@ -33,6 +37,7 @@ impl Parser<'_> {
 			t!("EVENT") => self.parse_define_event().map(DefineStatement::Event),
 			t!("FIELD") => self.parse_define_field().map(DefineStatement::Field),
 			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
+			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			x => unexpected!(self, x, "a define statement keyword"),
 		}
 	}
@@ -371,7 +376,7 @@ impl Parser<'_> {
 		self.eat(t!("TABLE"));
 		let what = self.parse_ident()?;
 
-		let res = DefineIndexStatement {
+		let mut res = DefineIndexStatement {
 			name,
 			what,
 			..Default::default()
@@ -390,12 +395,77 @@ impl Parser<'_> {
 					res.index = Index::Uniq;
 				}
 				t!("SEARCH") => {
-					let analyzer = self.parse_analyzer()?;
-					let scoring = self.parse_scoring()?;
+					let analyzer =
+						self.eat(t!("ANALYZER")).then(|| self.parse_ident()).transpose()?;
+					let scoring = match self.next().kind {
+						t!("VS") => Scoring::Vs,
+						t!("BM25") => {
+							let k1 = self.parse_f32()?;
+							let b = self.parse_f32()?;
+							Scoring::Bm {
+								k1,
+								b,
+							}
+						}
+						x => unexpected!(self, x, "`VS` or `BM25`"),
+					};
+
+					// TODO: Propose change in how order syntax works.
+					let doc_ids_order = self
+						.eat(t!("DOC_IDS_ORDER"))
+						.then(|| self.parse_u32())
+						.transpose()?
+						.unwrap_or(100);
+					let doc_lengths_order = self
+						.eat(t!("DOC_LENGTHS_ORDER"))
+						.then(|| self.parse_u32())
+						.transpose()?
+						.unwrap_or(100);
+					let postings_order = self
+						.eat(t!("POSTINGS_ORDER"))
+						.then(|| self.parse_u32())
+						.transpose()?
+						.unwrap_or(100);
+					let terms_order = self
+						.eat(t!("TERMS_ORDER"))
+						.then(|| self.parse_u32())
+						.transpose()?
+						.unwrap_or(100);
+
+					let hl = self.eat(t!("HIGHLIGHTS"));
+
+					res.index = Index::Search(crate::sql::index::SearchParams {
+						az: analyzer.unwrap_or_else(|| Ident::from(Analyzers::LIKE)),
+						sc: scoring,
+						hl,
+						doc_ids_order,
+						doc_lengths_order,
+						postings_order,
+						terms_order,
+					});
 				}
 				t!("MTREE") => {
 					expected!(self, "DIMENSION");
-					to_do!(self)
+					let dimension = self.parse_u16()?;
+					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
+					let capacity = self
+						.eat(t!("CAPACITY"))
+						.then(|| self.parse_u16())
+						.transpose()?
+						.unwrap_or(40);
+
+					let doc_ids_order = self
+						.eat(t!("DOC_IDS_ORDER"))
+						.then(|| self.parse_u32())
+						.transpose()?
+						.unwrap_or(100);
+
+					res.index = Index::MTree(crate::sql::index::MTreeParams {
+						dimension,
+						distance,
+						capacity,
+						doc_ids_order,
+					})
 				}
 				t!("COMMENT") => {
 					res.comment = Some(self.parse_strand()?);
@@ -404,6 +474,82 @@ impl Parser<'_> {
 			}
 		}
 
+		Ok(res)
+	}
+
+	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
+		let name = self.parse_ident()?;
+		let mut res = DefineAnalyzerStatement {
+			name,
+			tokenizers: None,
+			filters: None,
+			comment: None,
+		};
+		loop {
+			match self.next().kind {
+				t!("FILTERS") => {
+					let mut filters = Vec::new();
+					loop {
+						match self.next().kind {
+							t!("ASCII") => {
+								filters.push(Filter::Ascii);
+							}
+							t!("LOWERCASE") => {
+								filters.push(Filter::Lowercase);
+							}
+							t!("UPPERCASE") => {
+								filters.push(Filter::Uppercase);
+							}
+							t!("EDGENGRAM") => {
+								let open_span = expected!(self, "(").span;
+								let a = self.parse_u16()?;
+								expected!(self, ",");
+								let b = self.parse_u16()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::EdgeNgram(a, b));
+							}
+							t!("NGRAM") => {
+								let open_span = expected!(self, "(").span;
+								let a = self.parse_u16()?;
+								expected!(self, ",");
+								let b = self.parse_u16()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Ngram(a, b));
+							}
+							t!("SNOWBALL") => {
+								let open_span = expected!(self, "(").span;
+								let language = match self.next().kind {
+									TokenKind::Language(x) => x,
+									x => unexpected!(self, x, "a language"),
+								};
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+							}
+							_ => break,
+						}
+					}
+					res.filters = Some(filters);
+				}
+				t!("TOKENIZERS") => {
+					let mut tokenizers = Vec::new();
+
+					loop {
+						let tokenizer = match self.next().kind {
+							t!("BLANK") => Tokenizer::Blank,
+							t!("CAMEL") => Tokenizer::Camel,
+							t!("CLASS") => Tokenizer::Class,
+							t!("PUNCT") => Tokenizer::Punct,
+							x => break,
+						};
+						tokenizers.push(tokenizer);
+					}
+					res.tokenizers = Some(tokenizers);
+				}
+				t!("COMMENT") => {
+					res.comment = Some(self.parse_strand()?);
+				}
+				x => break,
+			}
+		}
 		Ok(res)
 	}
 }

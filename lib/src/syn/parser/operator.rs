@@ -5,9 +5,21 @@ use crate::syn::parser::mac::{expected, to_do};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{t, TokenKind};
 
+use super::mac::unexpected;
+
 impl Parser<'_> {
 	pub fn parse_expression(&mut self) -> ParseResult<Value> {
 		self.pratt_parse_expr(0)
+	}
+
+	pub fn parse_assigner(&mut self) -> ParseResult<Operator> {
+		match self.next().kind {
+			t!("=") => Ok(Operator::Equal),
+			t!("+=") => Ok(Operator::Inc),
+			t!("-=") => Ok(Operator::Dec),
+			t!("+?=") => Ok(Operator::Ext),
+			x => unexpected!(self, x, "an assign operator"),
+		}
 	}
 
 	/// Returns the binding power of an infix operator.

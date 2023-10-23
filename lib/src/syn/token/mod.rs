@@ -3,6 +3,7 @@
 use std::{hash::Hash, num::NonZeroU32};
 
 mod keyword;
+pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
 mod mac;
 pub(crate) use mac::t;
@@ -190,6 +191,29 @@ impl GeometryName {
 	}
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum DistanceKind {
+	Euclidean,
+	Manhattan,
+	Cosine,
+	Hamming,
+	Mahalanobis,
+	Minkowski,
+}
+
+impl DistanceKind {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			DistanceKind::Euclidean => "EUCLIDEAN",
+			DistanceKind::Manhattan => "MANHATTAN",
+			DistanceKind::Cosine => "COSINE",
+			DistanceKind::Hamming => "HAMMING",
+			DistanceKind::Mahalanobis => "MAHALANOBIS",
+			DistanceKind::Minkowski => "MINKOWSKI",
+		}
+	}
+}
+
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum TokenKind {
@@ -197,9 +221,11 @@ pub enum TokenKind {
 	Algorithm(Algorithm),
 	Language(Language),
 	Geometry(GeometryName),
+	Distance(DistanceKind),
 	Operator(Operator),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
+	Uuid,
 	Strand,
 	/// A parameter like `$name`.
 	Parameter,
@@ -267,12 +293,14 @@ impl TokenKind {
 			TokenKind::Algorithm(x) => todo!(),
 			TokenKind::Language(x) => todo!(),
 			TokenKind::Geometry(x) => x.as_str(),
+			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",
 			TokenKind::OpenDelim(Delim::Bracket) => "[",
 			TokenKind::CloseDelim(Delim::Paren) => ")",
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
+			TokenKind::Uuid => "a uuid",
 			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
 			TokenKind::Duration => "a duration",
