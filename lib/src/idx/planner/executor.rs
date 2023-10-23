@@ -6,8 +6,8 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexRangeThingIterator, KnnThingIterator, MatchesThingIterator,
-	ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
+	IndexAllThingIterator, IndexEqualThingIterator, IndexRangeThingIterator, KnnThingIterator,
+	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
@@ -225,8 +225,11 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperator::Equality(array) | IndexOperator::Contains(array) => {
-				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, array)?)))
+			IndexOperator::Equality(value) | IndexOperator::Contains(value) => {
+				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)?)))
+			}
+			IndexOperator::ContainsAll(value) => {
+				Ok(Some(ThingIterator::IndexAll(IndexAllThingIterator::new(opt, ix, value)?)))
 			}
 			IndexOperator::RangePart(_, _) => Ok(None), // TODO
 			_ => Ok(None),
@@ -264,8 +267,8 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		match io.op() {
-			IndexOperator::Equality(array) => {
-				Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, array)?)))
+			IndexOperator::Equality(value) => {
+				Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)?)))
 			}
 			IndexOperator::RangePart(_, _) => {
 				todo!()

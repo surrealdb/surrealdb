@@ -879,11 +879,15 @@ async fn select_contains() -> Result<(), Error> {
 				{ subject: "tamil", mark: 45 }
 			]
 		};
-		SELECT * FROM student where marks.*.subject contains "english" explain;
-		SELECT * FROM student where marks.*.subject contains "english";
+		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
+		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"] EXPLAIN;
+		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 		DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-		SELECT * FROM student where marks.*.subject contains "english" explain;
-		SELECT * FROM student where marks.*.subject contains "english";
+		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
+		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"] EXPLAIN;
+		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 	"#;
 	const EXPLAIN_TABLE: &str = r"[
 				{
@@ -899,7 +903,7 @@ async fn select_contains() -> Result<(), Error> {
 						operation: 'Fallback'
 					}
 				]";
-	const EXPLAIN_INDEX: &str = r"[
+	const EXPLAIN_INDEX_CONTAINS: &str = r"[
 				{
 					detail: {
 						table: 'student'
@@ -915,43 +919,39 @@ async fn select_contains() -> Result<(), Error> {
 					operation: 'Iterate Index'
 				}
 			]";
-	const RESULT: &str = r"[
-					{
-						id: student:1,
-						marks: [
-							{
-								mark: 50,
-								subject: 'maths'
-							},
-							{
-								mark: 40,
-								subject: 'english'
-							},
-							{
-								mark: 45,
-								subject: 'tamil'
-							}
-						]
+	const RESULT_CONTAINS: &str = r"[
+		{
+			id: student:1
+		},
+		{
+			id: student:2
+		}
+	]";
+	const EXPLAIN_INDEX_CONTAINS_ALL: &str = r"[
+				{
+					detail: {
+						table: 'student'
 					},
-					{
-						id: student:2,
-						marks: [
-							{
-								mark: 50,
-								subject: 'maths'
-							},
-							{
-								mark: 35,
-								subject: 'english'
-							},
-							{
-								mark: 45,
-								subject: 'hindi'
-							}
-						]
-					}
-				]";
-	let mut res = execute_test(SQL, 8).await?;
+					detail: {
+						plan: {
+							index: 'subject_idx',
+							operator: 'CONTAINSALL',
+							value: ['hindi', 'maths']
+						},
+						table: 'student',
+					},
+					operation: 'Iterate Index'
+				}
+			]";
+	const RESULT_CONTAINS_ALL: &str = r"[
+		{
+			id: student:2
+		},
+		{
+			id: student:3
+		}
+	]";
+	let mut res = execute_test(SQL, 12).await?;
 	skip_ok(&mut res, 3)?;
 	{
 		let tmp = res.remove(0).result?;
@@ -960,18 +960,38 @@ async fn select_contains() -> Result<(), Error> {
 	}
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(RESULT);
+		let val = Value::parse(RESULT_CONTAINS);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(EXPLAIN_TABLE);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(RESULT_CONTAINS_ALL);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	skip_ok(&mut res, 1)?;
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(EXPLAIN_INDEX);
+		let val = Value::parse(EXPLAIN_INDEX_CONTAINS);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(RESULT);
+		let val = Value::parse(RESULT_CONTAINS);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(EXPLAIN_INDEX_CONTAINS_ALL);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(RESULT_CONTAINS_ALL);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	Ok(())

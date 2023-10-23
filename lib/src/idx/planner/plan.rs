@@ -146,8 +146,8 @@ pub(super) struct Inner {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Array),
-	Contains(Array),
+	Equality(Value),
+	Contains(Value),
 	ContainsNot(Value),
 	ContainsAll(Value),
 	ContainsAny(Value),
@@ -178,25 +178,24 @@ impl IndexOption {
 		&self.0.id
 	}
 
+	fn reduce_array(v: &Value) -> Value {
+		if let Value::Array(a) = v {
+			if a.len() == 1 {
+				return a[0].clone();
+			}
+		}
+		v.clone()
+	}
+
 	pub(crate) fn explain(&self, e: &mut HashMap<&str, Value>) {
 		match self.op() {
-			IndexOperator::Equality(a) => {
-				let v = if a.len() == 1 {
-					a[0].clone()
-				} else {
-					Value::Array(a.clone())
-				};
+			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
-				e.insert("value", v);
+				e.insert("value", Self::reduce_array(v));
 			}
-			IndexOperator::Contains(a) => {
-				let v = if a.len() == 1 {
-					a[0].clone()
-				} else {
-					Value::Array(a.clone())
-				};
+			IndexOperator::Contains(v) => {
 				e.insert("operator", Value::from(Operator::Contains.to_string()));
-				e.insert("value", v);
+				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::ContainsNot(v) => {
 				e.insert("operator", Value::from(Operator::ContainsNot.to_string()));
@@ -208,7 +207,7 @@ impl IndexOption {
 			}
 			IndexOperator::ContainsAll(v) => {
 				e.insert("operator", Value::from(Operator::ContainsAll.to_string()));
-				e.insert("value", v.clone());
+				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::ContainsAny(v) => {
 				e.insert("operator", Value::from(Operator::ContainsAny.to_string()));

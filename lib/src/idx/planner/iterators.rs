@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
+	IndexAll(IndexAllThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
@@ -33,6 +34,7 @@ impl ThingIterator {
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::IndexAll(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
 		}
@@ -45,9 +47,10 @@ pub(crate) struct IndexEqualThingIterator {
 }
 
 impl IndexEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Array) -> Result<Self, Error> {
-		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, v);
-		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, v);
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
+		let a = Array::from(v.clone());
+		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
 		Ok(Self {
 			beg,
 			end,
@@ -179,13 +182,36 @@ impl IndexRangeThingIterator {
 	}
 }
 
+pub(crate) struct IndexAllThingIterator {
+	_v: Value,
+}
+
+impl IndexAllThingIterator {
+	pub(super) fn new(
+		_opt: &Options,
+		_ix: &DefineIndexStatement,
+		_v: &Value,
+	) -> Result<Self, Error> {
+		todo!()
+	}
+
+	async fn next_batch(
+		&mut self,
+		_txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		todo!()
+	}
+}
+
 pub(crate) struct UniqueEqualThingIterator {
 	key: Option<Key>,
 }
 
 impl UniqueEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Result<Self, Error> {
-		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, a, None).into();
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
+		let a = Array::from(v.to_owned());
+		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &a, None).into();
 		Ok(Self {
 			key: Some(key),
 		})

@@ -103,9 +103,9 @@ impl<'a> TreeBuilder<'a> {
 			Value::Expression(e) => self.eval_expression(e).await,
 			Value::Idiom(i) => self.eval_idiom(i).await,
 			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
-				Ok(Node::Scalar(v.to_owned()))
+				Ok(Node::Computed(v.to_owned()))
 			}
-			Value::Array(a) => Ok(self.eval_array(a)),
+			Value::Array(a) => self.eval_array(a).await,
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
@@ -115,14 +115,12 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	fn eval_array(&mut self, a: &Array) -> Node {
-		// Check if it is a numeric vector
+	async fn eval_array(&mut self, a: &Array) -> Result<Node, Error> {
+		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			if !v.is_number() {
-				return Node::Unsupported(format!("Unsupported array: {}", a));
-			}
+			values.push(v.compute(self.ctx, self.opt, self.txn, None).await?);
 		}
-		Node::Vector(a.to_owned())
+		Ok(Node::Computed(Value::Array(Array::from(values))))
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
@@ -185,28 +183,8 @@ impl<'a> TreeBuilder<'a> {
 					Index::Uniq => Self::eval_index_operator(op, n),
 					Index::Search {
 						..
-					} => {
-						if let Some(v) = n.is_scalar() {
-							if let Operator::Matches(mr) = op {
-								Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr))
-							} else {
-								None
-							}
-						} else {
-							None
-						}
-					}
-					Index::MTree(_) => {
-						if let Operator::Knn(k) = op {
-							if let Node::Vector(a) = n {
-								Some(IndexOperator::Knn(a.clone(), *k))
-							} else {
-								None
-							}
-						} else {
-							None
-						}
-					}
+					} => Self::eval_matches_operator(op, n),
+					Index::MTree(_) => Self::eval_knn_operator(op, n),
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id.clone(), op);
@@ -217,12 +195,31 @@ impl<'a> TreeBuilder<'a> {
 		}
 		None
 	}
+	fn eval_matches_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
+		if let Some(v) = n.is_computed() {
+			if let Operator::Matches(mr) = op {
+				return Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr));
+			}
+		}
+		None
+	}
+
+	fn eval_knn_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
+		if let Operator::Knn(k) = op {
+			if let Node::Computed(v) = n {
+				if let Value::Array(a) = v {
+					return Some(IndexOperator::Knn(a.clone(), *k));
+				}
+			}
+		}
+		None
+	}
 
 	fn eval_index_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
-		if let Some(v) = n.is_scalar() {
+		if let Some(v) = n.is_computed() {
 			match op {
-				Operator::Equal => Some(IndexOperator::Equality(Array::from(v.clone()))),
-				Operator::Contains => Some(IndexOperator::Contains(Array::from(v.clone()))),
+				Operator::Equal => Some(IndexOperator::Equality(v.clone())),
+				Operator::Contains => Some(IndexOperator::Contains(v.clone())),
 				Operator::ContainsAny => Some(IndexOperator::ContainsAny(v.clone())),
 				Operator::ContainsAll => Some(IndexOperator::ContainsAll(v.clone())),
 				Operator::ContainsNone => Some(IndexOperator::ContainsNone(v.clone())),
@@ -265,14 +262,13 @@ pub(super) enum Node {
 	},
 	IndexedField(Idiom, Arc<Vec<IndexRef>>),
 	NonIndexedField,
-	Scalar(Value),
-	Vector(Array),
+	Computed(Value),
 	Unsupported(String),
 }
 
 impl Node {
-	pub(super) fn is_scalar(&self) -> Option<&Value> {
-		if let Node::Scalar(v) = self {
+	pub(super) fn is_computed(&self) -> Option<&Value> {
+		if let Node::Computed(v) = self {
 			Some(v)
 		} else {
 			None
