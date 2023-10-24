@@ -175,11 +175,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
 		match status {
 			Status::Ok => {
-				match value {
-					Value::Array(Array(array)) => map.insert(index, Ok(array)),
-					Value::None | Value::Null => map.insert(index, Ok(vec![])),
-					value => map.insert(index, Ok(vec![value])),
-				};
+				map.insert(index, Ok(value));
 			}
 			Status::Err => {
 				map.insert(index, Err(Error::Query(value.as_raw_string()).into()));
@@ -192,21 +188,23 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 	if let Some(result) = query(request).await?.0.remove(&0) {
-		let mut vec = result?;
+		let result = result?;
 		match one {
-			true => match vec.pop() {
-				Some(Value::Array(Array(mut vec))) => {
+			true => match result {
+				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Some(Value::None | Value::Null) | None => {}
-				Some(value) => {
+				Value::None | Value::Null => {}
+				value => {
 					return Ok(value);
 				}
 			},
 			false => {
-				return Ok(Value::Array(Array(vec)));
+				// TODO should this return a vec?
+				// My train of thought is that at an API level developers currently always expect a vec to be returned here
+				return Ok(Value::Array(Array(vec![result])));
 			}
 		}
 	}

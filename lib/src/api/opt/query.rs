@@ -198,9 +198,9 @@ where
 	T: DeserializeOwned,
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
-		let vec = match map.get_mut(&self) {
+		let value = match map.get_mut(&self) {
 			Some(result) => match result {
-				Ok(vec) => vec,
+				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					map.remove(&self);
@@ -211,13 +211,9 @@ where
 				return Ok(None);
 			}
 		};
-		let result = match &mut vec[..] {
-			[] => Ok(None),
-			[value] => {
-				let value = mem::take(value);
-				from_value(value).map_err(Into::into)
-			}
-			_ => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
+		let result = {
+			let value = mem::take(value);
+			from_value(value).map_err(Into::into)
 		};
 		map.remove(&self);
 		result
@@ -229,7 +225,7 @@ impl QueryResult<Value> for (usize, &str) {
 		let (index, key) = self;
 		let response = match map.get_mut(&index) {
 			Some(result) => match result {
-				Ok(vec) => vec,
+				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					map.remove(&index);
@@ -240,15 +236,16 @@ impl QueryResult<Value> for (usize, &str) {
 				return Ok(Value::None);
 			}
 		};
-		let mut vec = Vec::with_capacity(response.len());
-		for value in response.iter_mut() {
-			if let Value::Object(Object(object)) = value {
-				if let Some(value) = object.remove(key) {
-					vec.push(value);
-				}
-			}
-		}
-		Ok(vec.into())
+
+		let response = match response {
+			Value::Object(Object(object)) => match object.remove(key) {
+				Some(value) => value,
+				_ => Value::None
+			},
+			_ => Value::None
+		};
+
+		Ok(response.into())
 	}
 }
 
@@ -258,9 +255,9 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let vec = match map.get_mut(&index) {
+		let mut value: &mut Value = match map.get_mut(&index) {
 			Some(result) => match result {
-				Ok(vec) => vec,
+				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					map.remove(&index);
@@ -269,16 +266,6 @@ where
 			},
 			None => {
 				return Ok(None);
-			}
-		};
-		let mut value = match &mut vec[..] {
-			[] => {
-				map.remove(&index);
-				return Ok(None);
-			}
-			[value] => value,
-			_ => {
-				return Err(Error::LossyTake(QueryResponse(mem::take(map))).into());
 			}
 		};
 		match &mut value {
@@ -307,7 +294,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match map.remove(&self) {
-			Some(result) => result?,
+			Some(result) => vec![result?],
 			None => {
 				return Ok(vec![]);
 			}
@@ -322,9 +309,9 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
-		let response = match map.get_mut(&index) {
+		let mut response = match map.get_mut(&index) {
 			Some(result) => match result {
-				Ok(vec) => vec,
+				Ok(val) => vec![val],
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					map.remove(&index);

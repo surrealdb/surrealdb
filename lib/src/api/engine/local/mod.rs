@@ -365,11 +365,7 @@ fn process(responses: Vec<Response>) -> Result<QueryResponse> {
 	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.result {
-			Ok(value) => match value {
-				Value::Array(Array(array)) => map.insert(index, Ok(array)),
-				Value::None | Value::Null => map.insert(index, Ok(vec![])),
-				value => map.insert(index, Ok(vec![value])),
-			},
+			Ok(value) => map.insert(index, Ok(value)),
 			Err(error) => map.insert(index, Err(error.into())),
 		};
 	}
@@ -378,21 +374,23 @@ fn process(responses: Vec<Response>) -> Result<QueryResponse> {
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 	if let Some(result) = process(responses)?.0.remove(&0) {
-		let mut vec = result?;
+		let result = result?;
 		match one {
-			true => match vec.pop() {
-				Some(Value::Array(Array(mut vec))) => {
+			true => match result {
+				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Some(Value::None | Value::Null) | None => {}
-				Some(value) => {
+				Value::None | Value::Null => {}
+				value => {
 					return Ok(value);
 				}
 			},
 			false => {
-				return Ok(Value::Array(Array(vec)));
+				// TODO should this return a vec?
+				// My train of thought is that at an API level developers currently always expect a vec to be returned here
+				return Ok(Value::Array(Array(vec![result])));
 			}
 		}
 	}
