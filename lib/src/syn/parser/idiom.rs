@@ -160,6 +160,14 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	pub fn parse_basic_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_basic_idiom()?];
+		while self.eat(t!(",")) {
+			res.push(self.parse_basic_idiom()?);
+		}
+		Ok(res)
+	}
+
 	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
 		let start = self.parse_ident()?;
 		let mut parts = vec![Part::Field(start)];

@@ -3,7 +3,7 @@
 use crate::{
 	sql::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Fetch, Fetchs, Group, Groups,
-		Operator, Output, Permission, Permissions, Table, Tables, Timeout, View,
+		Ident, Operator, Output, Permission, Permissions, Table, Tables, Timeout, View,
 	},
 	syn::{
 		parser::{
@@ -264,5 +264,18 @@ impl Parser<'_> {
 		};
 
 		Ok(Some(dist))
+	}
+
+	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
+		expected!(self, "fn");
+		expected!(self, "::");
+		let mut name = self.parse_ident()?;
+		while self.eat(t!("::")) {
+			let part = self.parse_ident()?;
+			name.0.push(':');
+			name.0.push(':');
+			name.0.push_str(part.as_str());
+		}
+		Ok(name)
 	}
 }

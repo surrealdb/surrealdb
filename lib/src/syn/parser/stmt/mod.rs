@@ -1,4 +1,8 @@
-use crate::sql::statements::{KillStatement, LiveStatement, OptionStatement};
+use crate::sql::statements::show::{ShowSince, ShowStatement};
+use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::{
+	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
+};
 use crate::sql::{Fields, Ident, Param, Table, Uuid};
 use crate::syn::token::{t, TokenKind};
 use crate::{
@@ -6,7 +10,7 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			RemoveStatement, SelectStatement, UseStatement,
+			UseStatement,
 		},
 		Expression, Operator, Statement, Statements, Value,
 	},
@@ -25,6 +29,8 @@ mod r#if;
 mod insert;
 mod parts;
 mod relate;
+mod remove;
+mod select;
 mod update;
 
 impl Parser<'_> {
@@ -50,36 +56,114 @@ impl Parser<'_> {
 	pub(super) fn parse_stmt(&mut self) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
-			t!("ANALYZE") => self.parse_analyze(),
-			t!("BEGIN") => self.parse_begin(),
-			t!("BREAK") => self.parse_break(),
-			t!("CANCEL") => self.parse_cancel(),
-			t!("COMMIT") => self.parse_commit(),
-			t!("CONTINUE") => self.parse_continue(),
-			t!("CREATE") => self.parse_create_stmt().map(Statement::Create),
-			t!("DEFINE") => self.parse_define_stmt().map(Statement::Define),
-			t!("DELETE") => self.parse_delete_stmt().map(Statement::Delete),
-			t!("FOR") => self.parse_for_stmt().map(Statement::Foreach),
-			t!("IF") => self.parse_if_stmt().map(Statement::Ifelse),
-			t!("INFO") => self.parse_info_stmt().map(Statement::Info),
-			t!("INSERT") => self.parse_insert_stmt().map(Statement::Insert),
-			t!("KILL") => self.parse_kill_stmt().map(Statement::Kill),
-			t!("LIVE") => self.parse_live_stmt().map(Statement::Live),
-			t!("OPTION") => self.parse_option_stmt().map(Statement::Option),
-			t!("RETURN") => self.parse_return_stmt().map(Statement::Output),
-			t!("RELATE") => self.parse_relate_stmt().map(Statement::Relate),
-			t!("REMOVE") => self.parse_begin(),
-			t!("SELECT") => self.parse_begin(),
-			t!("LET") => self.parse_begin(),
-			t!("SHOW") => self.parse_begin(),
-			t!("SLEEP") => self.parse_begin(),
-			t!("THROW") => self.parse_begin(),
-			t!("UPDATE") => self.parse_update_stmt().map(Statement::Update),
-			t!("USE") => self.parse_use(),
+			t!("ANALYZE") => {
+				self.pop_peek();
+				self.parse_analyze().map(Statement::Analyze)
+			}
+			t!("BEGIN") => {
+				self.pop_peek();
+				self.parse_begin().map(Statement::Begin)
+			}
+			t!("BREAK") => {
+				self.pop_peek();
+				Ok(Statement::Break(BreakStatement))
+			}
+			t!("CANCEL") => {
+				self.pop_peek();
+				self.parse_cancel().map(Statement::Cancel)
+			}
+			t!("COMMIT") => {
+				self.pop_peek();
+				self.parse_commit().map(Statement::Commit)
+			}
+			t!("CONTINUE") => {
+				self.pop_peek();
+				Ok(Statement::Continue(ContinueStatement))
+			}
+			t!("CREATE") => {
+				self.pop_peek();
+				self.parse_create_stmt().map(Statement::Create)
+			}
+			t!("DEFINE") => {
+				self.pop_peek();
+				self.parse_define_stmt().map(Statement::Define)
+			}
+			t!("DELETE") => {
+				self.pop_peek();
+				self.parse_delete_stmt().map(Statement::Delete)
+			}
+			t!("FOR") => {
+				self.pop_peek();
+				self.parse_for_stmt().map(Statement::Foreach)
+			}
+			t!("IF") => {
+				self.pop_peek();
+				self.parse_if_stmt().map(Statement::Ifelse)
+			}
+			t!("INFO") => {
+				self.pop_peek();
+				self.parse_info_stmt().map(Statement::Info)
+			}
+			t!("INSERT") => {
+				self.pop_peek();
+				self.parse_insert_stmt().map(Statement::Insert)
+			}
+			t!("KILL") => {
+				self.pop_peek();
+				self.parse_kill_stmt().map(Statement::Kill)
+			}
+			t!("LIVE") => {
+				self.pop_peek();
+				self.parse_live_stmt().map(Statement::Live)
+			}
+			t!("OPTION") => {
+				self.pop_peek();
+				self.parse_option_stmt().map(Statement::Option)
+			}
+			t!("RETURN") => {
+				self.pop_peek();
+				self.parse_return_stmt().map(Statement::Output)
+			}
+			t!("RELATE") => {
+				self.pop_peek();
+				self.parse_relate_stmt().map(Statement::Relate)
+			}
+			t!("REMOVE") => {
+				self.pop_peek();
+				self.parse_remove_stmt().map(Statement::Remove)
+			}
+			t!("SELECT") => {
+				self.pop_peek();
+				self.parse_select_stmt().map(Statement::Select)
+			}
+			t!("LET") => {
+				self.pop_peek();
+				self.parse_let_stmt().map(Statement::Set)
+			}
+			t!("SHOW") => {
+				self.pop_peek();
+				self.parse_show_stmt().map(Statement::Show)
+			}
+			t!("SLEEP") => {
+				self.pop_peek();
+				self.parse_sleep_stmt().map(Statement::Sleep)
+			}
+			t!("THROW") => {
+				self.pop_peek();
+				self.parse_throw_stmt().map(Statement::Throw)
+			}
+			t!("UPDATE") => {
+				self.pop_peek();
+				self.parse_update_stmt().map(Statement::Update)
+			}
+			t!("USE") => {
+				self.pop_peek();
+				self.parse_use_stmt().map(Statement::Use)
+			}
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = self.parse_value()?;
-				return Ok(Self::refine_stmt_value(value));
+				Ok(Self::refine_stmt_value(value))
 			}
 		}
 	}
@@ -88,18 +172,16 @@ impl Parser<'_> {
 	fn refine_stmt_value(value: Value) -> Statement {
 		match value {
 			Value::Expression(x) => {
-				match *x {
-					Expression::Binary {
-						l: Value::Param(x),
-						o: Operator::Equal,
-						r,
-					} => {
-						return Statement::Set(crate::sql::statements::SetStatement {
-							name: x.0 .0,
-							what: r,
-						})
-					}
-					_ => {}
+				if let Expression::Binary {
+					l: Value::Param(x),
+					o: Operator::Equal,
+					r,
+				} = *x
+				{
+					return Statement::Set(crate::sql::statements::SetStatement {
+						name: x.0 .0,
+						what: r,
+					});
 				}
 				Statement::Value(Value::Expression(x))
 			}
@@ -108,65 +190,38 @@ impl Parser<'_> {
 	}
 
 	/// Parsers a analyze statement.
-	fn parse_analyze(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("ANALYZE"));
-
+	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
 		expected!(self, "INDEX");
 
 		let index = self.parse_ident()?;
 		expected!(self, "ON");
 		let table = self.parse_ident()?;
 
-		let res = AnalyzeStatement::Idx(index, table);
-		Ok(Statement::Analyze(res))
+		Ok(AnalyzeStatement::Idx(index, table))
 	}
 
-	fn parse_begin(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("BEGIN"));
-
+	fn parse_begin(&mut self) -> ParseResult<BeginStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
 		}
-		Ok(Statement::Begin(BeginStatement))
+		Ok(BeginStatement)
 	}
 
-	fn parse_break(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("BREAK"));
-
-		Ok(Statement::Break(BreakStatement))
-	}
-
-	fn parse_cancel(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("CANCEL"));
-
+	fn parse_cancel(&mut self) -> ParseResult<CancelStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
 		}
-		Ok(Statement::Cancel(CancelStatement))
+		Ok(CancelStatement)
 	}
 
-	fn parse_commit(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("COMMIT"));
-
+	fn parse_commit(&mut self) -> ParseResult<CommitStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
 		}
-		Ok(Statement::Commit(CommitStatement))
+		Ok(CommitStatement)
 	}
 
-	fn parse_continue(&mut self) -> ParseResult<Statement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("CONTINUE"));
-
-		Ok(Statement::Continue(ContinueStatement))
-	}
-
-	fn parse_use(&mut self) -> ParseResult<Statement> {
+	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
 		let keyword = self.next();
 		debug_assert_eq!(keyword.kind, t!("USE"));
 
@@ -186,7 +241,7 @@ impl Parser<'_> {
 			ns: ns.map(|x| x.0),
 			db: db.map(|x| x.0),
 		};
-		Ok(Statement::Use(res))
+		Ok(res)
 	}
 
 	pub fn parse_for_stmt(&mut self) -> ParseResult<ForeachStatement> {
@@ -296,11 +351,60 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
-		to_do!(self)
+	pub(crate) fn parse_let_stmt(&mut self) -> ParseResult<SetStatement> {
+		let name = self.parse_param()?.0 .0;
+		expected!(self, "=");
+		let what = self.parse_value()?;
+		Ok(SetStatement {
+			name,
+			what,
+		})
 	}
 
-	pub(crate) fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
-		to_do!(self)
+	pub(crate) fn parse_show_stmt(&mut self) -> ParseResult<ShowStatement> {
+		expected!(self, "CHANGES");
+		expected!(self, "FOR");
+		let table = match self.next().kind {
+			t!("TABLE") => {
+				let table = self.parse_raw_ident()?;
+				Some(Table(table))
+			}
+			t!("DATABASE") => None,
+			x => unexpected!(self, x, "`TABLE` or `DATABASE`"),
+		};
+		expected!(self, "SINCE");
+		let since = match self.peek_kind() {
+			TokenKind::Number => ShowSince::Versionstamp(self.parse_u64()?),
+			// TODO: date time
+			x => unexpected!(self, x, "a version stamp of date-time"),
+		};
+
+		let limit = self
+			.eat(t!("LIMIT"))
+			.then(|| {
+				// TODO: Explain limit to integer.
+				self.parse_u32()
+			})
+			.transpose()?;
+
+		Ok(ShowStatement {
+			table,
+			since,
+			limit,
+		})
+	}
+
+	pub(crate) fn parse_sleep_stmt(&mut self) -> ParseResult<SleepStatement> {
+		let duration = self.parse_duration()?;
+		Ok(SleepStatement {
+			duration,
+		})
+	}
+
+	pub(crate) fn parse_throw_stmt(&mut self) -> ParseResult<ThrowStatement> {
+		let error = self.parse_value()?;
+		Ok(ThrowStatement {
+			error,
+		})
 	}
 }

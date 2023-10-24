@@ -45,6 +45,7 @@ pub struct Order {
 	pub random: bool,
 	pub collate: bool,
 	pub numeric: bool,
+	/// true if the direction is ascending
 	pub direction: bool,
 }
 

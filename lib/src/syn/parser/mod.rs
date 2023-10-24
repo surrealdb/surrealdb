@@ -74,6 +74,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next token.
+	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;

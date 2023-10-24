@@ -76,15 +76,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_function(&mut self) -> ParseResult<DefineFunctionStatement> {
-		expected!(self, "fn");
-		expected!(self, "::");
-		let mut name = self.parse_ident()?;
-		while self.eat(t!("::")) {
-			let part = self.parse_ident()?;
-			name.0.push(':');
-			name.0.push(':');
-			name.0.push_str(part.as_str());
-		}
+		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, "(").span;
 		let mut args = Vec::new();
 		loop {

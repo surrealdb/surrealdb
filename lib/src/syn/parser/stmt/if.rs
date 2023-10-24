@@ -23,10 +23,12 @@ impl Parser<'_> {
 			t!("THEN") => {
 				let body = self.parse_value()?;
 				res.exprs.push((condition, body));
+				self.parse_worded_tail(&mut res)?;
 			}
 			t!("{") => {
 				let body = self.parse_block(next.span)?;
 				res.exprs.push((condition, body.into()));
+				self.parse_bracketed_tail(&mut res)?;
 			}
 			x => unexpected!(self, x, "THEN or '{'"),
 		}
