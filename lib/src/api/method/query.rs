@@ -296,7 +296,7 @@ impl Response {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	// use crate::Error::Api;
+	use crate::Error::Api;
 	use serde::Deserialize;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,15 +337,15 @@ mod tests {
 
 	#[test]
 	fn take_from_empty_records() {
-		let mut response = Response(to_map(vec![Ok(Value::None)]));
+		let mut response = Response(to_map(vec![]));
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Default::default());
 
-		let mut response = Response(to_map(vec![Ok(Value::None)]));
+		let mut response = Response(to_map(vec![]));
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response(to_map(vec![Ok(Value::None)]));
+		let mut response = Response(to_map(vec![]));
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
@@ -356,7 +356,7 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(scalar.into())]));
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, vec![Value::from(scalar)].into());
+		assert_eq!(value, Value::from(scalar));
 
 		let mut response = Response(to_map(vec![Ok(scalar.into())]));
 		let option: Option<_> = response.take(0).unwrap();
@@ -370,7 +370,7 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(scalar.into())]));
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, vec![Value::from(scalar)].into());
+		assert_eq!(value, Value::from(scalar));
 
 		let mut response = Response(to_map(vec![Ok(scalar.into())]));
 		let option: Option<_> = response.take(0).unwrap();
@@ -406,7 +406,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one, vec![Value::from(1)].into());
+		assert_eq!(one, Value::from(1));
 	}
 
 	#[test]
@@ -418,7 +418,7 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(value.clone())]));
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title, vec![Value::from(summary.title.as_str())].into());
+		assert_eq!(title, Value::from(summary.title.as_str()));
 
 		let mut response = Response(to_map(vec![Ok(value.clone())]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -452,86 +452,84 @@ mod tests {
 
 		let mut response = Response(to_map(vec![Ok(value)]));
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value, vec![Value::from(article.title)].into());
+		assert_eq!(value, Value::from(article.title));
 	}
 
 	#[test]
 	fn take_partial_records() {
-		// TODO fix this test
-		// let mut response = Response(to_map(vec![Ok(Value::from(sql::Array::from(vec![true.into(), false.into()])))]));
-		// let value: Value = response.take(0).unwrap();
-		// assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
+		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let value: Value = response.take(0).unwrap();
+		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
 
-		// let mut response = Response(to_map(vec![Ok(Value::from(sql::Array::from(vec![true.into(), false.into()])))]));
-		// let vec: Vec<bool> = response.take(0).unwrap();
-		// assert_eq!(vec, vec![true, false]);
+		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let vec: Vec<bool> = response.take(0).unwrap();
+		assert_eq!(vec, vec![true, false]);
 
-		// let mut response = Response(to_map(vec![Ok(Value::from(sql::Array::from(vec![true.into(), false.into()])))]));
-		// let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0)
-		// else {
-		// 	panic!("silently dropping records not allowed");
-		// };
-		// let records = map.remove(&0).unwrap().unwrap();
-		// assert_eq!(records, Value::from(sql::Array::from(vec![true.into(), false.into()])));
+		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0)
+		else {
+			panic!("silently dropping records not allowed");
+		};
+		let records = map.remove(&0).unwrap().unwrap();
+		assert_eq!(records, vec![true, false].into());
 	}
 
 	#[test]
 	fn check_returns_the_first_error() {
-		// TODO fix this test
-		// let response = vec![
-		// 	Ok(vec![0.into()]),
-		// 	Ok(vec![1.into()]),
-		// 	Ok(vec![2.into()]),
-		// 	Err(Error::ConnectionUninitialised.into()),
-		// 	Ok(vec![3.into()]),
-		// 	Ok(vec![4.into()]),
-		// 	Ok(vec![5.into()]),
-		// 	Err(Error::BackupsNotSupported.into()),
-		// 	Ok(vec![6.into()]),
-		// 	Ok(vec![7.into()]),
-		// 	Err(Error::DuplicateRequestId(0).into()),
-		// ];
-		// let response = Response(to_map(response));
-		// let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
-		// else {
-		// 	panic!("check did not return the first error");
-		// };
+		let response = vec![
+			Ok(0.into()),
+			Ok(1.into()),
+			Ok(2.into()),
+			Err(Error::ConnectionUninitialised.into()),
+			Ok(3.into()),
+			Ok(4.into()),
+			Ok(5.into()),
+			Err(Error::BackupsNotSupported.into()),
+			Ok(6.into()),
+			Ok(7.into()),
+			Err(Error::DuplicateRequestId(0).into()),
+		];
+		let response = Response(to_map(response));
+		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
+		else {
+			panic!("check did not return the first error");
+		};
 	}
 
 	#[test]
 	fn take_errors() {
 		// TODO fix this test
-		// let response = vec![
-		// 	Ok(vec![0.into()]),
-		// 	Ok(vec![1.into()]),
-		// 	Ok(vec![2.into()]),
-		// 	Err(Error::ConnectionUninitialised.into()),
-		// 	Ok(vec![3.into()]),
-		// 	Ok(vec![4.into()]),
-		// 	Ok(vec![5.into()]),
-		// 	Err(Error::BackupsNotSupported.into()),
-		// 	Ok(vec![6.into()]),
-		// 	Ok(vec![7.into()]),
-		// 	Err(Error::DuplicateRequestId(0).into()),
-		// ];
-		// let mut response = Response(to_map(response));
-		// let errors = response.take_errors();
-		// assert_eq!(response.num_statements(), 8);
-		// assert_eq!(errors.len(), 3);
-		// let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
-		// 	panic!("index `10` is not `DuplicateRequestId`");
-		// };
-		// let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
-		// 	panic!("index `7` is not `BackupsNotSupported`");
-		// };
-		// let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
-		// 	panic!("index `3` is not `ConnectionUninitialised`");
-		// };
-		// let Some(value): Option<i32> = response.take(2).unwrap() else {
-		// 	panic!("statement not found");
-		// };
-		// assert_eq!(value, 2);
-		// let value: Value = response.take(4).unwrap();
-		// assert_eq!(value, vec![Value::from(3)].into());
+		let response = vec![
+			Ok(0.into()),
+			Ok(1.into()),
+			Ok(2.into()),
+			Err(Error::ConnectionUninitialised.into()),
+			Ok(3.into()),
+			Ok(4.into()),
+			Ok(5.into()),
+			Err(Error::BackupsNotSupported.into()),
+			Ok(6.into()),
+			Ok(7.into()),
+			Err(Error::DuplicateRequestId(0).into()),
+		];
+		let mut response = Response(to_map(response));
+		let errors = response.take_errors();
+		assert_eq!(response.num_statements(), 8);
+		assert_eq!(errors.len(), 3);
+		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
+			panic!("index `10` is not `DuplicateRequestId`");
+		};
+		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
+			panic!("index `7` is not `BackupsNotSupported`");
+		};
+		let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
+			panic!("index `3` is not `ConnectionUninitialised`");
+		};
+		let Some(value): Option<i32> = response.take(2).unwrap() else {
+			panic!("statement not found");
+		};
+		assert_eq!(value, 2);
+		let value: Value = response.take(4).unwrap();
+		assert_eq!(value, Value::from(3));
 	}
 }
