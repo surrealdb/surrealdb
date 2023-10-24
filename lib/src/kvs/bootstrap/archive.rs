@@ -278,6 +278,9 @@ mod test {
 		// There is an error TODO validate
 		assert!(val.1.is_some());
 
+		// Close channel for shutdown
+		drop(input_lq_send);
+
 		// Wait for output
 		let (tx_task_res, arch_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
