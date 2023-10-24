@@ -204,7 +204,7 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 			false => {
 				// TODO should this return a vec?
 				// My train of thought is that at an API level developers currently always expect a vec to be returned here
-				return Ok(Value::Array(Array(vec![result])));
+				return Ok(result);
 			}
 		}
 	}

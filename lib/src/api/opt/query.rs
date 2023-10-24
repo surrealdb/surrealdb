@@ -188,7 +188,7 @@ where
 impl QueryResult<Value> for usize {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
 		match map.remove(&self) {
-			Some(result) => Ok(result?.into()),
+			Some(result) => Ok(result?),
 			None => Ok(Value::None),
 		}
 	}
@@ -212,10 +212,16 @@ where
 				return Ok(None);
 			}
 		};
-
 		let result = match value {
-			Value::Array(_) => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
-			value => {
+			Value::Array(Array(vec)) => match &mut vec[..] {
+				[] => Ok(None),
+				[value] => {
+					let value = mem::take(value);
+					from_value(value).map_err(Into::into)
+				}
+				_ => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
+			},
+			_ => {
 				let value = mem::take(value);
 				from_value(value).map_err(Into::into)
 			}
@@ -250,7 +256,7 @@ impl QueryResult<Value> for (usize, &str) {
 			_ => Value::None,
 		};
 
-		Ok(response.into())
+		Ok(response)
 	}
 }
 
@@ -273,8 +279,20 @@ where
 				return Ok(None);
 			}
 		};
+		let mut value = match &mut value {
+			Value::Array(Array(vec)) => match &mut vec[..] {
+				[] => {
+					map.remove(&index);
+					return Ok(None);
+				}
+				[value] => value,
+				_ => {
+					return Err(Error::LossyTake(QueryResponse(mem::take(map))).into());
+				}
+			},
+			value => value,
+		};
 		match &mut value {
-			Value::Array(_) => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
 			Value::None | Value::Null => {
 				map.remove(&index);
 				Ok(None)
@@ -321,10 +339,7 @@ where
 		let mut response = match map.get_mut(&index) {
 			Some(result) => match result {
 				Ok(val) => match val {
-					Value::Array(Array(vec)) => {
-						let vec = mem::take(vec);
-						vec
-					}
+					Value::Array(Array(vec)) => mem::take(vec),
 					val => {
 						let val = mem::take(val);
 						vec![val]

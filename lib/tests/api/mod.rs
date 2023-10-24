@@ -903,5 +903,5 @@ async fn return_bool() {
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	assert_eq!(value, vec![Value::Bool(false)].into());
+	assert_eq!(value, Value::Bool(false));
 }
