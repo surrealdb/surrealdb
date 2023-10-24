@@ -11,7 +11,7 @@ use helpers::new_ds;
 use serial_test::serial;
 use surrealdb::err::Error;
 use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::TransactionStruct;
+use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
@@ -182,7 +182,7 @@ struct ValidNotificationState {
 /// If you see these IDs, it is because you captured this entry.
 /// So its ok to share ID between tests
 async fn a_valid_notification(
-	tx: &mut TransactionStruct,
+	tx: &mut Transaction,
 	args: ValidNotificationState,
 ) -> Result<ValidNotificationState, Error> {
 	let now = tx.clock().await;

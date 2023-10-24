@@ -3,7 +3,7 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, TransactionStruct};
+use crate::kvs::{Key, Transaction};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ pub(crate) struct DocIds {
 
 impl DocIds {
 	pub(in crate::idx) async fn new(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 		store_type: TreeStoreType,
@@ -69,7 +69,7 @@ impl DocIds {
 
 	pub(crate) async fn get_doc_id(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.store.lock().await;
@@ -80,7 +80,7 @@ impl DocIds {
 	/// If the doc_id does not exists, a new one is created, and associated to the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
 		{
@@ -99,7 +99,7 @@ impl DocIds {
 
 	pub(in crate::idx) async fn remove_doc(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.store.lock().await;
@@ -121,7 +121,7 @@ impl DocIds {
 
 	pub(in crate::idx) async fn get_doc_key(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
@@ -134,13 +134,13 @@ impl DocIds {
 
 	pub(in crate::idx) async fn statistics(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 	) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &mut TransactionStruct) -> Result<(), Error> {
+	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
 		let updated = self.store.lock().await.finish(tx).await?;
 		if self.updated || updated {
 			let state = State {
@@ -201,18 +201,18 @@ mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionStruct, TransactionType::*};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	const BTREE_ORDER: u32 = 7;
 
-	async fn get_doc_ids(ds: &Datastore, store_type: TreeStoreType) -> (TransactionStruct, DocIds) {
+	async fn get_doc_ids(ds: &Datastore, store_type: TreeStoreType) -> (Transaction, DocIds) {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let d =
 			DocIds::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, store_type).await.unwrap();
 		(tx, d)
 	}
 
-	async fn finish(mut tx: TransactionStruct, mut d: DocIds) {
+	async fn finish(mut tx: Transaction, mut d: DocIds) {
 		d.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}

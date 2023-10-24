@@ -431,7 +431,7 @@ struct Inner {
 
 impl FtEntry {
 	async fn new(
-		tx: &mut kvs::TransactionStruct,
+		tx: &mut kvs::Transaction,
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
@@ -459,7 +459,7 @@ pub(super) struct MtEntry {
 
 impl MtEntry {
 	async fn new(
-		tx: &mut kvs::TransactionStruct,
+		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
 		a: Array,
 		k: u32,

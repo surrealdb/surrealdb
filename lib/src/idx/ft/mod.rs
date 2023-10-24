@@ -20,7 +20,7 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, TransactionStruct};
+use crate::kvs::{Key, Transaction};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -94,7 +94,7 @@ impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
@@ -153,7 +153,7 @@ impl FtIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		rid: &Thing,
 	) -> Result<(), Error> {
 		// Extract and remove the doc_id (if any)
@@ -195,7 +195,7 @@ impl FtIndex {
 
 	pub(crate) async fn index_document(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
@@ -293,7 +293,7 @@ impl FtIndex {
 
 	pub(super) async fn extract_terms(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		query_string: String,
 	) -> Result<Vec<Option<TermId>>, Error> {
 		let t = self.terms.read().await;
@@ -303,7 +303,7 @@ impl FtIndex {
 
 	pub(super) async fn get_terms_docs(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		terms: &Vec<Option<TermId>>,
 	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
@@ -363,7 +363,7 @@ impl FtIndex {
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn highlight(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		thg: &Thing,
 		terms: &[Option<TermId>],
 		prefix: Value,
@@ -387,7 +387,7 @@ impl FtIndex {
 
 	pub(super) async fn extract_offsets(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		thg: &Thing,
 		terms: &[Option<TermId>],
 	) -> Result<Value, Error> {
@@ -405,10 +405,7 @@ impl FtIndex {
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(
-		&self,
-		tx: &mut TransactionStruct,
-	) -> Result<FtStatistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
 		Ok(FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(tx).await?,
@@ -418,7 +415,7 @@ impl FtIndex {
 		})
 	}
 
-	pub(crate) async fn finish(self, tx: &mut TransactionStruct) -> Result<(), Error> {
+	pub(crate) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		self.doc_ids.write().await.finish(tx).await?;
 		self.doc_lengths.write().await.finish(tx).await?;
 		self.postings.write().await.finish(tx).await?;
@@ -442,7 +439,7 @@ impl HitsIterator {
 
 	pub(crate) async fn next(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 	) -> Result<Option<(Thing, DocId)>, Error> {
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = self.doc_ids.read().await.get_doc_key(tx, doc_id).await? {
@@ -459,7 +456,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionStruct};
+	use crate::kvs::{Datastore, LockType::*, Transaction};
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::define::analyzer;
@@ -470,7 +467,7 @@ mod tests {
 	use test_log::test;
 
 	async fn check_hits(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		hits: Option<HitsIterator>,
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
@@ -491,7 +488,7 @@ mod tests {
 	}
 
 	async fn search(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		fti: &FtIndex,
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
@@ -508,7 +505,7 @@ mod tests {
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
-	) -> (TransactionStruct, FtIndex) {
+	) -> (Transaction, FtIndex) {
 		let write = matches!(store_type, TreeStoreType::Write);
 		let mut tx = ds.transaction(write.into(), Optimistic).await.unwrap();
 		let fti = FtIndex::new(
@@ -531,7 +528,7 @@ mod tests {
 		(tx, fti)
 	}
 
-	pub(super) async fn finish(mut tx: TransactionStruct, fti: FtIndex) {
+	pub(super) async fn finish(mut tx: Transaction, fti: FtIndex) {
 		fti.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}

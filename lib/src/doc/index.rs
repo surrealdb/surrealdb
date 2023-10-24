@@ -257,7 +257,7 @@ impl<'a> IndexOperation<'a> {
 		)
 	}
 
-	async fn index_unique(&mut self, run: &mut kvs::TransactionStruct) -> Result<(), Error> {
+	async fn index_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -288,7 +288,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, run: &mut kvs::TransactionStruct) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -330,7 +330,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_full_text(
 		&mut self,
-		run: &mut kvs::TransactionStruct,
+		run: &mut kvs::Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
@@ -346,7 +346,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(
 		&mut self,
-		run: &mut kvs::TransactionStruct,
+		run: &mut kvs::Transaction,
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);

@@ -46,6 +46,3 @@ pub(crate) async fn scan_node_live_queries(
 		}
 	}
 }
-
-#[cfg(test)]
-mod test {}

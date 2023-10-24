@@ -1,17 +1,13 @@
 use crate::err::Error;
 use crate::key::change;
-use crate::kvs::TransactionStruct;
+use crate::kvs::Transaction;
 use crate::vs;
 use crate::vs::Versionstamp;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
 #[allow(unused)]
-pub async fn gc_all_at(
-	tx: &mut TransactionStruct,
-	ts: u64,
-	limit: Option<u32>,
-) -> Result<(), Error> {
+pub async fn gc_all_at(tx: &mut Transaction, ts: u64, limit: Option<u32>) -> Result<(), Error> {
 	let nses = tx.all_ns().await?;
 	let nses = nses.as_ref();
 	for ns in nses {
@@ -23,7 +19,7 @@ pub async fn gc_all_at(
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
 #[allow(unused)]
 pub async fn gc_ns(
-	tx: &mut TransactionStruct,
+	tx: &mut Transaction,
 	ns: &str,
 	limit: Option<u32>,
 	ts: u64,
@@ -63,7 +59,7 @@ pub async fn gc_ns(
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
 pub async fn gc_db(
-	tx: &mut TransactionStruct,
+	tx: &mut Transaction,
 	ns: &str,
 	db: &str,
 	watermark: Versionstamp,

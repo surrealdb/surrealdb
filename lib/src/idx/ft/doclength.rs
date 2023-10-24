@@ -4,7 +4,7 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, TransactionStruct};
+use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -18,7 +18,7 @@ pub(super) struct DocLengths {
 
 impl DocLengths {
 	pub(super) async fn new(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 		store_type: TreeStoreType,
@@ -40,7 +40,7 @@ impl DocLengths {
 
 	pub(super) async fn get_doc_length(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 	) -> Result<Option<DocLength>, Error> {
 		let mut store = self.store.lock().await;
@@ -49,7 +49,7 @@ impl DocLengths {
 
 	pub(super) async fn set_doc_length(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 		doc_length: DocLength,
 	) -> Result<(), Error> {
@@ -59,22 +59,19 @@ impl DocLengths {
 
 	pub(super) async fn remove_doc_length(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Payload>, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.delete(tx, &mut store, doc_id.to_be_bytes().to_vec()).await
 	}
 
-	pub(super) async fn statistics(
-		&self,
-		tx: &mut TransactionStruct,
-	) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(&self, tx: &mut TransactionStruct) -> Result<(), Error> {
+	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
 		self.store.lock().await.finish(tx).await?;
 		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())

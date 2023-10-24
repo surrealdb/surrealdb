@@ -3,7 +3,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::terms::TermId;
 use crate::idx::IndexKeyBase;
-use crate::kvs::TransactionStruct;
+use crate::kvs::Transaction;
 use roaring::RoaringTreemap;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ impl TermDocs {
 
 	pub(super) async fn set_doc(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<(), Error> {
@@ -38,7 +38,7 @@ impl TermDocs {
 
 	pub(super) async fn get_docs(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term_id: TermId,
 	) -> Result<Option<RoaringTreemap>, Error> {
 		let key = self.index_key_base.new_bc_key(term_id);
@@ -52,7 +52,7 @@ impl TermDocs {
 
 	pub(super) async fn remove_doc(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<DocLength, Error> {

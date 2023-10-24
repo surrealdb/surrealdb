@@ -1,4 +1,4 @@
-use super::tx::TransactionStruct;
+use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::node::Timestamp;
@@ -15,7 +15,6 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::tx::Transaction;
 use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
@@ -490,8 +489,8 @@ impl Datastore {
 		// The transaction request pair is used for receiving requests for new transactions
 		// it contains one-shot senders so that the transaction can be sent and forgotten
 		let (tx_req_send, mut tx_req_recv): (
-			mpsc::Sender<oneshot::Sender<TransactionStruct>>,
-			mpsc::Receiver<oneshot::Sender<TransactionStruct>>,
+			mpsc::Sender<oneshot::Sender<Transaction>>,
+			mpsc::Receiver<oneshot::Sender<Transaction>>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
 		// In several new transactions, scan all removed node live queries
@@ -598,7 +597,7 @@ impl Datastore {
 	// Node registration + "mark" stage of mark-and-sweep gc
 	pub async fn register_and_remove_dead_nodes(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		node_id: &Uuid,
 	) -> Result<Vec<Uuid>, Error> {
 		trace!("Registering node {}", node_id);
@@ -612,7 +611,7 @@ impl Datastore {
 	// Adds entries to the KV store indicating membership information
 	pub async fn register_membership(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
 	) -> Result<(), Error> {
@@ -625,7 +624,7 @@ impl Datastore {
 	/// Returns node IDs
 	pub async fn remove_dead_nodes(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		ts: &Timestamp,
 	) -> Result<Vec<Uuid>, Error> {
 		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
@@ -640,7 +639,7 @@ impl Datastore {
 		Ok(nodes)
 	}
 
-	pub async fn clear_unreachable_state(&self, tx: &mut TransactionStruct) -> Result<(), Error> {
+	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
 		let cluster = tx.scan_nd(NO_LIMIT).await?;
 		trace!("Found {} nodes", cluster.len());
@@ -743,7 +742,7 @@ impl Datastore {
 	// Returns a list of live query IDs
 	pub async fn archive_lv_for_node(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		nd: &Uuid,
 		this_node_id: Uuid,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
@@ -770,7 +769,7 @@ impl Datastore {
 	/// Return the removed heartbeats as they will contain node information
 	pub async fn delete_dead_heartbeats(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		ts: &Timestamp,
 	) -> Result<Vec<Hb>, Error> {
 		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
@@ -824,7 +823,7 @@ impl Datastore {
 	async fn save_timestamp_for_versionstamp_impl(
 		&self,
 		ts: u64,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 	) -> Result<(), Error> {
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
@@ -860,7 +859,7 @@ impl Datastore {
 	async fn garbage_collect_stale_change_feeds_impl(
 		&self,
 		ts: u64,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
 		cf::gc_all_at(tx, ts, Some(100)).await?;
@@ -884,7 +883,7 @@ impl Datastore {
 	// Inside the database, try to use the heartbeat() function instead.
 	pub async fn heartbeat_full(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		timestamp: Timestamp,
 		node_id: Uuid,
 	) -> Result<(), Error> {
@@ -913,7 +912,7 @@ impl Datastore {
 		&self,
 		tx_type: TransactionType,
 		lock: LockType,
-	) -> Result<dyn Transaction, Error> {
+	) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		let write = match tx_type {
 			Read => false,
@@ -961,7 +960,7 @@ impl Datastore {
 		};
 
 		#[allow(unreachable_code)]
-		Ok(TransactionStruct {
+		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),

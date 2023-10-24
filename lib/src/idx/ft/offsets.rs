@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::IndexKeyBase;
-use crate::kvs::{TransactionStruct, Val};
+use crate::kvs::{Transaction, Val};
 
 pub(super) type Position = u32;
 
@@ -19,7 +19,7 @@ impl Offsets {
 
 	pub(super) async fn set_offsets(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 		offsets: OffsetRecords,
@@ -32,7 +32,7 @@ impl Offsets {
 
 	pub(super) async fn get_offsets(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<Option<OffsetRecords>, Error> {
@@ -47,7 +47,7 @@ impl Offsets {
 
 	pub(super) async fn remove_offsets(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<(), Error> {

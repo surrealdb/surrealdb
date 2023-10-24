@@ -3,7 +3,7 @@ use crate::err::UnreachableCause::UnexpectedIndexRootNode;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
 use crate::idx::VersionedSerdeState;
-use crate::kvs::{Key, TransactionStruct, Val};
+use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ impl BState {
 
 	pub(in crate::idx) async fn finish(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		key: &Key,
 	) -> Result<(), Error> {
 		if self.updated {
@@ -201,7 +201,7 @@ where
 
 	pub async fn search(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
@@ -223,7 +223,7 @@ where
 
 	pub async fn insert(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		key: Key,
 		payload: Payload,
@@ -258,7 +258,7 @@ where
 
 	async fn insert_non_full(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		node_id: NodeId,
 		key: Key,
@@ -362,7 +362,7 @@ where
 
 	pub(in crate::idx) async fn delete(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
@@ -451,7 +451,7 @@ where
 
 	async fn deleted_from_internal(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -497,7 +497,7 @@ where
 
 	async fn deleted_traversal(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -658,7 +658,7 @@ where
 
 	pub(in crate::idx) async fn statistics(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
@@ -702,7 +702,7 @@ mod tests {
 	};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, Key, LockType::*, TransactionStruct};
+	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
@@ -734,7 +734,7 @@ mod tests {
 	}
 
 	async fn insertions_test<F, BK>(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		t: &mut BTree<BK>,
 		samples_size: usize,
@@ -1329,7 +1329,7 @@ mod tests {
 		}
 	}
 
-	async fn print_tree<BK>(tx: &mut TransactionStruct, t: &BTree<BK>)
+	async fn print_tree<BK>(tx: &mut Transaction, t: &BTree<BK>)
 	where
 		BK: BKeys,
 	{
@@ -1365,7 +1365,7 @@ mod tests {
 		/// This is for debugging
 		async fn inspect_nodes<F>(
 			&self,
-			tx: &mut TransactionStruct,
+			tx: &mut Transaction,
 			inspect_func: F,
 		) -> Result<usize, Error>
 		where

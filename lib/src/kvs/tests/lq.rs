@@ -476,7 +476,7 @@ async fn live_creates_remote_notification_for_delete() {
 async fn compute_live<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
-	tx: Arc<Mutex<TransactionStruct>>,
+	tx: Arc<Mutex<Transaction>>,
 	live_query_id: Uuid,
 	node_id: Uuid,
 	table: &'a str,
@@ -498,7 +498,7 @@ async fn compute_live<'a>(
 async fn compute_create<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
-	tx: Arc<Mutex<TransactionStruct>>,
+	tx: Arc<Mutex<Transaction>>,
 	table: &'a str,
 	what: Option<Thing>,
 ) -> Value {
@@ -521,7 +521,7 @@ async fn compute_create<'a>(
 async fn compute_delete<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
-	tx: Arc<Mutex<TransactionStruct>>,
+	tx: Arc<Mutex<Transaction>>,
 	what: Thing,
 ) -> Value {
 	let delete_stm = DeleteStatement {
@@ -539,7 +539,7 @@ async fn compute_delete<'a>(
 async fn compute_update<'a>(
 	ctx: &'a context::Context<'a>,
 	opt: &'a Options,
-	tx: Arc<Mutex<TransactionStruct>>,
+	tx: Arc<Mutex<Transaction>>,
 	what: Thing,
 	field: String,
 	value: Value,

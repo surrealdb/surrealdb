@@ -3,7 +3,7 @@ use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, TransactionStruct};
+use crate::kvs::{Key, Transaction};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ pub(super) struct Terms {
 
 impl Terms {
 	pub(super) async fn new(
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 		store_type: TreeStoreType,
@@ -66,7 +66,7 @@ impl Terms {
 
 	pub(super) async fn resolve_term_id(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term: &str,
 	) -> Result<TermId, Error> {
 		let term_key = term.into();
@@ -86,7 +86,7 @@ impl Terms {
 
 	pub(super) async fn get_term_id(
 		&self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
 		let mut store = self.store.lock().await;
@@ -95,7 +95,7 @@ impl Terms {
 
 	pub(super) async fn remove_term_id(
 		&mut self,
-		tx: &mut TransactionStruct,
+		tx: &mut Transaction,
 		term_id: TermId,
 	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
@@ -115,15 +115,12 @@ impl Terms {
 		Ok(())
 	}
 
-	pub(super) async fn statistics(
-		&self,
-		tx: &mut TransactionStruct,
-	) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut TransactionStruct) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
 		let updated = self.store.lock().await.finish(tx).await?;
 		if self.updated || updated {
 			let state = State {

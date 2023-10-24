@@ -54,7 +54,7 @@ pub(crate) const NO_LIMIT: u32 = 0;
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
-pub struct TransactionStruct {
+pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
@@ -107,7 +107,7 @@ pub enum LockType {
 	Optimistic,
 }
 
-impl fmt::Display for TransactionStruct {
+impl fmt::Display for Transaction {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#![allow(unused_variables)]
 		match &self.inner {
@@ -129,661 +129,27 @@ impl fmt::Display for TransactionStruct {
 	}
 }
 
-pub trait Transaction {
-	fn rollback_with_warning(mut self) -> Self;
-
-	fn rollback_with_panic(mut self) -> Self;
-
-	fn rollback_and_ignore(mut self) -> Self;
-
-	fn enclose(self) -> Arc<Mutex<Self>>;
-
-	// --------------------------------------------------
-	// Integral methods
-	// --------------------------------------------------
-
-	/// Check if transaction is finished.
-	///
-	/// If the transaction has been cancelled or committed,
-	/// then this function will return [`true`], and any further
-	/// calls to functions on this transaction will result
-	/// in a [`Error::TxFinished`] error.
-	async fn closed(&self) -> bool;
-
-	/// Cancel a transaction.
-	///
-	/// This reverses all changes made within the transaction.
-	async fn cancel(&mut self) -> Result<(), Error>;
-
-	/// Commit a transaction.
-	///
-	/// This attempts to commit all changes made within the transaction.
-	async fn commit(&mut self) -> Result<(), Error>;
-
-	/// Delete a key from the datastore.
-	#[allow(unused_variables)]
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug + Into<Vec<u8>> + Clone;
-
-	/// Check if a key exists in the datastore.
-	#[allow(unused_variables)]
-	async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
-	where
-		K: Into<Key> + Debug;
-
-	/// Fetch a key from the datastore.
-	#[allow(unused_variables)]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
-	where
-		K: Into<Key> + Debug;
-
-	/// Insert or update a key in the datastore.
-	#[allow(unused_variables)]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug,
-		V: Into<Val> + Debug;
-
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
-	async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
-	where
-		K: Into<Key> + Debug;
-
-	#[allow(unused)]
-	async fn get_non_monotonic_versionstamp(&mut self) -> Result<Versionstamp, Error>;
-
-	#[allow(unused)]
-	async fn get_non_monotonic_versionstamped_key<K>(
-		&mut self,
-		prefix: K,
-		suffix: K,
-	) -> Result<Vec<u8>, Error>
-	where
-		K: Into<Key>,
-	{
-		let prefix: Key = prefix.into();
-		let suffix: Key = suffix.into();
-		let ts = self.get_non_monotonic_versionstamp().await?;
-		let mut k: Vec<u8> = prefix.clone();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.clone());
-		Ok(k)
-	}
-
-	/// Insert or update a key in the datastore.
-	#[allow(unused_variables)]
-	async fn set_versionstamped_key<K, V>(
-		&mut self,
-		ts_key: K,
-		prefix: K,
-		suffix: K,
-		val: V,
-	) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug + Clone,
-		V: Into<Val> + Debug;
-
-	/// Insert a key if it doesn't exist in the datastore.
-	#[allow(unused_variables)]
-	async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug,
-		V: Into<Val> + Debug;
-
-	/// Retrieve a specific range of keys from the datastore.
-	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	#[allow(unused_variables)]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key> + Debug + Clone;
-
-	/// Update a key in the datastore if the current value matches a condition.
-	#[allow(unused_variables)]
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug,
-		V: Into<Val> + Debug;
-
-	/// Delete a key from the datastore if the current value matches a condition.
-	#[allow(unused_variables)]
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug,
-		V: Into<Val> + Debug;
-
-	// --------------------------------------------------
-	// Superjacent methods
-	// --------------------------------------------------
-
-	/// Retrieve a specific range of keys from the datastore.
-	///
-	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key> + Debug + Clone;
-
-	/// Delete a range of keys from the datastore.
-	///
-	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug + Clone;
-
-	/// Retrieve a specific prefix of keys from the datastore.
-	///
-	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key> + Debug;
-
-	/// Delete a prefix of keys from the datastore.
-	///
-	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
-	where
-		K: Into<Key> + Debug;
-
-	// --------------------------------------------------
-	// Superimposed methods
-	// --------------------------------------------------
-
-	/// Clear any cache entry for the specified key.
-	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>;
-
-	// Register cluster membership
-	// NOTE: Setting cluster membership sets the heartbeat
-	// Remember to set the heartbeat as well
-	async fn set_nd(&mut self, id: Uuid) -> Result<(), Error>;
-
-	// Retrieve cluster information
-	async fn get_nd(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error>;
-
-	/// Clock retrieves the current timestamp, without guaranteeing
-	/// monotonicity in all implementations.
-	///
-	/// It is used for unreliable ordering of events as well as
-	/// handling of timeouts. Operations that are not guaranteed to be correct.
-	/// But also allows for lexicographical ordering.
-	///
-	/// Public for tests, but not required for usage from a user perspective.
-	async fn clock(&mut self) -> Timestamp;
-
-	// Set heartbeat
-	async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error>;
-
-	async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error>;
-
-	// Delete a cluster registration entry
-	async fn del_nd(&mut self, node: Uuid) -> Result<(), Error>;
-
-	// Delete the live query notification registry on the table
-	async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error>;
-
-	// Scans up until the heartbeat timestamp and returns the discovered nodes
-	async fn scan_hb(
-		&mut self,
-		time_to: &Timestamp,
-		limit: u32,
-	) -> Result<Vec<crate::key::root::hb::Hb>, Error>;
-
-	/// scan_nd will scan all the cluster membership registers
-	/// setting limit to 0 will result in scanning all entries
-	async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error>;
-
-	async fn delr_hb(&mut self, ts: Vec<crate::key::root::hb::Hb>, limit: u32)
-		-> Result<(), Error>;
-
-	async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error>;
-
-	async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error>;
-
-	async fn scan_tblq<'a>(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		limit: u32,
-	) -> Result<Vec<LqValue>, Error>;
-
-	async fn scan_tbnt<'a>(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		lq: sql::Uuid,
-		limit: u32,
-	) -> Result<Vec<Notification>, Error>;
-
-	/// Add live query to table
-	async fn putc_tblq(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		live_stm: LiveStatement,
-		expected: Option<LiveStatement>,
-	) -> Result<(), Error>;
-
-	async fn putc_ndlq(
-		&mut self,
-		nd: Uuid,
-		lq: Uuid,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		chk: Option<&str>,
-	) -> Result<(), Error>;
-
-	/// Retrieve all ROOT users.
-	async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error>;
-
-	/// Add live notification to table live query
-	async fn putc_tbnt<'a>(
-		&mut self,
-		key: crate::key::table::nt::Nt<'a>,
-		nt: Notification,
-		expected: Option<Notification>,
-	) -> Result<(), Error>;
-
-	/// Retrieve all namespace definitions in a datastore.
-	async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error>;
-
-	/// Retrieve all namespace user definitions for a specific namespace.
-	async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error>;
-
-	/// Retrieve all namespace token definitions for a specific namespace.
-	async fn all_ns_tokens(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error>;
-
-	/// Retrieve all database definitions for a specific namespace.
-	async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error>;
-
-	/// Retrieve all database user definitions for a specific database.
-	async fn all_db_users(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineUserStatement]>, Error>;
-
-	/// Retrieve all database token definitions for a specific database.
-	async fn all_db_tokens(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error>;
-
-	/// Retrieve all analyzer definitions for a specific database.
-	async fn all_db_analyzers(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineAnalyzerStatement]>, Error>;
-
-	/// Retrieve all function definitions for a specific database.
-	async fn all_db_functions(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineFunctionStatement]>, Error>;
-
-	/// Retrieve all param definitions for a specific database.
-	async fn all_db_params(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineParamStatement]>, Error>;
-
-	/// Retrieve all scope definitions for a specific database.
-	async fn all_sc(&mut self, ns: &str, db: &str) -> Result<Arc<[DefineScopeStatement]>, Error>;
-
-	/// Retrieve all scope token definitions for a scope.
-	async fn all_sc_tokens(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error>;
-
-	/// Retrieve all table definitions for a specific database.
-	async fn all_tb(&mut self, ns: &str, db: &str) -> Result<Arc<[DefineTableStatement]>, Error>;
-
-	/// Retrieve all event definitions for a specific table.
-	async fn all_tb_events(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<[DefineEventStatement]>, Error>;
-
-	/// Retrieve all field definitions for a specific table.
-	async fn all_tb_fields(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<[DefineFieldStatement]>, Error>;
-
-	/// Retrieve all index definitions for a specific table.
-	async fn all_tb_indexes(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<[DefineIndexStatement]>, Error>;
-
-	/// Retrieve all view definitions for a specific table.
-	async fn all_tb_views(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<[DefineTableStatement]>, Error>;
-
-	/// Retrieve all live definitions for a specific table.
-	async fn all_tb_lives(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<[LiveStatement]>, Error>;
-
-	async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error>;
-
-	/// Retrieve a specific user definition from ROOT.
-	async fn get_root_user(&mut self, user: &str) -> Result<DefineUserStatement, Error>;
-
-	/// Retrieve a specific namespace definition.
-	async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error>;
-
-	/// Retrieve a specific user definition from a namespace.
-	async fn get_ns_user(&mut self, ns: &str, user: &str) -> Result<DefineUserStatement, Error>;
-
-	/// Retrieve a specific namespace token definition.
-	async fn get_ns_token(&mut self, ns: &str, nt: &str) -> Result<DefineTokenStatement, Error>;
-
-	/// Retrieve a specific database definition.
-	async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error>;
-
-	/// Retrieve a specific user definition from a database.
-	async fn get_db_user(
-		&mut self,
-		ns: &str,
-		db: &str,
-		user: &str,
-	) -> Result<DefineUserStatement, Error>;
-
-	/// Retrieve a specific database token definition.
-	async fn get_db_token(
-		&mut self,
-		ns: &str,
-		db: &str,
-		dt: &str,
-	) -> Result<DefineTokenStatement, Error>;
-
-	/// Retrieve a specific analyzer definition.
-	async fn get_db_analyzer(
-		&mut self,
-		ns: &str,
-		db: &str,
-		az: &str,
-	) -> Result<DefineAnalyzerStatement, Error>;
-
-	/// Retrieve a specific scope definition.
-	async fn get_sc(&mut self, ns: &str, db: &str, sc: &str)
-		-> Result<DefineScopeStatement, Error>;
-
-	/// Retrieve a specific scope token definition.
-	async fn get_sc_token(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		st: &str,
-	) -> Result<DefineTokenStatement, Error>;
-
-	/// Return the table stored at the lq address
-	async fn get_lq(&mut self, nd: Uuid, ns: &str, db: &str, lq: Uuid) -> Result<Strand, Error>;
-
-	/// Retrieve a specific table definition.
-	async fn get_tb(&mut self, ns: &str, db: &str, tb: &str)
-		-> Result<DefineTableStatement, Error>;
-
-	/// Retrieve a live query for a table.
-	async fn get_tb_live(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		lv: &Uuid,
-	) -> Result<LiveStatement, Error>;
-
-	/// Add a namespace with a default configuration, only if we are in dynamic mode.
-	async fn add_ns(&mut self, ns: &str, strict: bool) -> Result<DefineNamespaceStatement, Error>;
-
-	/// Add a database with a default configuration, only if we are in dynamic mode.
-	async fn add_db(
-		&mut self,
-		ns: &str,
-		db: &str,
-		strict: bool,
-	) -> Result<DefineDatabaseStatement, Error>;
-
-	/// Add a scope with a default configuration, only if we are in dynamic mode.
-	async fn add_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		strict: bool,
-	) -> Result<DefineScopeStatement, Error>;
-
-	/// Add a table with a default configuration, only if we are in dynamic mode.
-	async fn add_tb(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		strict: bool,
-	) -> Result<DefineTableStatement, Error>;
-
-	/// Retrieve and cache a specific namespace definition.
-	async fn get_and_cache_ns(&mut self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error>;
-
-	/// Retrieve and cache a specific database definition.
-	async fn get_and_cache_db(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<DefineDatabaseStatement>, Error>;
-
-	/// Retrieve and cache a specific table definition.
-	async fn get_and_cache_tb(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<DefineTableStatement>, Error>;
-
-	/// Retrieve a specific function definition.
-	async fn get_and_cache_db_function(
-		&mut self,
-		ns: &str,
-		db: &str,
-		fc: &str,
-	) -> Result<Arc<DefineFunctionStatement>, Error>;
-
-	/// Retrieve a specific param definition.
-	async fn get_and_cache_db_param(
-		&mut self,
-		ns: &str,
-		db: &str,
-		pa: &str,
-	) -> Result<Arc<DefineParamStatement>, Error>;
-
-	/// Retrieve a specific table index definition.
-	async fn get_and_cache_tb_index(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		ix: &str,
-	) -> Result<Arc<DefineIndexStatement>, Error>;
-
-	/// Add a namespace with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_ns(
-		&mut self,
-		ns: &str,
-		strict: bool,
-	) -> Result<Arc<DefineNamespaceStatement>, Error>;
-
-	/// Add a database with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_db(
-		&mut self,
-		ns: &str,
-		db: &str,
-		strict: bool,
-	) -> Result<Arc<DefineDatabaseStatement>, Error>;
-
-	/// Add a table with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_tb(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		strict: bool,
-	) -> Result<Arc<DefineTableStatement>, Error>;
-
-	/// Retrieve and cache a specific table definition.
-	async fn check_ns_db_tb(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		strict: bool,
-	) -> Result<(), Error>;
-
-	// --------------------------------------------------
-	// Additional methods
-	// --------------------------------------------------
-
-	/// Writes the full database contents as binary SQL.
-	async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error>;
-
-	// change will record the change in the changefeed if enabled.
-	// To actually persist the record changes into the underlying kvs,
-	// you must call the `complete_changes` function and then commit the transaction.
-	// TODO pub(crate)
-	fn clear_cache(&mut self);
-
-	// change will record the change in the changefeed if enabled.
-	// To actually persist the record changes into the underlying kvs,
-	// you must call the `complete_changes` function and then commit the transaction.
-	// TODO pub(crate)
-	fn record_change(&mut self, ns: &str, db: &str, tb: &str, id: &Thing, v: Cow<'_, Value>);
-
-	// Records the table (re)definition in the changefeed if enabled.
-	// TODO pub(crate)
-	fn record_table_change(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement);
-
-	// TODO pub(crate)
-	async fn get_idg(&mut self, key: Key) -> Result<U32, Error>;
-
-	// get_next_db_id will get the next db id for the given namespace.
-	// TODO pub(crate)
-	async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error>;
-
-	// remove_db_id removes the given db id from the sequence.
-	#[allow(unused)]
-	// TODO pub(crate)
-	async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error>;
-
-	// get_next_db_id will get the next tb id for the given namespace and database.
-	// TODO pub(crate)
-	async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error>;
-
-	// remove_tb_id removes the given tb id from the sequence.
-	#[allow(unused)]
-	// TODO pub(crate)
-	async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error>;
-
-	// get_next_ns_id will get the next ns id.
-	// TODO pub(crate)
-	async fn get_next_ns_id(&mut self) -> Result<u32, Error>;
-
-	// remove_ns_id removes the given ns id from the sequence.
-	#[allow(unused)]
-	// TODO pub(crate)
-	async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error>;
-
-	// complete_changes will complete the changefeed recording for the given namespace and database.
-	//
-	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
-	// Every change must be recorded by calling this struct's `record_change` function beforehand.
-	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
-	//
-	// This function should be called only after all the changes have been made to the transaction.
-	// Otherwise, changes are missed in the change feed.
-	//
-	// This function should be called immediately before calling the commit function to guarantee that
-	// the lock, if needed by lock=true, is held only for the duration of the commit, not the entire transaction.
-	//
-	// This function is here because it needs access to mutably borrow the transaction.
-	//
-	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
-	// non-FDB backends.
-	// TODO pub(crate)
-	async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error>;
-
-	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
-	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
-	// TODO pub(crate)
-	async fn set_timestamp_for_versionstamp(
-		&mut self,
-		ts: u64,
-		ns: &str,
-		db: &str,
-		lock: bool,
-	) -> Result<(), Error>;
-
-	// TODO pub(crate)
-	async fn get_versionstamp_from_timestamp(
-		&mut self,
-		ts: u64,
-		ns: &str,
-		db: &str,
-		_lock: bool,
-	) -> Result<Option<Versionstamp>, Error>;
-}
-
-impl Transaction for TransactionStruct {
+impl Transaction {
 	// --------------------------------------------------
 	// Configuration methods
 	// --------------------------------------------------
 
-	fn rollback_with_warning(mut self) -> Self {
+	pub fn rollback_with_warning(mut self) -> Self {
 		self.check_level(Check::Warn);
 		self
 	}
 
-	fn rollback_with_panic(mut self) -> Self {
+	pub fn rollback_with_panic(mut self) -> Self {
 		self.check_level(Check::Panic);
 		self
 	}
 
-	fn rollback_and_ignore(mut self) -> Self {
+	pub fn rollback_and_ignore(mut self) -> Self {
 		self.check_level(Check::None);
 		self
 	}
 
-	fn enclose(self) -> Arc<Mutex<Self>> {
+	pub fn enclose(self) -> Arc<Mutex<Self>> {
 		Arc::new(Mutex::new(self))
 	}
 
@@ -797,37 +163,37 @@ impl Transaction for TransactionStruct {
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
-	async fn closed(&self) -> bool {
+	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
 		trace!("Closed");
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.closed(),
@@ -839,37 +205,37 @@ impl Transaction for TransactionStruct {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	async fn cancel(&mut self) -> Result<(), Error> {
+	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Cancel");
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.cancel(),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.cancel().await,
@@ -881,37 +247,37 @@ impl Transaction for TransactionStruct {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	async fn commit(&mut self) -> Result<(), Error> {
+	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Commit");
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.commit(),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.commit().await,
@@ -922,7 +288,7 @@ impl Transaction for TransactionStruct {
 
 	/// Delete a key from the datastore.
 	#[allow(unused_variables)]
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
 	{
@@ -930,32 +296,32 @@ impl Transaction for TransactionStruct {
 		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.del(key),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.del(key).await,
@@ -966,7 +332,7 @@ impl Transaction for TransactionStruct {
 
 	/// Check if a key exists in the datastore.
 	#[allow(unused_variables)]
-	async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -974,32 +340,32 @@ impl Transaction for TransactionStruct {
 		trace!("Exi {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.exi(key),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.exi(key).await,
@@ -1010,7 +376,7 @@ impl Transaction for TransactionStruct {
 
 	/// Fetch a key from the datastore.
 	#[allow(unused_variables)]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -1018,32 +384,32 @@ impl Transaction for TransactionStruct {
 		trace!("Get {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.get(key),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.get(key).await,
@@ -1054,7 +420,7 @@ impl Transaction for TransactionStruct {
 
 	/// Insert or update a key in the datastore.
 	#[allow(unused_variables)]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -1063,32 +429,32 @@ impl Transaction for TransactionStruct {
 		trace!("Set {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.set(key, val),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.set(key, val).await,
@@ -1103,7 +469,7 @@ impl Transaction for TransactionStruct {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[allow(unused)]
-	async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
+	pub async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -1111,32 +477,32 @@ impl Transaction for TransactionStruct {
 		trace!("Get Timestamp {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.get_timestamp(key),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.get_timestamp(key).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.get_timestamp(key).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.get_timestamp(key, lock).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.get_timestamp().await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.get_timestamp(key).await,
@@ -1170,7 +536,7 @@ impl Transaction for TransactionStruct {
 
 	/// Insert or update a key in the datastore.
 	#[allow(unused_variables)]
-	async fn set_versionstamped_key<K, V>(
+	pub async fn set_versionstamped_key<K, V>(
 		&mut self,
 		ts_key: K,
 		prefix: K,
@@ -1185,7 +551,7 @@ impl Transaction for TransactionStruct {
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => {
@@ -1193,7 +559,7 @@ impl Transaction for TransactionStruct {
 				v.set(k, val)
 			}
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => {
@@ -1201,7 +567,7 @@ impl Transaction for TransactionStruct {
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => {
@@ -1209,7 +575,7 @@ impl Transaction for TransactionStruct {
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => {
@@ -1217,12 +583,12 @@ impl Transaction for TransactionStruct {
 				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.set_versionstamped_key(prefix, suffix, val).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => {
@@ -1236,7 +602,7 @@ impl Transaction for TransactionStruct {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[allow(unused_variables)]
-	async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -1245,32 +611,32 @@ impl Transaction for TransactionStruct {
 		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.put(key, val),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.put(category, key, val).await,
@@ -1283,7 +649,7 @@ impl Transaction for TransactionStruct {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug + Clone,
 	{
@@ -1295,32 +661,32 @@ impl Transaction for TransactionStruct {
 		);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.scan(rng, limit),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.scan(rng, limit).await,
@@ -1331,7 +697,7 @@ impl Transaction for TransactionStruct {
 
 	/// Update a key in the datastore if the current value matches a condition.
 	#[allow(unused_variables)]
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -1340,32 +706,32 @@ impl Transaction for TransactionStruct {
 		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.putc(key, val, chk),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.putc(key, val, chk).await,
@@ -1376,7 +742,7 @@ impl Transaction for TransactionStruct {
 
 	/// Delete a key from the datastore if the current value matches a condition.
 	#[allow(unused_variables)]
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
@@ -1385,32 +751,32 @@ impl Transaction for TransactionStruct {
 		trace!("Delc {:?} if {:?}", key, chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.delc(key, chk),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.delc(key, chk).await,
@@ -1426,7 +792,7 @@ impl Transaction for TransactionStruct {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug + Clone,
 	{
@@ -1478,7 +844,7 @@ impl Transaction for TransactionStruct {
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug + Clone,
 	{
@@ -1529,7 +895,7 @@ impl Transaction for TransactionStruct {
 	/// Retrieve a specific prefix of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -1581,7 +947,7 @@ impl Transaction for TransactionStruct {
 	/// Delete a prefix of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
-	async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
+	pub async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -1635,7 +1001,7 @@ impl Transaction for TransactionStruct {
 	// --------------------------------------------------
 
 	/// Clear any cache entry for the specified key.
-	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -1647,7 +1013,7 @@ impl Transaction for TransactionStruct {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -1665,7 +1031,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	// Retrieve cluster information
-	async fn get_nd(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
+	pub async fn get_nd(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		let val = self.get(key).await?;
 		match val {
@@ -1682,14 +1048,14 @@ impl Transaction for TransactionStruct {
 	/// But also allows for lexicographical ordering.
 	///
 	/// Public for tests, but not required for usage from a user perspective.
-	async fn clock(&mut self) -> Timestamp {
+	pub async fn clock(&mut self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
 		self.clock.write().await.now().await
 	}
 
 	// Set heartbeat
-	async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		// We do not need to do a read, we always want to overwrite
 		let key_enc = key.encode()?;
@@ -1705,28 +1071,28 @@ impl Transaction for TransactionStruct {
 		Ok(())
 	}
 
-	async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		self.del(key).await?;
 		Ok(())
 	}
 
 	// Delete a cluster registration entry
-	async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
 		let key_enc = key.encode()?;
 		self.del(key_enc).await
 	}
 
 	// Delete the live query notification registry on the table
-	async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
+	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
 		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
 		let key_enc = key.encode()?;
 		self.del(key_enc).await
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
-	async fn scan_hb(
+	pub async fn scan_hb(
 		&mut self,
 		time_to: &Timestamp,
 		limit: u32,
@@ -1783,7 +1149,7 @@ impl Transaction for TransactionStruct {
 
 	/// scan_nd will scan all the cluster membership registers
 	/// setting limit to 0 will result in scanning all entries
-	async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
@@ -1834,7 +1200,7 @@ impl Transaction for TransactionStruct {
 		Ok(out)
 	}
 
-	async fn delr_hb(
+	pub async fn delr_hb(
 		&mut self,
 		ts: Vec<crate::key::root::hb::Hb>,
 		limit: u32,
@@ -1846,14 +1212,14 @@ impl Transaction for TransactionStruct {
 		Ok(())
 	}
 
-	async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
+	pub async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
 		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
 		let key = crate::key::table::lq::new(ns, db, tb, lv);
 		self.cache.del(&key.clone().into());
 		self.del(key).await
 	}
 
-	async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
+	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::node::lq::prefix_nd(node);
 		let end = crate::key::node::lq::suffix_nd(node);
 		trace!(
@@ -1914,7 +1280,7 @@ impl Transaction for TransactionStruct {
 		Ok(out)
 	}
 
-	async fn scan_tblq<'a>(
+	pub async fn scan_tblq<'a>(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -1980,7 +1346,7 @@ impl Transaction for TransactionStruct {
 		Ok(out)
 	}
 
-	async fn scan_tbnt<'a>(
+	pub async fn scan_tbnt<'a>(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2042,7 +1408,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add live query to table
-	async fn putc_tblq(
+	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2056,7 +1422,7 @@ impl Transaction for TransactionStruct {
 		self.putc(key_enc, live_stm, expected).await
 	}
 
-	async fn putc_ndlq(
+	pub async fn putc_ndlq(
 		&mut self,
 		nd: Uuid,
 		lq: Uuid,
@@ -2070,7 +1436,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all ROOT users.
-	async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
+	pub async fn all_root_users(&mut self) -> Result<Arc<[DefineUserStatement]>, Error> {
 		let beg = crate::key::root::us::prefix();
 		let end = crate::key::root::us::suffix();
 		let val = self.getr(beg..end, u32::MAX).await?;
@@ -2079,7 +1445,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add live notification to table live query
-	async fn putc_tbnt<'a>(
+	pub async fn putc_tbnt<'a>(
 		&mut self,
 		key: crate::key::table::nt::Nt<'a>,
 		nt: Notification,
@@ -2100,7 +1466,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
-	async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
+	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::root::ns::prefix();
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nss(v) = e {
@@ -2119,7 +1485,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all namespace user definitions for a specific namespace.
-	async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+	pub async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
 		let key = crate::key::namespace::us::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nus(v) = e {
@@ -2138,7 +1504,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all namespace token definitions for a specific namespace.
-	async fn all_ns_tokens(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
+	pub async fn all_ns_tokens(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::namespace::tk::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nts(v) = e {
@@ -2157,7 +1523,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
-	async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
+	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::namespace::db::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Dbs(v) = e {
@@ -2176,7 +1542,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all database user definitions for a specific database.
-	async fn all_db_users(
+	pub async fn all_db_users(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2199,7 +1565,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all database token definitions for a specific database.
-	async fn all_db_tokens(
+	pub async fn all_db_tokens(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2222,7 +1588,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
-	async fn all_db_analyzers(
+	pub async fn all_db_analyzers(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2245,7 +1611,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all function definitions for a specific database.
-	async fn all_db_functions(
+	pub async fn all_db_functions(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2268,7 +1634,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all param definitions for a specific database.
-	async fn all_db_params(
+	pub async fn all_db_params(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2291,7 +1657,11 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all scope definitions for a specific database.
-	async fn all_sc(&mut self, ns: &str, db: &str) -> Result<Arc<[DefineScopeStatement]>, Error> {
+	pub async fn all_sc(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineScopeStatement]>, Error> {
 		let key = crate::key::database::sc::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Scs(v) = e {
@@ -2310,7 +1680,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all scope token definitions for a scope.
-	async fn all_sc_tokens(
+	pub async fn all_sc_tokens(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2334,7 +1704,11 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all table definitions for a specific database.
-	async fn all_tb(&mut self, ns: &str, db: &str) -> Result<Arc<[DefineTableStatement]>, Error> {
+	pub async fn all_tb(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::database::tb::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Tbs(v) = e {
@@ -2353,7 +1727,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all event definitions for a specific table.
-	async fn all_tb_events(
+	pub async fn all_tb_events(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2377,7 +1751,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all field definitions for a specific table.
-	async fn all_tb_fields(
+	pub async fn all_tb_fields(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2401,7 +1775,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all index definitions for a specific table.
-	async fn all_tb_indexes(
+	pub async fn all_tb_indexes(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2425,7 +1799,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all view definitions for a specific table.
-	async fn all_tb_views(
+	pub async fn all_tb_views(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2449,7 +1823,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve all live definitions for a specific table.
-	async fn all_tb_lives(
+	pub async fn all_tb_lives(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2472,7 +1846,7 @@ impl Transaction for TransactionStruct {
 		})
 	}
 
-	async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
+	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::node::lq::prefix_nd(nd);
 		let end = crate::key::node::lq::suffix_nd(nd);
 		let lq_pairs = self.getr(beg..end, u32::MAX).await?;
@@ -2497,7 +1871,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific user definition from ROOT.
-	async fn get_root_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
+	pub async fn get_root_user(&mut self, user: &str) -> Result<DefineUserStatement, Error> {
 		let key = crate::key::root::us::new(user);
 		let val = self.get(key).await?.ok_or(Error::UserRootNotFound {
 			value: user.to_owned(),
@@ -2506,7 +1880,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific namespace definition.
-	async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
+	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::root::ns::new(ns);
 		let val = self.get(key).await?.ok_or(Error::NsNotFound {
 			value: ns.to_owned(),
@@ -2515,7 +1889,11 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific user definition from a namespace.
-	async fn get_ns_user(&mut self, ns: &str, user: &str) -> Result<DefineUserStatement, Error> {
+	pub async fn get_ns_user(
+		&mut self,
+		ns: &str,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
 		let key = crate::key::namespace::us::new(ns, user);
 		let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
 			value: user.to_owned(),
@@ -2525,7 +1903,11 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific namespace token definition.
-	async fn get_ns_token(&mut self, ns: &str, nt: &str) -> Result<DefineTokenStatement, Error> {
+	pub async fn get_ns_token(
+		&mut self,
+		ns: &str,
+		nt: &str,
+	) -> Result<DefineTokenStatement, Error> {
 		let key = crate::key::namespace::tk::new(ns, nt);
 		let val = self.get(key).await?.ok_or(Error::NtNotFound {
 			value: nt.to_owned(),
@@ -2534,7 +1916,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific database definition.
-	async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
+	pub async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
 		let key = crate::key::namespace::db::new(ns, db);
 		let val = self.get(key).await?.ok_or(Error::DbNotFound {
 			value: db.to_owned(),
@@ -2543,7 +1925,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific user definition from a database.
-	async fn get_db_user(
+	pub async fn get_db_user(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2559,7 +1941,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific database token definition.
-	async fn get_db_token(
+	pub async fn get_db_token(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2573,7 +1955,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific analyzer definition.
-	async fn get_db_analyzer(
+	pub async fn get_db_analyzer(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2587,7 +1969,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific scope definition.
-	async fn get_sc(
+	pub async fn get_sc(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2601,7 +1983,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific scope token definition.
-	async fn get_sc_token(
+	pub async fn get_sc_token(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2616,7 +1998,13 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Return the table stored at the lq address
-	async fn get_lq(&mut self, nd: Uuid, ns: &str, db: &str, lq: Uuid) -> Result<Strand, Error> {
+	pub async fn get_lq(
+		&mut self,
+		nd: Uuid,
+		ns: &str,
+		db: &str,
+		lq: Uuid,
+	) -> Result<Strand, Error> {
 		let key = crate::key::node::lq::new(nd, lq, ns, db);
 		let val = self.get(key).await?.ok_or(Error::LqNotFound {
 			value: lq.to_string(),
@@ -2625,7 +2013,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific table definition.
-	async fn get_tb(
+	pub async fn get_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2639,7 +2027,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a live query for a table.
-	async fn get_tb_live(
+	pub async fn get_tb_live(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2656,7 +2044,11 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
-	async fn add_ns(&mut self, ns: &str, strict: bool) -> Result<DefineNamespaceStatement, Error> {
+	pub async fn add_ns(
+		&mut self,
+		ns: &str,
+		strict: bool,
+	) -> Result<DefineNamespaceStatement, Error> {
 		match self.get_ns(ns).await {
 			Err(Error::NsNotFound {
 				value,
@@ -2680,7 +2072,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a database with a default configuration, only if we are in dynamic mode.
-	async fn add_db(
+	pub async fn add_db(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2709,7 +2101,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a scope with a default configuration, only if we are in dynamic mode.
-	async fn add_sc(
+	pub async fn add_sc(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2739,7 +2131,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a table with a default configuration, only if we are in dynamic mode.
-	async fn add_tb(
+	pub async fn add_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2770,7 +2162,10 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve and cache a specific namespace definition.
-	async fn get_and_cache_ns(&mut self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
+	pub async fn get_and_cache_ns(
+		&mut self,
+		ns: &str,
+	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		let key = crate::key::root::ns::new(ns).encode()?;
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Ns(v) = e {
@@ -2789,7 +2184,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve and cache a specific database definition.
-	async fn get_and_cache_db(
+	pub async fn get_and_cache_db(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2812,7 +2207,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve and cache a specific table definition.
-	async fn get_and_cache_tb(
+	pub async fn get_and_cache_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2836,7 +2231,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific function definition.
-	async fn get_and_cache_db_function(
+	pub async fn get_and_cache_db_function(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2860,7 +2255,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific param definition.
-	async fn get_and_cache_db_param(
+	pub async fn get_and_cache_db_param(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2884,7 +2279,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve a specific table index definition.
-	async fn get_and_cache_tb_index(
+	pub async fn get_and_cache_tb_index(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2909,7 +2304,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_ns(
+	pub async fn add_and_cache_ns(
 		&mut self,
 		ns: &str,
 		strict: bool,
@@ -2937,7 +2332,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a database with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_db(
+	pub async fn add_and_cache_db(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2966,7 +2361,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Add a table with a default configuration, only if we are in dynamic mode.
-	async fn add_and_cache_tb(
+	pub async fn add_and_cache_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -2997,7 +2392,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	/// Retrieve and cache a specific table definition.
-	async fn check_ns_db_tb(
+	pub async fn check_ns_db_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -3022,7 +2417,7 @@ impl Transaction for TransactionStruct {
 	// --------------------------------------------------
 
 	/// Writes the full database contents as binary SQL.
-	async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
+	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
 		// Output OPTIONS
 		{
 			chn.send(bytes!("-- ------------------------------")).await?;
@@ -3249,23 +2644,36 @@ impl Transaction for TransactionStruct {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
-	fn clear_cache(&mut self) {
+	pub(crate) fn clear_cache(&mut self) {
 		self.cache.clear()
 	}
 
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
-	fn record_change(&mut self, ns: &str, db: &str, tb: &str, id: &Thing, v: Cow<'_, Value>) {
+	pub(crate) fn record_change(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &Thing,
+		v: Cow<'_, Value>,
+	) {
 		self.cf.update(ns, db, tb, id.clone(), v)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
-	fn record_table_change(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
+	pub(crate) fn record_table_change(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		dt: &DefineTableStatement,
+	) {
 		self.cf.define_table(ns, db, tb, dt)
 	}
 
-	async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
+	pub(crate) async fn get_idg(&mut self, key: Key) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
 				v
@@ -3285,7 +2693,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	// get_next_db_id will get the next db id for the given namespace.
-	async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
+	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
 		let key = crate::key::namespace::di::new(ns).encode().unwrap();
 		let mut seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -3313,7 +2721,7 @@ impl Transaction for TransactionStruct {
 
 	// remove_db_id removes the given db id from the sequence.
 	#[allow(unused)]
-	async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
 		let key = crate::key::namespace::di::new(ns).encode().unwrap();
 		let mut seq = self.get_idg(key.clone()).await?;
 
@@ -3327,7 +2735,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	// get_next_db_id will get the next tb id for the given namespace and database.
-	async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
+	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
 		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
 		let mut seq = self.get_idg(key.clone()).await?;
 
@@ -3342,7 +2750,7 @@ impl Transaction for TransactionStruct {
 
 	// remove_tb_id removes the given tb id from the sequence.
 	#[allow(unused)]
-	async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
 		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
 		let mut seq = self.get_idg(key.clone()).await?;
 
@@ -3356,7 +2764,7 @@ impl Transaction for TransactionStruct {
 	}
 
 	// get_next_ns_id will get the next ns id.
-	async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
 		let key = crate::key::root::ni::Ni::default().encode().unwrap();
 		let mut seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
@@ -3384,7 +2792,7 @@ impl Transaction for TransactionStruct {
 
 	// remove_ns_id removes the given ns id from the sequence.
 	#[allow(unused)]
-	async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
 		let key = crate::key::root::ni::Ni::default().encode().unwrap();
 		let mut seq = self.get_idg(key.clone()).await?;
 
@@ -3413,7 +2821,7 @@ impl Transaction for TransactionStruct {
 	//
 	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
 	// non-FDB backends.
-	async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
+	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
 		let changes = self.cf.get();
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamped_key(tskey, prefix, suffix, v).await?
@@ -3423,7 +2831,7 @@ impl Transaction for TransactionStruct {
 
 	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
 	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
-	async fn set_timestamp_for_versionstamp(
+	pub(crate) async fn set_timestamp_for_versionstamp(
 		&mut self,
 		ts: u64,
 		ns: &str,
@@ -3452,7 +2860,7 @@ impl Transaction for TransactionStruct {
 		Ok(())
 	}
 
-	async fn get_versionstamp_from_timestamp(
+	pub(crate) async fn get_versionstamp_from_timestamp(
 		&mut self,
 		ts: u64,
 		ns: &str,
@@ -3475,9 +2883,7 @@ impl Transaction for TransactionStruct {
 		}
 		Ok(None)
 	}
-}
 
-impl TransactionStruct {
 	// --------------------------------------------------
 	// Private methods
 	// --------------------------------------------------
@@ -3487,32 +2893,32 @@ impl TransactionStruct {
 		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::Mem(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-rocksdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::RocksDB(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-speedb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::SpeeDB(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-indxdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::IndxDB(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-tikv")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::TiKV(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-fdb")]
-			TransactionStruct {
+			Transaction {
 				inner: Inner::FoundationDB(ref mut v),
 				..
 			} => v.check_level(check),
