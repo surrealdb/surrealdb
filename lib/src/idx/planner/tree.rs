@@ -101,16 +101,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
 		match v {
 			Value::Expression(e) => self.eval_expression(e).await,
-			Value::Idiom(i) => {
-				// Compute the idiom value if it is a param
-				if let Some(Part::Start(x)) = i.0.first() {
-					if x.is_param() {
-						let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
-						return self.eval_value(&v).await;
-					}
-				}
-				self.eval_idiom(i).await
-			}
+			Value::Idiom(i) => self.eval_idiom(i).await,
 			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
 				Ok(Node::Scalar(v.to_owned()))
 			}
@@ -135,6 +126,13 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
+		// Compute the idiom value if it is a param
+		if let Some(Part::Start(x)) = i.0.first() {
+			if x.is_param() {
+				let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
+				return self.eval_value(&v).await;
+			}
+		}
 		if let Some(irs) = self.find_indexes(i).await? {
 			if !irs.is_empty() {
 				return Ok(Node::IndexedField(i.to_owned(), irs));
