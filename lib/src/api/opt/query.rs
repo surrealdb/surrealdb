@@ -3,6 +3,7 @@ use crate::api::opt::from_value;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::sql;
+use crate::sql::Array;
 use crate::sql::statements::*;
 use crate::sql::Object;
 use crate::sql::Statement;
@@ -294,7 +295,10 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match map.remove(&self) {
-			Some(result) => vec![result?],
+			Some(result) => match result? {
+				Value::Array(Array(vec)) => vec,
+				vec => vec![vec]
+			},
 			None => {
 				return Ok(vec![]);
 			}
@@ -311,7 +315,16 @@ where
 		let (index, key) = self;
 		let mut response = match map.get_mut(&index) {
 			Some(result) => match result {
-				Ok(val) => vec![val],
+				Ok(val) => match val {
+					Value::Array(Array(vec)) => {
+						let vec = mem::take(vec);
+						vec
+					},
+					val => {
+						let val = mem::take(val);
+						vec![val]
+					}
+				},
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					map.remove(&index);
