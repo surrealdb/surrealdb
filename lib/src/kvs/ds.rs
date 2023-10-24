@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
-use crate::err::{Error, InternalCause};
+use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
@@ -372,7 +372,7 @@ impl Datastore {
 	}
 
 	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
+	pub fn with_notifications(self) -> Self {
 		self.notification_channel.set(channel::bounded(TX_LQ_CHANNEL_SIZE)).unwrap();
 		self
 	}
@@ -564,16 +564,16 @@ impl Datastore {
 
 		// Throw errors from join tasks
 		let scan_err = join_scan_err.map_err(|e| {
-			Error::Internal(format!("an error occurred in the join scan task: {:?}", e))
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapScan, e))
 		})?;
 		let arch_err = join_arch_err.map_err(|e| {
-			Error::Internal(format!("an error occurred in the join archive task: {:?}", e))
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapArchive, e))
 		})?;
 		let del_err = join_del_err.map_err(|e| {
-			Error::Internal(format!("an error occurred in the join delete task: {:?}", e))
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapDelete, e))
 		})?;
 		join_log_err.map_err(|e| {
-			Error::Internal(format!("an error occurred in the join log task: {:?}", e))
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapStageLog, e))
 		})?;
 
 		// Handle all the possible hard errors from tasks

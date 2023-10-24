@@ -1,4 +1,3 @@
-use rand::Rng;
 use tokio::sync::oneshot;
 
 use crate::kvs::Transaction;

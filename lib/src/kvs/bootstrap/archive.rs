@@ -59,7 +59,9 @@ pub(crate) async fn archive_live_queries(
 						}
 						break;
 					}
-					Err(e) => {}
+					Err(e) => {
+						error!("Failed to archive live queries: {:?}", e);
+					}
 				}
 			}
 			Err(_elapsed) => {
@@ -91,26 +93,25 @@ async fn archive_live_query_batch(
 	// TODO test failed tx retries
 	let mut last_err = None;
 	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
+		for (lq, e) in ret.drain(..) {
+			msg.push((lq, e));
+		}
+		// Fast-return
+		if msg.len() <= 0 {
+			trace!("archive fast return because msg.len() <= 0");
+			break;
+		}
+		trace!("Receiving a tx response in archive");
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
 		if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
-		trace!("Receiving a tx response in archive");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
 				trace!("Received tx in archive");
 				// In case this is a retry, we re-hydrate the msg vector
-				for (lq, e) in ret.drain(..) {
-					msg.push((lq, e));
-				}
-				// Fast-return
-				if msg.len() <= 0 {
-					trace!("archive fast return because msg.len() <= 0");
-					last_err = tx.cancel().await.err();
-					break;
-				}
 				// Consume the input message vector of live queries to archive
 				for (lq, _error_should_not_exist) in msg.drain(..) {
 					// Retrieve the existing table live query
@@ -165,6 +166,7 @@ async fn archive_live_query_batch(
 				trace!("outside the commit check");
 			}
 			Err(e) => {
+				error!("Failed to archive live queries: {:?}", e);
 				last_err = Some(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)));
 			}
 		}
@@ -183,4 +185,134 @@ async fn archive_live_query_batch(
 		return Err(e);
 	}
 	Ok(ret)
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod test {
+	use crate::err::Error;
+	use futures_concurrency::future::FutureExt;
+	use std::str::FromStr;
+	use std::sync::Arc;
+	use std::time::Duration;
+	use tokio::sync::mpsc;
+
+	use crate::kvs::bootstrap::{archive_live_queries, TxRequestOneshot};
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
+	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
+	use crate::sql::Uuid;
+
+	#[tokio::test]
+	async fn test_empty_archive() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let (tx_req, tx_res) = mpsc::channel(1);
+		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
+
+		let (input_lq_send, input_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+		let (output_lq_send, mut output_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+
+		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
+		let arch_task =
+			tokio::spawn(archive_live_queries(tx_req, node_id, input_lq_recv, output_lq_send));
+
+		// deliberately close channel
+		drop(input_lq_send);
+
+		// Wait for output
+		assert!(output_lq_recv.recv().await.is_none());
+
+		let (tx_task_res, arch_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+				.await
+				.unwrap();
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 0);
+		arch_task_res.unwrap().unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_batch_invalid_scan() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let (tx_req, tx_res) = mpsc::channel(1);
+		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
+
+		let (input_lq_send, input_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+		let (output_lq_send, mut output_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+
+		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
+		let arch_task =
+			tokio::spawn(archive_live_queries(tx_req, *&node_id, input_lq_recv, output_lq_send));
+
+		// Send input request
+		input_lq_send
+			.send((
+				LqValue {
+					nd: Default::default(),
+					ns: "".to_string(),
+					db: "".to_string(),
+					tb: "".to_string(),
+					lq: Default::default(),
+				},
+				None,
+			))
+			.await
+			.unwrap();
+
+		// Wait for output
+		let val = output_lq_recv.recv().await;
+		assert!(val.is_some());
+		let val = val.unwrap();
+		// There is an error TODO validate
+		assert!(val.1.is_some());
+
+		// Wait for output
+		let (tx_task_res, arch_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+				.await
+				.unwrap();
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 1);
+		arch_task_res.unwrap().unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_handles_batches_correctly() {
+		// test will require configurable batch size
+	}
+
+	async fn always_give_tx(
+		ds: Arc<Datastore>,
+		mut tx_req_channel: mpsc::Receiver<TxRequestOneshot>,
+	) -> Result<u32, Error> {
+		let mut count = 0 as u32;
+		loop {
+			let req = tx_req_channel.recv().await;
+			match req {
+				None => break,
+				Some(r) => {
+					count += 1;
+					let tx = ds.transaction(Write, Optimistic).await?;
+					if let Err(mut tx) = r.send(tx) {
+						// The other side of the channel was probably closed
+						// Do not reduce count, because it was requested
+						tx.cancel().await?;
+					}
+				}
+			}
+		}
+		Ok(count)
+	}
 }

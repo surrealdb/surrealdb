@@ -17,6 +17,7 @@ use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
+use tokio::task::JoinError as TokioJoinError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
@@ -635,7 +636,7 @@ pub enum Error {
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
-	#[deprecated(note = "Use InternalCause instead")]
+	// #[deprecated(note = "Use InternalCause instead")]
 	Internal(String),
 
 	/// Unimplemented functionality
@@ -757,6 +758,21 @@ pub enum BootstrapCause {
 	ChannelSendError(ChannelVariant),
 	#[error("Failed to recv from channel: {0}")]
 	ChannelRecvError(ChannelVariant),
+	#[error("Failed to join task: {0}")]
+	JoinTaskError(TaskVariant, TokioJoinError),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum TaskVariant {
+	#[error("Bootstrap scan task")]
+	BootstrapScan,
+	#[error("Bootstrap archive task")]
+	BootstrapArchive,
+	#[error("Bootstrap delete task")]
+	BootstrapDelete,
+	#[error("Bootstrap tx supplier task")]
+	BootstrapStageLog,
 }
 
 #[derive(Error, Debug)]
