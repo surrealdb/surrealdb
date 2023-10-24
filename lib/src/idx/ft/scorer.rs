@@ -4,7 +4,7 @@ use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::Bm25Params;
-use crate::kvs::Transaction;
+use crate::kvs::TransactionStruct;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -40,7 +40,7 @@ impl BM25Scorer {
 
 	async fn term_score(
 		&self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		doc_id: DocId,
 		term_doc_count: DocLength,
 		term_frequency: TermFrequency,
@@ -52,7 +52,7 @@ impl BM25Scorer {
 
 	pub(crate) async fn score(
 		&self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		doc_id: DocId,
 	) -> Result<Option<Score>, Error> {
 		let mut sc = 0.0;

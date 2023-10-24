@@ -5,7 +5,7 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, TransactionStruct};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,7 +20,7 @@ pub(super) struct Postings {
 
 impl Postings {
 	pub(super) async fn new(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		index_key_base: IndexKeyBase,
 		order: u32,
 		store_type: TreeStoreType,
@@ -43,7 +43,7 @@ impl Postings {
 
 	pub(super) async fn update_posting(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		term_id: TermId,
 		doc_id: DocId,
 		term_freq: TermFrequency,
@@ -55,7 +55,7 @@ impl Postings {
 
 	pub(super) async fn get_term_frequency(
 		&self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
@@ -66,7 +66,7 @@ impl Postings {
 
 	pub(super) async fn remove_posting(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
@@ -75,12 +75,15 @@ impl Postings {
 		self.btree.delete(tx, &mut store, key).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(
+		&self,
+		tx: &mut TransactionStruct,
+	) -> Result<BStatistics, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
-	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&self, tx: &mut TransactionStruct) -> Result<(), Error> {
 		self.store.lock().await.finish(tx).await?;
 		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())

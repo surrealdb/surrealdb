@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::err::UnreachableCause::{TreeNeverHasNode, TreeNodeAlwaysWrite, TreeOutSetNeverEmpty};
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, TransactionStruct, Val};
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -47,7 +47,7 @@ where
 
 	pub(super) async fn get_node(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		match self {
@@ -86,7 +86,10 @@ where
 		}
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
+	pub(in crate::idx) async fn finish(
+		&mut self,
+		tx: &mut TransactionStruct,
+	) -> Result<bool, Error> {
 		if let TreeNodeStore::Write(w) = self {
 			w.finish(tx).await
 		} else {
@@ -124,7 +127,7 @@ where
 
 	async fn get_node(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
@@ -172,7 +175,7 @@ where
 		Ok(())
 	}
 
-	async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
+	async fn finish(&mut self, tx: &mut TransactionStruct) -> Result<bool, Error> {
 		let update = !self.updated.is_empty() || !self.removed.is_empty();
 		#[cfg(debug_assertions)]
 		{
@@ -219,7 +222,7 @@ where
 
 	async fn get_node(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		if let Some(n) = self.nodes.pop(&node_id) {
@@ -255,7 +258,7 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn load<N>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<N>, Error>
+	async fn load<N>(&self, tx: &mut TransactionStruct, id: NodeId) -> Result<StoredNode<N>, Error>
 	where
 		N: TreeNode,
 	{
@@ -274,7 +277,11 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn save<N>(&self, tx: &mut Transaction, mut node: StoredNode<N>) -> Result<(), Error>
+	async fn save<N>(
+		&self,
+		tx: &mut TransactionStruct,
+		mut node: StoredNode<N>,
+	) -> Result<(), Error>
 	where
 		N: TreeNode,
 	{

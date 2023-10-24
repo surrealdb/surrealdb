@@ -1,7 +1,7 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::{Error, InternalCause};
 use crate::key::change;
-use crate::kvs::Transaction;
+use crate::kvs::TransactionStruct;
 use crate::sql::statements::show::ShowSince;
 use crate::vs;
 
@@ -14,7 +14,7 @@ use crate::vs;
 // You can use this to read the change feed in chunks.
 // The second call would start from the last versionstamp + 1 of the first call.
 pub async fn read(
-	tx: &mut Transaction,
+	tx: &mut TransactionStruct,
 	ns: &str,
 	db: &str,
 	tb: Option<&str>,

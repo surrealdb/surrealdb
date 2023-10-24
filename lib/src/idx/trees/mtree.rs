@@ -8,7 +8,7 @@ use crate::idx::trees::store::{
 	NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 };
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, TransactionStruct, Val};
 use crate::sql::index::{Distance, MTreeParams};
 use crate::sql::{Array, Number, Object, Thing, Value};
 use async_recursion::async_recursion;
@@ -40,7 +40,7 @@ pub(crate) struct MTreeIndex {
 
 impl MTreeIndex {
 	pub(crate) async fn new(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		st: TreeStoreType,
@@ -67,7 +67,7 @@ impl MTreeIndex {
 
 	pub(crate) async fn index_document(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
@@ -87,7 +87,7 @@ impl MTreeIndex {
 
 	pub(crate) async fn knn_search(
 		&self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		a: Array,
 		k: usize,
 	) -> Result<VecDeque<RoaringTreemap>, Error> {
@@ -132,7 +132,7 @@ impl MTreeIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
@@ -153,13 +153,16 @@ impl MTreeIndex {
 		self.doc_ids.clone()
 	}
 
-	pub(crate) async fn statistics(&self, tx: &mut Transaction) -> Result<MtStatistics, Error> {
+	pub(crate) async fn statistics(
+		&self,
+		tx: &mut TransactionStruct,
+	) -> Result<MtStatistics, Error> {
 		Ok(MtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(tx).await?,
 		})
 	}
 
-	pub(crate) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(self, tx: &mut TransactionStruct) -> Result<(), Error> {
 		self.doc_ids.write().await.finish(tx).await?;
 		self.store.lock().await.finish(tx).await?;
 		self.mtree.write().await.finish(tx, self.state_key).await?;
@@ -196,7 +199,7 @@ impl MTree {
 
 	async fn knn_search(
 		&self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		v: &Vector,
 		k: usize,
@@ -283,7 +286,7 @@ impl MTree {
 
 	async fn insert(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		v: Vec<Number>,
 		id: DocId,
@@ -336,7 +339,7 @@ impl MTree {
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	async fn insert_at_node(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<Arc<Vector>>,
@@ -366,7 +369,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -582,7 +585,7 @@ impl MTree {
 
 	async fn delete(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		object: Vector,
 		doc_id: DocId,
@@ -607,7 +610,7 @@ impl MTree {
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	async fn delete_at_node(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<Arc<Vector>>,
@@ -637,7 +640,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_internal(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -707,7 +710,7 @@ impl MTree {
 	#[allow(unused_variables, unused_assignments, clippy::too_many_arguments)]
 	async fn deletion_underflown(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		store: &mut MTreeNodeStore,
 		node: &mut InternalNode,
 		other_center: &Vector,
@@ -808,7 +811,7 @@ impl MTree {
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
-	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
+	async fn finish(&self, tx: &mut TransactionStruct, key: Key) -> Result<(), Error> {
 		if self.updated {
 			tx.set(key, self.state.try_to_val()?).await?;
 		}
@@ -1112,7 +1115,7 @@ mod tests {
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::*;
-	use crate::kvs::Transaction;
+	use crate::kvs::TransactionStruct;
 	use crate::sql::index::Distance;
 	use indexmap::IndexMap;
 	use roaring::RoaringTreemap;
@@ -1124,14 +1127,14 @@ mod tests {
 	async fn new_operation(
 		ds: &Datastore,
 		t: TreeStoreType,
-	) -> (Arc<Mutex<TreeNodeStore<MTreeNode>>>, Transaction) {
+	) -> (Arc<Mutex<TreeNodeStore<MTreeNode>>>, TransactionStruct) {
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, t, 20);
 		let tx = ds.transaction(t.into(), Optimistic).await.unwrap();
 		(s, tx)
 	}
 
 	async fn finish_operation(
-		mut tx: Transaction,
+		mut tx: TransactionStruct,
 		mut s: MutexGuard<'_, TreeNodeStore<MTreeNode>>,
 		commit: bool,
 	) {
@@ -1665,7 +1668,7 @@ mod tests {
 	}
 
 	async fn check_node<F>(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		s: &mut MTreeNodeStore,
 		node_id: NodeId,
 		check_func: F,
@@ -1678,7 +1681,7 @@ mod tests {
 	}
 
 	async fn check_leaf<F>(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		s: &mut MTreeNodeStore,
 		node_id: NodeId,
 		check_func: F,
@@ -1696,7 +1699,7 @@ mod tests {
 	}
 
 	async fn check_internal<F>(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		s: &mut MTreeNodeStore,
 		node_id: NodeId,
 		check_func: F,
@@ -1723,7 +1726,7 @@ mod tests {
 	}
 
 	async fn check_tree_properties(
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		s: &mut MTreeNodeStore,
 		t: &MTree,
 		expected_node_count: usize,

@@ -36,7 +36,7 @@ pub(crate) async fn init(
 
 /// Scan the entire storage layer displaying keys
 /// Useful to debug scans ;)
-async fn _debug_scan(tx: &mut Transaction, message: &str) {
+async fn _debug_scan(tx: &mut TransactionStruct, message: &str) {
 	let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
 	println!("START OF RANGE SCAN - {}", message);
 	for (k, _v) in r.iter() {

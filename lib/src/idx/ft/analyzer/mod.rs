@@ -4,7 +4,7 @@ use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
-use crate::kvs::Transaction;
+use crate::kvs::TransactionStruct;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
@@ -39,7 +39,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms(
 		&self,
 		t: &Terms,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		query_string: String,
 	) -> Result<Vec<Option<TermId>>, Error> {
 		let tokens = self.analyze(query_string)?;
@@ -63,7 +63,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies(
 		&self,
 		terms: &mut Terms,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		field_content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut dl = 0;
@@ -100,7 +100,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies_with_offsets(
 		&self,
 		terms: &mut Terms,
-		tx: &mut Transaction,
+		tx: &mut TransactionStruct,
 		content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
 		let mut dl = 0;
