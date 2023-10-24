@@ -3,8 +3,8 @@ use crate::api::opt::from_value;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::sql;
-use crate::sql::Array;
 use crate::sql::statements::*;
+use crate::sql::Array;
 use crate::sql::Object;
 use crate::sql::Statement;
 use crate::sql::Statements;
@@ -245,9 +245,9 @@ impl QueryResult<Value> for (usize, &str) {
 		let response = match response {
 			Value::Object(Object(object)) => match object.remove(key) {
 				Some(value) => value,
-				_ => Value::None
+				_ => Value::None,
 			},
-			_ => Value::None
+			_ => Value::None,
 		};
 
 		Ok(response.into())
@@ -302,7 +302,7 @@ where
 		let vec = match map.remove(&self) {
 			Some(result) => match result? {
 				Value::Array(Array(vec)) => vec,
-				vec => vec![vec]
+				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
@@ -324,7 +324,7 @@ where
 					Value::Array(Array(vec)) => {
 						let vec = mem::take(vec);
 						vec
-					},
+					}
 					val => {
 						let val = mem::take(val);
 						vec![val]
