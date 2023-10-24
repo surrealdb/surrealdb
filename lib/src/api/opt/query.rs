@@ -212,9 +212,13 @@ where
 				return Ok(None);
 			}
 		};
-		let result = {
-			let value = mem::take(value);
-			from_value(value).map_err(Into::into)
+
+		let result = match value {
+			Value::Array(_) => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
+			value => {
+				let value = mem::take(value);
+				from_value(value).map_err(Into::into)
+			}
 		};
 		map.remove(&self);
 		result
@@ -270,6 +274,7 @@ where
 			}
 		};
 		match &mut value {
+			Value::Array(_) => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
 			Value::None | Value::Null => {
 				map.remove(&index);
 				Ok(None)
