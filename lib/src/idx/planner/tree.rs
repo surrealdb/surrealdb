@@ -11,6 +11,28 @@ use std::sync::Arc;
 
 pub(super) struct Tree {}
 
+#[derive(Clone, Copy)]
+enum IdiomPosition {
+	LEFT,
+	RIGHT,
+}
+
+impl IdiomPosition {
+	// Reverses the operator for non commutative operators
+	fn transform(&self, op: &Operator) -> Operator {
+		match self {
+			IdiomPosition::LEFT => op.clone(),
+			IdiomPosition::RIGHT => match op {
+				Operator::LessThan => Operator::MoreThan,
+				Operator::LessThanOrEqual => Operator::MoreThanOrEqual,
+				Operator::MoreThan => Operator::LessThan,
+				Operator::MoreThanOrEqual => Operator::LessThanOrEqual,
+				_ => op.clone(),
+			},
+		}
+	}
+}
+
 impl Tree {
 	/// Traverse all the conditions and extract every expression
 	/// that can be resolved by an index.
@@ -161,9 +183,23 @@ impl<'a> TreeBuilder<'a> {
 				}
 				let mut io = None;
 				if let Some((id, irs)) = left.is_indexed_field() {
-					io = self.lookup_index_option(irs.as_slice(), o, id, &right, e);
+					io = self.lookup_index_option(
+						irs.as_slice(),
+						o,
+						id,
+						&right,
+						e,
+						IdiomPosition::LEFT,
+					);
 				} else if let Some((id, irs)) = right.is_indexed_field() {
-					io = self.lookup_index_option(irs.as_slice(), o, id, &left, e);
+					io = self.lookup_index_option(
+						irs.as_slice(),
+						o,
+						id,
+						&left,
+						e,
+						IdiomPosition::RIGHT,
+					);
 				};
 				Ok(Node::Expression {
 					io,
@@ -182,12 +218,13 @@ impl<'a> TreeBuilder<'a> {
 		id: &Idiom,
 		n: &Node,
 		e: &Expression,
+		p: IdiomPosition,
 	) -> Option<IndexOption> {
 		for ir in irs {
 			if let Some(ix) = self.index_map.definitions.get(ir) {
 				let op = match &ix.index {
-					Index::Idx => Self::eval_index_operator(op, n),
-					Index::Uniq => Self::eval_index_operator(op, n),
+					Index::Idx => Self::eval_index_operator(op, n, p),
+					Index::Uniq => Self::eval_index_operator(op, n, p),
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
@@ -220,20 +257,27 @@ impl<'a> TreeBuilder<'a> {
 		None
 	}
 
-	fn eval_index_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
+	fn eval_index_operator(op: &Operator, n: &Node, p: IdiomPosition) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
-			match (op, v) {
-				(Operator::Equal, v) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::Contains, v) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::ContainsAny, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
-				(Operator::ContainsAll, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
+			match (op, v, p) {
+				(Operator::Equal, v, _) => Some(IndexOperator::Equality(v.clone())),
+				(Operator::Contains, v, IdiomPosition::LEFT) => {
+					Some(IndexOperator::Equality(v.clone()))
+				}
+				(Operator::ContainsAny, Value::Array(a), IdiomPosition::LEFT) => {
+					Some(IndexOperator::Union(a.clone()))
+				}
+				(Operator::ContainsAll, Value::Array(a), IdiomPosition::LEFT) => {
+					Some(IndexOperator::Union(a.clone()))
+				}
 				(
 					Operator::LessThan
 					| Operator::LessThanOrEqual
 					| Operator::MoreThan
 					| Operator::MoreThanOrEqual,
 					v,
-				) => Some(IndexOperator::RangePart(op.clone(), v.clone())),
+					p,
+				) => Some(IndexOperator::RangePart(p.transform(op), v.clone())),
 				_ => None,
 			}
 		} else {
