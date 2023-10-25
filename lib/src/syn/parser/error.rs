@@ -91,8 +91,7 @@ impl ParseError {
 				}
 			}
 			ParseErrorKind::Retried {
-				first,
-				then,
+				..
 			} => todo!(),
 			ParseErrorKind::DisallowedStatement => todo!(),
 			ParseErrorKind::InvalidToken => {

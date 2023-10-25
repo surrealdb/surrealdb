@@ -1,8 +1,5 @@
 use crate::{
-	sql::{
-		error::expected, Array, Dir, Duration, Ident, Idiom, Mock, Param, Part, Strand, Subquery,
-		Table, Value,
-	},
+	sql::{Array, Dir, Duration, Ident, Idiom, Mock, Param, Part, Strand, Subquery, Table, Value},
 	syn::{
 		parser::mac::{expected, to_do},
 		token::{t, Span, TokenKind},

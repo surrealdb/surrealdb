@@ -20,6 +20,9 @@ mod prime;
 mod stmt;
 mod token_buffer;
 
+#[cfg(test)]
+mod test;
+
 pub use error::{ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
