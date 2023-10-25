@@ -192,6 +192,7 @@ async fn archive_live_query_batch(
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
+	use crate::dbs::Session;
 	use crate::err::Error;
 	use futures_concurrency::future::FutureExt;
 	use std::str::FromStr;
@@ -203,7 +204,7 @@ mod test {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
-	use crate::sql::Uuid;
+	use crate::sql::{Uuid, Value};
 
 	const RETRY_DURATION: Duration = Duration::from_millis(0);
 
@@ -320,7 +321,85 @@ mod test {
 
 	#[tokio::test]
 	async fn test_handles_batches_correctly() {
-		// test will require configurable batch size
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let (tx_req, tx_res) = mpsc::channel(1);
+		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
+
+		let (input_lq_send, input_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+		let (output_lq_send, mut output_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+
+		let self_node_id = Uuid::from_str("8a7a430b-7e9c-4ff9-8a27-9e2a2ba25b97").unwrap();
+		let namespace = "sample-namespace";
+		let database = "sample-db";
+		let table = "sampleTable";
+		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
+		let arch_task = tokio::spawn(archive_live_queries(
+			tx_req,
+			*&self_node_id,
+			input_lq_recv,
+			output_lq_send,
+			10,
+			&RETRY_DURATION,
+		));
+
+		let query = format!("LIVE SELECT * FROM {table}");
+		let mut lq = ds.execute(&query, &sess, None).await.unwrap();
+		assert_eq!(lq.len(), 1);
+		let live_query_id = lq.remove(0).result.unwrap();
+		let live_query_id = match live_query_id {
+			Value::Uuid(u) => u,
+			_ => {
+				panic!("Expected Uuid")
+			}
+		};
+
+		// Send input request
+		input_lq_send
+			.send((
+				LqValue {
+					nd: self_node_id,
+					ns: sess.ns.unwrap(),
+					db: sess.db.unwrap(),
+					tb: table.to_string(),
+					lq: live_query_id,
+				},
+				None,
+			))
+			.await
+			.unwrap();
+
+		// Wait for output
+		let val = output_lq_recv.recv().await;
+		assert!(val.is_some());
+		let val = val.unwrap();
+
+		// There is a not found error
+		assert!(val.1.is_none());
+
+		// Close channel for shutdown
+		drop(input_lq_send);
+
+		// Wait for output
+		let (tx_task_res, arch_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+				.await
+				.unwrap();
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 1);
+		arch_task_res.unwrap().unwrap();
+
+		// Now verify that it was in fact archived
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let res = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
+		tx.commit().await.unwrap();
+		let live_stm = res.unwrap();
+		assert_eq!(live_stm.archived, Some(self_node_id))
 	}
 
 	async fn always_give_tx(
