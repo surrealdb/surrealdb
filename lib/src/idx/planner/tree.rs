@@ -227,10 +227,6 @@ impl<'a> TreeBuilder<'a> {
 				(Operator::Contains, v) => Some(IndexOperator::Equality(v.clone())),
 				(Operator::ContainsAny, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
 				(Operator::ContainsAll, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
-				(Operator::ContainsNone, Value::Array(_)) => {
-					todo!()
-				}
-				(Operator::ContainsNot, _) => todo!(),
 				(
 					Operator::LessThan
 					| Operator::LessThanOrEqual
