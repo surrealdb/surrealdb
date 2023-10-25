@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
-	IndexAll(IndexAllThingIterator),
+	IndexUnion(IndexUnionThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
@@ -35,7 +35,7 @@ impl ThingIterator {
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
-			ThingIterator::IndexAll(i) => i.next_batch(tx, size).await,
+			ThingIterator::IndexUnion(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
 		}
@@ -61,11 +61,11 @@ impl IndexEqualThingIterator {
 	async fn next_scan(
 		txn: &Transaction,
 		beg: &mut Vec<u8>,
-		end: &Vec<u8>,
+		end: &[u8],
 		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = beg.clone();
-		let max = end.clone();
+		let max = end.to_owned();
 		let res = txn.lock().await.scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
@@ -193,12 +193,12 @@ impl IndexRangeThingIterator {
 	}
 }
 
-pub(crate) struct IndexAllThingIterator {
+pub(crate) struct IndexUnionThingIterator {
 	values_iter: IntoIter<(Vec<u8>, Vec<u8>)>,
 	current: Option<(Vec<u8>, Vec<u8>)>,
 }
 
-impl IndexAllThingIterator {
+impl IndexUnionThingIterator {
 	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
 		// We create an iterator, as we are going iterate over every values of the array.
 		// Each item of the iterator are the prefix keys (begin and end).

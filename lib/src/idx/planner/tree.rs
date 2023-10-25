@@ -213,10 +213,8 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_knn_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
 		if let Operator::Knn(k) = op {
-			if let Node::Computed(v) = n {
-				if let Value::Array(a) = v {
-					return Some(IndexOperator::Knn(a.clone(), *k));
-				}
+			if let Node::Computed(Value::Array(a)) = n {
+				return Some(IndexOperator::Knn(a.clone(), *k));
 			}
 		}
 		None
@@ -226,17 +224,13 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v) {
 				(Operator::Equal, v) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::Contains, v) => Some(IndexOperator::Contains(v.clone())),
-				(Operator::ContainsAny, Value::Array(a)) => {
-					Some(IndexOperator::ContainsAny(a.clone()))
+				(Operator::Contains, v) => Some(IndexOperator::Equality(v.clone())),
+				(Operator::ContainsAny, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
+				(Operator::ContainsAll, Value::Array(a)) => Some(IndexOperator::Union(a.clone())),
+				(Operator::ContainsNone, Value::Array(_)) => {
+					todo!()
 				}
-				(Operator::ContainsAll, Value::Array(a)) => {
-					Some(IndexOperator::ContainsAll(a.clone()))
-				}
-				(Operator::ContainsNone, Value::Array(a)) => {
-					Some(IndexOperator::ContainsNone(a.clone()))
-				}
-				(Operator::ContainsNot, v) => Some(IndexOperator::ContainsNot(v.clone())),
+				(Operator::ContainsNot, _) => todo!(),
 				(
 					Operator::LessThan
 					| Operator::LessThanOrEqual

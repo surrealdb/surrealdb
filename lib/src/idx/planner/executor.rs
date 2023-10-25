@@ -6,7 +6,7 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	IndexAllThingIterator, IndexEqualThingIterator, IndexRangeThingIterator, KnnThingIterator,
+	IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator, KnnThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -225,11 +225,11 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Option<ThingIterator> {
 		match io.op() {
-			IndexOperator::Equality(value) | IndexOperator::Contains(value) => {
+			IndexOperator::Equality(value) => {
 				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)))
 			}
-			IndexOperator::ContainsAll(value) => {
-				Some(ThingIterator::IndexAll(IndexAllThingIterator::new(opt, ix, value)))
+			IndexOperator::Union(value) => {
+				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(opt, ix, value)))
 			}
 			_ => None,
 		}

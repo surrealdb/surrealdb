@@ -947,7 +947,7 @@ async fn select_contains() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'subject_idx',
-							operator: 'CONTAINS',
+							operator: '=',
 							value: 'english'
 						},
 						table: 'student',
@@ -971,7 +971,7 @@ async fn select_contains() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'subject_idx',
-							operator: 'CONTAINSALL',
+							operator: 'union',
 							value: ['hindi', 'maths']
 						},
 						table: 'student',

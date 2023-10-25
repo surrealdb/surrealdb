@@ -147,11 +147,7 @@ pub(super) struct Inner {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Value),
-	Contains(Value),
-	ContainsNot(Value),
-	ContainsAll(Array),
-	ContainsAny(Array),
-	ContainsNone(Array),
+	Union(Array),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
@@ -167,7 +163,7 @@ impl IndexOption {
 	}
 
 	pub(super) fn require_distinct(&self) -> bool {
-		matches!(self.0.op, IndexOperator::ContainsAll(_))
+		matches!(self.0.op, IndexOperator::Union(_))
 	}
 
 	pub(super) fn ir(&self) -> IndexRef {
@@ -197,24 +193,8 @@ impl IndexOption {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
-			IndexOperator::Contains(v) => {
-				e.insert("operator", Value::from(Operator::Contains.to_string()));
-				e.insert("value", Self::reduce_array(v));
-			}
-			IndexOperator::ContainsNot(v) => {
-				e.insert("operator", Value::from(Operator::ContainsNot.to_string()));
-				e.insert("value", v.clone());
-			}
-			IndexOperator::ContainsNone(a) => {
-				e.insert("operator", Value::from(Operator::ContainsNone.to_string()));
-				e.insert("value", Value::Array(a.clone()));
-			}
-			IndexOperator::ContainsAll(a) => {
-				e.insert("operator", Value::from(Operator::ContainsAll.to_string()));
-				e.insert("value", Value::Array(a.clone()));
-			}
-			IndexOperator::ContainsAny(a) => {
-				e.insert("operator", Value::from(Operator::ContainsAny.to_string()));
+			IndexOperator::Union(a) => {
+				e.insert("operator", Value::from("union"));
 				e.insert("value", Value::Array(a.clone()));
 			}
 			IndexOperator::Matches(qs, a) => {
