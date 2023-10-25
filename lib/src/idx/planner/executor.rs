@@ -199,8 +199,8 @@ impl QueryExecutor {
 				IteratorEntry::Single(_, io) => {
 					if let Some(ix) = self.index_definitions.get(&io.ir()) {
 						match ix.index {
-							Index::Idx => Self::new_index_iterator(opt, ix, io.clone()),
-							Index::Uniq => Self::new_unique_index_iterator(opt, ix, io.clone()),
+							Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
+							Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
 							Index::Search {
 								..
 							} => self.new_search_index_iterator(ir, io.clone()).await,
@@ -211,7 +211,7 @@ impl QueryExecutor {
 					}
 				}
 				IteratorEntry::Range(_, ir, from, to) => {
-					Ok(self.new_range_iterator(opt, *ir, from, to)?)
+					Ok(self.new_range_iterator(opt, *ir, from, to))
 				}
 			}
 		} else {
@@ -223,16 +223,15 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Option<ThingIterator> {
 		match io.op() {
 			IndexOperator::Equality(value) | IndexOperator::Contains(value) => {
-				Ok(Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)?)))
+				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)))
 			}
 			IndexOperator::ContainsAll(value) => {
-				Ok(Some(ThingIterator::IndexAll(IndexAllThingIterator::new(opt, ix, value)?)))
+				Some(ThingIterator::IndexAll(IndexAllThingIterator::new(opt, ix, value)))
 			}
-			IndexOperator::RangePart(_, _) => Ok(None), // TODO
-			_ => Ok(None),
+			_ => None,
 		}
 	}
 
@@ -242,38 +241,35 @@ impl QueryExecutor {
 		ir: IndexRef,
 		from: &RangeValue,
 		to: &RangeValue,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Option<ThingIterator> {
 		if let Some(ix) = self.index_definitions.get(&ir) {
 			match ix.index {
 				Index::Idx => {
-					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
 						opt, ix, from, to,
-					))))
+					)))
 				}
 				Index::Uniq => {
-					return Ok(Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+					return Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
 						opt, ix, from, to,
-					))))
+					)))
 				}
 				_ => {}
 			}
 		}
-		Ok(None)
+		None
 	}
 
 	fn new_unique_index_iterator(
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Option<ThingIterator> {
 		match io.op() {
 			IndexOperator::Equality(value) => {
-				Ok(Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)?)))
+				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
 			}
-			IndexOperator::RangePart(_, _) => {
-				todo!()
-			}
-			_ => Ok(None),
+			_ => None,
 		}
 	}
 

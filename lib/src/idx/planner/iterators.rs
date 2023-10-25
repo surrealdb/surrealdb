@@ -11,6 +11,7 @@ use crate::sql::{Array, Thing, Value};
 use roaring::RoaringTreemap;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::vec::IntoIter;
 use tokio::sync::RwLock;
 
 pub(crate) enum ThingIterator {
@@ -47,14 +48,32 @@ pub(crate) struct IndexEqualThingIterator {
 }
 
 impl IndexEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Self {
 		let a = Array::from(v.clone());
 		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
 		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
-		Ok(Self {
+		Self {
 			beg,
 			end,
-		})
+		}
+	}
+
+	async fn next_scan(
+		txn: &Transaction,
+		beg: &mut Vec<u8>,
+		end: &Vec<u8>,
+		limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		let min = beg.clone();
+		let max = end.clone();
+		let res = txn.lock().await.scan(min..max, limit).await?;
+		if let Some((key, _)) = res.last() {
+			let mut key = key.clone();
+			key.push(0x00);
+			*beg = key;
+		}
+		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
+		Ok(res)
 	}
 
 	async fn next_batch(
@@ -62,15 +81,7 @@ impl IndexEqualThingIterator {
 		txn: &Transaction,
 		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		let min = self.beg.clone();
-		let max = self.end.clone();
-		let res = txn.lock().await.scan(min..max, limit).await?;
-		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
-			self.beg.push(0x00);
-		}
-		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
-		Ok(res)
+		Self::next_scan(txn, &mut self.beg, &self.end, limit).await
 	}
 }
 
@@ -183,24 +194,47 @@ impl IndexRangeThingIterator {
 }
 
 pub(crate) struct IndexAllThingIterator {
-	_v: Value,
+	values_iter: IntoIter<(Vec<u8>, Vec<u8>)>,
+	current: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 impl IndexAllThingIterator {
-	pub(super) fn new(
-		_opt: &Options,
-		_ix: &DefineIndexStatement,
-		_v: &Value,
-	) -> Result<Self, Error> {
-		todo!()
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
+		// We create an iterator, as we are going iterate over every values of the array.
+		// Each item of the iterator are the prefix keys (begin and end).
+		let values: Vec<(Vec<u8>, Vec<u8>)> =
+			a.0.iter()
+				.map(|v| {
+					let a = Array::from(v.clone());
+					let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+					let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+					(beg, end)
+				})
+				.collect();
+		let mut values_iter = values.into_iter();
+		let current = values_iter.next();
+		Self {
+			values_iter,
+			current,
+		}
 	}
 
 	async fn next_batch(
 		&mut self,
-		_txn: &Transaction,
-		_limit: u32,
+		txn: &Transaction,
+		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		todo!()
+		loop {
+			if let Some(r) = &mut self.current {
+				let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
+				if !res.is_empty() {
+					return Ok(res);
+				}
+			} else {
+				return Ok(vec![]);
+			}
+			self.current = self.values_iter.next();
+		}
 	}
 }
 
@@ -209,12 +243,12 @@ pub(crate) struct UniqueEqualThingIterator {
 }
 
 impl UniqueEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Result<Self, Error> {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Self {
 		let a = Array::from(v.to_owned());
 		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &a, None).into();
-		Ok(Self {
+		Self {
 			key: Some(key),
-		})
+		}
 	}
 
 	async fn next_batch(&mut self, txn: &Transaction) -> Result<Vec<(Thing, DocId)>, Error> {

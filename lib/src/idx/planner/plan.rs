@@ -149,9 +149,9 @@ pub(super) enum IndexOperator {
 	Equality(Value),
 	Contains(Value),
 	ContainsNot(Value),
-	ContainsAll(Value),
-	ContainsAny(Value),
-	ContainsNone(Value),
+	ContainsAll(Array),
+	ContainsAny(Array),
+	ContainsNone(Array),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
@@ -164,6 +164,10 @@ impl IndexOption {
 			id,
 			op,
 		}))
+	}
+
+	pub(super) fn require_distinct(&self) -> bool {
+		matches!(self.0.op, IndexOperator::ContainsAll(_))
 	}
 
 	pub(super) fn ir(&self) -> IndexRef {
@@ -201,17 +205,17 @@ impl IndexOption {
 				e.insert("operator", Value::from(Operator::ContainsNot.to_string()));
 				e.insert("value", v.clone());
 			}
-			IndexOperator::ContainsNone(v) => {
+			IndexOperator::ContainsNone(a) => {
 				e.insert("operator", Value::from(Operator::ContainsNone.to_string()));
-				e.insert("value", v.clone());
+				e.insert("value", Value::Array(a.clone()));
 			}
-			IndexOperator::ContainsAll(v) => {
+			IndexOperator::ContainsAll(a) => {
 				e.insert("operator", Value::from(Operator::ContainsAll.to_string()));
-				e.insert("value", Self::reduce_array(v));
+				e.insert("value", Value::Array(a.clone()));
 			}
-			IndexOperator::ContainsAny(v) => {
+			IndexOperator::ContainsAny(a) => {
 				e.insert("operator", Value::from(Operator::ContainsAny.to_string()));
-				e.insert("value", v.clone());
+				e.insert("value", Value::Array(a.clone()));
 			}
 			IndexOperator::Matches(qs, a) => {
 				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
@@ -332,13 +336,13 @@ mod tests {
 		let io1 = IndexOption::new(
 			1,
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Equality(Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
 			1,
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Equality(Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		set.insert(io1);
