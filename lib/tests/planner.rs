@@ -1102,3 +1102,47 @@ async fn select_contains_any() -> Result<(), Error> {
 
 	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
 }
+
+const CONTAINS_UNIQUE_CONTENT: &str = r#"
+		CREATE student:1 CONTENT { subject: "maths", mark: 50 };
+		CREATE student:2 CONTENT { subject: "english", mark: 35 };
+		CREATE student:3 CONTENT { subject: "hindi", mark: 30 };"#;
+
+#[tokio::test]
+async fn select_unique_contains() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let mut res = execute_test(&dbs, CONTAINS_UNIQUE_CONTENT, 3).await?;
+	skip_ok(&mut res, 3)?;
+
+	const SQL: &str = r#"
+		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
+		SELECT id FROM student WHERE subject CONTAINS "english";
+		DEFINE INDEX subject_idx ON student COLUMNS subject UNIQUE;
+		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
+		SELECT id FROM student WHERE subject CONTAINS "english";
+	"#;
+
+	const INDEX_EXPLAIN: &str = r"[
+				{
+					detail: {
+						table: 'student'
+					},
+					detail: {
+						plan: {
+							index: 'subject_idx',
+							operator: '=',
+							value: 'english'
+						},
+						table: 'student',
+					},
+					operation: 'Iterate Index'
+				}
+			]";
+	const RESULT: &str = r"[
+		{
+			id: student:2
+		}
+	]";
+
+	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+}
