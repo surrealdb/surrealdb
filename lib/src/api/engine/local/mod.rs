@@ -383,9 +383,9 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 					}
 				}
 				Value::None | Value::Null => {}
-				value => return Ok(value)
+				value => return Ok(value),
 			},
-			false => return Ok(value)
+			false => return Ok(value),
 		}
 	}
 	match one {
