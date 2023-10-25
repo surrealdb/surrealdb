@@ -54,11 +54,11 @@ impl ser::Serializer for Serializer {
 			"LessThanOrEqual" => Ok(Operator::LessThanOrEqual),
 			"MoreThan" => Ok(Operator::MoreThan),
 			"MoreThanOrEqual" => Ok(Operator::MoreThanOrEqual),
-			"Contain" => Ok(Operator::Contains),
-			"NotContain" => Ok(Operator::ContainsNot),
-			"ContainAll" => Ok(Operator::ContainsAll),
-			"ContainAny" => Ok(Operator::ContainsAny),
-			"ContainNone" => Ok(Operator::ContainsNone),
+			"Contain" => Ok(Operator::Contain),
+			"NotContain" => Ok(Operator::NotContain),
+			"ContainAll" => Ok(Operator::ContainAll),
+			"ContainAny" => Ok(Operator::ContainAny),
+			"ContainNone" => Ok(Operator::ContainNone),
 			"Inside" => Ok(Operator::Inside),
 			"NotInside" => Ok(Operator::NotInside),
 			"AllInside" => Ok(Operator::AllInside),
@@ -247,35 +247,35 @@ mod tests {
 
 	#[test]
 	fn contain() {
-		let dir = Operator::Contains;
+		let dir = Operator::Contain;
 		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn not_contain() {
-		let dir = Operator::ContainsNot;
+		let dir = Operator::NotContain;
 		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_all() {
-		let dir = Operator::ContainsAll;
+		let dir = Operator::ContainAll;
 		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_any() {
-		let dir = Operator::ContainsAny;
+		let dir = Operator::ContainAny;
 		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_none() {
-		let dir = Operator::ContainsNone;
+		let dir = Operator::ContainNone;
 		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}

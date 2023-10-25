@@ -261,13 +261,13 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
 				(Operator::Equal, v, _) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::Contains, v, IdiomPosition::Left) => {
+				(Operator::Contain, v, IdiomPosition::Left) => {
 					Some(IndexOperator::Equality(v.clone()))
 				}
-				(Operator::ContainsAny, Value::Array(a), IdiomPosition::Left) => {
+				(Operator::ContainAny, Value::Array(a), IdiomPosition::Left) => {
 					Some(IndexOperator::Union(a.clone()))
 				}
-				(Operator::ContainsAll, Value::Array(a), IdiomPosition::Left) => {
+				(Operator::ContainAll, Value::Array(a), IdiomPosition::Left) => {
 					Some(IndexOperator::Union(a.clone()))
 				}
 				(
