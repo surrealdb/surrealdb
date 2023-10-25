@@ -362,14 +362,21 @@ impl Surreal<Db> {
 }
 
 fn process(responses: Vec<Response>) -> Result<QueryResponse> {
-	let mut map = IndexMap::with_capacity(responses.len());
-	for (index, response) in responses.into_iter().enumerate() {
-		match response.result {
-			Ok(value) => map.insert(index, Ok(value)),
-			Err(error) => map.insert(index, Err(error.into())),
+	let mut results = IndexMap::with_capacity(responses.len());
+	let mut times = IndexMap::with_capacity(responses.len());
+
+	for (idx, response) in responses.into_iter().enumerate() {
+		let speed = response.speed();
+		let result = match response.result {
+			Ok(value) => Ok(value),
+			Err(error) => Err(error.into()),
 		};
+
+		results.insert(idx, result);
+		times.insert(idx, speed);
 	}
-	Ok(QueryResponse(map))
+
+	Ok(QueryResponse(results, times))
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {

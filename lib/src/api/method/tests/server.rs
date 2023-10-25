@@ -53,7 +53,9 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					_ => unreachable!(),
 				},
 				Method::Query => match param.query {
-					Some(_) => Ok(DbResponse::Query(QueryResponse(Default::default()))),
+					Some(_) => {
+						Ok(DbResponse::Query(QueryResponse(Default::default(), Default::default())))
+					}
 					_ => unreachable!(),
 				},
 				Method::Create => match &params[..] {

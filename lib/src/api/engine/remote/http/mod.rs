@@ -171,19 +171,23 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			error,
 		}
 	})?;
-	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
-	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
+	let mut results = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
+	let mut times = IndexMap::<usize, String>::with_capacity(responses.len());
+
+	for (index, (time, status, value)) in responses.into_iter().enumerate() {
 		match status {
 			Status::Ok => {
-				map.insert(index, Ok(value));
+				results.insert(index, Ok(value));
 			}
 			Status::Err => {
-				map.insert(index, Err(Error::Query(value.as_raw_string()).into()));
+				results.insert(index, Err(Error::Query(value.as_raw_string()).into()));
 			}
 		}
+
+		times.insert(index, time);
 	}
 
-	Ok(QueryResponse(map))
+	Ok(QueryResponse(results, times))
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {

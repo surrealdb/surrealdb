@@ -135,7 +135,7 @@ pub(crate) type QueryResult = Result<Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
-pub struct Response(pub(crate) IndexMap<usize, QueryResult>);
+pub struct Response(pub(crate) IndexMap<usize, QueryResult>, pub(crate) IndexMap<usize, String>);
 
 impl Response {
 	/// Takes and returns records returned from the database
@@ -205,6 +205,27 @@ impl Response {
 		R: DeserializeOwned,
 	{
 		index.query_result(self)
+	}
+
+	/// Takes and returns the execution time of a query
+	///
+	/// The time is keyed by the corresponding index of the statement that was executed.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::sql;
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// # let mut response = db.query("SELECT * FROM user").await?;
+	/// let time = response.take_time(0);
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn take_time(&mut self, index: usize) -> Option<String> {
+		self.1.remove(&index)
 	}
 
 	/// Take all errors from the query response
@@ -310,42 +331,45 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, QueryResult> {
-		vec.into_iter().enumerate().collect()
+	fn response_of(vec: Vec<QueryResult>) -> Response {
+		let times = vec!["1ms"; vec.len()].into_iter().map(String::from).enumerate().collect();
+		let results = vec.into_iter().enumerate().collect();
+
+		Response(results, times)
 	}
 
 	#[test]
 	fn take_from_an_empty_response() {
-		let mut response = Response(Default::default());
+		let mut response = response_of(vec![]);
 		let value: Value = response.take(0).unwrap();
 		assert!(value.is_none());
 
-		let mut response = Response(Default::default());
+		let mut response = response_of(vec![]);
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response(Default::default());
+		let mut response = response_of(vec![]);
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
 
 	#[test]
 	fn take_from_an_errored_query() {
-		let mut response = Response(to_map(vec![Err(Error::ConnectionUninitialised.into())]));
+		let mut response = response_of(vec![Err(Error::ConnectionUninitialised.into())]);
 		response.take::<Option<()>>(0).unwrap_err();
 	}
 
 	#[test]
 	fn take_from_empty_records() {
-		let mut response = Response(to_map(vec![]));
+		let mut response = response_of(vec![]);
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Default::default());
 
-		let mut response = Response(to_map(vec![]));
+		let mut response = response_of(vec![]);
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response(to_map(vec![]));
+		let mut response = response_of(vec![]);
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
@@ -354,36 +378,36 @@ mod tests {
 	fn take_from_a_scalar_response() {
 		let scalar = 265;
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let vec: Vec<usize> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = response_of(vec![Ok(scalar.into())]);
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 	}
 
 	#[test]
 	fn take_preserves_order() {
-		let mut response = Response(to_map(vec![
+		let mut response = response_of(vec![
 			Ok(0.into()),
 			Ok(1.into()),
 			Ok(2.into()),
@@ -392,7 +416,7 @@ mod tests {
 			Ok(5.into()),
 			Ok(6.into()),
 			Ok(7.into()),
-		]));
+		]);
 		let Some(four): Option<i32> = response.take(4).unwrap() else {
 			panic!("query not found");
 		};
@@ -416,17 +440,17 @@ mod tests {
 		};
 		let value = to_value(summary.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = response_of(vec![Ok(value.clone())]);
 		let title: Value = response.take("title").unwrap();
 		assert_eq!(title, Value::from(summary.title.as_str()));
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = response_of(vec![Ok(value.clone())]);
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
 		};
 		assert_eq!(title, summary.title);
 
-		let mut response = Response(to_map(vec![Ok(value)]));
+		let mut response = response_of(vec![Ok(value)]);
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![summary.title]);
 
@@ -436,7 +460,7 @@ mod tests {
 		};
 		let value = to_value(article.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = response_of(vec![Ok(value.clone())]);
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
 		};
@@ -446,27 +470,27 @@ mod tests {
 		};
 		assert_eq!(body, article.body);
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = response_of(vec![Ok(value.clone())]);
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
-		let mut response = Response(to_map(vec![Ok(value)]));
+		let mut response = response_of(vec![Ok(value)]);
 		let value: Value = response.take("title").unwrap();
 		assert_eq!(value, Value::from(article.title));
 	}
 
 	#[test]
 	fn take_partial_records() {
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let mut response = response_of(vec![Ok(vec![true, false].into())]);
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
 
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let mut response = response_of(vec![Ok(vec![true, false].into())]);
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
-		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0)
+		let mut response = response_of(vec![Ok(vec![true, false].into())]);
+		let Err(Api(Error::LossyTake(Response(mut map, _)))): Result<Option<bool>> = response.take(0)
 		else {
 			panic!("silently dropping records not allowed");
 		};
@@ -489,7 +513,7 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let response = Response(to_map(response));
+		let response = response_of(response);
 		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
 		else {
 			panic!("check did not return the first error");
@@ -511,7 +535,7 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let mut response = Response(to_map(response));
+		let mut response = response_of(response);
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
@@ -530,5 +554,15 @@ mod tests {
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
 		assert_eq!(value, Value::from(3));
+	}
+
+	#[test]
+	fn take_time() {
+		let scalar = 7;
+
+		let mut response = response_of(vec![Ok(scalar.into())]);
+		let value: String = response.take_time(0).unwrap();
+
+		assert_eq!(value, "1ms");
 	}
 }

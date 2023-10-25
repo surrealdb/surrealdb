@@ -16,6 +16,7 @@ use crate::dbs::Status;
 use crate::opt::IntoEndpoint;
 use crate::sql::Strand;
 use crate::sql::Value;
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -100,7 +101,6 @@ impl From<Failure> for Error {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryMethodResponse {
-	#[allow(dead_code)]
 	time: String,
 	status: Status,
 	result: Value,
@@ -110,19 +110,25 @@ impl DbResponse {
 	fn from(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
 			Data::Other(value) => Ok(DbResponse::Other(value)),
-			Data::Query(results) => Ok(DbResponse::Query(api::Response(
-				results
-					.into_iter()
-					.map(|response| match response.status {
+			Data::Query(responses) => {
+				let mut results = IndexMap::with_capacity(responses.len());
+				let mut times = IndexMap::with_capacity(responses.len());
+
+				for (idx, response) in responses.into_iter().enumerate() {
+					let result = match response.status {
 						Status::Ok => Ok(response.result),
 						Status::Err => match response.result {
 							Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
 							message => Err(Error::Query(message.to_string()).into()),
 						},
-					})
-					.enumerate()
-					.collect(),
-			))),
+					};
+
+					results.insert(idx, result);
+					times.insert(idx, response.time);
+				}
+
+				Ok(DbResponse::Query(api::Response(results, times)))
+			}
 		}
 	}
 }

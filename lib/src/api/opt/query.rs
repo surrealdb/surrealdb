@@ -186,7 +186,7 @@ where
 }
 
 impl QueryResult<Value> for usize {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
+	fn query_result(self, QueryResponse(map, _): &mut QueryResponse) -> Result<Value> {
 		match map.remove(&self) {
 			Some(result) => Ok(result?),
 			None => Ok(Value::None),
@@ -198,7 +198,7 @@ impl<T> QueryResult<Option<T>> for usize
 where
 	T: DeserializeOwned,
 {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
+	fn query_result(self, QueryResponse(map, times): &mut QueryResponse) -> Result<Option<T>> {
 		let value = match map.get_mut(&self) {
 			Some(result) => match result {
 				Ok(val) => val,
@@ -219,7 +219,7 @@ where
 					let value = mem::take(value);
 					from_value(value).map_err(Into::into)
 				}
-				_ => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
+				_ => Err(Error::LossyTake(QueryResponse(mem::take(map), mem::take(times))).into()),
 			},
 			_ => {
 				let value = mem::take(value);
@@ -232,7 +232,7 @@ where
 }
 
 impl QueryResult<Value> for (usize, &str) {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
+	fn query_result(self, QueryResponse(map, _): &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
 		let response = match map.get_mut(&index) {
 			Some(result) => match result {
@@ -261,7 +261,7 @@ impl<T> QueryResult<Option<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
+	fn query_result(self, QueryResponse(map, times): &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
 		let value = match map.get_mut(&index) {
 			Some(result) => match result {
@@ -284,7 +284,9 @@ where
 				}
 				[value] => value,
 				_ => {
-					return Err(Error::LossyTake(QueryResponse(mem::take(map))).into());
+					return Err(
+						Error::LossyTake(QueryResponse(mem::take(map), mem::take(times))).into()
+					);
 				}
 			},
 			value => value,
@@ -313,7 +315,7 @@ impl<T> QueryResult<Vec<T>> for usize
 where
 	T: DeserializeOwned,
 {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
+	fn query_result(self, QueryResponse(map, _): &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match map.remove(&self) {
 			Some(result) => match result? {
 				Value::Array(Array(vec)) => vec,
@@ -331,7 +333,7 @@ impl<T> QueryResult<Vec<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
-	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
+	fn query_result(self, QueryResponse(map, _): &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
 		let mut response = match map.get_mut(&index) {
 			Some(result) => match result {
