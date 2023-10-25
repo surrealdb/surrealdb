@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum KeyCategory {
 	/// This category is reserved for cases when we do not know the category
 	/// It should be caught and re-populated with the correct category where appropriate

@@ -253,6 +253,7 @@ mod test {
 		) = mpsc::channel(10);
 
 		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
+		let live_query_id = Uuid::from_str("fb063201-dc2f-4cb3-bcd8-db3cbf12affd").unwrap();
 		let arch_task =
 			tokio::spawn(archive_live_queries(tx_req, *&node_id, input_lq_recv, output_lq_send));
 
@@ -275,8 +276,16 @@ mod test {
 		let val = output_lq_recv.recv().await;
 		assert!(val.is_some());
 		let val = val.unwrap();
-		// There is an error TODO validate
+
+		// There is a not found error
 		assert!(val.1.is_some());
+		let err = val.1.unwrap();
+		assert_eq!(
+			Error::LvNotFound {
+				value: live_query_id.to_string()
+			},
+			val.1.unwrap()
+		);
 
 		// Close channel for shutdown
 		drop(input_lq_send);
