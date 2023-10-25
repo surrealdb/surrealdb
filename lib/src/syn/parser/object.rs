@@ -14,9 +14,7 @@ impl Parser<'_> {
 	/// Parse an production which starts with an `{`
 	///
 	/// Either a block statemnt, a object or geometry.
-	pub(super) fn parse_object_like(&mut self) -> ParseResult<Value> {
-		let object_start = expected!(self, "{").span;
-
+	pub(super) fn parse_object_like(&mut self, start: Span) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
 			// empty object, just return
 			return Ok(Value::Object(Object::default()));
@@ -28,14 +26,14 @@ impl Parser<'_> {
 			// No way to ensure that it actually is an object as grammar is ambiguous
 			//
 			// TODO: Do something with the error produced from trying to parse the object
-			if let Ok(object) = self.parse_object(object_start) {
+			if let Ok(object) = self.parse_object(start) {
 				return Ok(Value::Object(object));
 			}
-			self.backup_after(object_start);
+			self.backup_after(start);
 		}
 
 		// not an object so instead parse as a block.
-		self.parse_block(object_start).map(Box::new).map(Value::Block)
+		self.parse_block(start).map(Box::new).map(Value::Block)
 	}
 
 	pub(super) fn parse_object(&mut self, start: Span) -> ParseResult<Object> {

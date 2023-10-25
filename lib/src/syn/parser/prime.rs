@@ -1,7 +1,10 @@
 use crate::{
-	sql::{Array, Dir, Duration, Ident, Idiom, Param, Part, Strand, Value},
+	sql::{
+		error::expected, Array, Dir, Duration, Ident, Idiom, Mock, Param, Part, Strand, Subquery,
+		Table, Value,
+	},
 	syn::{
-		parser::mac::to_do,
+		parser::mac::{expected, to_do},
 		token::{t, Span, TokenKind},
 	},
 };
@@ -13,54 +16,95 @@ impl Parser<'_> {
 		to_do!(self)
 	}
 
-	pub fn parse_primary(&mut self) -> ParseResult<Value> {
+	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {
 		let token = self.next();
-		match token.kind {
-			t!("NONE") => Ok(Value::None),
-			t!("NULL") => Ok(Value::Null),
-			t!("true") => Ok(Value::Bool(true)),
-			t!("false") => Ok(Value::Bool(false)),
+		let value = match token.kind {
+			t!("NONE") => return Ok(Value::None),
+			t!("NULL") => return Ok(Value::Null),
+			t!("true") => return Ok(Value::Bool(true)),
+			t!("false") => return Ok(Value::Bool(false)),
 			t!("<") => {
-				// future
-				to_do!(self)
+				// Casting should already have been parsed.
+				expected!(self, "FUTURE");
+				self.expect_closing_delimiter(t!(">"), token.span)?;
+				let next = expected!(self, "{").span;
+				let block = self.parse_block(next)?;
+				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
 			}
 			TokenKind::Strand => {
 				let index = u32::from(token.data_index.unwrap());
 				let strand = Strand(self.lexer.strings[index as usize].clone());
-				Ok(Value::Strand(strand))
+				return Ok(Value::Strand(strand));
 			}
 			TokenKind::Duration => {
 				let index = u32::from(token.data_index.unwrap());
 				let duration = Duration(self.lexer.durations[index as usize]);
-				Ok(Value::Duration(duration))
+				Value::Duration(duration)
 			}
 			TokenKind::Number => {
 				let index = u32::from(token.data_index.unwrap());
 				let number = self.lexer.numbers[index as usize].clone();
-				Ok(Value::Number(number))
+				Value::Number(number)
 			}
 			t!("$param") => {
 				let index = u32::from(token.data_index.unwrap());
 				let param = Param(Ident(self.lexer.strings[index as usize].clone()));
-				Ok(Value::Param(param))
+				Value::Param(param)
 			}
 			t!("FUNCTION") => {
 				to_do!(self)
 			}
 			t!("->") => {
 				let graph = self.parse_graph(Dir::In)?;
-				Ok(Value::Idiom(Idiom(vec![Part::Graph(graph)])))
+				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<->") => {
 				let graph = self.parse_graph(Dir::Both)?;
-				Ok(Value::Idiom(Idiom(vec![Part::Graph(graph)])))
+				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<-") => {
 				let graph = self.parse_graph(Dir::Out)?;
-				Ok(Value::Idiom(Idiom(vec![Part::Graph(graph)])))
+				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
-			t!("[") => self.parse_array(token.span).map(Value::Array),
-			_ => to_do!(self),
+			t!("[") => self.parse_array(token.span).map(Value::Array)?,
+			t!("{") => self.parse_object_like(token.span)?,
+			t!("|") => self.parse_mock(token.span).map(Value::Mock)?,
+			t!("IF") => {
+				let stmt = self.parse_if_stmt()?;
+				Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
+			}
+			t!("(") => {
+				self.parse_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))?
+			}
+			t!("RETURN")
+			| t!("SELECT")
+			| t!("CREATE")
+			| t!("UPDATE")
+			| t!("DELETE")
+			| t!("RELATE")
+			| t!("DEFINE")
+			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
+			_ => {
+				let identifier = self.parse_raw_ident_from_token(token)?;
+				Value::Table(Table(identifier))
+			}
+		};
+
+		if Self::continues_idiom(self.peek_kind()) {
+			match value {
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Future(_)
+				| Value::Strand(_) => unreachable!(),
+				Value::Idiom(Idiom(x)) => self.parse_remaining_idiom(x).map(Value::Idiom),
+				Value::Table(Table(x)) => {
+					self.parse_remaining_idiom(vec![Part::Field(Ident(x))]).map(Value::Idiom)
+				}
+				x => self.parse_remaining_idiom(vec![Part::Value(x)]).map(Value::Idiom),
+			}
+		} else {
+			Ok(value)
 		}
 	}
 
@@ -83,5 +127,71 @@ impl Parser<'_> {
 		}
 
 		Ok(Array(values))
+	}
+
+	pub fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
+		let name = self.parse_raw_ident()?;
+		expected!(self, ":");
+		let from = self.parse_u64()?;
+		let to = self.eat(t!("..")).then(|| self.parse_u64()).transpose()?;
+		self.expect_closing_delimiter(t!("|"), start)?;
+		if let Some(to) = to {
+			Ok(Mock::Range(name, from, to))
+		} else {
+			Ok(Mock::Count(name, from))
+		}
+	}
+
+	pub fn parse_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
+		let res = match self.peek().kind {
+			t!("RETURN") => {
+				self.pop_peek();
+				let stmt = self.parse_return_stmt()?;
+				Subquery::Output(stmt)
+			}
+			t!("SELECT") => {
+				self.pop_peek();
+				let stmt = self.parse_select_stmt()?;
+				Subquery::Select(stmt)
+			}
+			t!("CREATE") => {
+				self.pop_peek();
+				let stmt = self.parse_create_stmt()?;
+				Subquery::Create(stmt)
+			}
+			t!("UPDATE") => {
+				self.pop_peek();
+				let stmt = self.parse_update_stmt()?;
+				Subquery::Update(stmt)
+			}
+			t!("DELETE") => {
+				self.pop_peek();
+				let stmt = self.parse_delete_stmt()?;
+				Subquery::Delete(stmt)
+			}
+			t!("RELATE") => {
+				self.pop_peek();
+				let stmt = self.parse_relate_stmt()?;
+				Subquery::Relate(stmt)
+			}
+			t!("DEFINE") => {
+				self.pop_peek();
+				let stmt = self.parse_define_stmt()?;
+				Subquery::Define(stmt)
+			}
+			t!("REMOVE") => {
+				self.pop_peek();
+				let stmt = self.parse_remove_stmt()?;
+				Subquery::Remove(stmt)
+			}
+			_ => {
+				let value = self.parse_value()?;
+				Subquery::Value(value)
+			}
+		};
+		if let Some(start) = start {
+			self.expect_closing_delimiter(t!(")"), start)?;
+		}
+		Ok(res)
 	}
 }

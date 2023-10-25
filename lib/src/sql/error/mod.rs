@@ -6,6 +6,7 @@ use std::fmt::Write;
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
 use std::ops::Bound;
+use std::ops::Range;
 use thiserror::Error;
 
 mod utils;
@@ -172,7 +173,7 @@ impl Location {
 		unreachable!()
 	}
 
-	pub fn of_span(source: &str, span: Span) -> Self {
+	pub fn of_span_start(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 		let offset = span.offset as usize;
 		// Bytes of input prior to line being iteratated.
@@ -193,6 +194,86 @@ impl Location {
 			bytes_prior = bytes_so_far;
 		}
 		unreachable!()
+	}
+
+	pub fn of_span_end(source: &str, span: Span) -> Self {
+		// Bytes of input before substr.
+		let offset = span.offset as usize + span.len as usize;
+		// Bytes of input prior to line being iteratated.
+		let mut bytes_prior = 0;
+		for (line_idx, line) in source.split('\n').enumerate() {
+			// +1 for the '\n'
+			let bytes_so_far = bytes_prior + line.len() + 1;
+			if bytes_so_far > offset {
+				// found line.
+				let line_offset = offset - bytes_prior;
+				let column = line[..line_offset].chars().count();
+				// +1 because line and column are 1 index.
+				return Self {
+					line: line_idx + 1,
+					column: column + 1,
+				};
+			}
+			bytes_prior = bytes_so_far;
+		}
+		unreachable!()
+	}
+
+	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
+		// Bytes of input before substr.
+		let offset = span.offset as usize;
+		let end = offset + span.len as usize;
+
+		// Bytes of input prior to line being iteratated.
+		let mut bytes_prior = 0;
+		let mut iterator = source.split('\n').enumerate();
+		let start = loop {
+			let Some((line_idx, line)) = iterator.next() else {
+				panic!("tried to find location of span not belonging to string");
+			};
+			// +1 for the '\n'
+			let bytes_so_far = bytes_prior + line.len() + 1;
+			if bytes_so_far > offset {
+				// found line.
+				let line_offset = offset - bytes_prior;
+				let column = line[..line_offset].chars().count();
+				// +1 because line and column are 1 index.
+				if bytes_so_far > end {
+					// end is on the same line, finish immediatly.
+					let line_offset = end - bytes_prior;
+					let end_column = line[..line_offset].chars().count();
+					return Self {
+						line: line_idx + 1,
+						column: column + 1,
+					}..Self {
+						line: line_idx + 1,
+						column: end_column + 1,
+					};
+				} else {
+					break Self {
+						line: line_idx + 1,
+						column: column + 1,
+					};
+				}
+			}
+			bytes_prior = bytes_so_far;
+		};
+
+		loop {
+			let Some((line_idx, line)) = iterator.next() else {
+				panic!("tried to find location of span not belonging to string");
+			};
+			// +1 for the '\n'
+			let bytes_so_far = bytes_prior + line.len() + 1;
+			if bytes_so_far > end {
+				let line_offset = end - bytes_prior;
+				let column = line[..line_offset].chars().count();
+				return start..Self {
+					line: line_idx + 1,
+					column: column + 1,
+				};
+			}
+		}
 	}
 }
 

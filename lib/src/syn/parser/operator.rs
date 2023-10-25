@@ -8,7 +8,7 @@ use crate::syn::token::{t, TokenKind};
 use super::mac::unexpected;
 
 impl Parser<'_> {
-	pub fn parse_expression(&mut self) -> ParseResult<Value> {
+	pub fn parse_value(&mut self) -> ParseResult<Value> {
 		self.pratt_parse_expr(0)
 	}
 

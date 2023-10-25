@@ -52,8 +52,8 @@ impl Parser<'_> {
 	}
 
 	/// Parses the remaining idiom parts after the start.
-	fn parse_remaining_idiom(&mut self, start: Part) -> ParseResult<Idiom> {
-		let mut res = vec![start];
+	pub(crate) fn parse_remaining_idiom(&mut self, start: Vec<Part>) -> ParseResult<Idiom> {
+		let mut res = start;
 		loop {
 			match self.peek_kind() {
 				t!("...") => {
@@ -113,6 +113,7 @@ impl Parser<'_> {
 			}
 			_ => Part::Field(self.parse_ident()?),
 		};
+		let start = vec![start];
 		self.parse_remaining_idiom(start)
 	}
 
@@ -260,7 +261,7 @@ impl Parser<'_> {
 	pub fn parse_what_value(&mut self) -> ParseResult<Value> {
 		let start = self.parse_what_primary()?;
 		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
-			let idiom = self.parse_remaining_idiom(Part::Value(start))?;
+			let idiom = self.parse_remaining_idiom(vec![Part::Value(start)])?;
 			Ok(Value::Idiom(idiom))
 		} else {
 			Ok(start)

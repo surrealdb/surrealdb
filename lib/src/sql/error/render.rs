@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use super::Location;
 
@@ -42,6 +42,8 @@ pub struct Snippet {
 	location: Location,
 	/// The offset, in chars, into the snippet where the location is.
 	offset: usize,
+	/// The amount of characters that are part of area to be pointed to.
+	length: usize,
 	/// A possible explanation for this snippet.
 	explain: Option<String>,
 }
@@ -65,6 +67,29 @@ impl Snippet {
 			truncation,
 			location,
 			offset,
+			length: 1,
+			explain: explain.map(|x| x.into()),
+		}
+	}
+
+	pub fn from_source_location_range(
+		source: &str,
+		location: Range<Location>,
+		explain: Option<&'static str>,
+	) -> Self {
+		let line = source.split('\n').nth(location.start.line - 1).unwrap();
+		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
+		let length = if location.start.line == location.end.line {
+			location.end.column - location.start.column
+		} else {
+			1
+		};
+		Snippet {
+			source: line.to_owned(),
+			truncation,
+			location: location.start,
+			offset,
+			length,
 			explain: explain.map(|x| x.into()),
 		}
 	}
@@ -143,11 +168,15 @@ impl fmt::Display for Snippet {
 
 		let error_offset = self.offset
 			+ if matches!(self.truncation, Truncation::Start | Truncation::Both) {
-				4
+				3
 			} else {
-				1
+				0
 			};
-		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "^",)?;
+		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "",)?;
+		for _ in 0..self.length {
+			write!(f, "^")?;
+		}
+		write!(f, " ")?;
 		if let Some(ref explain) = self.explain {
 			write!(f, "{explain}")?;
 		}

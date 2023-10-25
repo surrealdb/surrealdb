@@ -113,8 +113,9 @@ impl<'a> Lexer<'a> {
 	}
 
 	fn finish_number_token(&mut self, number: Number) -> Token {
-		let id = self.strings.len() as u32;
+		let id = self.numbers.len() as u32;
 		self.numbers.push(number);
+		dbg!(&self.numbers);
 		self.finish_token(TokenKind::Number, Some(id.into()))
 	}
 

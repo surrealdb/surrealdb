@@ -201,8 +201,8 @@ async fn a_valid_notification(
 		..args
 	};
 	let mut live_stm = LiveStatement::default();
-	live_stm.id = entry.live_query_id.clone().unwrap().into();
-	live_stm.node = entry.node_id.clone().unwrap().into();
+	live_stm.id = entry.live_query_id.clone().unwrap();
+	live_stm.node = entry.node_id.clone().unwrap();
 
 	// Create heartbeat
 	tx.set_hb(entry.timestamp.unwrap().into(), entry.node_id.clone().unwrap().0).await?;

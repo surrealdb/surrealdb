@@ -10,6 +10,7 @@ use crate::{
 use self::token_buffer::TokenBuffer;
 
 mod basic;
+mod error;
 mod idiom;
 mod kind;
 mod mac;
@@ -18,54 +19,8 @@ mod operator;
 mod prime;
 mod stmt;
 mod token_buffer;
-mod value;
 
-#[derive(Debug, Clone, Copy)]
-pub struct Checkpoint(usize);
-
-#[derive(Debug)]
-pub enum ParseErrorKind {
-	/// The parser encountered an unexpected token.
-	Unexpected {
-		found: TokenKind,
-		expected: &'static str,
-	},
-	/// The parser encountered an unexpected token.
-	UnexpectedEof {
-		expected: &'static str,
-	},
-	UnclosedDelimiter {
-		expected: TokenKind,
-		should_close: Span,
-	},
-	Retried {
-		first: Box<ParseError>,
-		then: Box<ParseError>,
-	},
-	DisallowedStatement,
-	/// The parser encountered an token which could not be lexed correctly.
-	InvalidToken,
-	/// A path in the parser which was not yet finished.
-	/// Should eventually be removed.
-	Todo,
-}
-
-#[derive(Debug)]
-pub struct ParseError {
-	pub kind: ParseErrorKind,
-	pub at: Span,
-	pub backtrace: std::backtrace::Backtrace,
-}
-
-impl ParseError {
-	pub fn new(kind: ParseErrorKind, at: Span) -> Self {
-		ParseError {
-			kind,
-			at,
-			backtrace: std::backtrace::Backtrace::force_capture(),
-		}
-	}
-}
+pub use error::{ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -166,29 +121,6 @@ impl<'a> Parser<'a> {
 	pub fn backup_after(&mut self, span: Span) {
 		self.token_buffer.clear();
 		self.lexer.backup_after(span);
-	}
-
-	pub fn recover<Ff, Ft, R>(&mut self, to: Span, first: Ff, then: Ft) -> ParseResult<R>
-	where
-		Ff: FnOnce(&mut Parser) -> ParseResult<R>,
-		Ft: FnOnce(&mut Parser) -> ParseResult<R>,
-	{
-		match first(self) {
-			Ok(x) => Ok(x),
-			Err(e_first) => {
-				self.backup_before(to);
-				match then(self) {
-					Ok(x) => Ok(x),
-					Err(e_then) => {
-						let kind = ParseErrorKind::Retried {
-							first: Box::new(e_first),
-							then: Box::new(e_then),
-						};
-						Err(ParseError::new(kind, to))
-					}
-				}
-			}
-		}
 	}
 
 	/// Parse a full query.

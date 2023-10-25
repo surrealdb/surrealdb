@@ -2,7 +2,7 @@ use crate::{
 	sql::{Dir, Duration, Ident, Number, Param, Strand},
 	syn::{
 		parser::mac::{to_do, unexpected},
-		token::{t, TokenKind},
+		token::{t, Token, TokenKind},
 	},
 };
 
@@ -23,7 +23,11 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_raw_ident(&mut self) -> ParseResult<String> {
-		let token = self.next();
+		let next = self.next();
+		self.parse_raw_ident_from_token(next)
+	}
+
+	pub fn parse_raw_ident_from_token(&mut self, token: Token) -> ParseResult<String> {
 		match token.kind {
 			TokenKind::Keyword(_) | TokenKind::Language(_) | TokenKind::Algorithm(_) => {
 				let str = self.lexer.reader.span(token.span);
