@@ -13,16 +13,16 @@ pub(super) struct Tree {}
 
 #[derive(Clone, Copy)]
 enum IdiomPosition {
-	LEFT,
-	RIGHT,
+	Left,
+	Right,
 }
 
 impl IdiomPosition {
 	// Reverses the operator for non commutative operators
 	fn transform(&self, op: &Operator) -> Operator {
 		match self {
-			IdiomPosition::LEFT => op.clone(),
-			IdiomPosition::RIGHT => match op {
+			IdiomPosition::Left => op.clone(),
+			IdiomPosition::Right => match op {
 				Operator::LessThan => Operator::MoreThan,
 				Operator::LessThanOrEqual => Operator::MoreThanOrEqual,
 				Operator::MoreThan => Operator::LessThan,
@@ -189,7 +189,7 @@ impl<'a> TreeBuilder<'a> {
 						id,
 						&right,
 						e,
-						IdiomPosition::LEFT,
+						IdiomPosition::Left,
 					);
 				} else if let Some((id, irs)) = right.is_indexed_field() {
 					io = self.lookup_index_option(
@@ -198,7 +198,7 @@ impl<'a> TreeBuilder<'a> {
 						id,
 						&left,
 						e,
-						IdiomPosition::RIGHT,
+						IdiomPosition::Right,
 					);
 				};
 				Ok(Node::Expression {
@@ -261,13 +261,13 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
 				(Operator::Equal, v, _) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::Contains, v, IdiomPosition::LEFT) => {
+				(Operator::Contains, v, IdiomPosition::Left) => {
 					Some(IndexOperator::Equality(v.clone()))
 				}
-				(Operator::ContainsAny, Value::Array(a), IdiomPosition::LEFT) => {
+				(Operator::ContainsAny, Value::Array(a), IdiomPosition::Left) => {
 					Some(IndexOperator::Union(a.clone()))
 				}
-				(Operator::ContainsAll, Value::Array(a), IdiomPosition::LEFT) => {
+				(Operator::ContainsAll, Value::Array(a), IdiomPosition::Left) => {
 					Some(IndexOperator::Union(a.clone()))
 				}
 				(
