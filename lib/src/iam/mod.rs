@@ -15,7 +15,7 @@ pub mod verify;
 pub use self::auth::*;
 pub use self::entities::*;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum Error {
 	#[error("Invalid role '{0}'")]
 	InvalidRole(String),

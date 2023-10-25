@@ -751,15 +751,6 @@ pub enum Error {
 	BootstrapError(BootstrapCause),
 }
 
-impl PartialEq for Error {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(Error::FstError(e1), Error::FstError(e2)) => e1.to_string() == e2.to_string(),
-			(a, b) => a == b,
-		}
-	}
-}
-
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum BootstrapCause {
@@ -771,19 +762,7 @@ pub enum BootstrapCause {
 	JoinTaskError(TaskVariant, TokioJoinError),
 }
 
-impl PartialEq for BootstrapCause {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(
-				BootstrapCause::JoinTaskError(task1, error1),
-				BootstrapCause::JoinTaskError(task2, error2),
-			) => task1 == task2 && error1.to_string() == error2.to_string(),
-			(a, b) => a == b,
-		}
-	}
-}
-
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum TaskVariant {
 	#[error("Bootstrap scan task")]
@@ -796,7 +775,7 @@ pub enum TaskVariant {
 	BootstrapStageLog,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ChannelVariant {
 	#[error("Bootstrap scan channel")]
@@ -809,7 +788,7 @@ pub enum ChannelVariant {
 	BootstrapTxSupplier,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum UnreachableCause {
 	#[error("The node id should always be set in the options")]
@@ -840,7 +819,7 @@ pub enum UnreachableCause {
 	ShouldHaveInner,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum LiveQueryCause {
 	#[error("The timestamps in the key and the value do not match")]
@@ -853,14 +832,14 @@ pub enum LiveQueryCause {
 	FailedToDecodeNodeLiveQueryValue,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ContextCause {
 	#[error("Expected the context to include 'session'")]
 	MissingSession,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum InternalCause {
 	#[error("no versionstamp associated to this timestamp exists yet")]

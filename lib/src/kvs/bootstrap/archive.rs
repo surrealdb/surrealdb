@@ -265,7 +265,7 @@ mod test {
 					ns: "".to_string(),
 					db: "".to_string(),
 					tb: "".to_string(),
-					lq: Default::default(),
+					lq: live_query_id,
 				},
 				None,
 			))
@@ -280,12 +280,14 @@ mod test {
 		// There is a not found error
 		assert!(val.1.is_some());
 		let err = val.1.unwrap();
-		assert_eq!(
+		match err {
 			Error::LvNotFound {
-				value: live_query_id.to_string()
-			},
-			val.1.unwrap()
-		);
+				value,
+			} => {
+				assert_eq!(value, live_query_id.0.to_string());
+			}
+			_ => panic!("Expected LvNotFound error"),
+		}
 
 		// Close channel for shutdown
 		drop(input_lq_send);
