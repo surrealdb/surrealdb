@@ -8,13 +8,6 @@ use crate::{
 
 use super::{mac::unexpected, ParseResult, Parser};
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum IdiomKind {
-	Plain,
-	Basic,
-	Local,
-}
-
 impl Parser<'_> {
 	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {

@@ -74,10 +74,7 @@ impl Parser<'_> {
 			if let Some(x) = stmt.into_entry() {
 				statements.push(x);
 			} else {
-				return Err(ParseError {
-					kind: ParseErrorKind::DisallowedStatement,
-					at: statement_span,
-				});
+				return Err(ParseError::new(ParseErrorKind::DisallowedStatement, statement_span));
 			}
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;

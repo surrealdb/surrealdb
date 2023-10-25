@@ -23,7 +23,7 @@ mod value;
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ParseErrorKind {
 	/// The parser encountered an unexpected token.
 	Unexpected {
@@ -50,10 +50,21 @@ pub enum ParseErrorKind {
 	Todo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,
+	pub backtrace: std::backtrace::Backtrace,
+}
+
+impl ParseError {
+	pub fn new(kind: ParseErrorKind, at: Span) -> Self {
+		ParseError {
+			kind,
+			at,
+			backtrace: std::backtrace::Backtrace::force_capture(),
+		}
+	}
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -134,13 +145,13 @@ impl<'a> Parser<'a> {
 
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
 		if !self.eat(kind) {
-			return Err(ParseError {
-				kind: ParseErrorKind::UnclosedDelimiter {
+			return Err(ParseError::new(
+				ParseErrorKind::UnclosedDelimiter {
 					expected: kind,
 					should_close,
 				},
-				at: self.last_span(),
-			});
+				self.last_span(),
+			));
 		}
 		Ok(())
 	}
@@ -173,10 +184,7 @@ impl<'a> Parser<'a> {
 							first: Box::new(e_first),
 							then: Box::new(e_then),
 						};
-						Err(ParseError {
-							kind,
-							at: to,
-						})
+						Err(ParseError::new(kind, to))
 					}
 				}
 			}

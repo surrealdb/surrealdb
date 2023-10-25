@@ -186,6 +186,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	Ok((i, res))
 }
 
+#[derive(Debug)]
 enum DefineTableOption {
 	Drop,
 	View(View),
