@@ -550,6 +550,10 @@ pub enum Error {
 	#[error("Cannot perform division with '{0}' and '{1}'")]
 	TryDiv(String, String),
 
+	/// Cannot perform remainder
+	#[error("Cannot perform remainder with '{0}' and '{1}'")]
+	TryRem(String, String),
+
 	/// Cannot perform power
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),

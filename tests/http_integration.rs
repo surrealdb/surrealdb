@@ -438,6 +438,7 @@ mod http_integration {
 		headers.insert("NS", "N".parse()?);
 		headers.insert("DB", "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
+
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -535,6 +536,35 @@ mod http_integration {
 				.upgrade()
 				.await;
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn sql_endpoint_with_compression() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", "N".parse()?);
+		headers.insert("DB", "D".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		headers.insert(header::ACCEPT_ENCODING, "gzip".parse()?);
+
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.gzip(false) // So that the content-encoding header is not removed by Reqwest
+			.default_headers(headers.clone())
+			.build()?;
+
+		// Check that the content is gzip encoded
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
+			assert_eq!(res.status(), 200);
+			assert_eq!(res.headers()["content-encoding"], "gzip");
 		}
 
 		Ok(())
