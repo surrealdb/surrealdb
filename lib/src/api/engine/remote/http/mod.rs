@@ -188,24 +188,18 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 	if let Some(result) = query(request).await?.0.remove(&0) {
-		let result = result?;
+		let value = result?;
 		match one {
-			true => match result {
+			true => match value {
 				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
 				Value::None | Value::Null => {}
-				value => {
-					return Ok(value);
-				}
+				value => return Ok(value)
 			},
-			false => {
-				// TODO should this return a vec?
-				// My train of thought is that at an API level developers currently always expect a vec to be returned here
-				return Ok(result);
-			}
+			false => return Ok(value)
 		}
 	}
 	match one {

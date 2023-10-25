@@ -498,7 +498,6 @@ mod tests {
 
 	#[test]
 	fn take_errors() {
-		// TODO fix this test
 		let response = vec![
 			Ok(0.into()),
 			Ok(1.into()),

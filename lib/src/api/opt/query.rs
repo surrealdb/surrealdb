@@ -249,10 +249,7 @@ impl QueryResult<Value> for (usize, &str) {
 		};
 
 		let response = match response {
-			Value::Object(Object(object)) => match object.remove(key) {
-				Some(value) => value,
-				_ => Value::None,
-			},
+			Value::Object(Object(object)) => object.remove(key).unwrap_or_default(),
 			_ => Value::None,
 		};
 
@@ -266,7 +263,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let mut value: &mut Value = match map.get_mut(&index) {
+		let value = match map.get_mut(&index) {
 			Some(result) => match result {
 				Ok(val) => val,
 				Err(error) => {
@@ -279,7 +276,7 @@ where
 				return Ok(None);
 			}
 		};
-		let mut value = match &mut value {
+		let value = match value {
 			Value::Array(Array(vec)) => match &mut vec[..] {
 				[] => {
 					map.remove(&index);
@@ -292,7 +289,7 @@ where
 			},
 			value => value,
 		};
-		match &mut value {
+		match value {
 			Value::None | Value::Null => {
 				map.remove(&index);
 				Ok(None)
