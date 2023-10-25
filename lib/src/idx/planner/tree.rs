@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value, With};
+use crate::sql::{Array, Cond, Expression, Idiom, Operator, Part, Subquery, Table, Value, With};
 use async_recursion::async_recursion;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -124,6 +124,13 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
+		// Compute the idiom value if it is a param
+		if let Some(Part::Start(x)) = i.0.first() {
+			if x.is_param() {
+				let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
+				return self.eval_value(&v).await;
+			}
+		}
 		if let Some(irs) = self.find_indexes(i).await? {
 			if !irs.is_empty() {
 				return Ok(Node::IndexedField(i.to_owned(), irs));
