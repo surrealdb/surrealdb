@@ -33,10 +33,10 @@ async fn expired_nodes_are_garbage_collected() {
 
 	// Throw in some stray nodes and heartbeats
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let corrupt_node_1 = Uuid::parse_str("5a65fe57-7ac3-4b13-a31f-6376d3b484c8").unwrap();
-	let corrupt_node_2 = Uuid::parse_str("eb94a0b4-70ea-482f-a7dd-dc02132be846").unwrap();
-	tx.set_nd(corrupt_node_1).await.unwrap();
-	tx.set_hb(old_time, corrupt_node_2).await.unwrap();
+	let corrupt_node_1 = Uuid::from_str("5a65fe57-7ac3-4b13-a31f-6376d3b484c8").unwrap();
+	let corrupt_node_2 = Uuid::from_str("eb94a0b4-70ea-482f-a7dd-dc02132be846").unwrap();
+	tx.set_nd(corrupt_node_1.0).await.unwrap();
+	tx.set_hb(old_time, corrupt_node_2.0).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Set up second node at a later timestamp

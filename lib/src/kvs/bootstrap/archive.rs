@@ -20,10 +20,12 @@ pub(crate) async fn archive_live_queries(
 	node_id: Uuid,
 	mut scan_recv: mpsc::Receiver<BootstrapOperationResult>,
 	sender: mpsc::Sender<BootstrapOperationResult>,
+	batch_size: usize,
+	batch_latency: &Duration,
 ) -> Result<(), Error> {
-	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(ds::BOOTSTRAP_BATCH_SIZE);
+	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
 	loop {
-		match tokio::time::timeout(ds::BOOTSTRAP_BATCH_LATENCY, scan_recv.recv()).await {
+		match tokio::time::timeout(*batch_latency, scan_recv.recv()).await {
 			Ok(Some(bor)) => {
 				if bor.1.is_some() {
 					// send any errors further on, because we don't need to process them
@@ -35,7 +37,7 @@ pub(crate) async fn archive_live_queries(
 						.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapArchive)))?;
 				} else {
 					msg.push(bor);
-					if msg.len() >= ds::BOOTSTRAP_BATCH_SIZE {
+					if msg.len() >= batch_size {
 						let results =
 							archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 						for boresult in results {
@@ -203,6 +205,8 @@ mod test {
 	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
 	use crate::sql::Uuid;
 
+	const RETRY_DURATION: Duration = Duration::from_millis(0);
+
 	#[tokio::test]
 	async fn test_empty_archive() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -219,8 +223,14 @@ mod test {
 		) = mpsc::channel(10);
 
 		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
-		let arch_task =
-			tokio::spawn(archive_live_queries(tx_req, node_id, input_lq_recv, output_lq_send));
+		let arch_task = tokio::spawn(archive_live_queries(
+			tx_req,
+			node_id,
+			input_lq_recv,
+			output_lq_send,
+			10,
+			&RETRY_DURATION,
+		));
 
 		// deliberately close channel
 		drop(input_lq_send);
@@ -254,8 +264,14 @@ mod test {
 
 		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
 		let live_query_id = Uuid::from_str("fb063201-dc2f-4cb3-bcd8-db3cbf12affd").unwrap();
-		let arch_task =
-			tokio::spawn(archive_live_queries(tx_req, *&node_id, input_lq_recv, output_lq_send));
+		let arch_task = tokio::spawn(archive_live_queries(
+			tx_req,
+			*&node_id,
+			input_lq_recv,
+			output_lq_send,
+			10,
+			&RETRY_DURATION,
+		));
 
 		// Send input request
 		input_lq_send

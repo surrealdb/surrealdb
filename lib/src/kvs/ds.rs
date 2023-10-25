@@ -514,6 +514,8 @@ impl Datastore {
 			self.id,
 			scan_recv,
 			archive_send,
+			BOOTSTRAP_BATCH_SIZE,
+			&BOOTSTRAP_BATCH_LATENCY,
 		));
 
 		// In several new transactions, delete archived node live queries
