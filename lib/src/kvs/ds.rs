@@ -527,6 +527,7 @@ impl Datastore {
 			tx_req_send.clone(),
 			archive_recv,
 			delete_send,
+			BOOTSTRAP_BATCH_SIZE,
 		));
 
 		// We then need to collect and log the errors
