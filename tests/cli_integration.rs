@@ -84,7 +84,7 @@ mod cli_integration {
 			let args = format!("sql --conn http://{addr} {creds} --ns N --db D2 --pretty");
 			assert_eq!(
 				common::run(&args).input("SELECT * FROM thing;\n").output(),
-				Ok("[\n\t[\n\t\t{\n\t\t\tid: thing:one\n\t\t}\n\t]\n]\n\n".to_owned()),
+				Ok("-- Query 1\n[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
 				"failed to send sql: {args}"
 			);
 		}
