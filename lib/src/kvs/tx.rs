@@ -287,6 +287,7 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore.
+	/// Does not error if it does not exist.
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where

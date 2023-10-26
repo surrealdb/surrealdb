@@ -235,7 +235,7 @@ mod test {
 	}
 
 	#[tokio::test]
-	async fn inbound_messages_invalid() {
+	async fn test_invalid_message() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
@@ -253,6 +253,7 @@ mod test {
 		let arch_task =
 			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
+		println!("Before send");
 		// Send input request
 		input_lq_send
 			.send((
@@ -268,34 +269,24 @@ mod test {
 			.await
 			.unwrap();
 
-		// Wait for output
-		let val = output_lq_recv.recv().await;
-		assert!(val.is_some());
-		let val = val.unwrap();
-
-		// There is a not found error
-		assert!(val.1.is_some());
-		let err = val.1.unwrap();
-		match err {
-			Error::LvNotFound {
-				value,
-			} => {
-				assert_eq!(value, live_query_id.0.to_string());
-			}
-			_ => panic!("Expected LvNotFound error"),
-		}
-
-		// Close channel for shutdown
+		// End processing
 		drop(input_lq_send);
 
+		println!("sent from test");
+
 		// Wait for output
-		let (tx_task_res, arch_task_res) =
+		let val = output_lq_recv.recv().await;
+		println!("Received in test");
+		assert!(val.is_none(), "Expected no message as deletes on invalid keys dont cause error");
+
+		// Wait for output
+		let (tx_task_res, delete_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
 				.await
 				.unwrap();
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 1);
-		arch_task_res.unwrap().unwrap();
+		delete_task_res.unwrap().unwrap();
 	}
 
 	#[tokio::test]
@@ -318,7 +309,7 @@ mod test {
 		let database = "sample-db";
 		let table = "sampleTable";
 		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
-		let arch_task =
+		let delete_task =
 			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
 		let query = format!("LIVE SELECT * FROM {table}");
@@ -356,15 +347,15 @@ mod test {
 		assert!(msg.is_none(), "Expected channel to close without a message");
 
 		// Wait for output
-		let (tx_task_res, arch_task_res) =
-			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+		let (tx_task_res, delete_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(delete_task))
 				.await
 				.unwrap();
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 1);
-		arch_task_res.unwrap().unwrap();
+		delete_task_res.unwrap().unwrap();
 
-		// Now verify that it was in fact archived
+		// Now verify that it was in fact deleted
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbres = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
 		let ndres = tx.scan_ndlq(&self_node_id, 1000).await;
