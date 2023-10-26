@@ -216,7 +216,7 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let value = {
+	let output = {
 		let mut output = Vec::<Value>::with_capacity(num_statements);
 		for index in 0..num_statements {
 			output.push(match response.take(index) {
@@ -224,26 +224,39 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 				Err(e) => e.to_string().into(),
 			});
 		}
-		Value::from(output)
+		output
 	};
+
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => value.to_string(),
+		(false, false) => Value::from(output).to_string(),
 		// Yes prettify the SurrealQL response
-		(false, true) => format!("{value:#}"),
+		(false, true) => output
+			.iter()
+			.enumerate()
+			.map(|(i, v)| format!("-- Query {:?}\n{v:#}", i + 1))
+			.collect::<Vec<String>>()
+			.join("\n"),
 		// Don't pretty print the JSON response
-		(true, false) => serde_json::to_string(&value.into_json()).unwrap(),
+		(true, false) => serde_json::to_string(&Value::from(output).into_json()).unwrap(),
 		// Yes prettify the JSON response
-		(true, true) => {
-			let mut buf = Vec::new();
-			let mut serializer = serde_json::Serializer::with_formatter(
-				&mut buf,
-				PrettyFormatter::with_indent(b"\t"),
-			);
-			value.into_json().serialize(&mut serializer).unwrap();
-			String::from_utf8(buf).unwrap()
-		}
+		(true, true) => output
+			.iter()
+			.enumerate()
+			.map(|(i, v)| {
+				let mut buf = Vec::new();
+				let mut serializer = serde_json::Serializer::with_formatter(
+					&mut buf,
+					PrettyFormatter::with_indent(b"\t"),
+				);
+
+				v.clone().into_json().serialize(&mut serializer).unwrap();
+				let v = String::from_utf8(buf).unwrap();
+				format!("-- Query {:?}\n{v:#}", i + 1)
+			})
+			.collect::<Vec<String>>()
+			.join("\n"),
 	})
 }
 
