@@ -320,7 +320,7 @@ impl Transaction {
 		}
 		let key: Vec<u8> = key.into();
 		if self.exi(key.clone().as_slice()).await? {
-			return Err(Error::TxKeyAlreadyExists(category));
+			return Err(Error::TxKeyAlreadyExistsCategory(category));
 		}
 		// Set the key
 		let key: &[u8] = &key[..];
