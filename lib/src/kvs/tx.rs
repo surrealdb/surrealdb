@@ -8,6 +8,7 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
+#[cfg(debug_assertions)]
 use crate::key::debug;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
