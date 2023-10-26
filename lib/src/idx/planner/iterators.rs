@@ -11,7 +11,6 @@ use crate::sql::{Array, Thing, Value};
 use roaring::RoaringTreemap;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::vec::IntoIter;
 use tokio::sync::RwLock;
 
 pub(crate) enum ThingIterator {
@@ -194,15 +193,14 @@ impl IndexRangeThingIterator {
 }
 
 pub(crate) struct IndexUnionThingIterator {
-	values_iter: IntoIter<(Vec<u8>, Vec<u8>)>,
+	values: VecDeque<(Vec<u8>, Vec<u8>)>,
 	current: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 impl IndexUnionThingIterator {
 	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
-		// We create an iterator, as we are going iterate over every values of the array.
-		// Each item of the iterator are the prefix keys (begin and end).
-		let values: Vec<(Vec<u8>, Vec<u8>)> =
+		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
@@ -211,10 +209,9 @@ impl IndexUnionThingIterator {
 					(beg, end)
 				})
 				.collect();
-		let mut values_iter = values.into_iter();
-		let current = values_iter.next();
+		let current = values.pop_front();
 		Self {
-			values_iter,
+			values,
 			current,
 		}
 	}
@@ -224,17 +221,14 @@ impl IndexUnionThingIterator {
 		txn: &Transaction,
 		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		loop {
-			if let Some(r) = &mut self.current {
-				let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
-				if !res.is_empty() {
-					return Ok(res);
-				}
-			} else {
-				return Ok(vec![]);
+		while let Some(r) = &mut self.current {
+			let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
+			if !res.is_empty() {
+				return Ok(res);
 			}
-			self.current = self.values_iter.next();
+			self.current = self.values.pop_front();
 		}
+		Ok(vec![])
 	}
 }
 
