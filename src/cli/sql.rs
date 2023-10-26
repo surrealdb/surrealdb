@@ -216,7 +216,7 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let value = if num_statements > 1 {
+	let value = {
 		let mut output = Vec::<Value>::with_capacity(num_statements);
 		for index in 0..num_statements {
 			output.push(match response.take(index) {
@@ -225,8 +225,6 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 			});
 		}
 		Value::from(output)
-	} else {
-		response.take(0)?
 	};
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
