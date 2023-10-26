@@ -503,6 +503,12 @@ impl From<Vec<Operation>> for Value {
 	}
 }
 
+impl From<Vec<bool>> for Value {
+	fn from(v: Vec<bool>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<HashMap<String, Value>> for Value {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Value::Object(Object::from(v))
