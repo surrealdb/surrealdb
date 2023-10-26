@@ -503,6 +503,12 @@ impl From<Vec<Operation>> for Value {
 	}
 }
 
+impl From<Vec<bool>> for Value {
+	fn from(v: Vec<bool>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<HashMap<String, Value>> for Value {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Value::Object(Object::from(v))
@@ -989,6 +995,11 @@ impl Value {
 			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
+	}
+
+	/// Check if this Value is a Param
+	pub fn is_param(&self) -> bool {
+		matches!(self, Value::Param(_))
 	}
 
 	/// Check if this Value is a Geometry of a specific type
@@ -2137,6 +2148,10 @@ impl Value {
 		match self {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
+				from: Value::Strand(v),
+				into: "record".into(),
+			}),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2577,7 +2592,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
-			Value::MlModel(m) => m.parameters.writeable(),
+			Value::MlModel(m) => m.args.iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,

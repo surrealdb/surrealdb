@@ -1,6 +1,7 @@
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
+use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
@@ -32,6 +33,9 @@ pub struct SqlCommandArguments {
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
+	/// Whether to show welcome message
+	#[arg(long, env = "SURREAL_HIDE_WELCOME")]
+	hide_welcome: bool,
 }
 
 pub async fn init(
@@ -47,6 +51,7 @@ pub async fn init(
 		pretty,
 		json,
 		multi,
+		hide_welcome,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
@@ -109,6 +114,35 @@ pub async fn init(
 			_ => {}
 		}
 	};
+
+	if !hide_welcome {
+		let hints = vec![
+			(true, "Different statements within a query should be separated by a (;) semicolon."),
+			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
+			(true, "To exit, send a SIGTERM or press CTRL+C")
+		]
+		.iter()
+		.filter(|(show, _)| *show)
+		.map(|(_, hint)| format!("#    - {hint}"))
+		.collect::<Vec<String>>()
+		.join("\n");
+
+		eprintln!(
+			"
+#
+#  Welcome to the SurrealDB SQL shell
+#
+#  How to use this shell:
+{hints}
+#
+#  Consult https://surrealdb.com/docs/cli/sql for further instructions
+#
+#  SurrealDB version: {}
+#
+		",
+			*PKG_VERSION
+		);
+	}
 
 	// Loop over each command-line input
 	loop {
@@ -216,36 +250,42 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let value = if num_statements > 1 {
-		let mut output = Vec::<Value>::with_capacity(num_statements);
-		for index in 0..num_statements {
-			output.push(match response.take(index) {
-				Ok(v) => v,
-				Err(e) => e.to_string().into(),
-			});
-		}
-		Value::from(output)
-	} else {
-		response.take(0)?
-	};
+	let mut output = Vec::<Value>::with_capacity(num_statements);
+	for index in 0..num_statements {
+		let result = response.take(index).unwrap_or_else(|e| e.to_string().into());
+		output.push(result);
+	}
+
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => value.to_string(),
+		(false, false) => Value::from(output).to_string(),
 		// Yes prettify the SurrealQL response
-		(false, true) => format!("{value:#}"),
+		(false, true) => output
+			.iter()
+			.enumerate()
+			.map(|(i, v)| format!("-- Query {:?}\n{v:#}", i + 1))
+			.collect::<Vec<String>>()
+			.join("\n"),
 		// Don't pretty print the JSON response
-		(true, false) => serde_json::to_string(&value.into_json()).unwrap(),
+		(true, false) => serde_json::to_string(&Value::from(output).into_json()).unwrap(),
 		// Yes prettify the JSON response
-		(true, true) => {
-			let mut buf = Vec::new();
-			let mut serializer = serde_json::Serializer::with_formatter(
-				&mut buf,
-				PrettyFormatter::with_indent(b"\t"),
-			);
-			value.into_json().serialize(&mut serializer).unwrap();
-			String::from_utf8(buf).unwrap()
-		}
+		(true, true) => output
+			.iter()
+			.enumerate()
+			.map(|(i, v)| {
+				let mut buf = Vec::new();
+				let mut serializer = serde_json::Serializer::with_formatter(
+					&mut buf,
+					PrettyFormatter::with_indent(b"\t"),
+				);
+
+				v.clone().into_json().serialize(&mut serializer).unwrap();
+				let v = String::from_utf8(buf).unwrap();
+				format!("-- Query {:?}\n{v:#}", i + 1)
+			})
+			.collect::<Vec<String>>()
+			.join("\n"),
 	})
 }
 

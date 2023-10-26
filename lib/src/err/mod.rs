@@ -79,8 +79,9 @@ pub enum Error {
 	TxConditionNotMet,
 
 	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExists(KeyCategory),
+	#[error("The key being inserted already exists")]
+	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
+	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
 	#[error("Record id or key is too large")]
@@ -713,6 +714,10 @@ pub enum Error {
 	/// Auth was expected to be set but was unknown
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
+
+	/// The key being inserted in the transaction already exists
+	#[error("The key being inserted already exists: {0}")]
+	TxKeyAlreadyExistsCategory(KeyCategory),
 }
 
 impl From<Error> for String {
@@ -738,7 +743,7 @@ impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
 			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -751,7 +756,7 @@ impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
 			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -764,7 +769,7 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
