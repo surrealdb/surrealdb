@@ -69,24 +69,34 @@ impl Snippet {
 		}
 	}
 
-	/// Trims whitespace of an line and additionally truncates a string if it is too long.
-	fn truncate_line(mut line: &str, around_offset: usize) -> (&str, Truncation, usize) {
-		let full_line_length = line.chars().count();
-		line = line.trim_start();
-		// Saturate in case the error occurred in invalid leading whitespace.
-		let mut offset = around_offset.saturating_sub(full_line_length - line.chars().count());
+	/// Trims whitespace of an line and additionally truncates the string around the target_col_offset if it is too long.
+	///
+	/// returns the trimmed string, how it is truncated, and the offset into truncated the string where the target_col is located.
+	fn truncate_line(mut line: &str, target_col: usize) -> (&str, Truncation, usize) {
+		// offset in characters from the start of the string.
+		let mut offset = 0;
+		for (i, (idx, c)) in line.char_indices().enumerate() {
+			// if i == target_col the error is in the leading whitespace. so return early.
+			if i == target_col || !c.is_whitespace() {
+				line = &line[idx..];
+				offset = target_col - i;
+				break;
+			}
+		}
+
 		line = line.trim_end();
+		// truncation none because only truncated non-whitespace counts.
 		let mut truncation = Truncation::None;
 
-		if around_offset > Self::MAX_ERROR_LINE_OFFSET {
+		if offset > Self::MAX_ERROR_LINE_OFFSET {
 			// Actual error is to far to the right, just truncated everything to the left.
 			// show some prefix for some extra context.
-			let extra_offset = around_offset - 10;
+			let too_much_offset = offset - 10;
 			let mut chars = line.chars();
-			for _ in 0..extra_offset {
+			for _ in 0..too_much_offset {
 				chars.next();
 			}
-			offset -= extra_offset;
+			offset = 10;
 			line = chars.as_str();
 			truncation = Truncation::Start;
 		}
@@ -130,16 +140,86 @@ impl fmt::Display for Snippet {
 				writeln!(f, "...{}...", self.source)?;
 			}
 		}
+
 		let error_offset = self.offset
 			+ if matches!(self.truncation, Truncation::Start | Truncation::Both) {
-				3
+				4
 			} else {
-				0
+				1
 			};
 		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "^",)?;
 		if let Some(ref explain) = self.explain {
 			write!(f, "{explain}")?;
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::sql::error::{Location, Truncation};
+
+	use super::Snippet;
+
+	#[test]
+	fn truncate_whitespace() {
+		let source = "\n\n\n\t      $     \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::None);
+		assert_eq!(snippet.offset, 0);
+		assert_eq!(snippet.source.as_str(), "$");
+	}
+
+	#[test]
+	fn truncate_start() {
+		let source = "     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $     \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::Start);
+		assert_eq!(snippet.offset, 10);
+		assert_eq!(snippet.source.as_str(), "aaaaaaaaa $");
+	}
+
+	#[test]
+	fn truncate_end() {
+		let source = "\n\n  a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::End);
+		assert_eq!(snippet.offset, 2);
+		assert_eq!(
+			snippet.source.as_str(),
+			"a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		);
+	}
+
+	#[test]
+	fn truncate_both() {
+		let source = "\n\n\n\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   \t";
+		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
+		let error = &source[offset..];
+
+		let location = Location::of_in(error, source);
+
+		let snippet = Snippet::from_source_location(source, location, None);
+		assert_eq!(snippet.truncation, Truncation::Both);
+		assert_eq!(snippet.offset, 10);
+		assert_eq!(
+			snippet.source.as_str(),
+			"aaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		);
 	}
 }

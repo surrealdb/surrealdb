@@ -98,12 +98,12 @@ roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", optional = true }
 rust_decimal = { version = "1.31.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
-rustls = { version = "0.20.8", optional = true }
+rustls = { version = "0.21.6", optional = true }
 scrypt = "0.11.0"
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0.183", features = ["derive"] }
 serde_json = "1.0.104"
-sha-1 = "0.10.1"
+sha1 = "0.10.6"
 sha2 = "0.10.7"
 snap = "1.1.0"
 speedb = { version = "0.0.2", optional = true }
@@ -138,7 +138,7 @@ ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.31.0", default-features = false, features = ["macros", "io-util", "io-std", "fs", "rt-multi-thread", "time", "sync"] }
-tokio-tungstenite = { version = "0.18.0", optional = true }
+tokio-tungstenite = { version = "0.20.1", optional = true }
 uuid = { version = "1.4.1", features = ["serde", "v4", "v7"] }
 
 [lib]

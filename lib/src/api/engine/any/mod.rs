@@ -95,10 +95,8 @@ use crate::api::opt::Endpoint;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::opt::replace_tilde;
-use path_clean::PathClean;
+use crate::opt::path_to_string;
 use std::marker::PhantomData;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use url::Url;
@@ -109,20 +107,30 @@ pub trait IntoEndpoint {
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
+fn split_url(url: &str) -> (&str, &str) {
+	match url.split_once("://") {
+		Some(parts) => parts,
+		None => match url.split_once(':') {
+			Some(parts) => parts,
+			None => (url, ""),
+		},
+	}
+}
+
 impl IntoEndpoint for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
 			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
-			url if url.starts_with("ws") | url.starts_with("http") => {
+			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
 				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
 			}
+
 			_ => {
-				let (scheme, _) = self.split_once(':').unwrap_or((self, ""));
-				let path = replace_tilde(self);
+				let (scheme, path) = split_url(self);
+				let protocol = format!("{scheme}://");
 				(
-					Url::parse(&format!("{scheme}://"))
-						.map_err(|_| Error::InvalidUrl(self.to_owned()))?,
-					Path::new(&path).clean().display().to_string(),
+					Url::parse(&protocol).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					path_to_string(&protocol, path),
 				)
 			}
 		};
@@ -270,7 +278,7 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(users, Value::parse("[{}]"), "there should be no users in the system");
+		assert_eq!(users, Value::parse("{}"), "there should be no users in the system");
 	}
 
 	#[tokio::test]
