@@ -218,10 +218,8 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 	// Prepare a single value from the query response
 	let mut output = Vec::<Value>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		output.push(match response.take(index) {
-			Ok(v) => v,
-			Err(e) => e.to_string().into(),
-		});
+        let result = response.take(index).unwrap_or_else(|e| e.to_string().into());
+		output.push(result);
 	}
 
 	// Check if we should emit JSON and/or prettify
