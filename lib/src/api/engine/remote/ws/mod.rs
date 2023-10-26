@@ -14,7 +14,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
 use crate::opt::IntoEndpoint;
-use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
 use serde::Deserialize;
@@ -115,11 +114,7 @@ impl DbResponse {
 				results
 					.into_iter()
 					.map(|response| match response.status {
-						Status::Ok => match response.result {
-							Value::Array(Array(values)) => Ok(values),
-							Value::None | Value::Null => Ok(vec![]),
-							value => Ok(vec![value]),
-						},
+						Status::Ok => Ok(response.result),
 						Status::Err => match response.result {
 							Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
 							message => Err(Error::Query(message.to_string()).into()),
