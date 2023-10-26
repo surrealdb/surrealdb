@@ -77,6 +77,12 @@ impl From<Vec<Operation>> for Array {
 	}
 }
 
+impl From<Vec<bool>> for Array {
+	fn from(v: Vec<bool>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Array> for Vec<Value> {
 	fn from(s: Array) -> Self {
 		s.0
