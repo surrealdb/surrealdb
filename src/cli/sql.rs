@@ -130,10 +130,11 @@ pub async fn init(
 		eprintln!(
 			"
 #
-#  Welcome to the SurrealDB SQL Shell
+#  Welcome to the SurrealDB SQL shell
 #
 #  How to use this shell:
 {hints}
+#
 #  Consult https://surrealdb.com/docs/cli/sql for further instructions
 #
 #  SurrealDB version: {}
