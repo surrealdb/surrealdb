@@ -292,7 +292,7 @@ impl Transaction {
 		// Set the key if empty
 		match self.inner.key_exists(key.clone()).await? {
 			false => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxKeyAlreadyExists(category)),
+			_ => return Err(Error::TxKeyAlreadyExistsCategory(category)),
 		};
 		// Return result
 		Ok(())
