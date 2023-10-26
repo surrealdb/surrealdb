@@ -1,4 +1,4 @@
-use std::{fmt, ops::Range};
+use std::fmt;
 
 use super::Location;
 
@@ -67,7 +67,6 @@ impl Snippet {
 			truncation,
 			location,
 			offset,
-			length: 1,
 			explain: explain.map(|x| x.into()),
 		}
 	}
