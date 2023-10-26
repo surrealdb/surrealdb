@@ -121,13 +121,14 @@ pub async fn init(
 			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
 			(true, "To exit, send a SIGTERM or press CTRL+C")
 		]
-			.iter()
-			.filter(|(show, _)| *show)
-			.map(|(_, hint)| format!("#    - {hint}"))
-			.collect::<Vec<String>>()
-			.join("\n");
+		.iter()
+		.filter(|(show, _)| *show)
+		.map(|(_, hint)| format!("#    - {hint}"))
+		.collect::<Vec<String>>()
+		.join("\n");
 
-		eprintln!("
+		eprintln!(
+			"
 #
 #  Welcome to the SurrealDB SQL Shell
 #
@@ -137,7 +138,9 @@ pub async fn init(
 #
 #  SurrealDB version: {}
 #
-		", *PKG_VERSION);
+		",
+			*PKG_VERSION
+		);
 	}
 
 	// Loop over each command-line input
