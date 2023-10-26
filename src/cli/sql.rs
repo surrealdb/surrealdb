@@ -116,22 +116,28 @@ pub async fn init(
 	};
 
 	if !hide_welcome {
-		eprintln!(
-			"
+		let hints = vec![
+			(true, "Different statements within a query should be separated by a (;) semicolon."),
+			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
+			(true, "To exit, send a SIGTERM or press CTRL+C")
+		]
+			.iter()
+			.filter(|(show, _)| *show)
+			.map(|(_, hint)| format!("#    - {hint}"))
+			.collect::<Vec<String>>()
+			.join("\n");
+
+		eprintln!("
 #
 #  Welcome to the SurrealDB SQL Shell
 #
 #  How to use this shell:
-#    - Different statements within a query should be separated by a (;) semicolon.
-#    - To create a multi-line query, end your lines with a (\\) backslash, and press enter.
-#    - To exit, send a SIGTERM or press CTRL+C
+{hints}
 #  Consult https://surrealdb.com/docs/cli/sql for further instructions
 #
-#  SurrealDB version: {:#}
+#  SurrealDB version: {}
 #
-	",
-			PKG_VERSION.to_string()
-		);
+		", *PKG_VERSION);
 	}
 
 	// Loop over each command-line input
