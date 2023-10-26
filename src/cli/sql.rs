@@ -1,8 +1,8 @@
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
-use crate::err::Error;
 use crate::cnf::PKG_VERSION;
+use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
@@ -116,7 +116,8 @@ pub async fn init(
 	};
 
 	if !hide_welcome {
-		eprintln!("
+		eprintln!(
+			"
 #
 #  Welcome to the SurrealDB SQL Shell
 #
@@ -128,7 +129,9 @@ pub async fn init(
 #
 #  SurrealDB version: {:#}
 #
-	", PKG_VERSION.to_string());
+	",
+			PKG_VERSION.to_string()
+		);
 	}
 
 	// Loop over each command-line input
