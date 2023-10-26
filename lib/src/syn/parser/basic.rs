@@ -6,7 +6,7 @@ use crate::{
 	},
 };
 
-use super::{ParseResult, Parser};
+use super::{NumberParseError, ParseError, ParseErrorKind, ParseResult, Parser};
 
 impl Parser<'_> {
 	pub fn parse_ident(&mut self) -> ParseResult<Ident> {
@@ -48,23 +48,167 @@ impl Parser<'_> {
 	}
 
 	pub(super) fn parse_u64(&mut self) -> ParseResult<u64> {
-		to_do!(self)
+		let next = self.next();
+		let number = match next.kind {
+			TokenKind::Number => {
+				let number =
+					self.lexer.numbers[u32::from(next.data_index.unwrap()) as usize].clone();
+				match number {
+					Number::Int(x) => {
+						if x < 0 {
+							to_do!(self)
+						}
+						x as u64
+					}
+					Number::Float(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::FloatToInt,
+							},
+							self.last_span(),
+						))
+					}
+					Number::Decimal(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::DecimalToInt,
+							},
+							self.last_span(),
+						))
+					}
+				}
+			}
+			x => unexpected!(self, x, "an integer"),
+		};
+		Ok(number)
 	}
 
 	pub(super) fn parse_u32(&mut self) -> ParseResult<u32> {
-		to_do!(self)
+		let next = self.next();
+		let number = match next.kind {
+			TokenKind::Number => {
+				let number =
+					self.lexer.numbers[u32::from(next.data_index.unwrap()) as usize].clone();
+				match number {
+					Number::Int(x) => {
+						if x < 0 {
+							to_do!(self)
+						}
+						match u32::try_from(x) {
+							Ok(x) => x,
+							Err(_) => {
+								return Err(ParseError::new(
+									ParseErrorKind::InvalidNumber {
+										error: NumberParseError::IntegerOverflow,
+									},
+									self.last_span(),
+								))
+							}
+						}
+					}
+					Number::Float(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::FloatToInt,
+							},
+							self.last_span(),
+						))
+					}
+					Number::Decimal(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::DecimalToInt,
+							},
+							self.last_span(),
+						))
+					}
+				}
+			}
+			x => unexpected!(self, x, "an integer"),
+		};
+		Ok(number)
 	}
 
 	pub(super) fn parse_u16(&mut self) -> ParseResult<u16> {
-		to_do!(self)
+		let next = self.next();
+		let number = match next.kind {
+			TokenKind::Number => {
+				let number =
+					self.lexer.numbers[u32::from(next.data_index.unwrap()) as usize].clone();
+				match number {
+					Number::Int(x) => {
+						if x < 0 {
+							to_do!(self)
+						}
+						match u16::try_from(x) {
+							Ok(x) => x,
+							Err(_) => {
+								return Err(ParseError::new(
+									ParseErrorKind::InvalidNumber {
+										error: NumberParseError::IntegerOverflow,
+									},
+									self.last_span(),
+								))
+							}
+						}
+					}
+					Number::Float(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::FloatToInt,
+							},
+							self.last_span(),
+						))
+					}
+					Number::Decimal(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::DecimalToInt,
+							},
+							self.last_span(),
+						))
+					}
+				}
+			}
+			x => unexpected!(self, x, "an integer"),
+		};
+		Ok(number)
 	}
 
 	pub(super) fn parse_f32(&mut self) -> ParseResult<f32> {
-		to_do!(self)
+		let next = self.next();
+		let number = match next.kind {
+			TokenKind::Number => {
+				let number =
+					self.lexer.numbers[u32::from(next.data_index.unwrap()) as usize].clone();
+				match number {
+					Number::Int(x) => x as f32,
+					Number::Float(x) => x as f32,
+					Number::Decimal(_) => {
+						return Err(ParseError::new(
+							ParseErrorKind::InvalidNumber {
+								error: NumberParseError::DecimalToInt,
+							},
+							self.last_span(),
+						))
+					}
+				}
+			}
+			x => unexpected!(self, x, "an floating point"),
+		};
+		Ok(number)
 	}
 
 	pub(super) fn parse_number(&mut self) -> ParseResult<Number> {
-		to_do!(self)
+		let next = self.next();
+		match next.kind {
+			TokenKind::Number => {
+				let number =
+					self.lexer.numbers[u32::from(next.data_index.unwrap()) as usize].clone();
+				return Ok(number);
+			}
+			x => unexpected!(self, x, "a number"),
+		}
 	}
 
 	pub(super) fn parse_param(&mut self) -> ParseResult<Param> {

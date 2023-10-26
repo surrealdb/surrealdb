@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Dir, Field, Fields, Graph, Idiom, Part, Table, Tables, Value},
+	sql::{Dir, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
 	syn::{
 		parser::mac::to_do,
 		token::{t, Span, TokenKind},
@@ -248,8 +248,9 @@ impl Parser<'_> {
 	/// Expects to be at the start of a what list.
 	pub fn parse_what_list(&mut self) -> ParseResult<Vec<Value>> {
 		let mut res = vec![self.parse_what_value()?];
+		dbg!(self.peek());
 		while self.eat(t!(",")) {
-			res.push(self.parse_what_value()?)
+			res.push(dbg!(self.parse_what_value())?)
 		}
 		Ok(res)
 	}
@@ -260,8 +261,14 @@ impl Parser<'_> {
 	/// Expects to be at the start of a what value
 	pub fn parse_what_value(&mut self) -> ParseResult<Value> {
 		let start = self.parse_what_primary()?;
-		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
-			let idiom = self.parse_remaining_idiom(vec![Part::Value(start)])?;
+		if dbg!(start.can_start_idiom()) && dbg!(Self::continues_idiom(self.peek_kind())) {
+			let start = match start {
+				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
+				Value::Idiom(Idiom(x)) => x,
+				x => vec![Part::Value(x)],
+			};
+
+			let idiom = self.parse_remaining_idiom(start)?;
 			Ok(Value::Idiom(idiom))
 		} else {
 			Ok(start)

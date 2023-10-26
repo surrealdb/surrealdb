@@ -10,7 +10,41 @@ use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	pub fn parse_what_primary(&mut self) -> ParseResult<Value> {
-		to_do!(self)
+		match self.peek_kind() {
+			TokenKind::Duration => {
+				let duration = self.parse_duration()?;
+				Ok(Value::Duration(duration))
+			}
+			t!("$param") => {
+				let param = self.parse_param()?;
+				Ok(Value::Param(param))
+			}
+			t!("IF") => {
+				let stmt = self.parse_if_stmt()?;
+				Ok(Value::Subquery(Box::new(Subquery::Ifelse(stmt))))
+			}
+			t!("(") => {
+				let token = self.pop_peek();
+				self.parse_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))
+			}
+			t!("<") => {
+				self.pop_peek();
+				expected!(self, "FUTURE");
+				expected!(self, ">");
+				let start = expected!(self, "{").span;
+				let block = self.parse_block(start)?;
+				Ok(Value::Future(Box::new(crate::sql::Future(block))))
+			}
+			t!("RETURN")
+			| t!("SELECT")
+			| t!("CREATE")
+			| t!("UPDATE")
+			| t!("DELETE")
+			| t!("RELATE")
+			| t!("DEFINE")
+			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
+			_ => self.parse_raw_ident().map(|x| Value::Table(Table(x))),
+		}
 	}
 
 	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {

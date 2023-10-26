@@ -20,9 +20,13 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_inner_kind(&mut self) -> ParseResult<Kind> {
-		match self.next().kind {
-			t!("ANY") => Ok(Kind::Any),
+		match self.peek_kind() {
+			t!("ANY") => {
+				self.pop_peek();
+				Ok(Kind::Any)
+			}
 			t!("OPTION") => {
+				self.pop_peek();
 				let delim = expected!(self, "<").span;
 				let kind = self.parse_concrete_kind()?;
 				self.expect_closing_delimiter(t!(">"), delim)?;

@@ -23,7 +23,7 @@ mod token_buffer;
 #[cfg(test)]
 mod test;
 
-pub use error::{ParseError, ParseErrorKind};
+pub use error::{NumberParseError, ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 

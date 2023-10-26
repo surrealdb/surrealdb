@@ -1090,7 +1090,8 @@ impl Value {
 			| Value::Array(_)
 			| Value::Param(_)
 			| Value::Edges(_)
-			| Value::Thing(_) => true,
+			| Value::Thing(_)
+			| Value::Table(_) => true,
 			_ => false,
 		}
 	}

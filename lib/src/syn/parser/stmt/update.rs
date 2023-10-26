@@ -8,9 +8,6 @@ use crate::{
 
 impl Parser<'_> {
 	pub fn parse_update_stmt(&mut self) -> ParseResult<UpdateStatement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("UPDATE"));
-
 		let only = self.eat(t!("ONLY"));
 		let what = Values(self.parse_what_list()?);
 		let data = self.try_parse_data()?;

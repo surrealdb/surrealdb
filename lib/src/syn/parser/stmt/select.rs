@@ -27,7 +27,7 @@ impl Parser<'_> {
 		while self.eat(t!(",")) {
 			what.push(self.parse_value()?);
 		}
-		let what = Values(what);
+		let what = dbg!(Values(what));
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition()?;
@@ -148,7 +148,7 @@ impl Parser<'_> {
 	}
 
 	fn try_parse_limit(&mut self) -> ParseResult<Option<Limit>> {
-		if self.eat(t!("LIMIT")) {
+		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
@@ -157,7 +157,7 @@ impl Parser<'_> {
 	}
 
 	fn try_parse_start(&mut self) -> ParseResult<Option<Start>> {
-		if self.eat(t!("START")) {
+		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
@@ -166,7 +166,7 @@ impl Parser<'_> {
 	}
 
 	fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
-		if self.eat(t!("START")) {
+		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		to_do!(self)

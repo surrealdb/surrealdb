@@ -23,8 +23,6 @@ use crate::{
 
 impl Parser<'_> {
 	pub fn parse_define_stmt(&mut self) -> ParseResult<DefineStatement> {
-		expected!(self, "DEFINE");
-
 		match self.next().kind {
 			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
@@ -63,9 +61,11 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("CHANGEFEED") => {
+					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
 				_ => break,
@@ -86,13 +86,13 @@ impl Parser<'_> {
 
 			let param = self.parse_param()?.0;
 			expected!(self, ":");
-			let delim = expected!(self, "<").span;
-			let kind = self.parse_kind(delim)?;
+			let kind = self.parse_inner_kind()?;
 
 			args.push((param, kind));
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!(")"), token)?;
+				break;
 			}
 		}
 
@@ -109,9 +109,11 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("PERMISSIONS") => {
+					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
 				}
 				_ => break,
@@ -133,17 +135,21 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("PASSWORD") => {
+					self.pop_peek();
 					res.code = self.parse_strand()?.0;
 				}
 				t!("PASSHASH") => {
+					self.pop_peek();
 					res.hash = self.parse_strand()?.0;
 				}
 				t!("ROLES") => {
+					self.pop_peek();
 					res.roles = vec![self.parse_ident()?];
 					while self.eat(t!(",")) {
 						res.roles.push(self.parse_ident()?);
@@ -168,19 +174,24 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("VALUE") => {
+					self.pop_peek();
 					res.code = self.parse_strand()?.0;
 				}
-				t!("TYPE") => match self.next().kind {
-					TokenKind::Algorithm(x) => {
-						res.kind = x;
+				t!("TYPE") => {
+					self.pop_peek();
+					match self.next().kind {
+						TokenKind::Algorithm(x) => {
+							res.kind = x;
+						}
+						x => unexpected!(self, x, "a token algorithm"),
 					}
-					x => unexpected!(self, x, "a token algorithm"),
-				},
+				}
 				_ => break,
 			}
 		}
@@ -192,21 +203,26 @@ impl Parser<'_> {
 		let name = self.parse_ident()?;
 		let mut res = DefineScopeStatement {
 			name,
+			code: DefineScopeStatement::random_code(),
 			..Default::default()
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("SESSION") => {
+					self.pop_peek();
 					res.session = Some(self.parse_duration()?);
 				}
 				t!("SIGNUP") => {
+					self.pop_peek();
 					res.signup = Some(self.parse_value()?);
 				}
 				t!("SIGNIN") => {
+					self.pop_peek();
 					res.signin = Some(self.parse_value()?);
 				}
 				_ => break,
@@ -225,14 +241,17 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("VALUE") => {
+					self.pop_peek();
 					res.value = self.parse_value()?;
 				}
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				t!("PERMISSIONS") => {
+					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
 				}
 				_ => break,
@@ -302,17 +321,20 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("WHEN") => {
+					self.pop_peek();
 					res.when = self.parse_value()?;
 				}
 				t!("THEN") => {
+					self.pop_peek();
 					res.then = Values(vec![self.parse_value()?]);
 					while self.eat(t!(",")) {
 						res.then.0.push(self.parse_value()?)
 					}
 				}
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				_ => break,
@@ -334,25 +356,31 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				// FLEX, FLEXI and FLEXIBLE are all the same token type.
 				t!("FLEXIBLE") => {
+					self.pop_peek();
 					res.flex = true;
 				}
 				t!("TYPE") => {
+					self.pop_peek();
 					let delim = expected!(self, "<").span;
 					res.kind = Some(self.parse_kind(delim)?);
 				}
 				t!("VALUE") => {
+					self.pop_peek();
 					res.value = Some(self.parse_value()?);
 				}
 				t!("ASSERT") => {
+					self.pop_peek();
 					res.assert = Some(self.parse_value()?);
 				}
 				t!("DEFAULT") => {
+					self.pop_peek();
 					res.default = Some(self.parse_value()?);
 				}
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				_ => break,
@@ -375,18 +403,21 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				// COLUMS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
+					self.pop_peek();
 					res.cols = Idioms(vec![self.parse_local_idiom()?]);
 					while self.eat(t!(",")) {
 						res.cols.0.push(self.parse_local_idiom()?);
 					}
 				}
 				t!("UNIQUE") => {
+					self.pop_peek();
 					res.index = Index::Uniq;
 				}
 				t!("SEARCH") => {
+					self.pop_peek();
 					let analyzer =
 						self.eat(t!("ANALYZER")).then(|| self.parse_ident()).transpose()?;
 					let scoring = match self.next().kind {
@@ -460,6 +491,7 @@ impl Parser<'_> {
 					})
 				}
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				_ => break,
@@ -478,8 +510,9 @@ impl Parser<'_> {
 			comment: None,
 		};
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("FILTERS") => {
+					self.pop_peek();
 					let mut filters = Vec::new();
 					loop {
 						match self.next().kind {
@@ -523,6 +556,7 @@ impl Parser<'_> {
 					res.filters = Some(filters);
 				}
 				t!("TOKENIZERS") => {
+					self.pop_peek();
 					let mut tokenizers = Vec::new();
 
 					loop {
@@ -538,6 +572,7 @@ impl Parser<'_> {
 					res.tokenizers = Some(tokenizers);
 				}
 				t!("COMMENT") => {
+					self.pop_peek();
 					res.comment = Some(self.parse_strand()?);
 				}
 				_ => break,

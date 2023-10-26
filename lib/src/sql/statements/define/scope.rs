@@ -37,6 +37,12 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	pub(crate) fn random_code() -> String {
+		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	}
+}
+
+impl DefineScopeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -89,11 +95,7 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	// Create the base statement
 	let mut res = DefineScopeStatement {
 		name,
-		code: rand::thread_rng()
-			.sample_iter(&Alphanumeric)
-			.take(128)
-			.map(char::from)
-			.collect::<String>(),
+		code: DefineScopeStatement::random_code(),
 		..Default::default()
 	};
 	// Assign any defined options

@@ -4,6 +4,13 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub enum NumberParseError {
+	FloatToInt,
+	DecimalToInt,
+	IntegerOverflow,
+}
+
+#[derive(Debug)]
 pub enum ParseErrorKind {
 	/// The parser encountered an unexpected token.
 	Unexpected {
@@ -21,6 +28,9 @@ pub enum ParseErrorKind {
 	Retried {
 		first: Box<ParseError>,
 		then: Box<ParseError>,
+	},
+	InvalidNumber {
+		error: NumberParseError,
 	},
 	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
@@ -95,7 +105,7 @@ impl ParseError {
 			} => todo!(),
 			ParseErrorKind::DisallowedStatement => todo!(),
 			ParseErrorKind::InvalidToken => {
-				let text = format!("Could not parse invalid token");
+				let text = "Could not parse invalid token".to_string();
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
@@ -104,11 +114,30 @@ impl ParseError {
 				}
 			}
 			ParseErrorKind::Todo => {
-				let text = format!("Parser hit not yet implemented path");
+				let text = "Parser hit not yet implemented path".to_string();
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
 					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidNumber {
+				ref error,
+			} => {
+				let text = match error {
+					NumberParseError::FloatToInt => {
+						"Found a floating point number, expected a integer"
+					}
+					NumberParseError::DecimalToInt => {
+						"Found a large decimal number, expected a integer"
+					}
+					NumberParseError::IntegerOverflow => "Number exceeded maximum allowed value",
+				};
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
 					snippets: vec![snippet],
 				}
 			}

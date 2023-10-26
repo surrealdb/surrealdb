@@ -18,7 +18,7 @@ impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
 	pub fn try_parse_data(&mut self) -> ParseResult<Option<Data>> {
-		let res = match self.peek_kind() {
+		let res = match self.next().kind {
 			t!("SET") => {
 				let mut set_list = Vec::new();
 				loop {
@@ -56,11 +56,26 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		let res = match self.peek_kind() {
-			t!("NONE") => Output::None,
-			t!("NULL") => Output::Null,
-			t!("DIFF") => Output::Diff,
-			t!("AFTER") => Output::After,
-			t!("BEFORE") => Output::Before,
+			t!("NONE") => {
+				self.pop_peek();
+				Output::None
+			}
+			t!("NULL") => {
+				self.pop_peek();
+				Output::Null
+			}
+			t!("DIFF") => {
+				self.pop_peek();
+				Output::Diff
+			}
+			t!("AFTER") => {
+				self.pop_peek();
+				Output::After
+			}
+			t!("BEFORE") => {
+				self.pop_peek();
+				Output::Before
+			}
 			_ => Output::Fields(self.parse_fields()?),
 		};
 		Ok(Some(res))
