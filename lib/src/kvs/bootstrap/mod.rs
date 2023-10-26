@@ -8,6 +8,9 @@ pub(crate) use scan::scan_node_live_queries;
 mod archive;
 mod delete;
 mod scan;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+pub(crate) mod test_util;
 
 type TxRequestOneshot = oneshot::Sender<Transaction>;
 type TxResponseOneshot = oneshot::Receiver<Transaction>;

@@ -21,6 +21,7 @@ pub(crate) async fn delete_live_queries(
 ) -> Result<(), Error> {
 	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
 	loop {
+		println!("Delete loop!");
 		match tokio::time::timeout(ds::BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 			Ok(Some(bor)) => {
 				if bor.1.is_some() {
@@ -80,6 +81,7 @@ async fn delete_live_query_batch(
 	// TODO test failed tx retries
 	let mut last_err = None;
 	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
+		println!("Started the loop");
 		// In case this is a retry, we re-hydrate the msg vector
 		for (lq, e) in ret.drain(..) {
 			msg.push((lq, e));
@@ -89,20 +91,26 @@ async fn delete_live_query_batch(
 			trace!("Delete fast return because msg.len() <= 0");
 			break;
 		}
+		println!("Requesting tx");
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
 		if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
+		println!("Received tx response");
 		trace!("Receiving a tx response in delete");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
+				println!("Tx response was good");
 				trace!("Received tx in delete");
 				// Consume the input message vector of live queries to archive
 				for (lq, _e) in msg.drain(..) {
+					// TODO check if e has error and send and skip
 					// Delete the node live query
+					println!("Deleting live query: {:?}", lq);
 					if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await {
+						println!("Failed deleting node live query: {:?}", e);
 						error!("Failed deleting node live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
@@ -110,6 +118,7 @@ async fn delete_live_query_batch(
 					}
 					// Delete the table live query
 					if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *(&lq).lq).await {
+						println!("Failed deleting table live query: {:?}", e);
 						error!("Failed deleting table live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
@@ -118,6 +127,7 @@ async fn delete_live_query_batch(
 					// Delete the notifications
 					// TODO hypothetical impl
 					if let Err(e) = Ok(()) {
+						println!("Failed deleting notifications: {:?}", e);
 						error!("Failed deleting notifications: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
@@ -128,17 +138,22 @@ async fn delete_live_query_batch(
 					// TODO wrap?
 					match tx.cancel().await {
 						Ok(_) => {
+							println!(
+								"Commit failed, but rollback succeeded when deleting ndlq+tblq"
+							);
 							trace!("Commit failed, but rollback succeeded when deleting ndlq+tblq");
 							last_err = Some(e);
 						}
 						Err(e2) => {
 							// TODO wrap?
+							println!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
 							error!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
 							last_err = Some(e2);
 						}
 					}
 					continue;
 				} else {
+					println!("delete lq committed tx happy path");
 					trace!("delete lq committed tx happy path");
 					break;
 				}
@@ -167,21 +182,24 @@ async fn delete_live_query_batch(
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
-	use crate::dbs::Session;
-	use crate::err::Error;
-	use futures_concurrency::future::FutureExt;
 	use std::str::FromStr;
 	use std::sync::Arc;
 	use std::time::Duration;
+
+	use futures_concurrency::future::FutureExt;
 	use tokio::sync::mpsc;
 
-	use crate::kvs::bootstrap::{archive_live_queries, delete_live_queries, TxRequestOneshot};
+	use test_util::always_give_tx;
+
+	use crate::dbs::Session;
+	use crate::err::Error;
+	use crate::kvs::bootstrap::{delete_live_queries, test_util};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
 	use crate::sql::{Uuid, Value};
 
-	const RETRY_DURATION: Duration = Duration::from_millis(0);
+	// const RETRY_DURATION: Duration = Duration::from_millis(0);
 
 	#[tokio::test]
 	async fn test_empty_channel() {
@@ -300,14 +318,8 @@ mod test {
 		let database = "sample-db";
 		let table = "sampleTable";
 		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
-		let arch_task = tokio::spawn(archive_live_queries(
-			tx_req,
-			*&self_node_id,
-			input_lq_recv,
-			output_lq_send,
-			10,
-			&RETRY_DURATION,
-		));
+		let arch_task =
+			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
 		let query = format!("LIVE SELECT * FROM {table}");
 		let mut lq = ds.execute(&query, &sess, None).await.unwrap();
@@ -335,16 +347,13 @@ mod test {
 			.await
 			.unwrap();
 
-		// Wait for output
-		let val = output_lq_recv.recv().await;
-		assert!(val.is_some());
-		let val = val.unwrap();
-
-		// There is a not found error
-		assert!(val.1.is_none());
+		println!("Sent and waiting for delete");
 
 		// Close channel for shutdown
 		drop(input_lq_send);
+
+		let msg = output_lq_recv.recv().await;
+		assert!(msg.is_none(), "Expected channel to close without a message");
 
 		// Wait for output
 		let (tx_task_res, arch_task_res) =
@@ -357,11 +366,12 @@ mod test {
 
 		// Now verify that it was in fact archived
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let res = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
+		let tbres = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
+		let ndres = tx.scan_ndlq(&self_node_id, 1000).await;
 		tx.commit().await.unwrap();
-		match res {
+		match tbres {
 			Ok(_) => {
-				panic!("Expected not found error")
+				panic!("Expected error due to live query being deleted")
 			}
 			Err(e) => match e {
 				Error::LvNotFound {
@@ -372,28 +382,7 @@ mod test {
 				_ => panic!("Expected LvNotFound error"),
 			},
 		}
-	}
-
-	async fn always_give_tx(
-		ds: Arc<Datastore>,
-		mut tx_req_channel: mpsc::Receiver<TxRequestOneshot>,
-	) -> Result<u32, Error> {
-		let mut count = 0 as u32;
-		loop {
-			let req = tx_req_channel.recv().await;
-			match req {
-				None => break,
-				Some(r) => {
-					count += 1;
-					let tx = ds.transaction(Write, Optimistic).await?;
-					if let Err(mut tx) = r.send(tx) {
-						// The other side of the channel was probably closed
-						// Do not reduce count, because it was requested
-						tx.cancel().await?;
-					}
-				}
-			}
-		}
-		Ok(count)
+		let ndres = ndres.unwrap();
+		assert_eq!(ndres.len(), 0);
 	}
 }
