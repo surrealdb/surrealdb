@@ -2,6 +2,7 @@ use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
 use crate::err::Error;
+use crate::cnf::PKG_VERSION;
 use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
@@ -32,6 +33,9 @@ pub struct SqlCommandArguments {
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
+	/// Whether to show welcome message
+	#[arg(long, env = "SURREAL_HIDE_WELCOME")]
+	hide_welcome: bool,
 }
 
 pub async fn init(
@@ -47,6 +51,7 @@ pub async fn init(
 		pretty,
 		json,
 		multi,
+		hide_welcome,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
@@ -109,6 +114,22 @@ pub async fn init(
 			_ => {}
 		}
 	};
+
+	if !hide_welcome {
+		eprintln!("
+#
+#  Welcome to the SurrealDB SQL Shell
+#
+#  How to use this shell:
+#    - Different statements within a query should be separated by a (;) semicolon.
+#    - To create a multi-line query, end your lines with a (\\) backslash, and press enter.
+#    - To exit, send a SIGTERM or press CTRL+C
+#  Consult https://surrealdb.com/docs/cli/sql for further instructions
+#
+#  SurrealDB version: {:#}
+#
+	", PKG_VERSION.to_string());
+	}
 
 	// Loop over each command-line input
 	loop {
