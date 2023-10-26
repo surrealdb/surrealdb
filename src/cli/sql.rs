@@ -1,6 +1,7 @@
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
+use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
@@ -32,6 +33,9 @@ pub struct SqlCommandArguments {
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
+	/// Whether to show welcome message
+	#[arg(long, env = "SURREAL_HIDE_WELCOME")]
+	hide_welcome: bool,
 }
 
 pub async fn init(
@@ -47,6 +51,7 @@ pub async fn init(
 		pretty,
 		json,
 		multi,
+		hide_welcome,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
@@ -109,6 +114,35 @@ pub async fn init(
 			_ => {}
 		}
 	};
+
+	if !hide_welcome {
+		let hints = vec![
+			(true, "Different statements within a query should be separated by a (;) semicolon."),
+			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
+			(true, "To exit, send a SIGTERM or press CTRL+C")
+		]
+		.iter()
+		.filter(|(show, _)| *show)
+		.map(|(_, hint)| format!("#    - {hint}"))
+		.collect::<Vec<String>>()
+		.join("\n");
+
+		eprintln!(
+			"
+#
+#  Welcome to the SurrealDB SQL shell
+#
+#  How to use this shell:
+{hints}
+#
+#  Consult https://surrealdb.com/docs/cli/sql for further instructions
+#
+#  SurrealDB version: {}
+#
+		",
+			*PKG_VERSION
+		);
+	}
 
 	// Loop over each command-line input
 	loop {
