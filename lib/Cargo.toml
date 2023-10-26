@@ -103,7 +103,7 @@ scrypt = "0.11.0"
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0.183", features = ["derive"] }
 serde_json = "1.0.104"
-sha-1 = "0.10.1"
+sha1 = "0.10.6"
 sha2 = "0.10.7"
 snap = "1.1.0"
 speedb = { version = "0.0.2", optional = true }

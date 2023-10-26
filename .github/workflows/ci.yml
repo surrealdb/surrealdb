@@ -94,7 +94,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
 
       - name: Install stable toolchain
@@ -217,7 +217,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
 
       - name: Install stable toolchain
