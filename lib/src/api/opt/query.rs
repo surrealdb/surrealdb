@@ -180,7 +180,7 @@ where
 impl QueryResult<Value> for usize {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
 		match map.remove(&self) {
-			Some(result) => Ok(result?),
+			Some((_, result)) => Ok(result?),
 			None => Ok(Value::None),
 		}
 	}
@@ -192,7 +192,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let value = match map.get_mut(&self) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -227,7 +227,7 @@ impl QueryResult<Value> for (usize, &str) {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
 		let response = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -256,7 +256,7 @@ where
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
 		let value = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -307,7 +307,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match map.remove(&self) {
-			Some(result) => match result? {
+			Some((_, result)) => match result? {
 				Value::Array(Array(vec)) => vec,
 				vec => vec![vec],
 			},
@@ -326,7 +326,7 @@ where
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
 		let mut response = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => match val {
 					Value::Array(Array(vec)) => mem::take(vec),
 					val => {

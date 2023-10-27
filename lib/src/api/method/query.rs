@@ -22,6 +22,7 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::mem;
 use std::pin::Pin;
+use std::time::Duration;
 
 /// A query future
 #[derive(Debug)]
@@ -131,11 +132,17 @@ where
 	}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Statistics {
+	pub lookup_time: Duration,
+}
+
 pub(crate) type QueryResult = Result<Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
-pub struct Response(pub(crate) IndexMap<usize, QueryResult>);
+pub struct Response(pub(crate) IndexMap<usize, (Statistics, QueryResult)>);
 
 impl Response {
 	/// Takes and returns records returned from the database
@@ -228,13 +235,13 @@ impl Response {
 	pub fn take_errors(&mut self) -> HashMap<usize, crate::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0 {
-			if result.is_err() {
+			if result.1.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some(Err(error)) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.0.remove(&key) {
 				errors.insert(key, error);
 			}
 		}
@@ -259,13 +266,13 @@ impl Response {
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.0 {
-			if result.is_err() {
+			if result.1.is_err() {
 				first_error = Some(*key);
 				break;
 			}
 		}
 		if let Some(key) = first_error {
-			if let Some(Err(error)) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.0.remove(&key) {
 				return Err(error);
 			}
 		}
@@ -310,8 +317,16 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, QueryResult> {
-		vec.into_iter().enumerate().collect()
+	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (Statistics, QueryResult)> {
+		vec.into_iter()
+			.map(|result| {
+				let stats = Statistics {
+					lookup_time: Default::default(),
+				};
+				(stats, result)
+			})
+			.enumerate()
+			.collect()
 	}
 
 	#[test]
@@ -470,7 +485,7 @@ mod tests {
 		else {
 			panic!("silently dropping records not allowed");
 		};
-		let records = map.remove(&0).unwrap().unwrap();
+		let records = map.remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
 

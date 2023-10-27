@@ -45,6 +45,7 @@ use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::method::query::Statistics;
 use crate::opt::IntoEndpoint;
 use crate::sql::statements::KillStatement;
 use crate::sql::Array;
@@ -364,19 +365,22 @@ impl Surreal<Db> {
 	}
 }
 
-fn process(responses: Vec<Response>) -> Result<QueryResponse> {
+fn process(responses: Vec<Response>) -> QueryResponse {
 	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
+		let stats = Statistics {
+			lookup_time: response.time,
+		};
 		match response.result {
-			Ok(value) => map.insert(index, Ok(value)),
-			Err(error) => map.insert(index, Err(error.into())),
+			Ok(value) => map.insert(index, (stats, Ok(value))),
+			Err(error) => map.insert(index, (stats, Err(error.into()))),
 		};
 	}
-	Ok(QueryResponse(map))
+	QueryResponse(map)
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some(result) = process(responses)?.0.remove(&0) {
+	if let Some((_stats, result)) = process(responses).0.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -552,7 +556,7 @@ async fn router(
 				}
 				None => unreachable!(),
 			};
-			let response = process(response)?;
+			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
 		#[cfg(target_arch = "wasm32")]

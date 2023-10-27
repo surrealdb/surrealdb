@@ -88,7 +88,7 @@ async fn select_all(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(ref res) => match maybe_output.as_deref() {
+		Ok(res) => match maybe_output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),

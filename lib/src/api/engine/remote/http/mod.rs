@@ -22,6 +22,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
+use crate::method::query::Statistics;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
 use crate::sql::Array;
@@ -42,6 +43,7 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -135,7 +137,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (String, Status, Value);
+type HttpQueryResponse = (Duration, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Root {
@@ -171,14 +173,17 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			error,
 		}
 	})?;
-	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
-	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
+	let mut map = IndexMap::<usize, (Statistics, QueryResult)>::with_capacity(responses.len());
+	for (index, (lookup_time, status, value)) in responses.into_iter().enumerate() {
+		let stats = Statistics {
+			lookup_time,
+		};
 		match status {
 			Status::Ok => {
-				map.insert(index, Ok(value));
+				map.insert(index, (stats, Ok(value)));
 			}
 			Status::Err => {
-				map.insert(index, Err(Error::Query(value.as_raw_string()).into()));
+				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
 			}
 		}
 	}
@@ -187,7 +192,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some(result) = query(request).await?.0.remove(&0) {
+	if let Some((_stats, result)) = query(request).await?.0.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
