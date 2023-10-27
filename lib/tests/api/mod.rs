@@ -210,7 +210,7 @@ async fn scope_throws_error() {
 		),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
