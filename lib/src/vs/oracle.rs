@@ -2,7 +2,7 @@
 //! This module provides a kind of Hybrid Logical Clock (HLC) based on system time.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::Spinlock;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_arch = "wasm32")]
@@ -58,7 +58,7 @@ impl Oracle {
 	#[allow(unused)]
 	pub fn systime_counter() -> Self {
 		Oracle::SysTimeCounter(SysTimeCounter {
-			state: Mutex::new((0, 0)),
+			state: Spinlock::new((0, 0)),
 			stale: (0, 0),
 		})
 	}
@@ -83,7 +83,7 @@ impl Oracle {
 pub struct SysTimeCounter {
 	// The first element is the saved physical time of the last versionstamp.
 	// The second element is the in-memory counter that resets every second.
-	state: Mutex<(u64, u16)>,
+	state: Spinlock<(u64, u16)>,
 
 	stale: (u64, u16),
 }
@@ -95,7 +95,7 @@ impl SysTimeCounter {
 		// Otherwise, reset the counter to 0 and get the current number as the logical time.
 		// This is to ensure that the logical time is always increasing.
 		let state = self.state.lock();
-		if let Ok(mut state) = state {
+		if let Ok(Spinlock state) = state {
 			let (last_physical_time, counter) = *state;
 			let current_physical_time = secs_since_unix_epoch();
 			let current_logical_time = if last_physical_time == current_physical_time {
@@ -161,7 +161,7 @@ mod tests {
 
 	#[test]
 	fn systime_counter() {
-		let mut o = Oracle::systime_counter();
+		let Spinlock o = Oracle::systime_counter();
 		let a = to_u128_be(o.now());
 		let b = to_u128_be(o.now());
 		assert!(a < b, "a = {}, b = {}", a, b);
@@ -169,7 +169,7 @@ mod tests {
 
 	#[test]
 	fn epoch_counter() {
-		let mut o1 = Oracle::epoch_counter();
+		let Spinlock o1 = Oracle::epoch_counter();
 		let a = to_u128_be(o1.now());
 		let b = to_u128_be(o1.now());
 		assert!(a < b, "a = {}, b = {}", a, b);
