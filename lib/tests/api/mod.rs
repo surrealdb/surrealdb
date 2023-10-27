@@ -180,6 +180,14 @@ async fn scope_throws_error() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert_eq!(
+			e,
+			"There was a problem with the database: An error occurred: signup_thrown_error"
+		),
+		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
+			e,
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
 
@@ -196,6 +204,14 @@ async fn scope_throws_error() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert_eq!(
+			e,
+			"There was a problem with the database: An error occurred: signin_thrown_error"
+		),
+		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
+			e,
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
 }
@@ -231,6 +247,13 @@ async fn scope_invalid_query() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::SignupQueryFailed)) => (),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
+			assert_eq!(e, "There was a problem with the database: The signup query failed")
+		}
+		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
+			e,
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
 
@@ -247,6 +270,13 @@ async fn scope_invalid_query() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
+			assert_eq!(e, "There was a problem with the database: The signup query failed")
+		}
+		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
+			e,
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
 }
