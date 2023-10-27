@@ -112,7 +112,7 @@ pub async fn sc(
 						},
 						Err(e) => match e {
 							Error::Thrown(_) => Err(e),
-							_ => Err(Error::SignupQueryFailed)
+							_ => Err(Error::SignupQueryFailed),
 						},
 					}
 				}
