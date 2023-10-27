@@ -169,7 +169,10 @@ pub async fn sc(
 							}
 							_ => Err(Error::NoRecordFound),
 						},
-						_ => Err(Error::SigninQueryFailed),
+						Err(e) => match e {
+							Error::Thrown(_) => Err(e),
+							_ => Err(Error::SigninQueryFailed)
+						}
 					}
 				}
 				_ => Err(Error::ScopeNoSignin),

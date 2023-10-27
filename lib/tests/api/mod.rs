@@ -150,6 +150,100 @@ async fn signin_scope() {
 }
 
 #[tokio::test]
+async fn scope_throws_error() {
+	let db = new_db().await;
+	let database = Ulid::new().to_string();
+	db.use_ns(NS).use_db(&database).await.unwrap();
+	let scope = Ulid::new().to_string();
+	let email = format!("{scope}@example.com");
+	let pass = "password123";
+	let sql = format!(
+		"
+        DEFINE SCOPE {scope} SESSION 1s
+        SIGNUP {{ THROW 'signup_thrown_error' }}
+        SIGNIN {{ THROW 'signin_thrown_error' }}
+    "
+	);
+	let response = db.query(sql).await.unwrap();
+	response.check().unwrap();
+
+	match db.signup(Scope {
+		namespace: NS,
+		database: &database,
+		scope: &scope,
+		params: AuthParams {
+			pass,
+			email: &email,
+		},
+	})
+	.await {
+		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
+		v => panic!("Unexpected response or error: {v:?}")
+	};
+
+	match db.signin(Scope {
+		namespace: NS,
+		database: &database,
+		scope: &scope,
+		params: AuthParams {
+			pass,
+			email: &email,
+		},
+	})
+	.await {
+		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
+		v => panic!("Unexpected response or error: {v:?}")
+	};
+}
+
+#[tokio::test]
+async fn scope_invalid_query() {
+	let db = new_db().await;
+	let database = Ulid::new().to_string();
+	db.use_ns(NS).use_db(&database).await.unwrap();
+	let scope = Ulid::new().to_string();
+	let email = format!("{scope}@example.com");
+	let pass = "password123";
+	let sql = format!(
+		"
+        DEFINE SCOPE {scope} SESSION 1s
+        SIGNUP {{ SELECT * FROM ONLY [1, 2] }}
+        SIGNIN {{ SELECT * FROM ONLY [1, 2] }}
+    "
+	);
+	let response = db.query(sql).await.unwrap();
+	response.check().unwrap();
+
+	match db.signup(Scope {
+		namespace: NS,
+		database: &database,
+		scope: &scope,
+		params: AuthParams {
+			pass,
+			email: &email,
+		},
+	})
+	.await {
+		Err(Error::Db(surrealdb::err::Error::SignupQueryFailed)) => (),
+		v => panic!("Unexpected response or error: {v:?}")
+	};
+
+	match db.signin(Scope {
+		namespace: NS,
+		database: &database,
+		scope: &scope,
+		params: AuthParams {
+			pass,
+			email: &email,
+		},
+	})
+	.await {
+		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
+		v => panic!("Unexpected response or error: {v:?}")
+	};
+}
+
+#[tokio::test]
 async fn authenticate() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();

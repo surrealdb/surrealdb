@@ -110,7 +110,10 @@ pub async fn sc(
 							}
 							_ => Err(Error::NoRecordFound),
 						},
-						Err(_) => Err(Error::SignupQueryFailed),
+						Err(e) => match e {
+							Error::Thrown(_) => Err(e),
+							_ => Err(Error::SignupQueryFailed)
+						},
 					}
 				}
 				_ => Err(Error::ScopeNoSignup),
