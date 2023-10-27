@@ -146,7 +146,8 @@ pub(super) struct Inner {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Array),
+	Equality(Value),
+	Union(Array),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
@@ -161,6 +162,10 @@ impl IndexOption {
 		}))
 	}
 
+	pub(super) fn require_distinct(&self) -> bool {
+		matches!(self.0.op, IndexOperator::Union(_))
+	}
+
 	pub(super) fn ir(&self) -> IndexRef {
 		self.0.ir
 	}
@@ -173,16 +178,24 @@ impl IndexOption {
 		&self.0.id
 	}
 
+	fn reduce_array(v: &Value) -> Value {
+		if let Value::Array(a) = v {
+			if a.len() == 1 {
+				return a[0].clone();
+			}
+		}
+		v.clone()
+	}
+
 	pub(crate) fn explain(&self, e: &mut HashMap<&str, Value>) {
 		match self.op() {
-			IndexOperator::Equality(a) => {
-				let v = if a.len() == 1 {
-					a[0].clone()
-				} else {
-					Value::Array(a.clone())
-				};
+			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
-				e.insert("value", v);
+				e.insert("value", Self::reduce_array(v));
+			}
+			IndexOperator::Union(a) => {
+				e.insert("operator", Value::from("union"));
+				e.insert("value", Value::Array(a.clone()));
 			}
 			IndexOperator::Matches(qs, a) => {
 				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
@@ -303,13 +316,13 @@ mod tests {
 		let io1 = IndexOption::new(
 			1,
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Equality(Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
 			1,
 			Idiom::from("a.b".to_string()),
-			IndexOperator::Equality(Array::from(vec!["test"])),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		set.insert(io1);

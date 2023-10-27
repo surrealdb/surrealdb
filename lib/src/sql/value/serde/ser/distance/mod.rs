@@ -33,7 +33,6 @@ impl ser::Serializer for Serializer {
 			"Manhattan" => Ok(Distance::Manhattan),
 			"Cosine" => Ok(Distance::Cosine),
 			"Hamming" => Ok(Distance::Hamming),
-			"Mahalanobis" => Ok(Distance::Mahalanobis),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
 	}
@@ -76,13 +75,6 @@ mod tests {
 	#[test]
 	fn distance_manhattan() {
 		let dist = Distance::Manhattan;
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
-	}
-
-	#[test]
-	fn distance_mahalanobis() {
-		let dist = Distance::Mahalanobis;
 		let serialized = dist.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dist, serialized);
 	}
