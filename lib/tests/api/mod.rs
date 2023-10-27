@@ -167,32 +167,36 @@ async fn scope_throws_error() {
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 
-	match db.signup(Scope {
-		namespace: NS,
-		database: &database,
-		scope: &scope,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await {
+	match db
+		.signup(Scope {
+			namespace: NS,
+			database: &database,
+			scope: &scope,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
-		v => panic!("Unexpected response or error: {v:?}")
+		v => panic!("Unexpected response or error: {v:?}"),
 	};
 
-	match db.signin(Scope {
-		namespace: NS,
-		database: &database,
-		scope: &scope,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await {
+	match db
+		.signin(Scope {
+			namespace: NS,
+			database: &database,
+			scope: &scope,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
-		v => panic!("Unexpected response or error: {v:?}")
+		v => panic!("Unexpected response or error: {v:?}"),
 	};
 }
 
@@ -214,32 +218,36 @@ async fn scope_invalid_query() {
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 
-	match db.signup(Scope {
-		namespace: NS,
-		database: &database,
-		scope: &scope,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await {
+	match db
+		.signup(Scope {
+			namespace: NS,
+			database: &database,
+			scope: &scope,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+	{
 		Err(Error::Db(surrealdb::err::Error::SignupQueryFailed)) => (),
-		v => panic!("Unexpected response or error: {v:?}")
+		v => panic!("Unexpected response or error: {v:?}"),
 	};
 
-	match db.signin(Scope {
-		namespace: NS,
-		database: &database,
-		scope: &scope,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await {
+	match db
+		.signin(Scope {
+			namespace: NS,
+			database: &database,
+			scope: &scope,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+	{
 		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
-		v => panic!("Unexpected response or error: {v:?}")
+		v => panic!("Unexpected response or error: {v:?}"),
 	};
 }
 
