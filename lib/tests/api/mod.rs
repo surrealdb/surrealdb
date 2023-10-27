@@ -271,7 +271,7 @@ async fn scope_invalid_query() {
 	{
 		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(e, "There was a problem with the database: The signup query failed")
+			assert_eq!(e, "There was a problem with the database: The signin query failed")
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
