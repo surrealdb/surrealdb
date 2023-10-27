@@ -11,7 +11,7 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
-use crate::err::Error;
+use crate::err::{Error, UnreachableCause};
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
@@ -542,7 +542,7 @@ impl MTree {
 		if let Some((o, p)) = closest {
 			Ok((o, p))
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated))
 		}
 	}
 
@@ -672,7 +672,7 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		assert_eq!(dist_cache.len(), n * n - n);
 		match promo {
-			None => Err(Error::Unreachable),
+			None => Err(Error::UnreachableCause(UnreachableCause::AlwaysSet)),
 			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
 		}
 	}
@@ -729,7 +729,10 @@ impl MTree {
 						}
 						1 => {
 							store.remove_node(sn.id, sn.key)?;
-							let e = n.values().next().ok_or(Error::Unreachable)?;
+							let e = n
+								.values()
+								.next()
+								.ok_or(Error::UnreachableCause(UnreachableCause::AlwaysSet))?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
 						}
@@ -1237,7 +1240,7 @@ impl MTreeNode {
 				Self::merge_leaf(s, o);
 				Ok(())
 			}
-			(_, _) => Err(Error::Unreachable),
+			(_, _) => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
 	}
 
@@ -1293,7 +1296,8 @@ impl NodeVectors for LeafNode {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
-			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let mut props =
+				self.remove(&o).ok_or(Error::UnreachableCause(UnreachableCause::AlwaysSet))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			if dist > r {
 				r = dist;
@@ -1327,7 +1331,8 @@ impl NodeVectors for InternalNode {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
-			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let mut props =
+				self.remove(&o).ok_or(Error::UnreachableCause(UnreachableCause::AlwaysSet))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			let r = dist + props.radius;
 			if r > max_r {

@@ -1,4 +1,4 @@
-use crate::err::Error;
+use crate::err::{Error, UnreachableCause};
 use crate::sql::index::VectorType;
 use crate::sql::Number;
 use revision::revisioned;
@@ -181,7 +181,7 @@ impl Vector {
 			(Vector::I8(a), Vector::I8(b)) => {
 				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i8>() as f64).sqrt())
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
 	}
 
@@ -216,7 +216,7 @@ impl Vector {
 			(Vector::I8(a), Vector::I8(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i8>() as f64)
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
 	}
 
@@ -247,7 +247,7 @@ impl Vector {
 			(Vector::I8(a), Vector::I8(b)) => {
 				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
 	}
 
@@ -272,7 +272,7 @@ impl Vector {
 			(Vector::I8(a), Vector::I8(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i8>() as f64)
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
 	}
 	pub(super) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
@@ -308,7 +308,7 @@ impl Vector {
 				.zip(b.iter())
 				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
 				.sum::<i8>() as f64,
-			_ => return Err(Error::Unreachable),
+			_ => return Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		};
 		Ok(dist.powf(1.0 / order.to_float()))
 	}
