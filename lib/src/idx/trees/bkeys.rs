@@ -46,10 +46,12 @@ where
 	pub(in crate::idx) median_payload: Payload,
 }
 
+#[derive(Debug)]
 pub struct FstKeys {
 	i: Inner,
 }
 
+#[derive(Debug)]
 enum Inner {
 	Map(Map<Vec<u8>>),
 	Trie(TrieKeys),
@@ -308,7 +310,7 @@ impl Display for FstKeys {
 	}
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
