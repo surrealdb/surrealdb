@@ -142,17 +142,13 @@ impl Parser<'_> {
 			t!("@") => {
 				let reference = (!self.eat(t!("@")))
 					.then(|| {
-						let number = self.parse_u64()?;
-						let Ok(number) = u8::try_from(number) else {
-							to_do!(self);
-						};
+						let number = self.parse_u8()?;
 						expected!(self, "@");
 						Ok(number)
 					})
 					.transpose()?;
 				Operator::Matches(reference)
 			}
-			// TODO: Knn
 			t!("<=") => Operator::LessThanOrEqual,
 			t!("<") => Operator::LessThan,
 			t!(">=") => Operator::MoreThanOrEqual,
@@ -186,6 +182,12 @@ impl Parser<'_> {
 				Operator::NotInside
 			}
 			t!("IN") => Operator::Inside,
+			t!("KNN") => {
+				let start = expected!(self, "<").span;
+				let amount = self.parse_u32()?;
+				self.expect_closing_delimiter(t!(">"), start)?;
+				Operator::Knn(amount)
+			}
 
 			// should be unreachable as we previously check if the token was a prefix op.
 			_ => unreachable!(),

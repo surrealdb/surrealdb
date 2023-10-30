@@ -1,5 +1,8 @@
 use crate::{
-	sql::{Array, Dir, Duration, Ident, Idiom, Mock, Param, Part, Strand, Subquery, Table, Value},
+	sql::{
+		Array, Dir, Duration, Id, Ident, Idiom, Mock, Param, Part, Strand, Subquery, Table, Thing,
+		Value,
+	},
 	syn::{
 		parser::mac::{expected, to_do},
 		token::{t, Span, TokenKind},
@@ -116,7 +119,7 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
-				let identifier = self.parse_raw_ident_from_token(token)?;
+				let identifier = self.token_as_raw_ident(token)?;
 				Value::Table(Table(identifier))
 			}
 		};
@@ -171,6 +174,36 @@ impl Parser<'_> {
 		} else {
 			Ok(Mock::Count(name, from))
 		}
+	}
+
+	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
+		let ident = self.parse_raw_ident()?;
+		expected!(self, ":");
+		let id = match self.peek_kind() {
+			t!("{") => {
+				let start = self.pop_peek().span;
+				let object = self.parse_object(start)?;
+				Id::Object(object)
+			}
+			t!("[") => {
+				let start = self.pop_peek().span;
+				let array = self.parse_array(start)?;
+				Id::Array(array)
+			}
+			// TODO: negative numbers.
+			TokenKind::Number => {
+				let number = self.parse_u64()?;
+				Id::Number(number as i64)
+			}
+			_ => {
+				let ident = self.parse_raw_ident()?;
+				Id::String(ident)
+			}
+		};
+		Ok(Thing {
+			tb: ident,
+			id,
+		})
 	}
 
 	pub fn parse_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {

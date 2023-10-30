@@ -379,13 +379,7 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "a version stamp of date-time"),
 		};
 
-		let limit = self
-			.eat(t!("LIMIT"))
-			.then(|| {
-				// TODO: Explain limit to integer.
-				self.parse_u32()
-			})
-			.transpose()?;
+		let limit = self.eat(t!("LIMIT")).then(|| self.parse_u32()).transpose()?;
 
 		Ok(ShowStatement {
 			table,

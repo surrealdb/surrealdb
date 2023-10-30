@@ -184,7 +184,7 @@ impl Parser<'_> {
 							Part::Last
 						}
 						t!("123") => {
-							let number = self.parse_number()?;
+							let number = self.token_as_number(token)?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),

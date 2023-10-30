@@ -88,6 +88,7 @@ keyword! {
 	Is => "IS",
 	Key => "KEY",
 	Kill => "KILL",
+	Knn => "KNN",
 	Let => "LET",
 	Limit => "LIMIT",
 	Live => "LIVE",

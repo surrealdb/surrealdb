@@ -5,12 +5,12 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CommitStatement,
 			CreateStatement, DefineDatabaseStatement, DefineFunctionStatement,
-			DefineNamespaceStatement, DefineScopeStatement, DefineStatement, DefineTokenStatement,
-			DefineUserStatement, OutputStatement, UpdateStatement,
+			DefineNamespaceStatement, DefineStatement, DefineTokenStatement, DefineUserStatement,
+			OutputStatement, UpdateStatement,
 		},
 		Algorithm, Base, Block, Cond, Data, Dir, Duration, Field, Fields, Future, Graph, Ident,
-		Idiom, Kind, Number, Operator, Output, Part, Permission, Permissions, Statement, Strand,
-		Table, Tables, Timeout, Value, Values,
+		Idiom, Kind, Number, Operator, Output, Part, Permission, Statement, Strand, Table, Tables,
+		Timeout, Value, Values,
 	},
 	syn::parser::mac::test_parse,
 };
@@ -167,7 +167,7 @@ fn parse_define_function() {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field("a".to_string())])),
+				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),

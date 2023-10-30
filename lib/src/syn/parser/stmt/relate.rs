@@ -1,5 +1,5 @@
 use crate::{
-	sql::{statements::RelateStatement, Value},
+	sql::{statements::RelateStatement, Table, Value},
 	syn::{
 		parser::{
 			mac::{expected, to_do, unexpected},
@@ -54,10 +54,29 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_relate_value(&mut self) -> ParseResult<Value> {
-		to_do!(self)
+		match self.peek_kind() {
+			t!("[") => {
+				let start = self.pop_peek().span;
+				self.parse_array(start).map(Value::Array)
+			}
+			t!("$param") => self.parse_param().map(Value::Param),
+			t!("RETURN")
+			| t!("SELECT")
+			| t!("CREATE")
+			| t!("UPDATE")
+			| t!("DELETE")
+			| t!("RELATE")
+			| t!("DEFINE")
+			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
+			_ => self.parse_thing().map(Value::Thing),
+		}
 	}
 
 	pub fn parse_thing_or_table(&mut self) -> ParseResult<Value> {
-		to_do!(self)
+		if self.peek_token_at(1).kind == t!(":") {
+			self.parse_thing().map(Value::Thing)
+		} else {
+			self.parse_raw_ident().map(|x| Value::Table(Table(x)))
+		}
 	}
 }
