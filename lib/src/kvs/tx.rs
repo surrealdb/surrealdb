@@ -9,6 +9,7 @@ use crate::dbs::Notification;
 use crate::err::{Error, InternalCause, LiveQueryCause};
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
+#[cfg(debug_assertions)]
 use crate::key::debug;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;

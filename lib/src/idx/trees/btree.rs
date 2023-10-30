@@ -94,6 +94,7 @@ impl From<BStatistics> for Value {
 	}
 }
 
+#[derive(Debug)]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys,
@@ -189,7 +190,7 @@ struct SplitResult {
 
 impl<BK> BTree<BK>
 where
-	BK: BKeys,
+	BK: BKeys + Debug,
 {
 	pub fn new(state: BState) -> Self {
 		Self {
@@ -706,6 +707,7 @@ mod tests {
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
+	use std::fmt::Debug;
 	use test_log::test;
 
 	#[test]
@@ -741,7 +743,7 @@ mod tests {
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
@@ -915,7 +917,7 @@ mod tests {
 
 	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> BStatistics
 	where
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
 		let mut s = s.lock().await;
@@ -1114,7 +1116,7 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_clrs_deletion_test<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -1220,7 +1222,7 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	async fn test_btree_fill_and_empty<BK>(mut t: BTree<BK>)
 	where
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -1331,7 +1333,7 @@ mod tests {
 
 	async fn print_tree<BK>(tx: &mut Transaction, t: &BTree<BK>)
 	where
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		debug!("----------------------------------");
 		t.inspect_nodes(tx, |_count, depth, node_id, node| {
@@ -1360,7 +1362,7 @@ mod tests {
 
 	impl<BK> BTree<BK>
 	where
-		BK: BKeys,
+		BK: BKeys + Debug,
 	{
 		/// This is for debugging
 		async fn inspect_nodes<F>(

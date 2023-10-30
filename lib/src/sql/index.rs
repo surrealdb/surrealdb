@@ -45,6 +45,7 @@ pub struct SearchParams {
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
+	pub vector_type: VectorType,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
 }
@@ -57,7 +58,6 @@ pub enum Distance {
 	Manhattan,
 	Cosine,
 	Hamming,
-	Mahalanobis,
 	Minkowski(Number),
 }
 
@@ -68,8 +68,32 @@ impl Display for Distance {
 			Self::Manhattan => f.write_str("MANHATTAN"),
 			Self::Cosine => f.write_str("COSINE"),
 			Self::Hamming => f.write_str("HAMMING"),
-			Self::Mahalanobis => f.write_str("MAHALANOBIS"),
 			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+pub enum VectorType {
+	#[default]
+	F64,
+	F32,
+	I64,
+	I32,
+	I16,
+	I8,
+}
+
+impl Display for VectorType {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::F64 => f.write_str("F64"),
+			Self::F32 => f.write_str("F32"),
+			Self::I64 => f.write_str("I64"),
+			Self::I32 => f.write_str("I32"),
+			Self::I16 => f.write_str("I16"),
+			Self::I8 => f.write_str("I8"),
 		}
 	}
 }
@@ -98,8 +122,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} CAPACITY {} DOC_IDS_ORDER {}",
-					p.dimension, p.distance, p.capacity, p.doc_ids_order
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order
 				)
 			}
 		}
@@ -200,6 +224,20 @@ pub fn minkowski(i: &str) -> IResult<&str, Distance> {
 	Ok((i, Distance::Minkowski(order.into())))
 }
 
+pub fn vector_type(i: &str) -> IResult<&str, VectorType> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case("TYPE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	alt((
+		map(tag_no_case("F64"), |_| VectorType::F64),
+		map(tag_no_case("F32"), |_| VectorType::F32),
+		map(tag_no_case("I64"), |_| VectorType::I64),
+		map(tag_no_case("I32"), |_| VectorType::I32),
+		map(tag_no_case("I16"), |_| VectorType::I16),
+		map(tag_no_case("I8"), |_| VectorType::I8),
+	))(i)
+}
+
 pub fn dimension(i: &str) -> IResult<&str, u16> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIMENSION")(i)?;
@@ -222,6 +260,7 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 	cut(|i| {
 		let (i, dimension) = dimension(i)?;
 		let (i, distance) = opt(distance)(i)?;
+		let (i, vector_type) = opt(vector_type)(i)?;
 		let (i, capacity) = opt(capacity)(i)?;
 		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
 		Ok((
@@ -229,6 +268,7 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 			Index::MTree(MTreeParams {
 				dimension,
 				distance: distance.unwrap_or(Distance::Euclidean),
+				vector_type: vector_type.unwrap_or(VectorType::F64),
 				capacity: capacity.unwrap_or(40),
 				doc_ids_order: doc_ids_order.unwrap_or(100),
 			}),

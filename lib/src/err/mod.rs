@@ -821,6 +821,12 @@ pub enum UnreachableCause {
 
 	#[error("The struct should have an inner set")]
 	ShouldHaveInner,
+
+	#[error("All logical enums evaluated")]
+	AllLogicalEnumsEvaluated,
+
+	#[error("The value operated on will always be set")]
+	AlwaysSet,
 }
 
 #[derive(Error, Debug)]
