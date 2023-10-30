@@ -21,10 +21,12 @@ pub(crate) async fn scan_node_live_queries(
 	trace!("Receiving a tx response in scan");
 	match tx_res_oneshot.await {
 		Ok(mut tx) => {
-			trace!("Received tx in scan");
+			println!("Received tx in scan - {:?} nodes", nodes);
+			trace!("Received tx in scan - {:?} nodes", nodes);
 			for nd in nodes {
 				match tx.scan_ndlq(&nd, NO_LIMIT).await {
 					Ok(node_lqs) => {
+						println!("Received node lqs in scan - {:?}", node_lqs);
 						for lq in node_lqs {
 							sender.send((lq, None)).await.map_err(|_| {
 								Error::BootstrapError(ChannelSendError(BootstrapScan))
@@ -32,6 +34,7 @@ pub(crate) async fn scan_node_live_queries(
 						}
 					}
 					Err(e) => {
+						println!("Failed scanning node live queries: {:?}", e);
 						error!("Failed scanning node live queries: {:?}", e);
 						tx.cancel().await?;
 						return Err(e);
@@ -52,7 +55,7 @@ pub(crate) async fn scan_node_live_queries(
 mod test {
 	use crate::dbs::Session;
 	use crate::kvs::bootstrap::scan_node_live_queries;
-	use crate::kvs::bootstrap::test_util::{always_give_tx, asUuid};
+	use crate::kvs::bootstrap::test_util::{always_give_tx, as_uuid};
 	use crate::kvs::{BootstrapOperationResult, Datastore};
 	use futures_concurrency::future::FutureExt;
 	use std::sync::Arc;
@@ -63,27 +66,36 @@ mod test {
 	async fn scan_picks_up() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let (tx_req, tx_res) = mpsc::channel(1);
-		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
+		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
 		// Create some nodes
 		let sess = Session::owner().with_ns("namespaceTest").with_db("databaseTest").with_rt(true);
 		let table = "testTable";
 		let query = format!("LIVE SELECT * FROM {table}");
-		let node_id = ds.id;
-		let lq1 = asUuid(ds.execute(&query, &sess, None).await.unwrap());
-		let lq2 = asUuid(ds.execute(&query, &sess, None).await.unwrap());
+		let lq1 = as_uuid(ds.execute(&query, &sess, None).await.unwrap());
+		let lq2 = as_uuid(ds.execute(&query, &sess, None).await.unwrap());
 
 		let (output_lq_send, mut output_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
-		let scan_task =
-			tokio::spawn(scan_node_live_queries(tx_req, vec![lq1, lq2], output_lq_send));
+		let scan_task = tokio::spawn(scan_node_live_queries(tx_req, vec![ds.id], output_lq_send));
 
-		// Wait for output
-		assert_eq!(output_lq_recv.recv().await, Some((lq1, None)));
-		assert_eq!(output_lq_recv.recv().await, Some((lq2, None)));
+		// We don't know the order of the live queries because the lq id is random
+		let mut lq_map = map! {lq1 => true, lq2 => true};
+
+		// Validate first live query
+		let boot_result = output_lq_recv.recv().await;
+		let boot_result = boot_result.unwrap();
+		assert!(boot_result.1.is_none());
+		assert!(lq_map.remove(&boot_result.0.lq).is_some());
+		// Validate second live query
+		let boot_result = output_lq_recv.recv().await;
+		let boot_result = boot_result.unwrap();
+		assert!(boot_result.1.is_none());
+		assert!(lq_map.remove(&boot_result.0.lq).is_some());
+		// Validate no more live queries
 		assert!(output_lq_recv.recv().await.is_none());
 
 		let (tx_task_res, arch_task_res) =
@@ -91,7 +103,7 @@ mod test {
 				.await
 				.unwrap();
 		let tx_req_count = tx_task_res.unwrap().unwrap();
-		assert_eq!(tx_req_count, 0);
+		assert_eq!(tx_req_count, 1);
 		arch_task_res.unwrap().unwrap();
 	}
 

@@ -95,6 +95,7 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Insert the node live query
+				println!("LIVE: {:?} for node {}", stm, nid);
 				run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
 				// Insert the table live query
 				run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;

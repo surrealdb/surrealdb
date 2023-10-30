@@ -31,7 +31,7 @@ pub(crate) async fn always_give_tx(
 	Ok(count)
 }
 
-pub(crate) fn asUuid(mut responses: Vec<Response>) -> sql::Uuid {
+pub(crate) fn as_uuid(mut responses: Vec<Response>) -> sql::Uuid {
 	assert_eq!(responses.len(), 1);
 	let resp = responses.pop().unwrap().result;
 	assert!(resp.is_ok());
