@@ -7,7 +7,7 @@ use helpers::new_ds;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::sql::{Id, Thing, Value};
+use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn delete() -> Result<(), Error> {
@@ -421,10 +421,12 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		Notification {
 			id: live_id,
 			action: Action::Delete,
-			result: Value::Thing(Thing {
-				tb: "person".to_string(),
-				id: Id::String("test_true".to_string()),
-			}),
+			result: Value::parse(
+				"{
+					id: person:test_true,
+					condition: true,
+				}"
+			),
 		}
 	);
 	Ok(())
