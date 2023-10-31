@@ -8,10 +8,23 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::dbs;
 use crate::dbs::Action;
+use crate::method::Query;
 use crate::opt::from_value;
 use crate::opt::Resource;
+use crate::sql::cond::Cond;
+use crate::sql::expression::Expression;
+use crate::sql::field::Field;
+use crate::sql::field::Fields;
+use crate::sql::ident::Ident;
+use crate::sql::idiom::Idiom;
+use crate::sql::operator::Operator;
+use crate::sql::part::Part;
+use crate::sql::statement::Statement;
+use crate::sql::statements::live::LiveStatement;
 use crate::sql::Id;
 use crate::sql::Table;
+use crate::sql::Thing;
+use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Receiver;
 use futures::StreamExt;
@@ -19,10 +32,13 @@ use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use std::mem;
+use std::ops::Bound;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use uuid::Uuid;
+
+const ID: &str = "id";
 
 /// A live query future
 #[derive(Debug)]
@@ -35,7 +51,7 @@ pub struct Live<'r, C: Connection, R> {
 }
 
 macro_rules! into_future {
-	($method:ident) => {
+	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Live {
 				router,
@@ -48,41 +64,155 @@ macro_rules! into_future {
 				if !router.features.contains(&ExtraFeatures::LiveQueries) {
 					return Err(Error::LiveQueriesNotSupported.into());
 				}
-				let payload = match range {
+				let mut stmt = LiveStatement {
+					id: Uuid::new_v4(),
+					node: Uuid::new_v4(),
+					expr: Fields(vec![Field::All], false),
+					..Default::default()
+				};
+				match range {
 					Some(range) => {
-						let _range = resource?.with_range(range)?;
-						return Err(crate::err::Error::FeatureNotYetImplemented {
-							feature: "live queries on ranges".to_owned(),
-						}
-						.into());
+						let range = resource?.with_range(range)?;
+						stmt.what = Table(range.tb.clone()).into();
+						stmt.cond = cond_from_range(range);
 					}
 					None => match resource? {
-						Resource::Table(table) => vec![Value::Table(Table(table.0))],
-						Resource::RecordId(_record) => {
-							return Err(crate::err::Error::FeatureNotYetImplemented {
-								feature: "live queries on record IDs".to_owned(),
-							}
-							.into())
+						Resource::Table(table) => {
+							stmt.what = table.into();
+						}
+						Resource::RecordId(record) => {
+							stmt.what = Table(record.tb.clone()).into();
+							stmt.cond = Some(Cond(Value::Expression(Box::new(Expression::new(
+								Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+								Operator::Equal,
+								record.into(),
+							)))));
 						}
 						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
 						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),
 						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
 					},
+				}
+				let query = Query {
+					router: Ok(router),
+					query: vec![Ok(vec![Statement::Live(stmt)])],
+					bindings: Ok(Default::default()),
 				};
-				let (tx, rx) = channel::unbounded();
+				let id: Value = query.await?.take(0)?;
 				let mut conn = Client::new(Method::Live);
+				let (tx, rx) = channel::unbounded();
 				let mut param = Param::notification_sender(tx);
-				param.other = payload;
-				let id = conn.$method(router, param).await?;
-				Ok(Stream {
+				param.other = vec![id.clone()];
+				let result = conn.execute_unit(router, param).await;
+				// Construct a stream before propagating any errors to make sure the live query
+				// is will be killed when the stream gets dropped. We can't contruct the stream
+				// before running `execute_unit` because we can't hold it across an await.
+				let stream = Stream {
 					router,
 					id,
 					rx,
 					response_type: PhantomData,
-				})
+				};
+				// Propagate any errors from `execute_unit`.
+				result?;
+				Ok(stream)
 			})
 		}
 	};
+}
+
+fn cond_from_range(range: crate::sql::Range) -> Option<Cond> {
+	match (range.beg, range.end) {
+		(Bound::Unbounded, Bound::Unbounded) => None,
+		(Bound::Unbounded, Bound::Excluded(id)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+				Operator::LessThan,
+				Thing::from((range.tb, id)).into(),
+			)))))
+		}
+		(Bound::Unbounded, Bound::Included(id)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+				Operator::LessThanOrEqual,
+				Thing::from((range.tb, id)).into(),
+			)))))
+		}
+		(Bound::Excluded(id), Bound::Unbounded) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+				Operator::MoreThan,
+				Thing::from((range.tb, id)).into(),
+			)))))
+		}
+		(Bound::Included(id), Bound::Unbounded) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+				Operator::MoreThanOrEqual,
+				Thing::from((range.tb, id)).into(),
+			)))))
+		}
+		(Bound::Included(lid), Bound::Included(rid)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThanOrEqual,
+					Thing::from((range.tb.clone(), lid)).into(),
+				))),
+				Operator::And,
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThanOrEqual,
+					Thing::from((range.tb, rid)).into(),
+				))),
+			)))))
+		}
+		(Bound::Included(lid), Bound::Excluded(rid)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThanOrEqual,
+					Thing::from((range.tb.clone(), lid)).into(),
+				))),
+				Operator::And,
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThan,
+					Thing::from((range.tb, rid)).into(),
+				))),
+			)))))
+		}
+		(Bound::Excluded(lid), Bound::Included(rid)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThan,
+					Thing::from((range.tb.clone(), lid)).into(),
+				))),
+				Operator::And,
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThanOrEqual,
+					Thing::from((range.tb, rid)).into(),
+				))),
+			)))))
+		}
+		(Bound::Excluded(lid), Bound::Excluded(rid)) => {
+			Some(Cond(Value::Expression(Box::new(Expression::new(
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThan,
+					Thing::from((range.tb.clone(), lid)).into(),
+				))),
+				Operator::And,
+				Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThan,
+					Thing::from((range.tb, rid)).into(),
+				))),
+			)))))
+		}
+	}
 }
 
 impl<'r, Client> IntoFuture for Live<'r, Client, Value>
@@ -92,7 +222,7 @@ where
 	type Output = Result<Stream<'r, Client, Value>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {execute}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Live<'r, Client, Option<R>>
@@ -103,7 +233,7 @@ where
 	type Output = Result<Stream<'r, Client, Option<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {execute}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Live<'r, Client, Vec<R>>
@@ -114,7 +244,7 @@ where
 	type Output = Result<Stream<'r, Client, Vec<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {execute}
+	into_future! {}
 }
 
 /// A stream of exported data
@@ -122,7 +252,7 @@ where
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Stream<'r, C: Connection, R> {
 	router: &'r Router<C>,
-	id: Uuid,
+	id: Value,
 	rx: Receiver<dbs::Notification>,
 	response_type: PhantomData<R>,
 }
@@ -135,7 +265,7 @@ where
 		futures::executor::block_on(async move {
 			let mut conn = Client::new(Method::Kill);
 			if let Err(error) =
-				conn.execute_unit(self.router, Param::new(vec![self.id.into()])).await
+				conn.execute_unit(self.router, Param::new(vec![mem::take(&mut self.id)])).await
 			{
 				error!("Failed to kill live query '{}': {error}", self.id);
 			}
