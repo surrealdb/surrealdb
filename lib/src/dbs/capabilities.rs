@@ -216,6 +216,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
+	live_query_notifications: bool,
 
 	allow_funcs: Arc<Targets<FuncTarget>>,
 	deny_funcs: Arc<Targets<FuncTarget>>,
@@ -227,8 +228,8 @@ impl std::fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-			self.scripting, self.guest_access, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+			self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
 		)
 	}
 }
@@ -238,6 +239,7 @@ impl Default for Capabilities {
 		Self {
 			scripting: false,
 			guest_access: false,
+			live_query_notifications: true,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -252,6 +254,7 @@ impl Capabilities {
 		Self {
 			scripting: true,
 			guest_access: true,
+			live_query_notifications: true,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -267,6 +270,11 @@ impl Capabilities {
 
 	pub fn with_guest_access(mut self, guest_access: bool) -> Self {
 		self.guest_access = guest_access;
+		self
+	}
+
+	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
+		self.live_query_notifications = live_query_notifications;
 		self
 	}
 
@@ -296,6 +304,10 @@ impl Capabilities {
 
 	pub fn allows_guest_access(&self) -> bool {
 		self.guest_access
+	}
+
+	pub fn allows_live_query_notifications(&self) -> bool {
+		self.live_query_notifications
 	}
 
 	pub fn allows_function(&self, target: &FuncTarget) -> bool {
@@ -528,6 +540,18 @@ mod tests {
 		{
 			let caps = Capabilities::default().with_guest_access(false);
 			assert!(!caps.allows_guest_access());
+		}
+
+		// When live query notifications are allowed
+		{
+			let cap = Capabilities::default().with_live_query_notifications(true);
+			assert!(cap.allows_live_query_notifications());
+		}
+
+		// When live query notifications are disabled
+		{
+			let cap = Capabilities::default().with_live_query_notifications(false);
+			assert!(!cap.allows_live_query_notifications());
 		}
 
 		// When all nets are allowed

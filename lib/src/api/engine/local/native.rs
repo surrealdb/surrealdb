@@ -18,9 +18,12 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
+use futures::future::Either;
+use futures::stream::poll_fn;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -28,6 +31,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::task::Poll;
 use std::time::Duration;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
@@ -126,33 +130,63 @@ pub(crate) fn router(
 			}
 		};
 
+		let kvs = match address.config.capabilities.allows_live_query_notifications() {
+			true => kvs.with_notifications(),
+			false => kvs,
+		};
+
 		let kvs = kvs
 			.with_strict_mode(address.config.strict)
 			.with_query_timeout(address.config.query_timeout)
 			.with_transaction_timeout(address.config.transaction_timeout)
 			.with_capabilities(address.config.capabilities);
 
-		let kvs = match address.config.notifications {
-			true => kvs.with_notifications(),
-			false => kvs,
-		};
-
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
-		let mut stream = route_rx.into_stream();
-		let mut session = Session::default();
+		let mut live_queries = HashMap::new();
+		let mut session = Session::default().with_rt(true);
 
 		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
 
-		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &mut session, &mut vars).await {
-				Ok(value) => {
-					let _ = route.response.into_send_async(Ok(value)).await;
+		let mut notifications = kvs.notifications();
+		let notification_stream = poll_fn(move |cx| match &mut notifications {
+			Some(rx) => rx.poll_next_unpin(cx),
+			None => Poll::Ready(None),
+		});
+
+		let streams = (route_rx.stream().map(Either::Left), notification_stream.map(Either::Right));
+		let mut merged = streams.merge();
+
+		while let Some(either) = merged.next().await {
+			match either {
+				Either::Left(None) => break, // Received a shutdown signal
+				Either::Left(Some(route)) => {
+					match super::router(
+						route.request,
+						&kvs,
+						&mut session,
+						&mut vars,
+						&mut live_queries,
+					)
+					.await
+					{
+						Ok(value) => {
+							let _ = route.response.into_send_async(Ok(value)).await;
+						}
+						Err(error) => {
+							let _ = route.response.into_send_async(Err(error)).await;
+						}
+					}
 				}
-				Err(error) => {
-					let _ = route.response.into_send_async(Err(error)).await;
+				Either::Right(notification) => {
+					if let Some(sender) = live_queries.get(&notification.id) {
+						let sender = sender.clone();
+						tokio::spawn(async move {
+							let _ = sender.send(notification).await;
+						});
+					}
 				}
 			}
 		}
