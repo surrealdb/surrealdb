@@ -16,6 +16,7 @@ storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
 storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
+http-compression = []
 # Private features
 has-storage = []
 
