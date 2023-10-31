@@ -29,6 +29,7 @@ mod version;
 #[cfg(test)]
 mod tests;
 
+pub use crate::dbs::Action;
 pub use authenticate::Authenticate;
 #[doc(hidden)] // Not supported yet
 pub use begin::Begin;
