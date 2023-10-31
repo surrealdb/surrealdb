@@ -949,38 +949,6 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 					}
 				]";
 
-async fn test_contains(
-	dbs: &Datastore,
-	sql: &str,
-	index_explain: &str,
-	result: &str,
-) -> Result<(), Error> {
-	let mut res = execute_test(&dbs, sql, 5).await?;
-
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(CONTAINS_TABLE_EXPLAIN);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(result);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	skip_ok(&mut res, 1)?;
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(index_explain);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(result);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	Ok(())
-}
-
 #[tokio::test]
 async fn select_contains() -> Result<(), Error> {
 	let dbs = new_ds().await?;
@@ -990,7 +958,11 @@ async fn select_contains() -> Result<(), Error> {
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 		DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 	"#;
@@ -1020,7 +992,17 @@ async fn select_contains() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 9).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 #[tokio::test]
@@ -1060,7 +1042,13 @@ async fn select_contains_all() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 #[tokio::test]
@@ -1100,7 +1088,13 @@ async fn select_contains_any() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 const CONTAINS_UNIQUE_CONTENT: &str = r#"
@@ -1144,5 +1138,11 @@ async fn select_unique_contains() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }

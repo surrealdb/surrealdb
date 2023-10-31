@@ -6,6 +6,7 @@ use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Part, Subquery, Table, Value, With};
 use async_recursion::async_recursion;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,6 +16,27 @@ pub(super) struct Tree {}
 enum IdiomPosition {
 	Left,
 	Right,
+}
+
+enum IndexIdiom<'a> {
+	Binary(Cow<'a, Idiom>),
+	Unary(Idiom, Operator, Cow<'a, Value>),
+}
+
+impl<'a> IndexIdiom<'a> {
+	fn as_ref(&self) -> &Idiom {
+		match self {
+			IndexIdiom::Binary(i) => i.as_ref(),
+			IndexIdiom::Unary(i, _, _) => &i,
+		}
+	}
+
+	fn into_owned(self) -> Idiom {
+		match self {
+			IndexIdiom::Binary(i) => i.into_owned(),
+			IndexIdiom::Unary(i, _, _) => i,
+		}
+	}
 }
 
 impl IdiomPosition {
@@ -81,7 +103,8 @@ struct TreeBuilder<'a> {
 
 impl<'a> TreeBuilder<'a> {
 	async fn find_indexes(&mut self, i: &Idiom) -> Result<Option<Arc<Vec<IndexRef>>>, Error> {
-		if let Some(irs) = self.index_lookup.get(i) {
+		let i = Self::resolve_index_idiom(i);
+		if let Some(irs) = self.index_lookup.get(i.as_ref()) {
 			return Ok(irs.clone());
 		}
 		if self.indexes.is_none() {
@@ -97,7 +120,7 @@ impl<'a> TreeBuilder<'a> {
 		let mut irs = Vec::new();
 		if let Some(indexes) = &self.indexes {
 			for ix in indexes.as_ref() {
-				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
+				if ix.cols.len() == 1 && ix.cols[0].eq(i.as_ref()) {
 					let ir = self.index_map.definitions.len() as IndexRef;
 					if let Some(With::Index(ixs)) = self.with {
 						if ixs.contains(&ix.name.0) {
@@ -114,8 +137,46 @@ impl<'a> TreeBuilder<'a> {
 		} else {
 			Some(Arc::new(irs))
 		};
-		self.index_lookup.insert(i.clone(), irs.clone());
+		self.index_lookup.insert(i.into_owned(), irs.clone());
 		Ok(irs)
+	}
+
+	fn resolve_index_idiom(idiom: &Idiom) -> IndexIdiom {
+		// We want to detect the form `field[WHERE subfield = ...]`
+		// and normalize it to `field.*.subfield`
+		if idiom.len() == 2 {
+			match (&idiom.0[0], &idiom.0[1]) {
+				(Part::Field(id1), Part::Where(v)) => {
+					if let Value::Expression(e) = v {
+						if let Expression::Binary {
+							l,
+							o,
+							r,
+						} = e.as_ref()
+						{
+							if let Value::Idiom(i) = l {
+								if i.len() == 1 {
+									if let Part::Field(id2) = &i.0[0] {
+										let idiom = Idiom::from(vec![
+											Part::Field(id1.clone()),
+											Part::All,
+											Part::Field(id2.clone()),
+										]);
+										return IndexIdiom::Unary(
+											idiom,
+											o.clone(),
+											Cow::Borrowed(r),
+										);
+									}
+								}
+							}
+						}
+					}
+				}
+				(_, _) => {}
+			}
+		}
+		IndexIdiom::Binary(Cow::Borrowed(idiom))
 	}
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
