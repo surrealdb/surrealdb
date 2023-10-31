@@ -11,11 +11,16 @@ use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Notification;
+use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
+use crate::opt::from_value;
 use crate::sql::serde::{deserialize, serialize};
+use crate::sql::Object;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -163,6 +168,7 @@ pub(crate) fn router(
 				0 => HashMap::new(),
 				capacity => HashMap::with_capacity(capacity),
 			};
+			let mut live_queries = HashMap::new();
 
 			let mut interval = time::interval(PING_INTERVAL);
 			// don't bombard the server with pings if we miss some ticks
@@ -204,6 +210,27 @@ pub(crate) fn router(
 							Method::Unset => {
 								if let [Value::Strand(Strand(key))] = &params[..1] {
 									vars.remove(key);
+								}
+							}
+							Method::Live => {
+								if let Some(sender) = param.notification_sender {
+									if let [Value::Uuid(id)] = &params[..1] {
+										live_queries.insert(*id, sender);
+									}
+								}
+								if response
+									.into_send_async(Ok(DbResponse::Other(Value::None)))
+									.await
+									.is_err()
+								{
+									trace!("Receiver dropped");
+								}
+								// There is nothing to send to the server here
+								continue;
+							}
+							Method::Kill => {
+								if let [Value::Uuid(id)] = &params[..1] {
+									live_queries.remove(id);
 								}
 							}
 							_ => {}
@@ -264,14 +291,39 @@ pub(crate) fn router(
 						last_activity = Instant::now();
 						match Response::try_from(&message) {
 							Ok(option) => {
+								// We are only interested in responses that are not empty
 								if let Some(response) = option {
 									trace!("{response:?}");
-									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
-										if let Some((_method, sender)) = routes.remove(&id) {
-											let _res = sender
-												.into_send_async(DbResponse::from(response.result))
-												.await;
+									match response.id {
+										// If `id` is set this is a normal response
+										Some(id) => {
+											if let Ok(id) = id.coerce_to_i64() {
+												// We can only route responses with IDs
+												if let Some((_method, sender)) = routes.remove(&id)
+												{
+													// Send the response back to the caller
+													let _res = sender
+														.into_send_async(DbResponse::from(
+															response.result,
+														))
+														.await;
+												}
+											}
 										}
+										// If `id` is not set, this may be a live query notification
+										None => match response.result {
+											Ok(Data::Live(notification)) => {
+												// Check if this live query is registered
+												if let Some(sender) =
+													live_queries.get(&notification.id)
+												{
+													// Send the notification back to the caller if it is
+													let _res = sender.send(notification).await;
+												}
+											}
+											Ok(..) => { /* Ignored responses like pings */ }
+											Err(error) => error!("{error:?}"),
+										},
 									}
 								}
 							}
@@ -389,6 +441,30 @@ impl Response {
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
+				// Live queries currently don't support the binary protocol
+				// This is a workaround until live queries add support to send messages over binary
+				if let Ok(value) = crate::sql::json(text) {
+					if let Value::Object(Object(mut response)) = value {
+						if let Some(Value::Object(Object(mut map))) = response.remove("result") {
+							if let Some(Value::Uuid(id)) = map.remove("id") {
+								if let Some(value) = map.remove("action") {
+									if let Ok(action) = from_value(value) {
+										if let Some(result) = map.remove("result") {
+											return Ok(Some(Self {
+												id: None,
+												result: Ok(Data::Live(Notification {
+													id,
+													action,
+													result,
+												})),
+											}));
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
