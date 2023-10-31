@@ -9,6 +9,7 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::DbResponse;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
