@@ -1,6 +1,5 @@
 use futures::StreamExt;
 use serde::Deserialize;
-use std::collections::HashMap;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::method::Notification;
 use surrealdb::opt::auth::Root;
@@ -8,18 +7,17 @@ use surrealdb::sql::Thing;
 use surrealdb::Result;
 use surrealdb::Surreal;
 
+const ACCOUNT: &str = "account";
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct Account {
 	id: Thing,
-	#[serde(flatten)]
-	extra: HashMap<String, serde_json::Value>,
+	balance: String,
 }
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-	tracing_subscriber::fmt::init();
-
 	let db = Surreal::new::<Ws>("localhost:8000").await?;
 
 	db.signin(Root {
@@ -28,9 +26,9 @@ async fn main() -> surrealdb::Result<()> {
 	})
 	.await?;
 
-	db.use_ns("test").use_db("test").await?;
+	db.use_ns("namespace").use_db("database").await?;
 
-	let mut accounts = db.select("accounts").range("jane".."john").live().await?;
+	let mut accounts = db.select(ACCOUNT).range("one".."two").live().await?;
 
 	while let Some(notification) = accounts.next().await {
 		print(notification);
@@ -43,9 +41,8 @@ fn print(result: Result<Notification<Account>>) {
 	match result {
 		Ok(notification) => {
 			let action = notification.action;
-			let id = notification.data.id;
-			let extra = notification.data.extra;
-			println!("{action}: {id}; {extra:?}");
+			let account = notification.data;
+			println!("{action}: {account:?}");
 		}
 		Err(error) => eprintln!("{error}"),
 	}

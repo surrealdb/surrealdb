@@ -32,7 +32,6 @@ use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::mem;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::task::Context;
@@ -265,9 +264,9 @@ where
 		futures::executor::block_on(async move {
 			let mut conn = Client::new(Method::Kill);
 			if let Err(error) =
-				conn.execute_unit(self.router, Param::new(vec![mem::take(&mut self.id)])).await
+				conn.execute_unit(self.router, Param::new(vec![self.id.clone()])).await
 			{
-				error!("Failed to kill live query '{}': {error}", self.id);
+				error!("Failed to kill live query {}; {error}", self.id);
 			}
 		});
 	}

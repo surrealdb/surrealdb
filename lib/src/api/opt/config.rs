@@ -38,12 +38,20 @@ impl Config {
 	}
 
 	/// Set the notifications value of the config to the supplied value
+	#[deprecated(
+		since = "1.1.0",
+		note = "Moved to `Capabilities::with_live_query_notifications()`"
+	)]
 	pub fn set_notifications(mut self, notifications: bool) -> Self {
 		self.notifications = notifications;
 		self
 	}
 
 	/// Set the config to use notifications
+	#[deprecated(
+		since = "1.1.0",
+		note = "Moved to `Capabilities::with_live_query_notifications()`"
+	)]
 	pub fn notifications(mut self) -> Self {
 		self.notifications = true;
 		self
