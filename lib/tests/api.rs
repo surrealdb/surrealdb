@@ -47,7 +47,7 @@ mod api_integration {
 		name: &'a str,
 	}
 
-	#[derive(Debug, Deserialize)]
+	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 	struct RecordId {
 		id: Thing,
 	}
@@ -57,7 +57,7 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 	struct RecordBuf {
 		id: Thing,
 		name: String,
@@ -103,6 +103,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 	}
 
 	#[cfg(feature = "protocol-http")]
@@ -232,6 +233,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
@@ -268,6 +270,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
@@ -304,6 +307,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
@@ -340,6 +344,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
@@ -373,6 +378,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
@@ -404,6 +410,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
