@@ -24,7 +24,6 @@ use crate::opt::from_value;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Object;
 use crate::sql::Strand;
-use crate::sql::Uuid;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::stream::SplitSink;
@@ -168,12 +167,6 @@ impl Connection for Client {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum LiveQueryKey {
-	Int(i64),
-	Uuid(Uuid),
-}
-
 #[allow(clippy::too_many_lines)]
 pub(crate) fn router(
 	url: Url,
@@ -247,9 +240,25 @@ pub(crate) fn router(
 										vars.remove(key);
 									}
 								}
+								Method::Live => {
+									if let Some(sender) = param.notification_sender {
+										if let [Value::Uuid(id)] = &params[..1] {
+											live_queries.insert(*id, sender);
+										}
+									}
+									if response
+										.into_send_async(Ok(DbResponse::Other(Value::None)))
+										.await
+										.is_err()
+									{
+										trace!("Receiver dropped");
+									}
+									// There is nothing to send to the server here
+									continue;
+								}
 								Method::Kill => {
-									if let [Value::Uuid(uuid)] = &params[..1] {
-										live_queries.remove(&LiveQueryKey::Uuid(*uuid));
+									if let [Value::Uuid(id)] = &params[..1] {
+										live_queries.remove(id);
 									}
 								}
 								_ => {}
@@ -285,10 +294,6 @@ pub(crate) fn router(
 										Entry::Vacant(entry) => {
 											// Register query route
 											entry.insert((method, response));
-											// Register live query listener, if applicable
-											if let Some(sender) = param.notification_sender {
-												live_queries.insert(LiveQueryKey::Int(id), sender);
-											}
 										}
 										Entry::Occupied(..) => {
 											let error = Error::DuplicateRequestId(id);
@@ -328,22 +333,6 @@ pub(crate) fn router(
 															if let Some((_method, sender)) =
 																routes.remove(&id)
 															{
-																// If this is a live query, replace the client ID with the live query ID from the database
-																if let Some(sender) = live_queries
-																	.remove(&LiveQueryKey::Int(id))
-																{
-																	if let Ok(Data::Other(
-																		Value::Uuid(uuid),
-																	)) = &response.result
-																	{
-																		live_queries.insert(
-																			LiveQueryKey::Uuid(
-																				*uuid,
-																			),
-																			sender,
-																		);
-																	}
-																}
 																// Send the response back to the caller
 																let _res = sender
 																	.into_send_async(
@@ -359,11 +348,9 @@ pub(crate) fn router(
 													None => match response.result {
 														Ok(Data::Live(notification)) => {
 															// Check if this live query is registered
-															if let Some(sender) = live_queries.get(
-																&LiveQueryKey::Uuid(
-																	notification.id,
-																),
-															) {
+															if let Some(sender) =
+																live_queries.get(&notification.id)
+															{
 																// Send the notification back to the caller if it is
 																let _res =
 																	sender.send(notification).await;

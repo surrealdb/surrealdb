@@ -30,7 +30,7 @@ async fn main() -> surrealdb::Result<()> {
 
 	db.use_ns("test").use_db("test").await?;
 
-	let mut accounts = db.select("accounts").live().await?;
+	let mut accounts = db.select("accounts").range("jane".."john").live().await?;
 
 	while let Some(notification) = accounts.next().await {
 		print(notification);
