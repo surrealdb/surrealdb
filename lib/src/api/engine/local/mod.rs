@@ -43,18 +43,23 @@ use crate::api::Result;
 use crate::api::Surreal;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::channel;
+use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
+use crate::sql::statements::KillStatement;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
+use crate::sql::Uuid;
 use crate::sql::Value;
+use channel::Sender;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
@@ -436,6 +441,7 @@ async fn router(
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
+	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 
@@ -660,26 +666,25 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Live => {
-			let table = match &mut params[..] {
-				[value] => mem::take(value),
-				_ => unreachable!(),
-			};
-			let mut vars = BTreeMap::new();
-			vars.insert("table".to_owned(), table);
-			let response = kvs
-				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars))
-				.await?;
-			let value = take(true, response).await?;
-			Ok(DbResponse::Other(value))
+			if let Some(sender) = param.notification_sender {
+				if let [Value::Uuid(id)] = &params[..1] {
+					live_queries.insert(*id, sender);
+				}
+			}
+			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Kill => {
 			let id = match &mut params[..] {
 				[value] => mem::take(value),
 				_ => unreachable!(),
 			};
-			let mut vars = BTreeMap::new();
-			vars.insert("id".to_owned(), id);
-			let response = kvs.execute("KILL type::string($id)", &*session, Some(vars)).await?;
+			if let Value::Uuid(id) = &id {
+				live_queries.remove(id);
+			}
+			let query = Query(Statements(vec![Statement::Kill(KillStatement {
+				id,
+			})]));
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
