@@ -591,7 +591,7 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, this_node_id).await {
+					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
 						Ok(lq) => lq,
 						Err(e) => {
 							error!("Error archiving lqs during bootstrap phase: {:?}", e);
