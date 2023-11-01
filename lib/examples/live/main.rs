@@ -1,9 +1,9 @@
 use futures::StreamExt;
 use serde::Deserialize;
 use surrealdb::engine::remote::ws::Ws;
-use surrealdb::method::Notification;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::Thing;
+use surrealdb::Notification;
 use surrealdb::Result;
 use surrealdb::Surreal;
 

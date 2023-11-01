@@ -2,8 +2,9 @@ use crate::sql::{Object, Uuid, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
 pub enum Action {
 	Create,
 	Update,
