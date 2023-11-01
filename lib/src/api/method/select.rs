@@ -104,7 +104,53 @@ where
 	C: Connection,
 	R: DeserializeOwned,
 {
-	/// Listen to real-time changes of a select query
+	/// Turns a normal select query into a live query
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # use futures::StreamExt;
+	/// # use surrealdb::opt::Resource;
+	/// # use surrealdb::Result;
+	/// # use surrealdb::Notification;
+	/// # #[derive(Debug, serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Listen to all updates on a table
+	/// let mut stream = db.select("person").live().await?;
+	/// # let _: Option<Result<Notification<Person>>> = stream.next().await;
+	///
+	/// // Listen to updates on a range of records
+	/// let mut stream = db.select("person").range("jane".."john").live().await?;
+	/// # let _: Option<Result<Notification<Person>>> = stream.next().await;
+	///
+	/// // Listen to updates on a specific record
+	/// let mut stream = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).live().await?;
+	///
+	/// // The returned stream implements `futures::Stream` so we can
+	/// // use it with `futures::StreamExt`, for example.
+	/// while let Some(result) = stream.next().await {
+	///     handle(result);
+	/// }
+	///
+	/// // Handle the result of the live query notification
+	/// fn handle(result: Result<Notification<Person>>) {
+	///     match result {
+	///         Ok(notification) => println!("{notification:?}"),
+	///         Err(error) => eprintln!("{error}"),
+	///     }
+	/// }
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn live(self) -> Live<'r, C, R> {
 		Live {
 			router: self.router,
