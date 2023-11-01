@@ -434,6 +434,19 @@ where
 	})
 }
 
+async fn kill_live_query(
+	kvs: &Datastore,
+	id: Uuid,
+	session: &Session,
+	vars: BTreeMap<String, Value>,
+) -> Result<Value> {
+	let query = Query(Statements(vec![Statement::Kill(KillStatement {
+		id: id.into(),
+	})]));
+	let response = kvs.process(query, session, Some(vars)).await?;
+	take(true, response).await
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Arc<Datastore>,
@@ -672,18 +685,12 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Kill => {
-			let id = match &mut params[..] {
-				[value] => mem::take(value),
+			let id = match &params[..] {
+				[Value::Uuid(id)] => *id,
 				_ => unreachable!(),
 			};
-			if let Value::Uuid(id) = &id {
-				live_queries.remove(id);
-			}
-			let query = Query(Statements(vec![Statement::Kill(KillStatement {
-				id,
-			})]));
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
-			let value = take(true, response).await?;
+			live_queries.remove(&id);
+			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}
