@@ -29,7 +29,6 @@ mod version;
 #[cfg(test)]
 mod tests;
 
-pub use crate::dbs::Action;
 pub use authenticate::Authenticate;
 #[doc(hidden)] // Not supported yet
 pub use begin::Begin;
@@ -48,7 +47,7 @@ pub use health::Health;
 pub use import::Import;
 pub use invalidate::Invalidate;
 pub use live::Live;
-pub use live::Notification;
+pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;

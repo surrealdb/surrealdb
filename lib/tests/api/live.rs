@@ -3,8 +3,8 @@
 
 use futures::StreamExt;
 use futures::TryStreamExt;
-use surrealdb::method::Action;
-use surrealdb::method::Notification;
+use surrealdb::Action;
+use surrealdb::Notification;
 
 #[test_log::test(tokio::test)]
 async fn live_select_table() {
