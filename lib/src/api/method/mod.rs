@@ -627,6 +627,8 @@ where
 	/// # Examples
 	///
 	/// ```no_run
+	/// # use futures::StreamExt;
+	/// # use surrealdb::opt::Resource;
 	/// # #[derive(serde::Deserialize)]
 	/// # struct Person;
 	/// #
@@ -640,8 +642,21 @@ where
 	/// // Select all records from a table
 	/// let people: Vec<Person> = db.select("person").await?;
 	///
+	/// // Select a range of records from a table
+	/// let people: Vec<Person> = db.select("person").range("jane".."john").await?;
+	///
 	/// // Select a specific record from a table
 	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
+	///
+	/// // To listen for updates as they happen on a record, a range of records
+	/// // or entire table use a live query. This is done by simply calling `.live()`
+	/// // after this method. That gives you a stream of notifications you can listen on.
+	/// # let resource = Resource::from("person");
+	/// let mut stream = db.select(resource).live().await?;
+	///
+	/// while let Some(notification) = stream.next().await {
+	///     // Use the notification
+	/// }
 	/// #
 	/// # Ok(())
 	/// # }
