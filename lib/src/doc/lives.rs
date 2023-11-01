@@ -101,16 +101,16 @@ impl<'a> Document<'a> {
 					// Send a DELETE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Delete,
 							result: {
 								// Ensure futures are run
 								let lqopt: &Options = &lqopt.new_with_futures(true);
 								// Output the full document before any changes were applied
 								let mut value =
-									doc.doc.compute(&lqctx, &lqopt, txn, Some(&doc)).await?;
+									doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
 								// Remove metadata fields on output
-								value.del(&lqctx, &lqopt, txn, &*META).await?;
+								value.del(&lqctx, lqopt, txn, &*META).await?;
 								// Output result
 								value
 							},
@@ -123,7 +123,7 @@ impl<'a> Document<'a> {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Create,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
@@ -135,7 +135,7 @@ impl<'a> Document<'a> {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Update,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
