@@ -111,7 +111,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Graph(self.parse_graph(Dir::Out)?)
 			}
-			_ => Part::Field(self.parse_ident()?),
+			_ => Part::Field(self.parse_token_value()?),
 		};
 		let start = vec![start];
 		self.parse_remaining_idiom(start)
@@ -123,7 +123,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
-			_ => Part::Field(self.parse_ident()?),
+			_ => Part::Field(self.parse_token_value()?),
 		};
 		Ok(res)
 	}
@@ -138,13 +138,13 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("123") => Part::Index(self.parse_number()?),
+			t!("123") => Part::Index(self.parse_token_value()?),
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
 				Part::Where(self.parse_value()?)
 			}
-			t!("$param") => Part::Value(Value::Param(self.parse_param()?)),
-			TokenKind::Strand => Part::Value(Value::Strand(self.parse_strand()?)),
+			t!("$param") => Part::Value(Value::Param(self.parse_token_value()?)),
+			TokenKind::Strand => Part::Value(Value::Strand(self.parse_token_value()?)),
 			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
@@ -163,7 +163,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_ident()?;
+		let start = self.parse_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -184,7 +184,7 @@ impl Parser<'_> {
 							Part::Last
 						}
 						t!("123") => {
-							let number = self.token_as_number(token)?;
+							let number = self.from_token(token)?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),
@@ -200,7 +200,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_ident()?;
+		let start = self.parse_token_value()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -217,7 +217,7 @@ impl Parser<'_> {
 							Part::All
 						}
 						t!("123") => {
-							let number = self.parse_number()?;
+							let number = self.parse_token_value()?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),
@@ -248,9 +248,8 @@ impl Parser<'_> {
 	/// Expects to be at the start of a what list.
 	pub fn parse_what_list(&mut self) -> ParseResult<Vec<Value>> {
 		let mut res = vec![self.parse_what_value()?];
-		dbg!(self.peek());
 		while self.eat(t!(",")) {
-			res.push(dbg!(self.parse_what_value())?)
+			res.push(self.parse_what_value()?)
 		}
 		Ok(res)
 	}
@@ -261,7 +260,7 @@ impl Parser<'_> {
 	/// Expects to be at the start of a what value
 	pub fn parse_what_value(&mut self) -> ParseResult<Value> {
 		let start = self.parse_what_primary()?;
-		if dbg!(start.can_start_idiom()) && dbg!(Self::continues_idiom(self.peek_kind())) {
+		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
 			let start = match start {
 				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
 				Value::Idiom(Idiom(x)) => x,
@@ -299,10 +298,10 @@ impl Parser<'_> {
 					x if x.can_be_identifier() => {
 						// The following function should always succeed here,
 						// returning an error here would be a bug, so unwrap.
-						let table = self.parse_raw_ident().unwrap();
-						let mut tables = Tables(vec![Table(table)]);
+						let table = self.parse_token_value().unwrap();
+						let mut tables = Tables(vec![table]);
 						while self.eat(t!(",")) {
-							tables.0.push(Table(self.parse_raw_ident()?));
+							tables.0.push(self.parse_token_value()?);
 						}
 						tables
 					}
@@ -325,10 +324,10 @@ impl Parser<'_> {
 			x if x.can_be_identifier() => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let identifier = self.parse_raw_ident().unwrap();
+				let table = self.parse_token_value().unwrap();
 				Ok(Graph {
 					dir,
-					what: Tables(vec![Table(identifier)]),
+					what: Tables(vec![table]),
 					..Default::default()
 				})
 			}

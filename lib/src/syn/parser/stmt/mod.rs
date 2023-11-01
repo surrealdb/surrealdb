@@ -3,7 +3,7 @@ use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
-use crate::sql::{Fields, Ident, Param, Table, Uuid};
+use crate::sql::{Fields, Ident, Param, Uuid};
 use crate::syn::token::{t, TokenKind};
 use crate::{
 	sql::{
@@ -193,9 +193,9 @@ impl Parser<'_> {
 	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
 		expected!(self, "INDEX");
 
-		let index = self.parse_ident()?;
+		let index = self.parse_token_value()?;
 		expected!(self, "ON");
-		let table = self.parse_ident()?;
+		let table = self.parse_token_value()?;
 
 		Ok(AnalyzeStatement::Idx(index, table))
 	}
@@ -226,26 +226,28 @@ impl Parser<'_> {
 		debug_assert_eq!(keyword.kind, t!("USE"));
 
 		let (ns, db) = if self.eat(t!("NAMESPACE")) {
-			let ns = self.parse_ident()?;
-
-			let db = self.eat(t!("DATABASE")).then(|| self.parse_ident()).transpose()?;
+			let ns = self.parse_token_value::<Ident>()?.0;
+			let db = self
+				.eat(t!("DATABASE"))
+				.then(|| self.parse_token_value::<Ident>())
+				.transpose()?
+				.map(|x| x.0);
 			(Some(ns), db)
 		} else {
 			expected!(self, "DATABASE");
 
-			let db = self.parse_ident()?;
+			let db = self.parse_token_value::<Ident>()?.0;
 			(None, Some(db))
 		};
 
-		let res = UseStatement {
-			ns: ns.map(|x| x.0),
-			db: db.map(|x| x.0),
-		};
-		Ok(res)
+		Ok(UseStatement {
+			ns,
+			db,
+		})
 	}
 
 	pub fn parse_for_stmt(&mut self) -> ParseResult<ForeachStatement> {
-		let param = self.parse_param()?;
+		let param = self.parse_token_value()?;
 		expected!(self, "IN");
 		let range = self.parse_value()?;
 
@@ -265,15 +267,15 @@ impl Parser<'_> {
 			t!("NAMESPACE") => InfoStatement::Ns,
 			t!("DATABASE") => InfoStatement::Db,
 			t!("SCOPE") => {
-				let ident = self.parse_ident()?;
+				let ident = self.parse_token_value()?;
 				InfoStatement::Sc(ident)
 			}
 			t!("TABLE") => {
-				let ident = self.parse_ident()?;
+				let ident = self.parse_token_value()?;
 				InfoStatement::Tb(ident)
 			}
 			t!("USER") => {
-				let ident = self.parse_ident()?;
+				let ident = self.parse_token_value()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 				InfoStatement::User(ident, base)
 			}
@@ -311,8 +313,8 @@ impl Parser<'_> {
 		};
 		expected!(self, "FROM");
 		let what = match self.peek().kind {
-			t!("$param") => Value::Param(self.parse_param()?),
-			_ => Value::Table(Table(self.parse_raw_ident()?)),
+			t!("$param") => Value::Param(self.parse_token_value()?),
+			_ => Value::Table(self.parse_token_value()?),
 		};
 		let cond = self.try_parse_condition()?;
 		let fetch = self.try_parse_fetch()?;
@@ -329,7 +331,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
-		let name = self.parse_ident()?;
+		let name = self.parse_token_value()?;
 		expected!(self, "=");
 		let what = match self.next().kind {
 			t!("true") => true,
@@ -352,7 +354,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_let_stmt(&mut self) -> ParseResult<SetStatement> {
-		let name = self.parse_param()?.0 .0;
+		let name = self.parse_token_value::<Param>()?.0 .0;
 		expected!(self, "=");
 		let what = self.parse_value()?;
 		Ok(SetStatement {
@@ -366,20 +368,20 @@ impl Parser<'_> {
 		expected!(self, "FOR");
 		let table = match self.next().kind {
 			t!("TABLE") => {
-				let table = self.parse_raw_ident()?;
-				Some(Table(table))
+				let table = self.parse_token_value()?;
+				Some(table)
 			}
 			t!("DATABASE") => None,
 			x => unexpected!(self, x, "`TABLE` or `DATABASE`"),
 		};
 		expected!(self, "SINCE");
 		let since = match self.peek_kind() {
-			TokenKind::Number => ShowSince::Versionstamp(self.parse_u64()?),
+			TokenKind::Number => ShowSince::Versionstamp(self.parse_token_value()?),
 			// TODO: date time
 			x => unexpected!(self, x, "a version stamp of date-time"),
 		};
 
-		let limit = self.eat(t!("LIMIT")).then(|| self.parse_u32()).transpose()?;
+		let limit = self.eat(t!("LIMIT")).then(|| self.parse_token_value()).transpose()?;
 
 		Ok(ShowStatement {
 			table,
@@ -389,7 +391,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_sleep_stmt(&mut self) -> ParseResult<SleepStatement> {
-		let duration = self.parse_duration()?;
+		let duration = self.parse_token_value()?;
 		Ok(SleepStatement {
 			duration,
 		})

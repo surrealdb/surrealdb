@@ -1,8 +1,8 @@
 use crate::{
-	sql::{statements::RelateStatement, Table, Value},
+	sql::{statements::RelateStatement, Value},
 	syn::{
 		parser::{
-			mac::{expected, to_do, unexpected},
+			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::t,
@@ -59,7 +59,7 @@ impl Parser<'_> {
 				let start = self.pop_peek().span;
 				self.parse_array(start).map(Value::Array)
 			}
-			t!("$param") => self.parse_param().map(Value::Param),
+			t!("$param") => self.parse_token_value().map(Value::Param),
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -76,7 +76,7 @@ impl Parser<'_> {
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing().map(Value::Thing)
 		} else {
-			self.parse_raw_ident().map(|x| Value::Table(Table(x)))
+			self.parse_token_value().map(Value::Table)
 		}
 	}
 }

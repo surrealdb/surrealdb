@@ -66,17 +66,17 @@ impl Parser<'_> {
 				let next = self.next();
 				let tables = match next.kind {
 					t!("<") => {
-						let mut tables = vec![self.parse_ident()?.into()];
+						let mut tables = vec![self.parse_token_value()?];
 						while self.eat(t!("|")) {
-							tables.push(self.parse_ident()?.into());
+							tables.push(self.parse_token_value()?);
 						}
 						self.expect_closing_delimiter(t!(">"), next.span)?;
 						tables
 					}
 					t!("(") => {
-						let mut tables = vec![self.parse_ident()?.into()];
+						let mut tables = vec![self.parse_token_value()?];
 						while self.eat(t!(",")) {
-							tables.push(self.parse_ident()?.into());
+							tables.push(self.parse_token_value()?);
 						}
 						self.expect_closing_delimiter(t!(")"), next.span)?;
 						tables
@@ -97,14 +97,14 @@ impl Parser<'_> {
 			t!("ARRAY") => {
 				let delim = expected!(self, "<").span;
 				let kind = self.parse_inner_kind()?;
-				let size = self.eat(t!(",")).then(|| self.parse_u64()).transpose()?;
+				let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Array(Box::new(kind), size))
 			}
 			t!("SET") => {
 				let delim = expected!(self, "<").span;
 				let kind = self.parse_inner_kind()?;
-				let size = self.eat(t!(",")).then(|| self.parse_u64()).transpose()?;
+				let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Set(Box::new(kind), size))
 			}

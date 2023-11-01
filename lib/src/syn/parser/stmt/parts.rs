@@ -2,8 +2,8 @@
 
 use crate::{
 	sql::{
-		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Fetch, Fetchs, Group, Groups,
-		Ident, Operator, Output, Permission, Permissions, Table, Tables, Timeout, View,
+		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Group,
+		Groups, Ident, Operator, Output, Permission, Permissions, Tables, Timeout, View,
 	},
 	syn::{
 		parser::{
@@ -85,7 +85,7 @@ impl Parser<'_> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
-		let duration = self.parse_duration()?;
+		let duration = self.parse_token_value()?;
 		Ok(Some(Timeout(duration)))
 	}
 
@@ -209,7 +209,7 @@ impl Parser<'_> {
 				if !scope_allowed {
 					unexpected!(self, t!("SCOPE"), "a scope is not allowed here");
 				}
-				let name = self.parse_ident()?;
+				let name = self.parse_token_value()?;
 				Ok(Base::Sc(name))
 			}
 			x => {
@@ -227,7 +227,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
-		let expiry = self.parse_duration()?.0;
+		let expiry = self.parse_token_value::<Duration>()?.0;
 		Ok(ChangeFeed {
 			expiry,
 		})
@@ -242,9 +242,9 @@ impl Parser<'_> {
 		expected!(self, "SELECT");
 		let fields = self.parse_fields()?;
 		expected!(self, "FROM");
-		let mut from = vec![Table(self.parse_raw_ident()?)];
+		let mut from = vec![self.parse_token_value()?];
 		while self.eat(t!(",")) {
-			from.push(Table(self.parse_raw_ident()?));
+			from.push(self.parse_token_value()?);
 		}
 
 		let cond = self.try_parse_condition()?;
@@ -271,7 +271,7 @@ impl Parser<'_> {
 				DistanceKind::Hamming => Distance::Hamming,
 				DistanceKind::Mahalanobis => Distance::Mahalanobis,
 				DistanceKind::Minkowski => {
-					let distance = self.parse_number()?;
+					let distance = self.parse_token_value()?;
 					Distance::Minkowski(distance)
 				}
 			},
@@ -284,12 +284,12 @@ impl Parser<'_> {
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
 		expected!(self, "fn");
 		expected!(self, "::");
-		let mut name = self.parse_ident()?;
+		let mut name = self.parse_token_value::<Ident>()?;
 		while self.eat(t!("::")) {
-			let part = self.parse_ident()?;
+			let part = self.parse_token_value::<Ident>()?;
 			name.0.push(':');
 			name.0.push(':');
-			name.0.push_str(part.as_str());
+			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)
 	}

@@ -15,11 +15,11 @@ impl Parser<'_> {
 	pub fn parse_what_primary(&mut self) -> ParseResult<Value> {
 		match self.peek_kind() {
 			TokenKind::Duration => {
-				let duration = self.parse_duration()?;
+				let duration = self.parse_token_value()?;
 				Ok(Value::Duration(duration))
 			}
 			t!("$param") => {
-				let param = self.parse_param()?;
+				let param = self.parse_token_value()?;
 				Ok(Value::Param(param))
 			}
 			t!("IF") => {
@@ -46,7 +46,7 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
-			_ => self.parse_raw_ident().map(|x| Value::Table(Table(x))),
+			_ => self.parse_token_value().map(Value::Table),
 		}
 	}
 
@@ -119,8 +119,8 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
-				let identifier = self.token_as_raw_ident(token)?;
-				Value::Table(Table(identifier))
+				let table = self.parse_token_value()?;
+				Value::Table(table)
 			}
 		};
 
@@ -164,10 +164,10 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
-		let name = self.parse_raw_ident()?;
+		let name = self.parse_token_value::<Ident>()?.0;
 		expected!(self, ":");
-		let from = self.parse_u64()?;
-		let to = self.eat(t!("..")).then(|| self.parse_u64()).transpose()?;
+		let from = self.parse_token_value()?;
+		let to = self.eat(t!("..")).then(|| self.parse_token_value()).transpose()?;
 		self.expect_closing_delimiter(t!("|"), start)?;
 		if let Some(to) = to {
 			Ok(Mock::Range(name, from, to))
@@ -177,7 +177,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
-		let ident = self.parse_raw_ident()?;
+		let ident = self.parse_token_value::<Ident>()?.0;
 		expected!(self, ":");
 		let id = match self.peek_kind() {
 			t!("{") => {
@@ -192,11 +192,11 @@ impl Parser<'_> {
 			}
 			// TODO: negative numbers.
 			TokenKind::Number => {
-				let number = self.parse_u64()?;
+				let number = self.parse_token_value::<u64>()?;
 				Id::Number(number as i64)
 			}
 			_ => {
-				let ident = self.parse_raw_ident()?;
+				let ident = self.parse_token_value::<Ident>()?.0;
 				Id::String(ident)
 			}
 		};

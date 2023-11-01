@@ -130,7 +130,7 @@ fn parse_define_database() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
-				expiry: Duration(std::time::Duration::from_secs(1) * 60)
+				expiry: std::time::Duration::from_secs(1) * 60
 			})
 		}))
 	);
@@ -176,6 +176,7 @@ fn parse_define_function() {
 	)
 }
 
+#[test]
 fn parse_define_user() {
 	let res = test_parse!(
 		parse_stmt,

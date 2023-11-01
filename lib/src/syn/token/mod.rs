@@ -226,6 +226,7 @@ pub enum TokenKind {
 	OpenDelim(Delim),
 	CloseDelim(Delim),
 	Uuid,
+	DateTime,
 	Strand,
 	/// A parameter like `$name`.
 	Parameter,
@@ -301,6 +302,7 @@ impl TokenKind {
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
 			TokenKind::Uuid => "a uuid",
+			TokenKind::DateTime => "a date-time",
 			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
 			TokenKind::Duration => "a duration",

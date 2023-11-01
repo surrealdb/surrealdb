@@ -1,5 +1,5 @@
 use crate::{
-	sql::{statements::InsertStatement, Data, Ident, Param, Table, Value},
+	sql::{statements::InsertStatement, Data, Ident, Param, Value},
 	syn::{
 		parser::{mac::expected, ParseResult, Parser},
 		token::t,
@@ -18,8 +18,8 @@ impl Parser<'_> {
 				Value::Param(Param(Ident(str)))
 			}
 			_ => {
-				let table = self.parse_raw_ident()?;
-				Value::Table(Table(table))
+				let table = self.parse_token_value()?;
+				Value::Table(table)
 			}
 		};
 

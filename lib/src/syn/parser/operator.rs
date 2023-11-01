@@ -1,7 +1,7 @@
 //! This module defines the pratt parser for operators.
 
 use crate::sql::{Cast, Expression, Operator, Value};
-use crate::syn::parser::mac::{expected, to_do};
+use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{t, TokenKind};
 
@@ -142,7 +142,7 @@ impl Parser<'_> {
 			t!("@") => {
 				let reference = (!self.eat(t!("@")))
 					.then(|| {
-						let number = self.parse_u8()?;
+						let number = self.parse_token_value()?;
 						expected!(self, "@");
 						Ok(number)
 					})
@@ -184,7 +184,7 @@ impl Parser<'_> {
 			t!("IN") => Operator::Inside,
 			t!("KNN") => {
 				let start = expected!(self, "<").span;
-				let amount = self.parse_u32()?;
+				let amount = self.parse_token_value()?;
 				self.expect_closing_delimiter(t!(">"), start)?;
 				Operator::Knn(amount)
 			}

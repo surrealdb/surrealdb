@@ -22,7 +22,7 @@ impl Lexer<'_> {
 					let next = self.reader.peek();
 					if let Some(x @ b'0'..=b'9') = next {
 						self.scratch.push(x as char);
-						return self.lex_mantissa(backup);
+						return self.lex_mantissa();
 					} else {
 						// indexing a number
 						self.reader.backup(backup);
@@ -94,7 +94,7 @@ impl Lexer<'_> {
 	}
 
 	/// Lexes the mantissa of a number, i.e. `.8` in `1.8`
-	pub fn lex_mantissa(&mut self, backup: usize) -> Token {
+	pub fn lex_mantissa(&mut self) -> Token {
 		self.scratch.push('.');
 		loop {
 			let Some(x) = self.reader.peek() else {
@@ -106,15 +106,48 @@ impl Lexer<'_> {
 					self.reader.next();
 					self.scratch.push(x as char);
 				}
+				b'e' | b'E' => {
+					// scientific notation
+					self.reader.next();
+					self.scratch.push('e');
+					return self.lex_exponent();
+				}
 				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-					// invalid token, random identifier characters immediately after
-					// backup to before dot part.
-					self.reader.backup(backup);
+					// invalid token, random identifier characters immediately after number.
 					self.scratch.clear();
 					return self.invalid_token();
 				}
 				_ => {
 					return self.finish_float_token();
+				}
+			}
+		}
+	}
+
+	pub fn lex_exponent(&mut self) -> Token {
+		let mut atleast_one = false;
+		match self.reader.peek() {
+			Some(b'-' | b'+') => {}
+			Some(b'0'..=b'9') => {
+				atleast_one = true;
+			}
+			_ => {
+				// random other character, expected atleast one digit.
+				return self.invalid_token();
+			}
+		}
+		self.reader.next();
+		loop {
+			match self.reader.peek() {
+				Some(x @ b'0'..=b'9') => {
+					self.scratch.push(x as char);
+				}
+				_ => {
+					if atleast_one {
+						return self.finish_float_token();
+					} else {
+						return self.invalid_token();
+					}
 				}
 			}
 		}

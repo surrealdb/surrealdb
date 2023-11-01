@@ -274,6 +274,34 @@ impl<'a> Lexer<'a> {
 			b'`' => return self.lex_surrounded_ident(true),
 			b'"' => return self.lex_strand(true),
 			b'\'' => return self.lex_strand(false),
+			b't' => {
+				match self.reader.peek() {
+					Some(b'"') => {
+						self.reader.next();
+						return self.lex_date_time(true);
+					}
+					Some(b'\'') => {
+						self.reader.next();
+						return self.lex_date_time(false);
+					}
+					_ => {}
+				}
+				return self.lex_ident_from_next_byte(b't');
+			}
+			b'u' => {
+				match self.reader.peek() {
+					Some(b'"') => {
+						self.reader.next();
+						return self.lex_uuid(true);
+					}
+					Some(b'\'') => {
+						self.reader.next();
+						return self.lex_uuid(false);
+					}
+					_ => {}
+				}
+				return self.lex_ident_from_next_byte(b'u');
+			}
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}

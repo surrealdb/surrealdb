@@ -128,7 +128,7 @@ impl<'a> Parser<'a> {
 
 	/// Parse a full query.
 	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
-		let mut statements = dbg!(vec![self.parse_stmt()?]);
+		let mut statements = vec![self.parse_stmt()?];
 		while self.eat(t!(";")) {
 			while self.eat(t!(";")) {}
 

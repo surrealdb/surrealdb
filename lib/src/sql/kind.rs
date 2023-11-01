@@ -187,6 +187,7 @@ fn array(i: &str) -> IResult<&str, Kind> {
 			let (i, _) = mightbespace(i)?;
 			Ok((i, l))
 		})(i)?;
+
 		let (i, _) = expect_terminator(s, char('>'))(i)?;
 		Ok((i, (k, l)))
 	})(i)?;

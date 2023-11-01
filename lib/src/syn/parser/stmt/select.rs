@@ -1,7 +1,7 @@
 use crate::{
 	sql::{
-		statements::SelectStatement, Explain, Idioms, Limit, Order, Orders, Split, Splits, Start,
-		Values, Version, With,
+		statements::SelectStatement, Explain, Ident, Idioms, Limit, Order, Orders, Split, Splits,
+		Start, Values, Version, With,
 	},
 	syn::{
 		parser::{
@@ -27,7 +27,7 @@ impl Parser<'_> {
 		while self.eat(t!(",")) {
 			what.push(self.parse_value()?);
 		}
-		let what = dbg!(Values(what));
+		let what = Values(what);
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition()?;
@@ -73,9 +73,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.parse_raw_ident()?];
+				let mut index = vec![self.parse_token_value::<Ident>()?.0];
 				while self.eat(t!(",")) {
-					index.push(self.parse_raw_ident()?);
+					index.push(self.parse_token_value::<Ident>()?.0);
 				}
 				With::Index(index)
 			}

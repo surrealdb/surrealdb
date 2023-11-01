@@ -195,3 +195,110 @@ fn keyword() {
 		]
 	}
 }
+
+#[test]
+fn uuid() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" u"e72bee20-f49b-11ec-b939-0242ac120002" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::Uuid);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"e72bee20-f49b-11ec-b939-0242ac120002"
+	);
+
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" u"b19bc00b-aa98-486c-ae37-c8e1c54295b1" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::Uuid);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"b19bc00b-aa98-486c-ae37-c8e1c54295b1"
+	);
+}
+
+#[test]
+fn date_zone() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2020-01-01T00:00:00Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2020-01-01T00:00:00Z"
+	);
+}
+
+#[test]
+fn date_time() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-23T18:25:43Z"
+	);
+}
+
+#[test]
+fn date_time_nanos() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.5631Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-23T18:25:43.5631Z"
+	);
+}
+
+#[test]
+fn date_time_timezone_utc() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.0000511Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-23T18:25:43.0000511Z"
+	);
+}
+
+#[test]
+fn date_time_timezone_pacific() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.511-08:00" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-24T02:25:43.511-08:00"
+	);
+}
+
+#[test]
+fn date_time_timezone_pacific_partial() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.511-08:30" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-24T02:55:43.511-08:30"
+	);
+}
+
+#[test]
+fn date_time_timezone_utc_nanoseconds() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.5110000Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-23T18:25:43.5110000Z"
+	);
+}
+
+#[test]
+fn date_time_timezone_utc_sub_nanoseconds() {
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.0000511Z" "#);
+	let token = lexer.next_token();
+	assert_eq!(token.kind, TokenKind::DateTime);
+	assert_eq!(
+		lexer.strings[u32::from(token.data_index.unwrap()) as usize],
+		"2012-04-23T18:25:43.000051100Z"
+	);
+}
