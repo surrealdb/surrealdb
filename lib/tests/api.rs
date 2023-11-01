@@ -5,6 +5,7 @@ mod api_integration {
 	use serde::Deserialize;
 	use serde::Serialize;
 	use serde_json::json;
+	use serial_test::serial;
 	use std::borrow::Cow;
 	use std::ops::Bound;
 	use std::sync::Arc;
@@ -38,9 +39,6 @@ mod api_integration {
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
 	const TICK_INTERVAL: Duration = Duration::from_secs(1);
-	// Used to ensure that only one test at a time is setting up the underlying datastore.
-	// When auth is enabled, multiple tests may try to create the same root user at the same time.
-	static SETUP_MUTEX: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
 
 	#[derive(Debug, Serialize)]
 	struct Record<'a> {
@@ -69,23 +67,13 @@ mod api_integration {
 		pass: &'a str,
 	}
 
-	fn init_logger() {
-		let test_writer = fmt::layer().with_test_writer();
-		let builder = fmt::Subscriber::builder().with_env_filter(EnvFilter::from_default_env());
-		let subscriber = builder.finish();
-		let _ = subscriber.with(test_writer).try_init();
-	}
-
 	#[cfg(feature = "protocol-ws")]
 	mod ws {
 		use super::*;
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Client> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -96,9 +84,8 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
 			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
 		}
 
@@ -112,10 +99,7 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Client;
 		use surrealdb::engine::remote::http::Http;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Client> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -126,9 +110,8 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
 			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		}
 
@@ -145,7 +128,6 @@ mod api_integration {
 		use surrealdb::iam;
 
 		async fn new_db() -> Surreal<Db> {
-			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -159,22 +141,19 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn memory_allowed_as_address() {
-			init_logger();
 			surrealdb::engine::any::connect("memory").await.unwrap();
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
 			surrealdb::engine::any::connect("mem://").await.unwrap();
 			surrealdb::engine::any::connect("memory").await.unwrap();
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn signin_first_not_necessary() {
-			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
@@ -183,9 +162,8 @@ mod api_integration {
 			assert_eq!(record.id.to_string(), "item:foo");
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn cant_sign_into_default_root_account() {
-			init_logger();
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			let Error::Db(DbError::InvalidAuth) = db
 				.signin(Root {
@@ -199,9 +177,8 @@ mod api_integration {
 			};
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn credentials_activate_authentication() {
-			init_logger();
 			let config = Config::new().user(Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -219,7 +196,7 @@ mod api_integration {
 			};
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn surreal_clone() {
 			use surrealdb::engine::any::Any;
 
@@ -243,10 +220,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::File;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -261,12 +235,12 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("file://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("file:///tmp/{path}.db")).await.unwrap();
+			let path = format!("{}.db", Ulid::new());
+			surrealdb::engine::any::connect(format!("file://{path}")).await.unwrap();
+			surrealdb::engine::any::connect(format!("file:///tmp/{path}")).await.unwrap();
+			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -280,10 +254,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::RocksDb;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -298,12 +269,12 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("rocksdb://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}.db")).await.unwrap();
+			let path = format!("{}.db", Ulid::new());
+			surrealdb::engine::any::connect(format!("rocksdb://{path}")).await.unwrap();
+			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}")).await.unwrap();
+			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -317,10 +288,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::SpeeDb;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -335,12 +303,12 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("speedb://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}.db")).await.unwrap();
+			let path = format!("{}.db", Ulid::new());
+			surrealdb::engine::any::connect(format!("speedb://{path}")).await.unwrap();
+			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}")).await.unwrap();
+			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -354,10 +322,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::TiKv;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -371,9 +336,8 @@ mod api_integration {
 			db
 		}
 
-		#[tokio::test]
+		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			init_logger();
 			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
 		}
 
@@ -390,8 +354,6 @@ mod api_integration {
 
 		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -419,10 +381,7 @@ mod api_integration {
 		use super::*;
 		use surrealdb::engine::any::Any;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Any> {
-			let _guard = SETUP_MUTEX.lock().unwrap();
-			init_logger();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
