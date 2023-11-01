@@ -7,7 +7,6 @@ use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::dbs;
-use crate::dbs::Action;
 use crate::method::Query;
 use crate::opt::from_value;
 use crate::opt::Resource;
@@ -26,6 +25,7 @@ use crate::sql::Table;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
+use crate::Notification;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -246,7 +246,7 @@ where
 	into_future! {}
 }
 
-/// A stream of exported data
+/// A stream of live query notifications
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Stream<'r, C: Connection, R> {
@@ -264,12 +264,6 @@ where
 		let mut conn = Client::new(Method::Kill);
 		conn.execute_unit(self.router, Param::new(vec![self.id])).await
 	}
-}
-
-#[derive(Debug)]
-pub struct Notification<R> {
-	pub action: Action,
-	pub data: R,
 }
 
 macro_rules! poll_next {

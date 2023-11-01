@@ -136,6 +136,8 @@ pub mod key;
 pub mod kvs;
 
 #[doc(inline)]
+pub use crate::dbs::Action;
+#[doc(inline)]
 pub use api::engine;
 #[doc(inline)]
 pub use api::method;
@@ -164,6 +166,13 @@ pub mod channel {
 pub mod error {
 	pub use crate::api::err::Error as Api;
 	pub use crate::err::Error as Db;
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub struct Notification<R> {
+	pub action: Action,
+	pub data: R,
 }
 
 /// An error originating from the SurrealDB client library
