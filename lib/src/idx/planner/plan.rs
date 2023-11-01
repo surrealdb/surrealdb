@@ -1,9 +1,9 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{IndexRef, Node};
+use crate::idx::planner::tree::{IdiomRef, IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Object};
-use crate::sql::{Expression, Idiom, Operator, Value};
+use crate::sql::{Expression, Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -140,7 +140,7 @@ pub(crate) struct IndexOption(Arc<Inner>);
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) struct Inner {
 	ir: IndexRef,
-	id: Idiom,
+	id: IdiomRef,
 	op: IndexOperator,
 }
 
@@ -154,7 +154,7 @@ pub(super) enum IndexOperator {
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: Idiom, op: IndexOperator) -> Self {
+	pub(super) fn new(ir: IndexRef, id: IdiomRef, op: IndexOperator) -> Self {
 		Self(Arc::new(Inner {
 			ir,
 			id,
@@ -174,8 +174,8 @@ impl IndexOption {
 		&self.0.op
 	}
 
-	pub(super) fn id(&self) -> &Idiom {
-		&self.0.id
+	pub(super) fn id(&self) -> IdiomRef {
+		self.0.id
 	}
 
 	fn reduce_array(v: &Value) -> Value {
@@ -315,13 +315,13 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			Idiom::from("a.b".to_string()),
+			7,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
-			1,
-			Idiom::from("a.b".to_string()),
+			2,
+			5,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 

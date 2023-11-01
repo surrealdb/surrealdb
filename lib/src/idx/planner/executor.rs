@@ -11,7 +11,7 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-use crate::idx::planner::tree::{IndexMap, IndexRef};
+use crate::idx::planner::tree::{IdiomRef, IndexRef, IndexesMap};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
@@ -19,7 +19,7 @@ use crate::kvs;
 use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Object, Table, Thing, Value};
+use crate::sql::{Array, Expression, Idiom, Object, Table, Thing, Value};
 use roaring::RoaringTreemap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -27,6 +27,7 @@ use tokio::sync::RwLock;
 
 pub(crate) struct QueryExecutor {
 	table: String,
+	idioms: HashMap<IdiomRef, Idiom>,
 	ft_map: HashMap<IndexRef, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
@@ -62,10 +63,10 @@ impl QueryExecutor {
 		opt: &Options,
 		txn: &Transaction,
 		table: &Table,
-		im: IndexMap,
+		im: IndexesMap,
+		idioms: HashMap<IdiomRef, Idiom>,
 	) -> Result<Self, Error> {
 		let mut run = txn.lock().await;
-
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
@@ -127,6 +128,7 @@ impl QueryExecutor {
 
 		Ok(Self {
 			table: table.0.clone(),
+			idioms,
 			ft_map,
 			mr_entries,
 			exp_entries,
@@ -351,10 +353,12 @@ impl QueryExecutor {
 		}
 	}
 
-	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex)> {
+	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex, &Idiom)> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(ft) = self.ft_map.get(&e.0.index_option.ir()) {
-				return Some((e, ft));
+				if let Some(id) = self.idioms.get(&e.0.index_option.id()) {
+					return Some((e, ft, id));
+				}
 			}
 		}
 		None
@@ -369,11 +373,9 @@ impl QueryExecutor {
 		match_ref: &Value,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
+		if let Some((e, ft, id)) = self.get_ft_entry_and_index(match_ref) {
 			let mut run = txn.lock().await;
-			return ft
-				.highlight(&mut run, thg, &e.0.terms, prefix, suffix, e.0.index_option.id(), doc)
-				.await;
+			return ft.highlight(&mut run, thg, &e.0.terms, prefix, suffix, id, doc).await;
 		}
 		Ok(Value::None)
 	}
@@ -384,7 +386,7 @@ impl QueryExecutor {
 		thg: &Thing,
 		match_ref: &Value,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
+		if let Some((e, ft, _)) = self.get_ft_entry_and_index(match_ref) {
 			let mut run = txn.lock().await;
 			return ft.extract_offsets(&mut run, thg, &e.0.terms).await;
 		}
