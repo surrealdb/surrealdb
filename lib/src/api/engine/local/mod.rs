@@ -41,8 +41,6 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::channel;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -550,7 +548,7 @@ async fn router(
 		Method::Export => {
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			let (tx, rx) = channel::new(1);
+			let (tx, rx) = crate::channel::new(1);
 
 			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {
