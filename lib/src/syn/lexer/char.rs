@@ -1,6 +1,8 @@
 use crate::syn::lexer::{CharError, Lexer};
 use crate::syn::token::{t, Token, TokenKind};
 
+use super::Error;
+
 impl<'a> Lexer<'a> {
 	pub fn lex_char(&mut self, byte: u8) -> Token {
 		let c = match self.reader.complete_char(byte) {
@@ -22,7 +24,7 @@ impl<'a> Lexer<'a> {
 			'⊄' => t!("⊄"),
 			'×' => t!("×"),
 			'÷' => t!("÷"),
-			_ => return self.invalid_token(),
+			x => return self.invalid_token(Error::UnexpectedCharacter(x)),
 		};
 		self.finish_token(kind, None)
 	}

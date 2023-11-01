@@ -1,5 +1,5 @@
 use crate::{
-	sql::Number,
+	sql::{Datetime, Number},
 	syn::token::{DataIndex, Span, Token, TokenKind},
 };
 
@@ -12,12 +12,41 @@ mod number;
 mod reader;
 mod unicode;
 
+mod datetime;
 mod strand;
 #[cfg(test)]
 mod test;
 
 pub use reader::{BytesReader, CharError};
 use std::time::Duration;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+	#[error("Lexer encountered unexpected character {0}")]
+	UnexpectedCharacter(char),
+	#[error("Lexer encountered unexpected end of source characters")]
+	UnexpectedEof,
+	#[error("source was not valid utf-8")]
+	InvalidUtf8,
+	#[error("{0}")]
+	Strand(#[from] strand::Error),
+	#[error("{0}")]
+	DateTime(#[from] datetime::Error),
+	#[error("{0}")]
+	Uuid(#[from] UuidLexError),
+	#[error("{0}")]
+	Duration(#[from] DurationLexError),
+}
+
+impl From<CharError> for Error {
+	fn from(value: CharError) -> Self {
+		match value {
+			CharError::Eof => Self::UnexpectedEof,
+			CharError::Unicode => Self::InvalidUtf8,
+		}
+	}
+}
 
 pub struct Lexer<'a> {
 	pub reader: BytesReader<'a>,
@@ -27,6 +56,8 @@ pub struct Lexer<'a> {
 	/// Strings build from the source.
 	pub strings: Vec<String>,
 	pub durations: Vec<Duration>,
+	pub datetime: Vec<Datetime>,
+	pub error: Option<Error>,
 }
 
 impl<'a> Lexer<'a> {
@@ -44,6 +75,7 @@ impl<'a> Lexer<'a> {
 			scratch: String::new(),
 			numbers: Vec::new(),
 			strings: Vec::new(),
+			datetime: Vec::new(),
 			durations: Vec::new(),
 		}
 	}
@@ -78,7 +110,8 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Return an invalid token.
-	fn invalid_token(&mut self) -> Token {
+	fn invalid_token(&mut self, error: Error) -> Token {
+		self.error = Some(error);
 		self.finish_token(TokenKind::Invalid, None)
 	}
 

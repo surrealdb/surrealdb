@@ -1,8 +1,13 @@
+use thiserror::Error;
+
 use crate::syn::token::Span;
 use std::{fmt, marker::PhantomData, ptr::NonNull};
 
+#[derive(Error, Debug)]
 pub enum CharError {
+	#[error("found eof inside multi byte character")]
 	Eof,
+	#[error("string is not valid utf-8")]
 	Unicode,
 }
 

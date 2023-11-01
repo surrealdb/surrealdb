@@ -133,7 +133,6 @@ impl<'a> Lexer<'a> {
 					duration += new_duration;
 					self.scratch.clear();
 				}
-
 				_ => {
 					self.eat_remaining_identifier();
 					self.scratch.clear();

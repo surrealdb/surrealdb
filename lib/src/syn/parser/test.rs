@@ -130,7 +130,7 @@ fn parse_define_database() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1) * 60
+				expiry: std::time::Duration::from_secs(60) * 10
 			})
 		}))
 	);

@@ -1,5 +1,5 @@
 use crate::{
-	sql::{language::Language, Dir, Duration, Ident, Number, Param, Strand, Table},
+	sql::{language::Language, Datetime, Dir, Duration, Ident, Number, Param, Strand, Table, Uuid},
 	syn::{
 		parser::mac::{to_do, unexpected},
 		token::{t, Token, TokenKind},
@@ -265,14 +265,21 @@ impl TokenValue for Param {
 
 impl TokenValue for Duration {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		match token.kind {
-			TokenKind::Duration => {
-				let index = u32::from(token.data_index.unwrap());
-				let duration = parser.lexer.durations[index as usize];
-				Ok(Duration(duration))
-			}
-			x => unexpected!(parser, x, "a duration"),
-		}
+		let TokenKind::Duration = token.kind else {
+			unexpected!(parser, token.kind, "a duration")
+		};
+		let index = u32::from(token.data_index.unwrap());
+		let duration = parser.lexer.durations[index as usize];
+		Ok(Duration(duration))
+	}
+}
+
+impl TokenValue for Datetime {
+	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
+		let TokenKind::DateTime = token.kind else {
+			unexpected!(parser, token.kind, "a duration")
+		};
+		to_do!(parser)
 	}
 }
 
@@ -285,6 +292,19 @@ impl TokenValue for Strand {
 				Ok(Strand(strand))
 			}
 			x => unexpected!(parser, x, "a strand"),
+		}
+	}
+}
+
+impl TokenValue for Uuid {
+	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
+		let TokenKind::Uuid = token.kind else {
+			unexpected!(parser, token.kind, "a duration")
+		};
+		let index = u32::from(token.data_index.unwrap());
+		match uuid::Uuid::try_from(parser.lexer.strings[index as usize].as_str()) {
+			Ok(x) => Ok(Uuid(x)),
+			Err(_) => Err(ParseError::new(ParseErrorKind::InvalidToken, token.span)),
 		}
 	}
 }

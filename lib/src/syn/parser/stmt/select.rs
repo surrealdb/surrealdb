@@ -5,7 +5,7 @@ use crate::{
 	},
 	syn::{
 		parser::{
-			mac::{expected, to_do, unexpected},
+			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::t,
@@ -166,9 +166,10 @@ impl Parser<'_> {
 	}
 
 	fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
-		if !self.eat(t!("START")) {
+		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}
-		to_do!(self)
+		let time = self.parse_token_value()?;
+		Ok(Some(Version(time)))
 	}
 }

@@ -17,10 +17,7 @@ use crate::{
 	syn::parser::mac::unexpected,
 };
 
-use super::{
-	mac::{expected, to_do},
-	ParseResult, Parser,
-};
+use super::{mac::expected, ParseResult, Parser};
 
 mod create;
 mod define;
@@ -286,9 +283,7 @@ impl Parser<'_> {
 
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let id = match self.peek().kind {
-			TokenKind::Uuid => {
-				to_do!(self)
-			}
+			TokenKind::Uuid => self.parse_token_value().map(Value::Uuid)?,
 			t!("$param") => {
 				let token = self.pop_peek();
 				let param =

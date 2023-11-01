@@ -13,7 +13,7 @@ impl Lexer<'_> {
 				b'0'..=b'9' => {
 					// next digits.
 					self.reader.next();
-					self.scratch.push(start as char);
+					self.scratch.push(x as char);
 				}
 				b'.' => {
 					// mantissa

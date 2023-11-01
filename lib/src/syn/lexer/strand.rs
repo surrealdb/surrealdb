@@ -1,34 +1,55 @@
+//! Lexing of strand like characters.
+
+use thiserror::Error;
+
 use crate::syn::token::{Token, TokenKind};
 
-use super::{unicode::chars, CharError, Lexer};
+use super::{unicode::chars, CharError, Error as LexError, Lexer};
+
+#[derive(Error, Debug)]
+pub enum Error {
+	#[error("strand contains null byte")]
+	NullByte,
+	#[error("invalid escape character `{0}`")]
+	InvalidEscapeCharacter(char),
+}
 
 impl<'a> Lexer<'a> {
-	/// Lex a strand with either double or single quotes.
 	pub fn lex_strand(&mut self, is_double: bool) -> Token {
+		match self.lex_strand_err(is_double) {
+			Ok(x) => x,
+			Err(x) => {
+				self.scratch.clear();
+				self.invalid_token(x)
+			}
+		}
+	}
+
+	/// Lex a strand with either double or single quotes.
+	pub fn lex_strand_err(&mut self, is_double: bool) -> Result<Token, Error> {
 		loop {
 			let Some(x) = self.reader.next() else {
 				self.scratch.clear();
-				return self.eof_token();
+				return Ok(self.eof_token());
 			};
 
 			if x.is_ascii() {
 				match x {
 					b'\'' if !is_double => {
-						return self.finish_string_token(TokenKind::Strand);
+						return Ok(self.finish_string_token(TokenKind::Strand));
 					}
 					b'"' if is_double => {
-						return self.finish_string_token(TokenKind::Strand);
+						return Ok(self.finish_string_token(TokenKind::Strand));
 					}
 					b'\0' => {
 						// null bytes not allowed
-						self.scratch.clear();
-						return self.invalid_token();
+						return Err(LexError::Strand(Error::NullByte));
 					}
 					b'\\' => {
 						// Handle escape sequences.
 						let Some(next) = self.reader.next() else {
 							self.scratch.clear();
-							return self.eof_token();
+							return Ok(self.eof_token());
 						};
 						match next {
 							b'\\' => {
@@ -58,140 +79,23 @@ impl<'a> Lexer<'a> {
 							b't' => {
 								self.scratch.push(chars::TAB);
 							}
-							_ => {
-								self.scratch.clear();
-								return self.invalid_token();
+							x => {
+								let char = if x.is_ascii() {
+									x as char;
+								} else {
+									self.reader.complete_char(x)?;
+								};
+								return Err(LexError::Strand(Error::InvalidEscapeCharacter(x)));
 							}
 						}
 					}
 					x => self.scratch.push(x as char),
 				}
 			} else {
-				let c = match self.reader.complete_char(x) {
-					Ok(x) => x,
-					Err(CharError::Eof) => {
-						self.scratch.clear();
-						return self.eof_token();
-					}
-					Err(CharError::Unicode) => {
-						self.scratch.clear();
-						return self.invalid_token();
-					}
-				};
+				let c = self.reader.complete_char(x)?;
 				self.scratch.push(c);
 			}
 		}
-	}
-
-	pub fn lex_date_time(&mut self, double: bool) -> Token {
-		match self.reader.peek() {
-			Some(b'+') => {
-				self.scratch.push('+');
-				self.reader.next();
-			}
-			Some(b'-') => {
-				self.scratch.push('-');
-				self.reader.next();
-			}
-			_ => {}
-		}
-		// year
-		if !self.lex_digits(4) {
-			return self.invalid_token();
-		}
-		let Some(b'-') = self.reader.next() else {
-			return self.invalid_token();
-		};
-		self.scratch.push('-');
-		// month
-		if !self.lex_digits(2) {
-			return self.invalid_token();
-		}
-		let Some(b'-') = self.reader.next() else {
-			return self.invalid_token();
-		};
-		self.scratch.push('-');
-		// day
-		if !self.lex_digits(2) {
-			return self.invalid_token();
-		}
-		let Some(b'T') = self.reader.next() else {
-			return self.invalid_token();
-		};
-		self.scratch.push('T');
-		// hour
-		if !self.lex_digits(2) {
-			return self.invalid_token();
-		}
-		let Some(b'-') = self.reader.next() else {
-			return self.invalid_token();
-		};
-		self.scratch.push('-');
-		// minutes
-		if !self.lex_digits(2) {
-			return self.invalid_token();
-		}
-		let Some(b'-') = self.reader.next() else {
-			return self.invalid_token();
-		};
-		self.scratch.push('-');
-		// seconds
-		if !self.lex_digits(2) {
-			return self.invalid_token();
-		}
-
-		// nano seconds
-		if let Some(b'.') = self.reader.peek() {
-			self.reader.next();
-
-			loop {
-				let Some(char) = self.reader.peek() else {
-					break;
-				};
-				if !char.is_ascii_digit() {
-					break;
-				}
-				self.reader.next();
-				self.scratch.push(char as char);
-			}
-		}
-
-		// time zone
-		match self.reader.peek() {
-			Some(b'Z') => {
-				self.reader.next();
-				self.scratch.push('Z');
-			}
-			Some(x @ (b'-' | b'+')) => {
-				self.reader.next();
-				self.scratch.push(x as char);
-
-				if !self.lex_digits(2) {
-					return self.invalid_token();
-				}
-				let Some(b':') = self.reader.next() else {
-					return self.invalid_token();
-				};
-				self.scratch.push(':');
-				if !self.lex_digits(2) {
-					return self.invalid_token();
-				}
-			}
-			_ => return self.invalid_token(),
-		}
-
-		// closing strand character
-		if double {
-			let Some(b'"') = self.reader.next() else {
-				return self.invalid_token();
-			};
-		} else {
-			let Some(b'\'') = self.reader.next() else {
-				return self.invalid_token();
-			};
-		}
-
-		self.finish_string_token(TokenKind::DateTime)
 	}
 
 	pub fn lex_uuid(&mut self, double: bool) -> Token {
@@ -256,21 +160,6 @@ impl<'a> Lexer<'a> {
 		}
 
 		self.finish_string_token(TokenKind::Uuid)
-	}
-
-	pub fn lex_digits(&mut self, mut amount: u8) -> bool {
-		while amount != 0 {
-			let Some(char) = self.reader.peek() else {
-				return false;
-			};
-			if !char.is_ascii_digit() {
-				return false;
-			}
-			self.reader.next();
-			self.scratch.push(char as char);
-			amount -= 1;
-		}
-		true
 	}
 
 	pub fn lex_hex(&mut self, mut amount: u8) -> bool {

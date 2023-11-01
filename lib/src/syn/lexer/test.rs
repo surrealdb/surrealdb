@@ -217,7 +217,7 @@ fn uuid() {
 
 #[test]
 fn date_zone() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2020-01-01T00:00:00Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2020-01-01T00:00:00Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -228,7 +228,7 @@ fn date_zone() {
 
 #[test]
 fn date_time() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -239,7 +239,7 @@ fn date_time() {
 
 #[test]
 fn date_time_nanos() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.5631Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.5631Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -250,7 +250,7 @@ fn date_time_nanos() {
 
 #[test]
 fn date_time_timezone_utc() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.0000511Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.0000511Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -261,7 +261,7 @@ fn date_time_timezone_utc() {
 
 #[test]
 fn date_time_timezone_pacific() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.511-08:00" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.511-08:00" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -272,7 +272,7 @@ fn date_time_timezone_pacific() {
 
 #[test]
 fn date_time_timezone_pacific_partial() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.511-08:30" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.511-08:30" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -283,7 +283,7 @@ fn date_time_timezone_pacific_partial() {
 
 #[test]
 fn date_time_timezone_utc_nanoseconds() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.5110000Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.5110000Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
@@ -294,7 +294,7 @@ fn date_time_timezone_utc_nanoseconds() {
 
 #[test]
 fn date_time_timezone_utc_sub_nanoseconds() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" "2012-04-23T18:25:43.0000511Z" "#);
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" t"2012-04-23T18:25:43.0000511Z" "#);
 	let token = lexer.next_token();
 	assert_eq!(token.kind, TokenKind::DateTime);
 	assert_eq!(
