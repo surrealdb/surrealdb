@@ -352,7 +352,6 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::FDb;
 
-		#[allow(clippy::await_holding_lock)]
 		async fn new_db() -> Surreal<Db> {
 			let root = Root {
 				username: ROOT_USER,

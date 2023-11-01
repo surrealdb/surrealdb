@@ -313,12 +313,36 @@ pub(crate) fn router(
 										// If `id` is not set, this may be a live query notification
 										None => match response.result {
 											Ok(Data::Live(notification)) => {
+												let live_query_id = notification.id;
 												// Check if this live query is registered
 												if let Some(sender) =
-													live_queries.get(&notification.id)
+													live_queries.get(&live_query_id)
 												{
-													// Send the notification back to the caller if it is
-													let _res = sender.send(notification).await;
+													// Send the notification back to the caller or kill live query if the receiver is already dropped
+													if sender.send(notification).await.is_err() {
+														live_queries.remove(&live_query_id);
+														let kill = {
+															let mut request = BTreeMap::new();
+															request.insert(
+																"method".to_owned(),
+																Method::Kill.as_str().into(),
+															);
+															request.insert(
+																"params".to_owned(),
+																vec![Value::from(live_query_id)]
+																	.into(),
+															);
+															let value = Value::from(request);
+															let value = serialize(&value).unwrap();
+															Message::Binary(value)
+														};
+														if let Err(error) =
+															socket_sink.send(kill).await
+														{
+															trace!("failed to send kill query to the server; {error:?}");
+															break;
+														}
+													}
 												}
 											}
 											Ok(..) => { /* Ignored responses like pings */ }

@@ -181,11 +181,16 @@ pub(crate) fn router(
 					}
 				}
 				Either::Right(notification) => {
-					if let Some(sender) = live_queries.get(&notification.id) {
-						let sender = sender.clone();
-						tokio::spawn(async move {
-							let _ = sender.send(notification).await;
-						});
+					let id = notification.id;
+					if let Some(sender) = live_queries.get(&id) {
+						if sender.send(notification).await.is_err() {
+							live_queries.remove(&id);
+							if let Err(error) =
+								super::kill_live_query(&kvs, id, &session, vars.clone()).await
+							{
+								warn!("Failed to kill live query '{id}'; {error}");
+							}
+						}
 					}
 				}
 			}
