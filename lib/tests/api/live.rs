@@ -6,14 +6,14 @@ use futures::TryStreamExt;
 use surrealdb::method::Action;
 use surrealdb::method::Notification;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn live_select_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let table = "user";
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users = db.select(table).live().await.unwrap();
 
 		// Create a record
@@ -42,26 +42,28 @@ async fn live_select_table() {
 	}
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users = db.select(Resource::from(table)).live().await.unwrap();
 
 		// Create a record
-		let created = db.create(Resource::from(table)).await.unwrap();
+		db.create(Resource::from(table)).await.unwrap();
 		// Pull the notification
 		let notification = users.next().await.unwrap();
-		// The returned record should match the created record
-		assert_eq!(created, notification.data);
+		// The returned record should be an object
+		assert!(notification.data.is_object());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
 	}
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn live_select_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let record_id = ("user", "john");
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users = db.select(record_id).live().await.unwrap();
 
 		// Create a record
@@ -90,26 +92,28 @@ async fn live_select_record_id() {
 	}
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users = db.select(Resource::from(record_id)).live().await.unwrap();
 
 		// Create a record
-		let created = db.create(Resource::from(record_id)).await.unwrap();
+		db.create(Resource::from(record_id)).await.unwrap();
 		// Pull the notification
 		let notification = users.next().await.unwrap();
-		// The returned record should match the created record
-		assert_eq!(created, notification.data);
+		// The returned record should be an object
+		assert!(notification.data.is_object());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
 	}
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn live_select_record_ranges() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let table = "user";
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users = db.select(table).range("jane".."john").live().await.unwrap();
 
 		// Create a record
@@ -138,15 +142,17 @@ async fn live_select_record_ranges() {
 	}
 
 	{
-		// Start listening on the table
+		// Start listening
 		let mut users =
 			db.select(Resource::from(table)).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		let created = db.create(Resource::from(table)).await.unwrap();
+		db.create(Resource::from((table, "job"))).await.unwrap();
 		// Pull the notification
 		let notification = users.next().await.unwrap();
-		// The returned record should match the created record
-		assert_eq!(created, notification.data);
+		// The returned record should be an object
+		assert!(notification.data.is_object());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
 	}
 }

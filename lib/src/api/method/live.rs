@@ -256,19 +256,13 @@ pub struct Stream<'r, C: Connection, R> {
 	response_type: PhantomData<R>,
 }
 
-impl<Client, R> Drop for Stream<'_, Client, R>
+impl<Client, R> Stream<'_, Client, R>
 where
 	Client: Connection,
 {
-	fn drop(&mut self) {
-		futures::executor::block_on(async move {
-			let mut conn = Client::new(Method::Kill);
-			if let Err(error) =
-				conn.execute_unit(self.router, Param::new(vec![self.id.clone()])).await
-			{
-				error!("Failed to kill live query {}; {error}", self.id);
-			}
-		});
+	pub async fn close(self) -> Result<()> {
+		let mut conn = Client::new(Method::Kill);
+		conn.execute_unit(self.router, Param::new(vec![self.id])).await
 	}
 }
 
