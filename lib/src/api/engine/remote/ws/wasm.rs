@@ -443,22 +443,20 @@ impl Response {
 			Message::Text(text) => {
 				// Live queries currently don't support the binary protocol
 				// This is a workaround until live queries add support to send messages over binary
-				if let Ok(value) = crate::sql::json(text) {
-					if let Value::Object(Object(mut response)) = value {
-						if let Some(Value::Object(Object(mut map))) = response.remove("result") {
-							if let Some(Value::Uuid(id)) = map.remove("id") {
-								if let Some(value) = map.remove("action") {
-									if let Ok(action) = from_value(value) {
-										if let Some(result) = map.remove("result") {
-											return Ok(Some(Self {
-												id: None,
-												result: Ok(Data::Live(Notification {
-													id,
-													action,
-													result,
-												})),
-											}));
-										}
+				if let Ok(Value::Object(Object(mut response))) = crate::sql::json(text) {
+					if let Some(Value::Object(Object(mut map))) = response.remove("result") {
+						if let Some(Value::Uuid(id)) = map.remove("id") {
+							if let Some(value) = map.remove("action") {
+								if let Ok(action) = from_value(value) {
+									if let Some(result) = map.remove("result") {
+										return Ok(Some(Self {
+											id: None,
+											result: Ok(Data::Live(Notification {
+												id,
+												action,
+												result,
+											})),
+										}));
 									}
 								}
 							}

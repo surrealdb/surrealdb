@@ -591,7 +591,7 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+					match self.archive_lv_for_node(tx, &lq.nd, this_node_id).await {
 						Ok(lq) => lq,
 						Err(e) => {
 							error!("Error archiving lqs during bootstrap phase: {:?}", e);
@@ -749,7 +749,7 @@ impl Datastore {
 				continue;
 			}
 			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			let archived_lvs = lv.clone().archive(this_node_id);
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
 			ret.push((lq, None));
 		}
@@ -863,7 +863,7 @@ impl Datastore {
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock().await;
-		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
+		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
 		tx.commit().await
 	}
 
