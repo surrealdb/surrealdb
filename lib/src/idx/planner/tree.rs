@@ -42,8 +42,10 @@ impl Tree {
 			with_indexes,
 		};
 		if let Some(cond) = cond {
+			println!("COND: {}", cond.0);
+			let node = b.eval_value(&cond.0).await?;
 			Ok(Some((
-				b.eval_value(&cond.0).await?,
+				node,
 				b.index_map,
 				b.with_indexes,
 				b.resolved_idioms.into_iter().map(|(key, value)| (value, key)).collect(),
@@ -63,17 +65,13 @@ struct TreeBuilder<'a> {
 	indexes: Option<Arc<[DefineIndexStatement]>>,
 	resolved_idioms: IndexMap<Idiom, IdiomRef>,
 	translated_idioms: HashMap<IdiomRef, IdiomParameters>,
-	resolved_indexes: HashMap<IdiomRef, Arc<Vec<IndexRef>>>,
+	resolved_indexes: HashMap<IdiomRef, Option<Arc<Vec<IndexRef>>>>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 }
 
 impl<'a> TreeBuilder<'a> {
-	async fn resolve_indexes(
-		&mut self,
-		ir: IdiomRef,
-		normalized_idiom: &Idiom,
-	) -> Result<Option<Arc<Vec<IndexRef>>>, Error> {
+	async fn lazy_cache_indexes(&mut self) -> Result<(), Error> {
 		if self.indexes.is_none() {
 			let indexes = self
 				.txn
@@ -84,35 +82,43 @@ impl<'a> TreeBuilder<'a> {
 				.await?;
 			self.indexes = Some(indexes);
 		}
-		let mut irs = Vec::new();
-		if let Some(indexes) = &self.indexes {
-			for ix in indexes.as_ref() {
-				if ix.cols.len() == 1 && ix.cols[0].eq(normalized_idiom) {
-					let ir = self.index_map.definitions.len() as IndexRef;
-					if let Some(With::Index(ixs)) = self.with {
-						if ixs.contains(&ix.name.0) {
-							self.with_indexes.push(ir);
+		Ok(())
+	}
+
+	fn resolve_indexes(&mut self, idr: IdiomRef) -> Result<Option<Arc<Vec<IndexRef>>>, Error> {
+		if let Some(irs) = self.resolved_indexes.get(&idr) {
+			return Ok(irs.clone());
+		}
+		let mut res = None;
+		if let Some((id, _)) = self.resolved_idioms.get_index(idr as usize) {
+			if let Some(indexes) = &self.indexes {
+				let mut irs = Vec::new();
+				for ix in indexes.as_ref() {
+					if ix.cols.len() == 1 && ix.cols[0].eq(id) {
+						let ixr = self.index_map.definitions.len() as IndexRef;
+						if let Some(With::Index(ixs)) = self.with {
+							if ixs.contains(&ix.name.0) {
+								self.with_indexes.push(ixr);
+							}
 						}
+						self.index_map.definitions.push(ix.clone());
+						irs.push(ixr);
 					}
-					self.index_map.definitions.insert(ir, ix.clone());
-					irs.push(ir);
+				}
+				if !irs.is_empty() {
+					res = Some(Arc::new(irs));
 				}
 			}
 		}
-		if irs.is_empty() {
-			return Ok(None);
-		}
-		let irs = Arc::new(irs);
-		self.resolved_indexes.insert(ir, irs.clone());
-		Ok(Some(irs))
+		self.resolved_indexes.insert(idr, res.clone());
+		Ok(res)
 	}
 
 	fn resolve_idiom(&mut self, idiom: Cow<'_, Idiom>) -> (IdiomRef, Option<IdiomRef>) {
-		if let Some(ir) = self.resolved_idioms.get(&idiom).copied() {
+		if let Some(ir) = self.resolved_idioms.get(idiom.as_ref()).copied() {
 			return (ir, None);
 		};
-		let new_ir = self.index_map.len() as IdiomRef;
-		self.resolved_idioms.insert(idiom.into_owned(), new_ir);
+		let new_ir = self.resolved_idioms.len() as IdiomRef;
 		// We want to detect the form `field[WHERE subfield = ...]`
 		// and return normalized `field.*.subfield`
 		if idiom.len() == 2 {
@@ -128,11 +134,11 @@ impl<'a> TreeBuilder<'a> {
 							if let Value::Idiom(i) = l {
 								if i.len() == 1 {
 									if let Part::Field(id2) = &i.0[0] {
-										let translated_idiom = Arc::new(Idiom::from(vec![
+										let translated_idiom = Idiom::from(vec![
 											Part::Field(id1.clone()),
 											Part::All,
 											Part::Field(id2.clone()),
-										]));
+										]);
 										let (translated_ir, _) =
 											self.resolve_idiom(Cow::Owned(translated_idiom));
 										let idiom_params = IdiomParameters {
@@ -141,6 +147,7 @@ impl<'a> TreeBuilder<'a> {
 											v: r.clone(),
 										};
 										self.translated_idioms.insert(translated_ir, idiom_params);
+										self.resolved_idioms.insert(idiom.into_owned(), new_ir);
 										return (new_ir, Some(translated_ir));
 									}
 								}
@@ -151,6 +158,7 @@ impl<'a> TreeBuilder<'a> {
 				(_, _) => {}
 			}
 		}
+		self.resolved_idioms.insert(idiom.into_owned(), new_ir);
 		(new_ir, None)
 	}
 
@@ -189,22 +197,23 @@ impl<'a> TreeBuilder<'a> {
 				return self.eval_value(&v).await;
 			}
 		}
+		self.lazy_cache_indexes().await?;
 		// Check if the idiom has already been resolved
 		let (ir, translated_id) = self.resolve_idiom(Cow::Borrowed(i));
-		let id = if let Some(ir) = translated_id {
-			self.translated_idioms.get(&ir).map(|ti| ti.i)
-		} else {
-			Some(i)
-		};
-		if let Some(id) = id {
-			if let Some(irs) = self.resolve_indexes(ir, id).await? {
+		if let Some(ir) = translated_id {
+			if let Some(irs) = self.resolve_indexes(ir)? {
 				return Ok(Node::IndexedField(ir, irs));
 			}
-		}
+		} else {
+			if let Some(irs) = self.resolve_indexes(ir)? {
+				return Ok(Node::IndexedField(ir, irs));
+			}
+		};
 		Ok(Node::NonIndexedField)
 	}
 
 	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
+		println!("EXP {e}");
 		match e {
 			Expression::Unary {
 				..
@@ -244,6 +253,7 @@ impl<'a> TreeBuilder<'a> {
 						IdiomPosition::Right,
 					);
 				};
+				println!("IO {io:?}");
 				Ok(Node::Expression {
 					io,
 					left: Box::new(left),
@@ -264,7 +274,7 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 	) -> Option<IndexOption> {
 		for ir in irs {
-			if let Some(ix) = self.index_map.definitions.get(ir) {
+			if let Some(ix) = self.index_map.definitions.get(*ir as usize) {
 				let op = match &ix.index {
 					Index::Idx => Self::eval_index_operator(op, n, p),
 					Index::Uniq => Self::eval_index_operator(op, n, p),
@@ -343,7 +353,7 @@ pub(super) type IdiomRef = u16;
 #[derive(Default)]
 pub(super) struct IndexesMap {
 	pub(super) options: HashMap<Arc<Expression>, IndexOption>,
-	pub(super) definitions: HashMap<IndexRef, DefineIndexStatement>,
+	pub(super) definitions: Vec<DefineIndexStatement>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -384,6 +394,7 @@ enum IdiomPosition {
 	Right,
 }
 
+#[derive(Debug)]
 struct IdiomParameters {
 	i: IndexRef,
 	o: Operator,

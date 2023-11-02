@@ -32,7 +32,7 @@ pub(crate) struct QueryExecutor {
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
-	index_definitions: HashMap<IndexRef, DefineIndexStatement>,
+	index_definitions: Vec<DefineIndexStatement>,
 	mt_exp: HashMap<Arc<Expression>, MtEntry>,
 }
 
@@ -76,12 +76,12 @@ impl QueryExecutor {
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Expressions and MatchRef
 		for (exp, io) in im.options {
-			let ir = io.ir();
-			if let Some(idx_def) = im.definitions.get(&ir) {
+			let ixr = io.ir();
+			if let Some(idx_def) = im.definitions.get(ixr as usize) {
 				match &idx_def.index {
 					Index::Search(p) => {
 						let mut ft_entry = None;
-						if let Some(ft) = ft_map.get(&ir) {
+						if let Some(ft) = ft_map.get(&ixr) {
 							if ft_entry.is_none() {
 								ft_entry = FtEntry::new(&mut run, ft, io).await?;
 							}
@@ -93,7 +93,7 @@ impl QueryExecutor {
 							if ft_entry.is_none() {
 								ft_entry = FtEntry::new(&mut run, &ft, io).await?;
 							}
-							ft_map.insert(ir, ft);
+							ft_map.insert(ixr, ft);
 						}
 						if let Some(e) = ft_entry {
 							if let Matches(_, Some(mr)) = e.0.index_option.op() {
@@ -108,14 +108,14 @@ impl QueryExecutor {
 					}
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
-							let entry = if let Some(mt) = mt_map.get(&ir) {
+							let entry = if let Some(mt) = mt_map.get(&ixr) {
 								MtEntry::new(&mut run, mt, a.clone(), *k).await?
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let mt =
 									MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Read).await?;
 								let entry = MtEntry::new(&mut run, &mt, a.clone(), *k).await?;
-								mt_map.insert(ir, mt);
+								mt_map.insert(ixr, mt);
 								entry
 							};
 							mt_exp.insert(exp, entry);
@@ -173,7 +173,7 @@ impl QueryExecutor {
 			Some(ie) => {
 				let mut e = HashMap::default();
 				let ir = ie.explain(&mut e);
-				if let Some(ix) = self.index_definitions.get(&ir) {
+				if let Some(ix) = self.index_definitions.get(ir as usize) {
 					e.insert("index", Value::from(ix.name.0.to_owned()));
 				}
 				Value::from(Object::from(e))
@@ -199,7 +199,7 @@ impl QueryExecutor {
 		if let Some(it_entry) = self.it_entries.get(ir as usize) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => {
-					if let Some(ix) = self.index_definitions.get(&io.ir()) {
+					if let Some(ix) = self.index_definitions.get(io.ir() as usize) {
 						match ix.index {
 							Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
 							Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
@@ -244,7 +244,7 @@ impl QueryExecutor {
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Option<ThingIterator> {
-		if let Some(ix) = self.index_definitions.get(&ir) {
+		if let Some(ix) = self.index_definitions.get(ir as usize) {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(

@@ -163,9 +163,10 @@ fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 }
 
 fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<(), Error> {
+	let left = res.len();
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(expected);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{}", left);
 	Ok(())
 }
 
@@ -961,10 +962,10 @@ async fn select_contains() -> Result<(), Error> {
 		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
 		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 		DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
-		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 	"#;
 
 	const INDEX_EXPLAIN: &str = r"[
