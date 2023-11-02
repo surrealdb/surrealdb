@@ -125,10 +125,7 @@ pub(crate) fn router(
 			}
 		};
 
-		let live_query_notifications =
-			address.config.capabilities.allows_live_query_notifications();
-
-		let kvs = match live_query_notifications {
+		let kvs = match address.config.capabilities.allows_live_query_notifications() {
 			true => kvs.with_notifications(),
 			false => kvs,
 		};
@@ -142,7 +139,7 @@ pub(crate) fn router(
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
 		let mut live_queries = HashMap::new();
-		let mut session = Session::default().with_rt(live_query_notifications);
+		let mut session = Session::default().with_rt(true);
 
 		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
