@@ -1,6 +1,6 @@
 use unicase::UniCase;
 
-use crate::syn::lexer::{keywords::KEYWORDS, CharError, Lexer};
+use crate::syn::lexer::{keywords::KEYWORDS, Error, Lexer};
 use crate::syn::token::{Token, TokenKind};
 
 use super::unicode::{chars, U8Ext};
@@ -54,30 +54,47 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// Lex an ident surrounded either by `⟨⟩` or `\`\``
 	pub fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
+		match self.lex_surrounded_ident_err(is_backtick) {
+			Ok(x) => x,
+			Err(e) => {
+				self.scratch.clear();
+				self.invalid_token(e)
+			}
+		}
+	}
+
+	/// Lex an ident surrounded either by `⟨⟩` or `\`\``
+	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<Token, Error> {
 		loop {
 			let Some(x) = self.reader.next() else {
-				self.scratch.clear();
-				return self.eof_token();
+				let end_char = if is_backtick {
+					'`'
+				} else {
+					'⟩'
+				};
+				return Error::ExpectedEnd(end_char);
 			};
 			if x.is_ascii() {
 				match x {
 					b'`' if is_backtick => {
-						return self.finish_string_token(TokenKind::Identifier);
+						return Ok(self.finish_string_token(TokenKind::Identifier));
 					}
 					b'\0' => {
 						// null bytes not allowed
-						self.scratch.clear();
-						return self.invalid_token();
+						return Err(Error::UnexpectedCharacter('\0'));
 					}
 					b'\\' if is_backtick => {
 						// handle escape sequences.
 						// This is compliant with the orignal parser which didn't permit
 						// escape sequences in `⟨⟩` surrounded idents.
 						let Some(next) = self.reader.next() else {
-							self.scratch.clear();
-							return self.eof_token();
+							let end_char = if is_backtick {
+								'`'
+							} else {
+								'⟩'
+							};
+							return Error::ExpectedEnd(end_char);
 						};
 						match next {
 							b'\\' => {
@@ -105,27 +122,21 @@ impl<'a> Lexer<'a> {
 								self.scratch.push(chars::TAB);
 							}
 							_ => {
-								self.scratch.clear();
-								return self.invalid_token();
+								let char = if x.is_ascii() {
+									x as char
+								} else {
+									self.reader.complete_char(x)?
+								};
+								return Err(Error::InvalidEscapeCharacter(char));
 							}
 						}
 					}
 					x => self.scratch.push(x as char),
 				}
 			} else {
-				let c = match self.reader.complete_char(x) {
-					Ok(x) => x,
-					Err(CharError::Eof) => {
-						self.scratch.clear();
-						return self.eof_token();
-					}
-					Err(CharError::Unicode) => {
-						self.scratch.clear();
-						return self.invalid_token();
-					}
-				};
+				let c = self.reader.complete_char(x)?;
 				if !is_backtick && c == '⟩' {
-					return self.finish_string_token(TokenKind::Identifier);
+					return Ok(self.finish_string_token(TokenKind::Identifier));
 				}
 				self.scratch.push(c);
 			}

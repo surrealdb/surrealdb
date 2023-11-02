@@ -14,9 +14,7 @@ impl<'a> Lexer<'a> {
 			match byte {
 				byte::CR => {
 					self.reader.peek();
-					if let Some(byte::LF) = self.reader.peek() {
-						self.reader.next();
-					}
+					self.eat(byte::LF);
 					break;
 				}
 				byte::LF => {

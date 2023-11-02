@@ -79,34 +79,30 @@ impl<'a> Lexer<'a> {
 			year = -year;
 		}
 
-		let Some(b'-') = self.reader.peek() else {
+		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
-		};
-		self.reader.next();
+		}
 
 		let month = self.lex_date_time_part(2, 1..=12).map_err(Error::Month)?;
-		let Some(b'-') = self.reader.peek() else {
+		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
-		};
-		self.reader.next();
+		}
 
 		let day = self.lex_date_time_part(2, 1..=31).map_err(Error::Day)?;
-		let Some(b'T') = self.reader.peek() else {
+		if !self.eat(b'T') {
 			return Err(Error::MissingSeparator(b'T'));
-		};
-		self.reader.next();
+		}
 
 		let hour = self.lex_date_time_part(2, 0..=24).map_err(Error::Hour)?;
-		let Some(b'-') = self.reader.peek() else {
+		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
-		};
-		self.reader.next();
+		}
 
 		let minutes = self.lex_date_time_part(2, 0..=59).map_err(Error::Minute)?;
-		let Some(b'-') = self.reader.peek() else {
+
+		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
-		};
-		self.reader.next();
+		}
 
 		let seconds = self.lex_date_time_part(2, 0..=59).map_err(Error::Second)?;
 
@@ -167,15 +163,14 @@ impl<'a> Lexer<'a> {
 			_ => return Err(Error::MissingTimeZone),
 		};
 
-		// closing strand character
-		if double {
-			let Some(b'"') = self.reader.peek() else {
-				return Err(Error::ExpectedEnd);
-			};
+		let end_char = if double {
+			b'"'
 		} else {
-			let Some(b'\'') = self.reader.peek() else {
-				return Err(Error::ExpectedEnd);
-			};
+			b'\''
+		};
+
+		if !self.eat(end_char) {
+			return Err(Error::ExpectedEnd);
 		}
 		self.reader.next();
 

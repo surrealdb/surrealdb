@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Datetime, Number},
+	sql::{Datetime, Number, Uuid},
 	syn::token::{DataIndex, Span, Token, TokenKind},
 };
 
@@ -16,6 +16,7 @@ mod datetime;
 mod strand;
 #[cfg(test)]
 mod test;
+mod uuid;
 
 pub use reader::{BytesReader, CharError};
 use std::time::Duration;
@@ -23,20 +24,22 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-	#[error("Lexer encountered unexpected character {0}")]
+	#[error("Lexer encountered unexpected character {0:?}")]
 	UnexpectedCharacter(char),
+	#[error("invalid escape character {0:?}")]
+	InvalidEscapeCharacter(char),
 	#[error("Lexer encountered unexpected end of source characters")]
 	UnexpectedEof,
 	#[error("source was not valid utf-8")]
 	InvalidUtf8,
-	#[error("{0}")]
-	Strand(#[from] strand::Error),
-	#[error("{0}")]
+	#[error("expected token to end with '{0}'")]
+	ExpectedEnd(char),
+	#[error("failed to lex date-time, {0}")]
 	DateTime(#[from] datetime::Error),
-	#[error("{0}")]
-	Uuid(#[from] UuidLexError),
-	#[error("{0}")]
-	Duration(#[from] DurationLexError),
+	#[error("failed to lex uuid, {0}")]
+	Uuid(#[from] uuid::Error),
+	#[error("failed to lex duration, {0}")]
+	Duration(#[from] duration::Error),
 }
 
 impl From<CharError> for Error {
@@ -57,6 +60,7 @@ pub struct Lexer<'a> {
 	pub strings: Vec<String>,
 	pub durations: Vec<Duration>,
 	pub datetime: Vec<Datetime>,
+	pub uuid: Vec<Uuid>,
 	pub error: Option<Error>,
 }
 
@@ -77,6 +81,8 @@ impl<'a> Lexer<'a> {
 			strings: Vec::new(),
 			datetime: Vec::new(),
 			durations: Vec::new(),
+			uuid: Vec::new(),
+			error: None,
 		}
 	}
 
@@ -115,18 +121,24 @@ impl<'a> Lexer<'a> {
 		self.finish_token(TokenKind::Invalid, None)
 	}
 
-	/// Builds a token from an TokenKind.
-	///
-	/// Attaches a span to the token and returns, updates the new offset.
-	fn finish_token(&mut self, kind: TokenKind, data_index: Option<DataIndex>) -> Token {
-		// We make sure that the source is no longer then u32::MAX so this can't wrap.
+	// Returns the span for the current token being lexed.
+	fn current_span(&mut self) -> Span {
+		// We make sure that the source is no longer then u32::MAX so this can't overflow.
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - self.last_offset;
 		let span = Span {
 			offset: self.last_offset,
 			len,
 		};
-		self.last_offset = new_offset;
+	}
+
+	/// Builds a token from an TokenKind.
+	///
+	/// Attaches a span to the token and returns, updates the new offset.
+	fn finish_token(&mut self, kind: TokenKind, data_index: Option<DataIndex>) -> Token {
+		let span = self.current_span();
+		// We make sure that the source is no longer then u32::MAX so this can't overflow.
+		self.last_offset = self.reader.offset() as u32;
 		Token {
 			kind,
 			span,
@@ -158,6 +170,27 @@ impl<'a> Lexer<'a> {
 
 	pub fn backup_after(&mut self, span: Span) {
 		self.reader.backup(span.offset as usize + span.len as usize);
+	}
+
+	pub fn eat(&mut self, byte: u8) -> bool {
+		if self.reader.peek() == Some(byte) {
+			self.reader.next();
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn eat_when<F: FnOnce(u8) -> bool>(&mut self, f: F) -> bool {
+		let Some(x) = self.reader.peek() else {
+			return false;
+		};
+		if f(x) {
+			self.reader.next();
+			true
+		} else {
+			false
+		}
 	}
 }
 

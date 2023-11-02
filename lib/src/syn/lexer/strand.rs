@@ -1,18 +1,8 @@
 //! Lexing of strand like characters.
 
-use thiserror::Error;
-
 use crate::syn::token::{Token, TokenKind};
 
-use super::{unicode::chars, CharError, Error as LexError, Lexer};
-
-#[derive(Error, Debug)]
-pub enum Error {
-	#[error("strand contains null byte")]
-	NullByte,
-	#[error("invalid escape character `{0}`")]
-	InvalidEscapeCharacter(char),
-}
+use super::{unicode::chars, Error, Lexer};
 
 impl<'a> Lexer<'a> {
 	pub fn lex_strand(&mut self, is_double: bool) -> Token {
@@ -43,7 +33,7 @@ impl<'a> Lexer<'a> {
 					}
 					b'\0' => {
 						// null bytes not allowed
-						return Err(LexError::Strand(Error::NullByte));
+						return Err(Error::UnexpectedCharacter('\0'));
 					}
 					b'\\' => {
 						// Handle escape sequences.
@@ -81,11 +71,11 @@ impl<'a> Lexer<'a> {
 							}
 							x => {
 								let char = if x.is_ascii() {
-									x as char;
+									x as char
 								} else {
-									self.reader.complete_char(x)?;
+									self.reader.complete_char(x)?
 								};
-								return Err(LexError::Strand(Error::InvalidEscapeCharacter(x)));
+								return Err(Error::InvalidEscapeCharacter(char));
 							}
 						}
 					}
@@ -96,84 +86,5 @@ impl<'a> Lexer<'a> {
 				self.scratch.push(c);
 			}
 		}
-	}
-
-	pub fn lex_uuid(&mut self, double: bool) -> Token {
-		if !self.lex_hex(8) {
-			return self.invalid_token();
-		}
-
-		if let Some(b'-') = self.reader.peek() {
-			return self.invalid_token();
-		}
-		self.scratch.push('-');
-		self.reader.next();
-
-		if !self.lex_hex(4) {
-			return self.invalid_token();
-		}
-
-		if let Some(b'-') = self.reader.peek() {
-			return self.invalid_token();
-		}
-		self.scratch.push('-');
-		self.reader.next();
-
-		let Some(next @ b'1'..=b'8') = self.reader.peek() else {
-			return self.invalid_token();
-		};
-		self.scratch.push(next as char);
-
-		if !self.lex_hex(3) {
-			return self.invalid_token();
-		}
-
-		if let Some(b'-') = self.reader.peek() {
-			return self.invalid_token();
-		}
-		self.scratch.push('-');
-		self.reader.next();
-
-		if !self.lex_hex(4) {
-			return self.invalid_token();
-		}
-
-		if let Some(b'-') = self.reader.peek() {
-			return self.invalid_token();
-		}
-		self.scratch.push('-');
-		self.reader.next();
-
-		if !self.lex_hex(12) {
-			return self.invalid_token();
-		}
-
-		// closing strand character
-		if double {
-			let Some(b'"') = self.reader.next() else {
-				return self.invalid_token();
-			};
-		} else {
-			let Some(b'\'') = self.reader.next() else {
-				return self.invalid_token();
-			};
-		}
-
-		self.finish_string_token(TokenKind::Uuid)
-	}
-
-	pub fn lex_hex(&mut self, mut amount: u8) -> bool {
-		while amount != 0 {
-			let Some(char) = self.reader.peek() else {
-				return false;
-			};
-			let (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') = char else {
-				return false;
-			};
-			self.reader.next();
-			self.scratch.push(char as char);
-			amount -= 1;
-		}
-		true
 	}
 }
