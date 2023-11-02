@@ -41,9 +41,6 @@ mod api_integration {
 	const ROOT_PASS: &str = "root";
 	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
-	// FoundationDB is also used by the external SurrealDB server that backs the remote engines
-	static FDB_PERMITS: Semaphore = Semaphore::const_new(1);
-
 	#[derive(Debug, Serialize)]
 	struct Record<'a> {
 		name: &'a str,
@@ -77,8 +74,10 @@ mod api_integration {
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
+		static PERMITS: Semaphore = Semaphore::const_new(1);
+
 		async fn new_db() -> Surreal<Client> {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -91,7 +90,7 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
 		}
 
@@ -105,8 +104,10 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Client;
 		use surrealdb::engine::remote::http::Http;
 
+		static PERMITS: Semaphore = Semaphore::const_new(1);
+
 		async fn new_db() -> Surreal<Client> {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -119,7 +120,7 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		}
 
@@ -330,10 +331,10 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::TiKv;
 
-		static LOCAL_PERMITS: Semaphore = Semaphore::const_new(1);
+		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Db> {
-			let _permit = LOCAL_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -349,7 +350,7 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = LOCAL_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
 		}
 
@@ -364,8 +365,10 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::FDb;
 
+		static PERMITS: Semaphore = Semaphore::const_new(1);
+
 		async fn new_db() -> Surreal<Db> {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -393,8 +396,10 @@ mod api_integration {
 		use super::*;
 		use surrealdb::engine::any::Any;
 
+		static PERMITS: Semaphore = Semaphore::const_new(1);
+
 		async fn new_db() -> Surreal<Any> {
-			let _permit = FDB_PERMITS.acquire().await.unwrap();
+			let _permit = PERMITS.acquire().await.unwrap();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
