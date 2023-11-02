@@ -330,7 +330,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+				.capabilities(Capabilities::all().with_live_query_notifications(false));
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			db
@@ -338,7 +338,9 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
+			let config = Config::new()
+				.capabilities(Capabilities::default().with_live_query_notifications(false));
+			surrealdb::engine::any::connect(("tikv://127.0.0.1:2379", config)).await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -359,7 +361,7 @@ mod api_integration {
 			let config = Config::new()
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+				.capabilities(Capabilities::all().with_live_query_notifications(false));
 			let path = "/etc/foundationdb/fdb.cluster";
 			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
 				.await
