@@ -77,7 +77,7 @@ mod api_integration {
 		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Client> {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -85,13 +85,15 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
+			drop(permit);
 			db
 		}
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+			drop(permit);
 		}
 
 		include!("api/mod.rs");
@@ -107,7 +109,7 @@ mod api_integration {
 		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Client> {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -115,13 +117,15 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
+			drop(permit);
 			db
 		}
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+			drop(permit);
 		}
 
 		include!("api/mod.rs");
@@ -334,7 +338,7 @@ mod api_integration {
 		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Db> {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -345,13 +349,15 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
+			drop(permit);
 			db
 		}
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
+			drop(permit);
 		}
 
 		include!("api/mod.rs");
@@ -368,7 +374,7 @@ mod api_integration {
 		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Db> {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -383,6 +389,7 @@ mod api_integration {
 				.unwrap();
 			let db = Surreal::new::<FDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
+			drop(permit);
 			db
 		}
 
@@ -399,7 +406,7 @@ mod api_integration {
 		static PERMITS: Semaphore = Semaphore::const_new(1);
 
 		async fn new_db() -> Surreal<Any> {
-			let _permit = PERMITS.acquire().await.unwrap();
+			let permit = PERMITS.acquire().await.unwrap();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
 				username: ROOT_USER,
@@ -407,6 +414,7 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
+			drop(permit);
 			db
 		}
 
