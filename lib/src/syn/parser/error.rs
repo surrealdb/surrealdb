@@ -1,5 +1,6 @@
 use crate::{
 	sql::error::{Location, RenderedError, Snippet},
+	syn::lexer::Error as LexError,
 	syn::token::{Span, TokenKind},
 };
 
@@ -34,7 +35,7 @@ pub enum ParseErrorKind {
 	},
 	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
-	InvalidToken,
+	InvalidToken(LexError),
 	/// A path in the parser which was not yet finished.
 	/// Should eventually be removed.
 	Todo,
@@ -58,7 +59,7 @@ impl ParseError {
 
 	pub fn render_on(&self, source: &str) -> RenderedError {
 		println!("FOUND ERROR: {}", self.backtrace);
-		match self.kind {
+		match &self.kind {
 			ParseErrorKind::Unexpected {
 				found,
 				expected,
@@ -89,7 +90,7 @@ impl ParseError {
 				let text = format!("Expected closing delimiter {}", expected.as_str());
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
-				let locations = Location::range_of_span(source, should_close);
+				let locations = Location::range_of_span(source, *should_close);
 				let close_snippet = Snippet::from_source_location_range(
 					source,
 					locations,
@@ -104,8 +105,8 @@ impl ParseError {
 				..
 			} => todo!(),
 			ParseErrorKind::DisallowedStatement => todo!(),
-			ParseErrorKind::InvalidToken => {
-				let text = "Could not parse invalid token".to_string();
+			ParseErrorKind::InvalidToken(e) => {
+				let text = e.to_string();
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

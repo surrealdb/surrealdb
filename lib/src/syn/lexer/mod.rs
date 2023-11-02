@@ -40,6 +40,8 @@ pub enum Error {
 	Uuid(#[from] uuid::Error),
 	#[error("failed to lex duration, {0}")]
 	Duration(#[from] duration::Error),
+	#[error("failed to lex number, {0}")]
+	Number(#[from] number::Error),
 }
 
 impl From<CharError> for Error {
@@ -51,10 +53,25 @@ impl From<CharError> for Error {
 	}
 }
 
+/// The SurrealQL lexer.
+/// Takes a slice of bytes and turns it into tokens.
+///
+/// The lexer generates tokens lazily. each time next is called on the lexer it will try to lex the
+/// next bytes in the give source as a token.
 pub struct Lexer<'a> {
+	/// The reader for reading the source bytes.
 	pub reader: BytesReader<'a>,
+	/// The one past the last character of the previous token.
 	last_offset: u32,
+	/// A buffer used to build the value of tokens which can't be read straight from the source.
+	/// like for example strings with escape characters.
 	scratch: String,
+
+	// below are a collection of buffers with values produced by tokens.
+	// For performance reasons we wan't to keep the tokens as small as possible.
+	// As only some tokens have an additional value associated with them we don't store that value
+	// in the token itself but, instead, in the lexer ensureing a smaller size for each individual
+	// token.
 	pub numbers: Vec<Number>,
 	/// Strings build from the source.
 	pub strings: Vec<String>,
@@ -86,6 +103,9 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Returns the next token, driving the lexer forward.
+	///
+	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
 		let Some(byte) = self.reader.next() else {
 			return self.eof_token();
@@ -97,7 +117,11 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub fn eof_token(&mut self) -> Token {
+	/// Creates the eof token.
+	///
+	/// An eof token has tokenkind Eof and an span which points to the last character of the
+	/// source.
+	fn eof_token(&mut self) -> Token {
 		Token {
 			kind: TokenKind::Eof,
 			span: Span {
@@ -122,14 +146,14 @@ impl<'a> Lexer<'a> {
 	}
 
 	// Returns the span for the current token being lexed.
-	fn current_span(&mut self) -> Span {
+	fn current_span(&self) -> Span {
 		// We make sure that the source is no longer then u32::MAX so this can't overflow.
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - self.last_offset;
-		let span = Span {
+		Span {
 			offset: self.last_offset,
 			len,
-		};
+		}
 	}
 
 	/// Builds a token from an TokenKind.
@@ -164,14 +188,31 @@ impl<'a> Lexer<'a> {
 		self.finish_token(TokenKind::Number, Some(id.into()))
 	}
 
+	/// Moves the lexer state back to before the give span.
+	///
+	/// # Warning
+	/// Moving the lexer into a state where the next byte is within a multibyte character will
+	/// result in spurious errors.
 	pub fn backup_before(&mut self, span: Span) {
 		self.reader.backup(span.offset as usize);
+		self.last_offset = span.offset;
 	}
 
+	/// Moves the lexer state to after the give span.
+	///
+	/// # Warning
+	/// Moving the lexer into a state where the next byte is within a multibyte character will
+	/// result in spurious errors.
 	pub fn backup_after(&mut self, span: Span) {
-		self.reader.backup(span.offset as usize + span.len as usize);
+		let offset = span.offset + span.len;
+		self.reader.backup(offset as usize);
+		self.last_offset = offset;
 	}
 
+	/// Checks if the next byte is the give byte, if it is it consumes the byte and returns true.
+	/// Otherwise returns false.
+	///
+	/// Also returns false if there is no next character.
 	pub fn eat(&mut self, byte: u8) -> bool {
 		if self.reader.peek() == Some(byte) {
 			self.reader.next();
@@ -181,6 +222,10 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Checks if the closure returns true when given the next byte, if it is it consumes the byte
+	/// and returns true. Otherwise returns false.
+	///
+	/// Also returns false if there is no next character.
 	pub fn eat_when<F: FnOnce(u8) -> bool>(&mut self, f: F) -> bool {
 		let Some(x) = self.reader.peek() else {
 			return false;

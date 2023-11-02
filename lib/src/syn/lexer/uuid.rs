@@ -22,7 +22,7 @@ impl<'a> Lexer<'a> {
 	pub fn lex_uuid(&mut self, double: bool) -> Token {
 		match self.lex_uuid_err(double) {
 			Ok(x) => x,
-			Err(e) => self.invalid_token(LexError::Uuid(Error::MissingDigits)),
+			Err(_) => self.invalid_token(LexError::Uuid(Error::MissingDigits)),
 		}
 	}
 
@@ -44,8 +44,8 @@ impl<'a> Lexer<'a> {
 		}
 
 		if !self.eat_when(|x| (b'1'..=b'8').contains(&x)) {
-			if self.peek().map(|x| x.is_ascii_digit()).unwrap_or(false) {
-				// bute wasan ascii digit but not in the valid range.
+			if self.reader.peek().map(|x| x.is_ascii_digit()).unwrap_or(false) {
+				// byte was an ascii digit but not in the valid range.
 				return Err(Error::InvalidRange);
 			}
 			return Err(Error::MissingDigits);
@@ -99,7 +99,7 @@ impl<'a> Lexer<'a> {
 
 	/// lexes a given amount of hex characters. returns true if the lexing was successfull, false
 	/// otherwise.
-	pub fn lex_hex(&mut self, mut amount: u8) -> bool {
+	pub fn lex_hex(&mut self, amount: u8) -> bool {
 		for _ in 0..amount {
 			if !self.eat_when(|x| matches!(x,b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
 				return false;

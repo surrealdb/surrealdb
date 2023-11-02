@@ -302,10 +302,7 @@ impl TokenValue for Uuid {
 			unexpected!(parser, token.kind, "a duration")
 		};
 		let index = u32::from(token.data_index.unwrap());
-		match uuid::Uuid::try_from(parser.lexer.strings[index as usize].as_str()) {
-			Ok(x) => Ok(Uuid(x)),
-			Err(_) => Err(ParseError::new(ParseErrorKind::InvalidToken, token.span)),
-		}
+		Ok(parser.lexer.uuid[index as usize].clone())
 	}
 }
 

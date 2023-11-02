@@ -73,7 +73,7 @@ impl<'a> Lexer<'a> {
 				} else {
 					'⟩'
 				};
-				return Error::ExpectedEnd(end_char);
+				return Err(Error::ExpectedEnd(end_char));
 			};
 			if x.is_ascii() {
 				match x {
@@ -94,7 +94,7 @@ impl<'a> Lexer<'a> {
 							} else {
 								'⟩'
 							};
-							return Error::ExpectedEnd(end_char);
+							return Err(Error::ExpectedEnd(end_char));
 						};
 						match next {
 							b'\\' => {

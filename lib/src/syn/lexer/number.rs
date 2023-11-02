@@ -1,13 +1,34 @@
 use crate::sql::Number;
-use crate::syn::lexer::{unicode::U8Ext, Lexer};
+use crate::syn::lexer::{unicode::U8Ext, Error as LexError, Lexer};
 use crate::syn::token::{Token, TokenKind};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+	#[error("invalid number suffix")]
+	InvalidSuffix,
+	#[error("expected atleast a single digit in the exponent")]
+	DigitExpectedExponent,
+	#[error("number overflows max allowed value")]
+	Overflow,
+}
 
 impl Lexer<'_> {
 	pub fn lex_number(&mut self, start: u8) -> Token {
+		match self.lex_number_err(start) {
+			Ok(x) => x,
+			Err(e) => self.invalid_token(LexError::Number(e)),
+		}
+	}
+	/// Lex a number.
+	///
+	/// Expects the digit which started the number as the start argument.
+	pub fn lex_number_err(&mut self, start: u8) -> Result<Token, Error> {
+		debug_assert!(start.is_ascii_digit());
 		self.scratch.push(start as char);
 		loop {
 			let Some(x) = self.reader.peek() else {
-				return self.finish_token(TokenKind::Number, None);
+				return Ok(self.finish_token(TokenKind::Number, None));
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -26,79 +47,77 @@ impl Lexer<'_> {
 					} else {
 						// indexing a number
 						self.reader.backup(backup);
-						return self.finish_int_token();
+						return Ok(self.finish_int_token());
 					}
 				}
-				b'f' => {
-					// float suffix
-					self.reader.next();
-					if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-						self.eat_remaining_identifier();
-						return self.invalid_token();
-					} else {
-						return self.finish_float_token();
-					}
-				}
-				b'd' => {
-					// decimal suffix
-					let checkpoint = self.reader.offset();
-					self.reader.next();
-					let Some(b'e') = self.reader.peek() else {
-						// 'e' isn't next so it could be a duration
-						self.reader.backup(checkpoint);
-						return self.lex_duration();
-					};
-					self.reader.next();
-
-					let Some(b'c') = self.reader.peek() else {
-						// 'de' isn't a valid suffix,
-						self.eat_remaining_identifier();
-						self.scratch.clear();
-						return self.invalid_token();
-					};
-					self.reader.next();
-
-					if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-						// random identifier like tokens after suffix, invalid token.
-						self.eat_remaining_identifier();
-						self.scratch.clear();
-						return self.invalid_token();
-					} else {
-						return self.finish_int_token();
-					}
-				}
+				b'f' | b'd' => return self.lex_suffix(true),
 				// Oxc2 is the start byte of 'µ'
 				0xc2 | b'n' | b'u' | b'm' | b'h' | b'w' | b'y' | b's' => {
 					// duration suffix, switch to lexing duration.
-					return self.lex_duration();
+					return Ok(self.lex_duration());
 				}
-				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+				b'_' => {
+					self.reader.next();
+				}
+				b'a'..=b'z' | b'A'..=b'Z' => {
+					return Err(Error::InvalidSuffix);
 					// invalid token, unexpected identifier character immediatly after number.
 					// Eat all remaining identifier like characters.
-					self.eat_remaining_identifier();
-					self.scratch.clear();
-					return self.invalid_token();
 				}
 				_ => {
-					return self.finish_int_token();
+					return Ok(self.finish_int_token());
 				}
 			}
 		}
 	}
 
-	/// Eats all remaining identifier like character.
-	pub fn eat_remaining_identifier(&mut self) {
-		while let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-			self.reader.next();
+	fn lex_suffix(&mut self, can_be_duration: bool) -> Result<Token, Error> {
+		match self.reader.next() {
+			Some(b'f') => {
+				// float suffix
+				self.reader.next();
+				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
+					Err(Error::InvalidSuffix)
+				} else {
+					Ok(self.finish_float_token())
+				}
+			}
+			Some(b'd') => {
+				// decimal suffix
+				let checkpoint = self.reader.offset();
+				self.reader.next();
+				if !self.eat(b'e') {
+					if can_be_duration {
+						// TODO: See about removing backup.
+						self.reader.backup(checkpoint);
+						return Ok(self.lex_duration());
+					} else {
+						return Err(Error::InvalidSuffix);
+					}
+				}
+
+				if !self.eat(b'c') {
+					return Err(Error::InvalidSuffix);
+				}
+
+				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
+					Err(Error::InvalidSuffix)
+				} else {
+					Ok(self.finish_int_token())
+				}
+			}
+			_ => unreachable!(),
 		}
 	}
 
 	/// Lexes the mantissa of a number, i.e. `.8` in `1.8`
-	pub fn lex_mantissa(&mut self) -> Token {
+	pub fn lex_mantissa(&mut self) -> Result<Token, Error> {
 		self.scratch.push('.');
 		loop {
+			// lex_number already checks if there exists a digit after the dot.
+			// So this will never fail the first iteration of the loop.
 			let Some(x) = self.reader.peek() else {
-				return self.finish_float_token();
+				return Ok(self.finish_float_token());
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -112,19 +131,24 @@ impl Lexer<'_> {
 					self.scratch.push('e');
 					return self.lex_exponent();
 				}
-				b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+				b'_' => {
+					self.reader.next();
+				}
+				b'f' | b'd' => return self.lex_suffix(false),
+				b'a'..=b'z' | b'A'..=b'Z' => {
 					// invalid token, random identifier characters immediately after number.
 					self.scratch.clear();
-					return self.invalid_token();
+					return Err(Error::InvalidSuffix);
 				}
 				_ => {
-					return self.finish_float_token();
+					return Ok(self.finish_float_token());
 				}
 			}
 		}
 	}
 
-	pub fn lex_exponent(&mut self) -> Token {
+	/// Lexes the exponent of a number, i.e. `e10` in `1.1e10`;
+	fn lex_exponent(&mut self) -> Result<Token, Error> {
 		let mut atleast_one = false;
 		match self.reader.peek() {
 			Some(b'-' | b'+') => {}
@@ -133,20 +157,25 @@ impl Lexer<'_> {
 			}
 			_ => {
 				// random other character, expected atleast one digit.
-				return self.invalid_token();
+				return Err(Error::DigitExpectedExponent);
 			}
 		}
 		self.reader.next();
 		loop {
 			match self.reader.peek() {
 				Some(x @ b'0'..=b'9') => {
+					self.reader.next();
 					self.scratch.push(x as char);
 				}
+				Some(b'_') => {
+					self.reader.next();
+				}
+				Some(b'f' | b'd') => return self.lex_suffix(false),
 				_ => {
 					if atleast_one {
-						return self.finish_float_token();
+						return Ok(self.finish_float_token());
 					} else {
-						return self.invalid_token();
+						return Err(Error::DigitExpectedExponent);
 					}
 				}
 			}
@@ -155,21 +184,17 @@ impl Lexer<'_> {
 
 	/// Parse the float in the scratch buffer and return it as a token
 	pub fn finish_float_token(&mut self) -> Token {
-		let result = self.scratch.parse::<f64>();
+		// Lexer should ensure this never panics.
+		let result = self.scratch.parse::<f64>().unwrap();
 		self.scratch.clear();
-		match result {
-			Ok(x) => self.finish_number_token(Number::Float(x)),
-			Err(_) => self.invalid_token(),
-		}
+		self.finish_number_token(Number::Float(result))
 	}
 
 	/// Parse the integer in the scratch buffer and return it as a token
 	pub fn finish_int_token(&mut self) -> Token {
-		let result = self.scratch.parse::<i64>();
+		// TODO: Improve parsing of numbers so that we can use full range of number.
+		let result = self.scratch.parse::<f64>().unwrap() as i64;
 		self.scratch.clear();
-		match result {
-			Ok(x) => self.finish_number_token(Number::Int(x)),
-			Err(_) => self.invalid_token(),
-		}
+		self.finish_number_token(Number::Int(result))
 	}
 }

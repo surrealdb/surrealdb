@@ -3,8 +3,9 @@ macro_rules! unexpected {
 	($parser:expr, $found:expr, $expected:expr) => {
 		match $found {
 			$crate::syn::token::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken,
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
 					$parser.last_span(),
 				));
 			}
@@ -38,10 +39,11 @@ macro_rules! expected {
 		match token.kind {
 			t!($kind) => token,
 			$crate::syn::parser::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken,
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
 					$parser.last_span(),
-				))
+				));
 			}
 			x => {
 				let expected = $kind;
