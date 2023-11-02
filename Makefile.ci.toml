@@ -204,7 +204,7 @@ script = "kill $(cat /tmp/tiup.pid) || true"
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 command = "cargo"
-args = ["build", "--locked", "--no-default-features", "--features", "storage-mem,storage-fdb"]
+args = ["build", "--locked", "--no-default-features", "--features", "storage-mem"]
 
 #
 # Benchmarks
