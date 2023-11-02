@@ -102,19 +102,13 @@ macro_rules! into_future {
 				let (tx, rx) = channel::unbounded();
 				let mut param = Param::notification_sender(tx);
 				param.other = vec![id.clone()];
-				let result = conn.execute_unit(router, param).await;
-				// Construct a stream before propagating any errors to make sure the live query
-				// will be killed when the stream gets dropped. We can't contruct the stream
-				// before running `execute_unit` because we can't hold it across an await.
-				let stream = Stream {
+				conn.execute_unit(router, param).await?;
+				Ok(Stream {
 					router,
 					id,
 					rx,
 					response_type: PhantomData,
-				};
-				// Propagate any errors from `execute_unit`.
-				result?;
-				Ok(stream)
+				})
 			})
 		}
 	};
