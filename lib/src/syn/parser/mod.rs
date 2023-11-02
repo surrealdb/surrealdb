@@ -34,6 +34,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+	/// Create a new parser from a give source.
 	pub fn new(source: &'a str) -> Self {
 		Parser {
 			lexer: Lexer::new(source),
@@ -69,6 +70,7 @@ impl<'a> Parser<'a> {
 		x
 	}
 
+	/// Return the token kind of the next token without consuming it.
 	pub fn peek_kind(&mut self) -> TokenKind {
 		let Some(x) = self.token_buffer.first().map(|x| x.kind) else {
 			let res = self.lexer.next_token();
@@ -78,6 +80,8 @@ impl<'a> Parser<'a> {
 		x
 	}
 
+	/// Returns the next n'th token without consuming it.
+	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_token_at(&mut self, at: u8) -> Token {
 		for _ in at..self.token_buffer.len() {
 			self.token_buffer.push(self.lexer.next_token());
@@ -85,7 +89,7 @@ impl<'a> Parser<'a> {
 		self.token_buffer.at(at).unwrap()
 	}
 
-	/// Returns the span of the last peeked or consumed token.
+	/// Returns the span of the last peeked if there is one, otherwise the last consumed token.
 	pub fn last_span(&mut self) -> Span {
 		self.token_buffer.first().map(|x| x.span).unwrap_or(self.last_span)
 	}
@@ -101,6 +105,8 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter
+	/// error.
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
 		if !self.eat(kind) {
 			return Err(ParseError::new(

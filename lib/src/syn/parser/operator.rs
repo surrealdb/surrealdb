@@ -8,10 +8,12 @@ use crate::syn::token::{t, TokenKind};
 use super::mac::unexpected;
 
 impl Parser<'_> {
+	/// Parsers a generic value.
 	pub fn parse_value(&mut self) -> ParseResult<Value> {
 		self.pratt_parse_expr(0)
 	}
 
+	/// Parse a assigner operator.
 	pub fn parse_assigner(&mut self) -> ParseResult<Operator> {
 		match self.next().kind {
 			t!("=") => Ok(Operator::Equal),
@@ -200,6 +202,8 @@ impl Parser<'_> {
 		})))
 	}
 
+	/// The pratt parsing loop.
+	/// Parses expression according to binding power.
 	fn pratt_parse_expr(&mut self, min_bp: u8) -> ParseResult<Value> {
 		let peek = self.peek();
 		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(peek.kind) {

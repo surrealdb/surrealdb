@@ -22,35 +22,35 @@ pub enum PartError {
 
 #[derive(Error, Debug)]
 pub enum Error {
-	#[error("invalid date-time year, `{0}`")]
+	#[error("invalid year, {0}")]
 	Year(PartError),
-	#[error("invalid date-time month, `{0}`")]
+	#[error("invalid month, {0}")]
 	Month(PartError),
-	#[error("invalid date-time day, `{0}`")]
+	#[error("invalid day, {0}")]
 	Day(PartError),
-	#[error("invalid date-time hour, `{0}`")]
+	#[error("invalid hour, {0}")]
 	Hour(PartError),
-	#[error("invalid date-time minute, `{0}`")]
+	#[error("invalid time minute, {0}")]
 	Minute(PartError),
-	#[error("invalid date-time second, `{0}`")]
+	#[error("invalid second, {0}")]
 	Second(PartError),
-	#[error("invalid nano_seconds, `{0}`")]
+	#[error("invalid nano_seconds, {0}")]
 	NanoSeconds(PartError),
-	#[error("invalid date-time time-zone hour, `{0}`")]
+	#[error("invalid time-zone hour, {0}")]
 	TimeZoneHour(PartError),
-	#[error("invalid date-time time-zon minute, `{0}`")]
+	#[error("invalid time-zone minute, {0}")]
 	TimeZoneMinute(PartError),
 	#[error("missing seperator `{}`",*(.0) as char)]
 	MissingSeparator(u8),
 	#[error("expected date-time strand to end")]
 	ExpectedEnd,
-	#[error("missing date-time time-zone")]
+	#[error("missing time-zone")]
 	MissingTimeZone,
-	#[error("date-time date does not exist")]
+	#[error("date does not exist")]
 	NonExistantDate,
-	#[error("date-time time does not exist")]
+	#[error("time does not exist")]
 	NonExistantTime,
-	#[error("date-time time-zone offset too big")]
+	#[error("time-zone offset too big")]
 	TimeZoneOutOfRange,
 }
 
@@ -94,14 +94,14 @@ impl<'a> Lexer<'a> {
 		}
 
 		let hour = self.lex_date_time_part(2, 0..=24).map_err(Error::Hour)?;
-		if !self.eat(b'-') {
-			return Err(Error::MissingSeparator(b'-'));
+		if !self.eat(b':') {
+			return Err(Error::MissingSeparator(b':'));
 		}
 
 		let minutes = self.lex_date_time_part(2, 0..=59).map_err(Error::Minute)?;
 
-		if !self.eat(b'-') {
-			return Err(Error::MissingSeparator(b'-'));
+		if !self.eat(b':') {
+			return Err(Error::MissingSeparator(b':'));
 		}
 
 		let seconds = self.lex_date_time_part(2, 0..=59).map_err(Error::Second)?;
@@ -115,7 +115,6 @@ impl<'a> Lexer<'a> {
 			}
 			let mut number = 0u32;
 			for i in 0..9 {
-				number *= 10;
 				let Some(c) = self.reader.peek() else {
 					// always invalid token, just let the next section handle the error.
 					break;
@@ -128,10 +127,11 @@ impl<'a> Lexer<'a> {
 					break;
 				}
 				self.reader.next();
-				number += (c - b'0') as u32
+				number *= 10;
+				number += (c - b'0') as u32;
 			}
 			// ensure nano_seconds are at most 9 digits.
-			if !matches!(self.reader.peek(), Some(b'0'..=b'9')) {
+			if matches!(self.reader.peek(), Some(b'0'..=b'9')) {
 				return Err(Error::NanoSeconds(PartError::TooManyDigits));
 			}
 			number
@@ -146,6 +146,7 @@ impl<'a> Lexer<'a> {
 				None
 			}
 			Some(x @ (b'-' | b'+')) => {
+				self.reader.next();
 				let negative = x == b'-';
 				let hour = self.lex_date_time_part(2, 0..=24).map_err(Error::TimeZoneHour)? as i32;
 				let Some(b':') = self.reader.next() else {
@@ -191,7 +192,7 @@ impl<'a> Lexer<'a> {
 			Some(offset) => if offset < 0 {
 				FixedOffset::west_opt(-offset)
 			} else {
-				FixedOffset::east_opt(-offset)
+				FixedOffset::east_opt(offset)
 			}
 			.ok_or(Error::TimeZoneOutOfRange)?,
 		};

@@ -3,10 +3,10 @@ use crate::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CommitStatement,
-			CreateStatement, DefineDatabaseStatement, DefineFunctionStatement,
-			DefineNamespaceStatement, DefineStatement, DefineTokenStatement, DefineUserStatement,
-			OutputStatement, UpdateStatement,
+			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
+			CommitStatement, ContinueStatement, CreateStatement, DefineDatabaseStatement,
+			DefineFunctionStatement, DefineNamespaceStatement, DefineStatement,
+			DefineTokenStatement, DefineUserStatement, OutputStatement, UpdateStatement,
 		},
 		Algorithm, Base, Block, Cond, Data, Dir, Duration, Field, Fields, Future, Graph, Ident,
 		Idiom, Kind, Number, Operator, Output, Part, Permission, Statement, Strand, Table, Tables,
@@ -41,23 +41,23 @@ pub fn parse_break() {
 #[test]
 pub fn parse_cancel() {
 	let res = test_parse!(parse_stmt, r#"CANCEL"#).unwrap();
-	assert_eq!(res, Statement::Begin(BeginStatement));
+	assert_eq!(res, Statement::Cancel(CancelStatement));
 	let res = test_parse!(parse_stmt, r#"CANCEL TRANSACTION"#).unwrap();
-	assert_eq!(res, Statement::Begin(BeginStatement));
+	assert_eq!(res, Statement::Cancel(CancelStatement));
 }
 
 #[test]
 pub fn parse_commit() {
 	let res = test_parse!(parse_stmt, r#"COMMIT"#).unwrap();
 	assert_eq!(res, Statement::Commit(CommitStatement));
-	let res = test_parse!(parse_stmt, r#"COMMMIT TRANSACTION"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"COMMIT TRANSACTION"#).unwrap();
 	assert_eq!(res, Statement::Commit(CommitStatement));
 }
 
 #[test]
 pub fn parse_continue() {
 	let res = test_parse!(parse_stmt, r#"CONTINUE"#).unwrap();
-	assert_eq!(res, Statement::Break(BreakStatement));
+	assert_eq!(res, Statement::Continue(ContinueStatement));
 }
 
 #[test]

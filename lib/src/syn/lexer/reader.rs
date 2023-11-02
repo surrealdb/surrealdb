@@ -137,7 +137,7 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn span(&self, span: Span) -> &[u8] {
-		assert!(((span.offset + span.len) as usize) < self.full().len());
+		assert!(((span.offset + span.len) as usize) <= self.full().len());
 		unsafe {
 			let ptr = self.start.as_ptr().add(span.offset as usize);
 			std::slice::from_raw_parts(ptr, span.len as usize)

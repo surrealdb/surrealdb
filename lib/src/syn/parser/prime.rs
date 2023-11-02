@@ -12,6 +12,9 @@ use crate::{
 use super::{ParseResult, Parser};
 
 impl Parser<'_> {
+	/// Parse a what primary.
+	///
+	/// What's are values which are more restricted in what expressions they can contain.
 	pub fn parse_what_primary(&mut self) -> ParseResult<Value> {
 		match self.peek_kind() {
 			TokenKind::Duration => {
@@ -50,6 +53,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse an expressions
 	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {
 		let token = self.next();
 		let value = match token.kind {
@@ -119,11 +123,12 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
-				let table = self.parse_token_value()?;
+				let table = self.from_token(token)?;
 				Value::Table(table)
 			}
 		};
 
+		// Parse the rest of the idiom if it is being continued.
 		if Self::continues_idiom(self.peek_kind()) {
 			match value {
 				Value::None

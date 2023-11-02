@@ -22,20 +22,19 @@ impl Parser<'_> {
 
 		// Check first if it can be an object.
 		if self.peek_token_at(1).kind == t!(":") {
-			// Could actually be an object, try that first
-			// No way to ensure that it actually is an object as grammar is ambiguous
-			//
-			// TODO: Do something with the error produced from trying to parse the object
-			if let Ok(object) = self.parse_object(start) {
-				return Ok(Value::Object(object));
-			}
-			self.backup_after(start);
+			return self.parse_object(start).map(Value::Object);
 		}
 
 		// not an object so instead parse as a block.
 		self.parse_block(start).map(Box::new).map(Value::Block)
 	}
 
+	/// Parses an object.
+	///
+	/// Expects the span of the starting `{` as an argument.
+	///
+	/// # Parser state
+	/// Expects the first `{` to already have been eaten.
 	pub(super) fn parse_object(&mut self, start: Span) -> ParseResult<Object> {
 		let mut map = BTreeMap::new();
 		loop {
@@ -82,6 +81,8 @@ impl Parser<'_> {
 		Ok(Block(statements))
 	}
 
+	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
+	/// 1 }`
 	fn parse_object_entry(&mut self) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, ":");
@@ -89,6 +90,7 @@ impl Parser<'_> {
 		Ok((text, value))
 	}
 
+	/// Parses the key of an object, i.e. `field` in the object `{ field: 1 }`.
 	fn parse_object_key(&mut self) -> ParseResult<String> {
 		let token = self.peek();
 		match token.kind {

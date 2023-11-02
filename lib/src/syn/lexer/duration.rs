@@ -36,8 +36,11 @@ impl<'a> Lexer<'a> {
 
 		let mut current_value = 0u64;
 		// use the existing eat span to generate the current value.
-		for b in self.reader.span(self.current_span()) {
-			debug_assert!(b.is_ascii_digit());
+		// span already contains
+		let mut span = self.current_span();
+		span.len -= 1;
+		for b in self.reader.span(self.current_span()).iter().copied() {
+			debug_assert!(b.is_ascii_digit(), "`{}` is not a digit", b as char);
 			current_value = current_value.checked_mul(10).ok_or(Error::Overflow)?;
 			current_value = current_value.checked_add((b - b'0') as u64).ok_or(Error::Overflow)?;
 		}

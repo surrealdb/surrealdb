@@ -1,8 +1,8 @@
 use crate::syn::lexer::{
 	unicode::{byte, chars},
-	CharError, Lexer,
+	Error, Lexer,
 };
-use crate::syn::token::{t, Token, TokenKind};
+use crate::syn::token::{t, Token};
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment and returns the next token.
@@ -23,10 +23,7 @@ impl<'a> Lexer<'a> {
 				x if !x.is_ascii() => {
 					let char = match self.reader.complete_char(x) {
 						Ok(x) => x,
-						Err(CharError::Eof) => return self.eof_token(),
-						Err(CharError::Unicode) => {
-							return self.finish_token(TokenKind::Invalid, None)
-						}
+						Err(_) => return self.invalid_token(Error::InvalidUtf8),
 					};
 
 					match char {
@@ -74,10 +71,7 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					let char = match self.reader.complete_char(x) {
 						Ok(x) => x,
-						Err(CharError::Eof) => return self.eof_token(),
-						Err(CharError::Unicode) => {
-							return self.finish_token(TokenKind::Invalid, None)
-						}
+						Err(_) => return self.invalid_token(Error::InvalidUtf8),
 					};
 
 					match char {
@@ -124,7 +118,7 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("&&")
 				}
-				_ => TokenKind::Invalid,
+				_ => return self.invalid_token(Error::ExpectedEnd('&')),
 			},
 			b'.' => match self.reader.peek() {
 				Some(b'.') => {
@@ -220,7 +214,7 @@ impl<'a> Lexer<'a> {
 							self.reader.next();
 							t!("+?=")
 						}
-						_ => TokenKind::Invalid,
+						_ => return self.invalid_token(Error::ExpectedEnd('=')),
 					}
 				}
 				_ => t!("+"),
@@ -304,7 +298,7 @@ impl<'a> Lexer<'a> {
 				return self.lex_ident_from_next_byte(byte);
 			}
 			b'0'..=b'9' => return self.lex_number(byte),
-			_ => TokenKind::Invalid,
+			x => return self.invalid_token(Error::UnexpectedCharacter(x as char)),
 		};
 
 		self.finish_token(kind, None)

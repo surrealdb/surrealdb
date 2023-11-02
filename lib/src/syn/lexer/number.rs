@@ -72,7 +72,7 @@ impl Lexer<'_> {
 	}
 
 	fn lex_suffix(&mut self, can_be_duration: bool) -> Result<Token, Error> {
-		match self.reader.next() {
+		match self.reader.peek() {
 			Some(b'f') => {
 				// float suffix
 				self.reader.next();
@@ -84,12 +84,11 @@ impl Lexer<'_> {
 			}
 			Some(b'd') => {
 				// decimal suffix
-				let checkpoint = self.reader.offset();
 				self.reader.next();
+				let checkpoint = self.reader.offset();
 				if !self.eat(b'e') {
 					if can_be_duration {
-						// TODO: See about removing backup.
-						self.reader.backup(checkpoint);
+						self.reader.backup(checkpoint - 1);
 						return Ok(self.lex_duration());
 					} else {
 						return Err(Error::InvalidSuffix);

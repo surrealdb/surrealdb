@@ -32,7 +32,7 @@ pub enum Error {
 	UnexpectedEof,
 	#[error("source was not valid utf-8")]
 	InvalidUtf8,
-	#[error("expected token to end with '{0}'")]
+	#[error("expected next character to be '{0}'")]
 	ExpectedEnd(char),
 	#[error("failed to lex date-time, {0}")]
 	DateTime(#[from] datetime::Error),
