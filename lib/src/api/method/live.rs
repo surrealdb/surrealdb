@@ -260,6 +260,11 @@ impl<Client, R> Stream<'_, Client, R>
 where
 	Client: Connection,
 {
+	/// Close the live query stream
+	///
+	/// This kills the live query process responsible for this stream.
+	/// If the stream is dropped without calling this method, the process
+	/// will be killed next time it tries to send a notification to the stream.
 	pub async fn close(self) -> Result<()> {
 		let mut conn = Client::new(Method::Kill);
 		conn.execute_unit(self.router, Param::new(vec![self.id])).await
