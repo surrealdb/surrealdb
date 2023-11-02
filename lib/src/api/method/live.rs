@@ -104,7 +104,7 @@ macro_rules! into_future {
 				param.other = vec![id.clone()];
 				let result = conn.execute_unit(router, param).await;
 				// Construct a stream before propagating any errors to make sure the live query
-				// is will be killed when the stream gets dropped. We can't contruct the stream
+				// will be killed when the stream gets dropped. We can't contruct the stream
 				// before running `execute_unit` because we can't hold it across an await.
 				let stream = Stream {
 					router,
