@@ -72,7 +72,12 @@ impl PlanBuilder {
 	}
 
 	fn eval_node(&mut self, node: Node) -> Result<(), String> {
+		println!("eval_node: {:?}", node);
 		match node {
+			Node::IndexedField(idr, ixrs) => {
+				println!("IndexedField {}, {:?}", idr, ixrs);
+				Ok(())
+			}
 			Node::Expression {
 				io,
 				left,
