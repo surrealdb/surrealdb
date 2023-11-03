@@ -113,19 +113,19 @@ jobs:
           - arch: x86_64-apple-darwin
             os: macos-latest-xl
             file: surreal-${{ github.ref_name }}.darwin-amd64
-            opts: --features storage-tikv
+            opts: --features storage-tikv,http-compression
           - arch: aarch64-apple-darwin
             os: macos-latest-xl
             file: surreal-${{ github.ref_name }}.darwin-arm64
-            opts: --features storage-tikv
+            opts: --features storage-tikv,http-compression
           - arch: x86_64-unknown-linux-gnu
             os: ubuntu-latest-16-cores
             file: surreal-${{ github.ref_name }}.linux-amd64
-            opts: --features storage-tikv
+            opts: --features storage-tikv,http-compression
           - arch: aarch64-unknown-linux-gnu
             os: ubuntu-latest-16-cores
             file: surreal-${{ github.ref_name }}.linux-arm64
-            opts: --features storage-tikv
+            opts: --features storage-tikv,http-compression
           - arch: x86_64-pc-windows-msvc
             os: windows-latest
             file: surreal-${{ github.ref_name }}.windows-amd64
