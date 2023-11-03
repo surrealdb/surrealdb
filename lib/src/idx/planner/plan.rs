@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 pub(super) struct PlanBuilder {
-	indexes: Vec<(Arc<Expression>, IndexOption)>,
+	indexes: Vec<(Option<Arc<Expression>>, IndexOption)>,
 	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
 	with_indexes: Vec<IndexRef>,
 	all_and: bool,
@@ -74,8 +74,9 @@ impl PlanBuilder {
 	fn eval_node(&mut self, node: Node) -> Result<(), String> {
 		println!("eval_node: {:?}", node);
 		match node {
-			Node::IndexedField(idr, ixrs) => {
-				println!("IndexedField {}, {:?}", idr, ixrs);
+			Node::IndexedFilter(io, n) => {
+				println!("IndexedField {:?}, {:?}", io, n);
+				self.add_index_option(None, io);
 				Ok(())
 			}
 			Node::Expression {
@@ -89,7 +90,7 @@ impl PlanBuilder {
 				}
 				let is_bool = self.check_boolean_operator(exp.operator());
 				if let Some(io) = self.filter_index_option(io) {
-					self.add_index_option(exp, io);
+					self.add_index_option(Some(exp), io);
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
@@ -115,7 +116,7 @@ impl PlanBuilder {
 		}
 	}
 
-	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
+	fn add_index_option(&mut self, exp: Option<Arc<Expression>>, io: IndexOption) {
 		if let IndexOperator::RangePart(o, v) = io.op() {
 			match self.range_queries.entry(io.ir()) {
 				Entry::Occupied(mut e) => {
@@ -134,8 +135,8 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(Arc<Expression>, IndexOption),
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
+	SingleIndex(Option<Arc<Expression>>, IndexOption),
+	MultiIndex(Vec<(Option<Arc<Expression>>, IndexOption)>),
 	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
 }
 
@@ -297,7 +298,7 @@ pub(super) struct RangeQueryBuilder {
 }
 
 impl RangeQueryBuilder {
-	fn add(&mut self, exp: Arc<Expression>, op: &Operator, v: &Value) {
+	fn add(&mut self, exp: Option<Arc<Expression>>, op: &Operator, v: &Value) {
 		match op {
 			Operator::LessThan => self.to.set_to(v),
 			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),
@@ -305,14 +306,16 @@ impl RangeQueryBuilder {
 			Operator::MoreThanOrEqual => self.from.set_from_inclusive(v),
 			_ => return,
 		}
-		self.exps.insert(exp);
+		if let Some(exp) = exp {
+			self.exps.insert(exp);
+		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-	use crate::sql::{Array, Idiom, Value};
+	use crate::sql::{Array, Value};
 	use std::collections::HashSet;
 
 	#[test]

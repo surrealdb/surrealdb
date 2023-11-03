@@ -39,7 +39,7 @@ pub(crate) struct QueryExecutor {
 pub(crate) type IteratorRef = u16;
 
 pub(super) enum IteratorEntry {
-	Single(Arc<Expression>, IndexOption),
+	Single(Option<Arc<Expression>>, IndexOption),
 	Range(HashSet<Arc<Expression>>, IndexRef, RangeValue, RangeValue),
 }
 
@@ -162,7 +162,7 @@ impl QueryExecutor {
 
 	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
 		match self.it_entries.get(ir as usize) {
-			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
+			Some(IteratorEntry::Single(Some(e), ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
 			_ => false,
 		}
@@ -280,7 +280,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(ir as usize) {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.it_entries.get(ir as usize) {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.ft_map.get(&io.ir()) {
 					if let Some(fte) = self.exp_entries.get(exp.as_ref()) {
@@ -294,7 +294,7 @@ impl QueryExecutor {
 	}
 
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(ir as usize) {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.it_entries.get(ir as usize) {
 			if let Some(mte) = self.mt_exp.get(exp.as_ref()) {
 				let it = KnnThingIterator::new(mte.doc_ids.clone(), mte.res.clone());
 				return Some(ThingIterator::Knn(it));
