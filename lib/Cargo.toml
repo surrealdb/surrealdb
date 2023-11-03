@@ -167,3 +167,7 @@ harness = false
 [[bench]]
 name = "move_vs_clone"
 harness = false
+
+[[bench]]
+name = "sdb"
+harness = false
