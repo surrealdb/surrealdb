@@ -1147,3 +1147,53 @@ async fn select_unique_contains() -> Result<(), Error> {
 	check_result(&mut res, RESULT)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_matches() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
+	skip_ok(&mut res, 3)?;
+
+	const SQL: &str = r#"
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX subject_ft ON student COLUMNS marks.*.subject SEARCH ANALYZER simple BM25;
+		SELECT id FROM student WHERE marks[WHERE subject @@ "english"];
+	"#;
+
+	// SELECT id FROM student WHERE marks.*.subject @@ "english" EXPLAIN;
+	// 		SELECT id FROM student WHERE marks.*.subject @@ "english";
+	// 		SELECT id FROM student WHERE marks[WHERE subject @@ "english"] EXPLAIN;
+
+	const INDEX_EXPLAIN: &str = r"[
+				{
+					detail: {
+						table: 'student'
+					},
+					detail: {
+						plan: {
+							index: 'subject_ft',
+							operator: '@@',
+							value: 'english'
+						},
+						table: 'student',
+					},
+					operation: 'Iterate Index'
+				}
+			]";
+	const RESULT: &str = r"[
+		{
+			id: student:1
+		},
+		{
+			id: student:2
+		}
+	]";
+
+	let mut res = execute_test(&dbs, SQL, 3).await?;
+	skip_ok(&mut res, 2)?;
+	// check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	// check_result(&mut res, INDEX_EXPLAIN)?;
+	// check_result(&mut res, RESULT)?;
+	Ok(())
+}

@@ -182,7 +182,7 @@ fn get_index_option<'a>(
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					if let Some(ir) = doc.ir {
-						if exe.is_iterator_expression(ir, exp) {
+						if exe.is_matching_iterator(ir, exp, ctx.idiom()) {
 							return IndexOption::PreMatch;
 						}
 					}
@@ -203,7 +203,7 @@ pub(crate) async fn matches(
 	match get_index_option(ctx, doc, exp) {
 		IndexOption::PreMatch => Ok(Value::Bool(true)),
 		IndexOption::None => Ok(Value::Bool(false)),
-		IndexOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
+		IndexOption::Execute(exe, thg) => exe.matches(txn, thg, exp, ctx.idiom()).await,
 	}
 }
 

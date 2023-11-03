@@ -43,20 +43,21 @@ impl<'a> QueryPlanner<'a> {
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
-			Some((node, im, with_indexes, idioms)) => {
-				let mut exe = QueryExecutor::new(self.opt, txn, &t, im, idioms).await?;
+			Some((node, im, with_indexes)) => {
+				let mut exe = QueryExecutor::new(self.opt, txn, &t, im).await?;
 				match PlanBuilder::build(node, self.with, with_indexes)? {
-					Plan::SingleIndex(exp, io) => {
+					Plan::SingleIndex(io) => {
 						if io.require_distinct() {
 							self.requires_distinct = true;
 						}
-						let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
+						let ir = exe.add_iterator(IteratorEntry::Single(io.cloned_id(), io));
 						it.ingest(Iterable::Index(t.clone(), ir));
 						self.executors.insert(t.0.clone(), exe);
 					}
 					Plan::MultiIndex(v) => {
-						for (exp, io) in v {
-							let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
+						for io in v {
+							let ir =
+								exe.add_iterator(IteratorEntry::Single(io.cloned_id(), io.clone()));
 							it.ingest(Iterable::Index(t.clone(), ir));
 							self.requires_distinct = true;
 						}
@@ -64,7 +65,7 @@ impl<'a> QueryPlanner<'a> {
 					}
 					Plan::SingleIndexMultiExpression(ixn, rq) => {
 						let ir =
-							exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+							exe.add_iterator(IteratorEntry::Range(rq.idioms, ixn, rq.from, rq.to));
 						it.ingest(Iterable::Index(t.clone(), ir));
 						self.executors.insert(t.0.clone(), exe);
 					}

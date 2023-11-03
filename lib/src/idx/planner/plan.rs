@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{IdiomRef, IndexRef, Node};
+use crate::idx::planner::tree::{IndexRef, Node};
 use crate::sql::with::With;
-use crate::sql::{Array, Object};
+use crate::sql::{Array, Idiom, Object};
 use crate::sql::{Expression, Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -10,7 +10,8 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 pub(super) struct PlanBuilder {
-	indexes: Vec<(Option<Arc<Expression>>, IndexOption)>,
+	indexes: Vec<IndexOption>,
+	indexed_expressions: HashMap<Arc<Expression>, IndexOption>,
 	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
 	with_indexes: Vec<IndexRef>,
 	all_and: bool,
@@ -27,8 +28,9 @@ impl PlanBuilder {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
 		}
 		let mut b = PlanBuilder {
-			indexes: Vec::new(),
-			range_queries: HashMap::new(),
+			indexes: Default::default(),
+			indexed_expressions: Default::default(),
+			range_queries: Default::default(),
 			with_indexes,
 			all_and: true,
 			all_exp_with_index: true,
@@ -50,8 +52,8 @@ impl PlanBuilder {
 				return Ok(Plan::SingleIndexMultiExpression(ir, rq));
 			}
 			// Otherwise we take the first single index option
-			if let Some((e, i)) = b.indexes.pop() {
-				return Ok(Plan::SingleIndex(e, i));
+			if let Some(i) = b.indexes.pop() {
+				return Ok(Plan::SingleIndex(i));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -72,10 +74,8 @@ impl PlanBuilder {
 	}
 
 	fn eval_node(&mut self, node: Node) -> Result<(), String> {
-		println!("eval_node: {:?}", node);
 		match node {
-			Node::IndexedFilter(io, n) => {
-				println!("IndexedField {:?}, {:?}", io, n);
+			Node::IndexedFilter(io) => {
 				self.add_index_option(None, io);
 				Ok(())
 			}
@@ -120,23 +120,26 @@ impl PlanBuilder {
 		if let IndexOperator::RangePart(o, v) = io.op() {
 			match self.range_queries.entry(io.ir()) {
 				Entry::Occupied(mut e) => {
-					e.get_mut().add(exp.clone(), o, v);
+					e.get_mut().add(io.cloned_id(), o, v);
 				}
 				Entry::Vacant(e) => {
 					let mut b = RangeQueryBuilder::default();
-					b.add(exp.clone(), o, v);
+					b.add(io.cloned_id(), o, v);
 					e.insert(b);
 				}
 			}
 		}
-		self.indexes.push((exp, io));
+		if let Some(exp) = exp {
+			self.indexed_expressions.insert(exp, io.clone());
+		}
+		self.indexes.push(io);
 	}
 }
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(Option<Arc<Expression>>, IndexOption),
-	MultiIndex(Vec<(Option<Arc<Expression>>, IndexOption)>),
+	SingleIndex(IndexOption),
+	MultiIndex(Vec<IndexOption>),
 	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
 }
 
@@ -146,7 +149,7 @@ pub(crate) struct IndexOption(Arc<Inner>);
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) struct Inner {
 	ir: IndexRef,
-	id: IdiomRef,
+	id: Arc<Idiom>,
 	op: IndexOperator,
 }
 
@@ -160,7 +163,7 @@ pub(super) enum IndexOperator {
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: IdiomRef, op: IndexOperator) -> Self {
+	pub(super) fn new(ir: IndexRef, id: Arc<Idiom>, op: IndexOperator) -> Self {
 		Self(Arc::new(Inner {
 			ir,
 			id,
@@ -180,8 +183,12 @@ impl IndexOption {
 		&self.0.op
 	}
 
-	pub(super) fn id(&self) -> IdiomRef {
-		self.0.id
+	pub(super) fn id(&self) -> &Idiom {
+		self.0.id.as_ref()
+	}
+
+	pub(super) fn cloned_id(&self) -> Arc<Idiom> {
+		self.0.id.clone()
 	}
 
 	fn reduce_array(v: &Value) -> Value {
@@ -292,13 +299,13 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default, Debug)]
 pub(super) struct RangeQueryBuilder {
-	pub(super) exps: HashSet<Arc<Expression>>,
+	pub(super) idioms: HashSet<Arc<Idiom>>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
 impl RangeQueryBuilder {
-	fn add(&mut self, exp: Option<Arc<Expression>>, op: &Operator, v: &Value) {
+	fn add(&mut self, id: Arc<Idiom>, op: &Operator, v: &Value) {
 		match op {
 			Operator::LessThan => self.to.set_to(v),
 			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),
@@ -306,30 +313,30 @@ impl RangeQueryBuilder {
 			Operator::MoreThanOrEqual => self.from.set_from_inclusive(v),
 			_ => return,
 		}
-		if let Some(exp) = exp {
-			self.exps.insert(exp);
-		}
+		self.idioms.insert(id);
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+	use crate::sql::Value::Idiom;
 	use crate::sql::{Array, Value};
 	use std::collections::HashSet;
+	use std::sync::Arc;
 
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			7,
+			Arc::new(Idiom::from_str("test")),
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
-			2,
-			5,
+			1,
+			Arc::new(Idiom::from_str("test")),
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 

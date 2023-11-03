@@ -7,6 +7,7 @@ use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::value::Value;
+use crate::sql::Idiom;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -43,6 +44,8 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// Current idiom
+	idiom: Option<&'a Idiom>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 }
@@ -74,6 +77,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			idiom: None,
 			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
@@ -87,6 +91,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
+			idiom: parent.idiom,
 			capabilities: parent.capabilities.clone(),
 		}
 	}
@@ -132,6 +137,14 @@ impl<'a> Context<'a> {
 	/// Set the query planner
 	pub(crate) fn set_query_planner(&mut self, qp: &'a QueryPlanner) {
 		self.query_planner = Some(qp);
+	}
+
+	pub(crate) fn set_idiom(&mut self, idiom: &'a Idiom) {
+		self.idiom = Some(idiom);
+	}
+
+	pub(crate) fn idiom(&self) -> Option<&Idiom> {
+		self.idiom
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
