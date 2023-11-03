@@ -189,7 +189,7 @@ impl Parser<'_> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_value()?)),
+			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field()?)),
 			x => unexpected!(self, x, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}

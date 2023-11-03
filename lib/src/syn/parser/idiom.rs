@@ -11,7 +11,7 @@ use super::{mac::unexpected, ParseResult, Parser};
 impl Parser<'_> {
 	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = self.parse_value()?;
+			let expr = self.parse_value_field()?;
 			let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
 			Ok(Fields(
 				vec![Field::Single {
@@ -26,7 +26,7 @@ impl Parser<'_> {
 				let field = if self.eat(t!("*")) {
 					Field::All
 				} else {
-					let expr = self.parse_value()?;
+					let expr = self.parse_value_field()?;
 					let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
 					Field::Single {
 						expr,
@@ -70,7 +70,7 @@ impl Parser<'_> {
 				}
 				t!("->") => {
 					self.pop_peek();
-					res.push(Part::Graph(self.parse_graph(Dir::In)?))
+					res.push(Part::Graph(self.parse_graph(Dir::Out)?))
 				}
 				t!("<->") => {
 					self.pop_peek();
@@ -78,7 +78,7 @@ impl Parser<'_> {
 				}
 				t!("<-") => {
 					self.pop_peek();
-					res.push(Part::Graph(self.parse_graph(Dir::Out)?))
+					res.push(Part::Graph(self.parse_graph(Dir::In)?))
 				}
 				t!("..") => {
 					// TODO: error message suggesting `..`
@@ -101,7 +101,7 @@ impl Parser<'_> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
-				Part::Graph(self.parse_graph(Dir::In)?)
+				Part::Graph(self.parse_graph(Dir::Out)?)
 			}
 			t!("<->") => {
 				self.pop_peek();
@@ -109,7 +109,7 @@ impl Parser<'_> {
 			}
 			t!("<-") => {
 				self.pop_peek();
-				Part::Graph(self.parse_graph(Dir::Out)?)
+				Part::Graph(self.parse_graph(Dir::In)?)
 			}
 			_ => Part::Field(self.parse_token_value()?),
 		};

@@ -95,12 +95,14 @@ impl Parser<'_> {
 		let token = self.peek();
 		match token.kind {
 			TokenKind::Keyword(_) => {
+				self.pop_peek();
 				let str = self.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let str = std::str::from_utf8(str).unwrap().to_owned();
 				Ok(str)
 			}
 			TokenKind::Identifier | TokenKind::Strand => {
+				self.pop_peek();
 				let data_index = token.data_index.unwrap();
 				let idx = u32::from(data_index) as usize;
 				let str = self.lexer.strings[idx].clone();

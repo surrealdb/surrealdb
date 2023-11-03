@@ -41,6 +41,10 @@ impl Parser<'_> {
 				let block = self.parse_block(start)?;
 				Ok(Value::Future(Box::new(crate::sql::Future(block))))
 			}
+			t!("|") => {
+				let start = self.pop_peek().span;
+				self.parse_mock(start).map(Value::Mock)
+			}
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -93,7 +97,7 @@ impl Parser<'_> {
 				to_do!(self)
 			}
 			t!("->") => {
-				let graph = self.parse_graph(Dir::In)?;
+				let graph = self.parse_graph(Dir::Out)?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<->") => {
@@ -101,7 +105,7 @@ impl Parser<'_> {
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<-") => {
-				let graph = self.parse_graph(Dir::Out)?;
+				let graph = self.parse_graph(Dir::In)?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("[") => self.parse_array(token.span).map(Value::Array)?,
@@ -123,8 +127,12 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
-				let table = self.from_token(token)?;
-				Value::Table(table)
+				let name: Ident = self.from_token(token)?;
+				if self.table_as_field {
+					Value::Idiom(Idiom(vec![Part::Field(name)]))
+				} else {
+					Value::Table(Table(name.0))
+				}
 			}
 		};
 

@@ -10,7 +10,19 @@ use super::mac::unexpected;
 impl Parser<'_> {
 	/// Parsers a generic value.
 	pub fn parse_value(&mut self) -> ParseResult<Value> {
-		self.pratt_parse_expr(0)
+		let old = self.table_as_field;
+		self.table_as_field = false;
+		let res = self.pratt_parse_expr(0);
+		self.table_as_field = old;
+		res
+	}
+
+	pub fn parse_value_field(&mut self) -> ParseResult<Value> {
+		let old = self.table_as_field;
+		self.table_as_field = true;
+		let res = self.pratt_parse_expr(0);
+		self.table_as_field = old;
+		res
 	}
 
 	/// Parse a assigner operator.

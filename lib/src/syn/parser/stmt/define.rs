@@ -233,7 +233,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_param(&mut self) -> ParseResult<DefineParamStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.parse_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
 			name,
@@ -293,13 +293,19 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
-				t!("(") => {
-					let open = self.pop_peek().span;
-					res.view = Some(self.parse_view()?);
-					self.expect_closing_delimiter(t!(")"), open)?;
-				}
-				t!("SELECT") => {
-					res.view = Some(self.parse_view()?);
+				t!("AS") => {
+					self.pop_peek();
+					match self.peek_kind() {
+						t!("(") => {
+							let open = self.pop_peek().span;
+							res.view = Some(self.parse_view()?);
+							self.expect_closing_delimiter(t!(")"), open)?;
+						}
+						t!("SELECT") => {
+							res.view = Some(self.parse_view()?);
+						}
+						x => unexpected!(self, x, "`SELECT`"),
+					}
 				}
 				_ => break,
 			}

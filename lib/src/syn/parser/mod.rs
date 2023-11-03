@@ -31,6 +31,7 @@ pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
 	token_buffer: TokenBuffer<4>,
+	table_as_field: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -40,6 +41,7 @@ impl<'a> Parser<'a> {
 			lexer: Lexer::new(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
+			table_as_field: false,
 		}
 	}
 
@@ -83,7 +85,7 @@ impl<'a> Parser<'a> {
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_token_at(&mut self, at: u8) -> Token {
-		for _ in at..self.token_buffer.len() {
+		for _ in at..=self.token_buffer.len() {
 			self.token_buffer.push(self.lexer.next_token());
 		}
 		self.token_buffer.at(at).unwrap()

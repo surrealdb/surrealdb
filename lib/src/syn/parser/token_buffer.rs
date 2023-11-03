@@ -18,11 +18,12 @@ impl<const S: usize> TokenBuffer<S> {
 
 	#[inline]
 	pub fn push(&mut self, token: Token) {
-		if self.write.wrapping_add(1) % S as u8 == self.read {
+		let next_write = self.write.wrapping_add(1) % S as u8;
+		if next_write == self.read {
 			panic!("token buffer full");
 		}
 		self.buffer[self.write as usize] = token;
-		self.write = (self.write + 1) % S as u8;
+		self.write = next_write;
 	}
 
 	#[inline]
@@ -31,7 +32,7 @@ impl<const S: usize> TokenBuffer<S> {
 			return None;
 		}
 		let res = self.buffer[self.read as usize];
-		self.read = (self.read + 1) % S as u8;
+		self.read = self.read.wrapping_add(1) % S as u8;
 		Some(res)
 	}
 
@@ -51,12 +52,12 @@ impl<const S: usize> TokenBuffer<S> {
 		if self.read > self.write {
 			S as u8 - self.read + self.write
 		} else {
-			self.read - self.write
+			self.write - self.read
 		}
 	}
 
 	pub fn at(&mut self, at: u8) -> Option<Token> {
-		if self.len() < at {
+		if at >= self.len() {
 			return None;
 		}
 		let offset = (self.read as u16 + at as u16) % S as u16;
