@@ -370,8 +370,7 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					let delim = expected!(self, "<").span;
-					res.kind = Some(self.parse_kind(delim)?);
+					res.kind = Some(self.parse_inner_kind()?);
 				}
 				t!("VALUE") => {
 					self.pop_peek();
@@ -384,6 +383,10 @@ impl Parser<'_> {
 				t!("DEFAULT") => {
 					self.pop_peek();
 					res.default = Some(self.parse_value()?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					res.permissions = self.parse_permission()?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

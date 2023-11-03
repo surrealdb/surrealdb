@@ -28,9 +28,16 @@ impl Parser<'_> {
 			t!("OPTION") => {
 				self.pop_peek();
 				let delim = expected!(self, "<").span;
-				let kind = self.parse_concrete_kind()?;
+				let mut first = self.parse_concrete_kind()?;
+				if self.peek_kind() == t!("|") {
+					let mut kind = vec![first];
+					while self.eat(t!("|")) {
+						kind.push(self.parse_concrete_kind()?);
+					}
+					first = Kind::Either(kind);
+				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::Option(Box::new(kind)))
+				Ok(Kind::Option(Box::new(first)))
 			}
 			_ => {
 				let first = self.parse_concrete_kind()?;

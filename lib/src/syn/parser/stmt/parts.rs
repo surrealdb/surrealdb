@@ -147,6 +147,7 @@ impl Parser<'_> {
 				let mut permission = Permissions::default();
 				self.parse_specific_permission(&mut permission)?;
 				while self.eat(t!(",")) {
+					expected!(self, "FOR");
 					self.parse_specific_permission(&mut permission)?;
 				}
 				Ok(permission)
@@ -162,21 +163,46 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
 	pub fn parse_specific_permission(&mut self, permissions: &mut Permissions) -> ParseResult<()> {
-		match self.next().kind {
-			t!("SELECT") => {
-				permissions.select = self.parse_permission_value()?;
+		let mut select = false;
+		let mut create = false;
+		let mut update = false;
+		let mut delete = false;
+
+		loop {
+			match self.next().kind {
+				t!("SELECT") => {
+					select = true;
+				}
+				t!("CREATE") => {
+					create = true;
+				}
+				t!("UPDATE") => {
+					update = true;
+				}
+				t!("DELETE") => {
+					delete = true;
+				}
+				x => unexpected!(self, x, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 			}
-			t!("CREATE") => {
-				permissions.create = self.parse_permission_value()?;
+			if !self.eat(t!(",")) {
+				break;
 			}
-			t!("UPDATE") => {
-				permissions.update = self.parse_permission_value()?;
-			}
-			t!("DELETE") => {
-				permissions.delete = self.parse_permission_value()?;
-			}
-			x => unexpected!(self, x, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 		}
+
+		let permission_value = self.parse_permission_value()?;
+		if select {
+			permissions.select = permission_value.clone();
+		}
+		if create {
+			permissions.create = permission_value.clone();
+		}
+		if update {
+			permissions.update = permission_value.clone();
+		}
+		if delete {
+			permissions.delete = permission_value
+		}
+
 		Ok(())
 	}
 

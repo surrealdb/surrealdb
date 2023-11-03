@@ -5,9 +5,10 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 			CommitStatement, ContinueStatement, CreateStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFunctionStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
-			DefineUserStatement, DeleteStatement, OutputStatement, UpdateStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+			DefineTokenStatement, DefineUserStatement, DeleteStatement, OutputStatement,
+			UpdateStatement,
 		},
 		Algorithm, Base, Block, Cond, Data, Dir, Duration, Field, Fields, Future, Graph, Group,
 		Groups, Ident, Idiom, Kind, Number, Object, Operator, Output, Part, Permission,
@@ -342,6 +343,41 @@ fn parse_define_event() {
 			when: Value::Null,
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
+		}))
+	)
+}
+
+#[test]
+fn parse_define_field() {
+	let res =
+		test_parse!(parse_stmt, r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#)
+			.unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Field(DefineFieldStatement {
+			name: Idiom(vec![
+				Part::Field(Ident("foo".to_owned())),
+				Part::All,
+				Part::All,
+				Part::Flatten,
+			]),
+			what: Ident("bar".to_owned()),
+			flex: true,
+			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+				Kind::Number,
+				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
+			])))),
+			value: Some(Value::Null),
+			assert: Some(Value::Bool(true)),
+			default: Some(Value::Bool(false)),
+			permissions: Permissions {
+				delete: Permission::None,
+				update: Permission::None,
+				create: Permission::Specific(Value::Bool(true)),
+				select: Permission::Full,
+			},
+			comment: None
 		}))
 	)
 }
