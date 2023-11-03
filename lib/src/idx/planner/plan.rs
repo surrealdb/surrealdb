@@ -320,8 +320,8 @@ impl RangeQueryBuilder {
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-	use crate::sql::Value::Idiom;
-	use crate::sql::{Array, Value};
+	use crate::sql::test::Parse;
+	use crate::sql::{Array, Idiom, Value};
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
@@ -330,13 +330,13 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			Arc::new(Idiom::from_str("test")),
+			Arc::new(Idiom::parse("test")),
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
 			1,
-			Arc::new(Idiom::from_str("test")),
+			Arc::new(Idiom::parse("test")),
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
