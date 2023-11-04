@@ -163,9 +163,10 @@ fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 }
 
 fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<(), Error> {
+	let left = res.len();
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(expected);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{}", left);
 	Ok(())
 }
 
@@ -949,38 +950,6 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 					}
 				]";
 
-async fn test_contains(
-	dbs: &Datastore,
-	sql: &str,
-	index_explain: &str,
-	result: &str,
-) -> Result<(), Error> {
-	let mut res = execute_test(&dbs, sql, 5).await?;
-
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(CONTAINS_TABLE_EXPLAIN);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(result);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	skip_ok(&mut res, 1)?;
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(index_explain);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	{
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(result);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	Ok(())
-}
-
 #[tokio::test]
 async fn select_contains() -> Result<(), Error> {
 	let dbs = new_ds().await?;
@@ -990,9 +959,13 @@ async fn select_contains() -> Result<(), Error> {
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 		DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+		SELECT id FROM student WHERE marks[WHERE subject = "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject = "english"];
 	"#;
 
 	const INDEX_EXPLAIN: &str = r"[
@@ -1020,7 +993,17 @@ async fn select_contains() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 9).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 #[tokio::test]
@@ -1060,7 +1043,13 @@ async fn select_contains_all() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 #[tokio::test]
@@ -1100,7 +1089,13 @@ async fn select_contains_any() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }
 
 const CONTAINS_UNIQUE_CONTENT: &str = r#"
@@ -1144,5 +1139,60 @@ async fn select_unique_contains() -> Result<(), Error> {
 		}
 	]";
 
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+	let mut res = execute_test(&dbs, SQL, 5).await?;
+	check_result(&mut res, CONTAINS_TABLE_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	skip_ok(&mut res, 1)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
+	skip_ok(&mut res, 3)?;
+
+	const SQL: &str = r#"
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX subject_ft ON student COLUMNS marks.*.subject SEARCH ANALYZER simple BM25;
+	 	SELECT id FROM student WHERE marks.*.subject @@ "english" EXPLAIN;
+		SELECT id FROM student WHERE marks.*.subject @@ "english";
+		SELECT id FROM student WHERE marks[WHERE subject @@ "english"] EXPLAIN;
+		SELECT id FROM student WHERE marks[WHERE subject @@ "english"];
+	"#;
+
+	const INDEX_EXPLAIN: &str = r"[
+				{
+					detail: {
+						table: 'student'
+					},
+					detail: {
+						plan: {
+							index: 'subject_ft',
+							operator: '@@',
+							value: 'english'
+						},
+						table: 'student',
+					},
+					operation: 'Iterate Index'
+				}
+			]";
+	const RESULT: &str = r"[
+		{
+			id: student:1
+		},
+		{
+			id: student:2
+		}
+	]";
+
+	let mut res = execute_test(&dbs, SQL, 6).await?;
+	skip_ok(&mut res, 2)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	check_result(&mut res, INDEX_EXPLAIN)?;
+	check_result(&mut res, RESULT)?;
+	Ok(())
 }

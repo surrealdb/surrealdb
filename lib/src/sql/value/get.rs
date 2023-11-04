@@ -123,7 +123,12 @@ impl Value {
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
-							let cur = v.into();
+							let mut cur: CursorDoc = v.into();
+							if let Some(d) = doc {
+								cur.doc_id = d.doc_id;
+								cur.rid = d.rid;
+								cur.ir = d.ir;
+							}
 							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
 								a.push(v.clone());
 							}

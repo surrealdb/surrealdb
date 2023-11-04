@@ -152,21 +152,23 @@ impl Idiom {
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		let mut ctx = Context::new(ctx);
+		ctx.set_idiom(self);
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				v.compute(ctx, opt, txn, doc)
+				v.compute(&ctx, opt, txn, doc)
 					.await?
-					.get(ctx, opt, txn, doc, self.as_ref().next())
+					.get(&ctx, opt, txn, doc, self.as_ref().next())
 					.await?
-					.compute(ctx, opt, txn, doc)
+					.compute(&ctx, opt, txn, doc)
 					.await
 			}
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.doc.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc).await
+					v.doc.get(&ctx, opt, txn, doc, self).await?.compute(&ctx, opt, txn, doc).await
 				}
 				// There isn't any document
 				None => Ok(Value::None),

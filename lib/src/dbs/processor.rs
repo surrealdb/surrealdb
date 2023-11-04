@@ -590,6 +590,10 @@ impl<'a> Processor<'a> {
 					}
 					// Everything ok
 					return Ok(());
+				} else {
+					return Err(Error::QueryNotExecutedDetail {
+						message: "No iterator has been found.".to_string(),
+					});
 				}
 			}
 		}
