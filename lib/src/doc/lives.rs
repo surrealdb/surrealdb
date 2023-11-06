@@ -101,7 +101,7 @@ impl<'a> Document<'a> {
 					// Send a DELETE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id,
+							live_id: lv.id,
 							action: Action::Delete,
 							result: {
 								// Ensure futures are run
@@ -123,7 +123,7 @@ impl<'a> Document<'a> {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id,
+							live_id: lv.id,
 							action: Action::Create,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
@@ -135,7 +135,7 @@ impl<'a> Document<'a> {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id,
+							live_id: lv.id,
 							action: Action::Update,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
