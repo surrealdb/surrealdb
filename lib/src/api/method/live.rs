@@ -288,7 +288,7 @@ where
 	type Item = Notification<Value>;
 
 	poll_next! {
-		action, result => Poll::Ready(Some(Notification { action, data: result }))
+		action, result => Poll::Ready(Some(Notification { action: action.into(), data: result }))
 	}
 }
 
@@ -296,7 +296,7 @@ macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
 			action, result => match from_value(result) {
-				Ok(data) => Poll::Ready(Some(Ok(Notification { action, data }))),
+				Ok(data) => Poll::Ready(Some(Ok(Notification { action: action.into(), data }))),
 				Err(error) => Poll::Ready(Some(Err(error.into()))),
 			}
 		}
