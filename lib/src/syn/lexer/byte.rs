@@ -259,7 +259,12 @@ impl<'a> Lexer<'a> {
 				}
 				_ => t!(":"),
 			},
-			b'$' => return self.lex_param(),
+			b'$' => {
+				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
+					return self.lex_param();
+				}
+				t!("$")
+			}
 			b'#' => {
 				return self.eat_single_line_comment();
 			}

@@ -53,7 +53,13 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
-			_ => self.parse_token_value().map(Value::Table),
+			_ => {
+				let table = self.parse_token_value::<Table>()?;
+				if self.peek_kind() == t!(":") {
+					return self.parse_thing_from_ident(table.0).map(Value::Thing);
+				}
+				Ok(Value::Table(table))
+			}
 		}
 	}
 
@@ -128,6 +134,10 @@ impl Parser<'_> {
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
 				let name: Ident = self.from_token(token)?;
+				if self.peek_kind() == t!(":") {
+					return self.parse_thing_from_ident(name.0).map(Value::Thing);
+				}
+
 				if self.table_as_field {
 					Value::Idiom(Idiom(vec![Part::Field(name)]))
 				} else {
@@ -144,11 +154,11 @@ impl Parser<'_> {
 				| Value::Bool(_)
 				| Value::Future(_)
 				| Value::Strand(_) => unreachable!(),
-				Value::Idiom(Idiom(x)) => self.parse_remaining_idiom(x).map(Value::Idiom),
+				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(x),
 				Value::Table(Table(x)) => {
-					self.parse_remaining_idiom(vec![Part::Field(Ident(x))]).map(Value::Idiom)
+					self.parse_remaining_value_idiom(vec![Part::Field(Ident(x))])
 				}
-				x => self.parse_remaining_idiom(vec![Part::Value(x)]).map(Value::Idiom),
+				x => self.parse_remaining_value_idiom(vec![Part::Value(x)]),
 			}
 		} else {
 			Ok(value)
@@ -191,6 +201,10 @@ impl Parser<'_> {
 
 	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
 		let ident = self.parse_token_value::<Ident>()?.0;
+		self.parse_thing_from_ident(ident)
+	}
+
+	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
 		expected!(self, ":");
 		let id = match self.peek_kind() {
 			t!("{") => {

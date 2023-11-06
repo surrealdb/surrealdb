@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Dir, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
+	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
 	syn::{
 		parser::mac::to_do,
 		token::{t, Span, TokenKind},
@@ -88,6 +88,80 @@ impl Parser<'_> {
 			}
 		}
 		Ok(Idiom(res))
+	}
+
+	/// Parses the remaining idiom parts after the start.
+	pub(crate) fn parse_remaining_value_idiom(&mut self, start: Vec<Part>) -> ParseResult<Value> {
+		let mut res = start;
+		loop {
+			match self.peek_kind() {
+				t!("...") => {
+					self.pop_peek();
+					res.push(Part::Flatten);
+				}
+				t!(".") => {
+					self.pop_peek();
+					res.push(self.parse_dot_part()?)
+				}
+				t!("[") => {
+					let span = self.pop_peek().span;
+					res.push(self.parse_bracket_part(span)?)
+				}
+				t!("->") => {
+					self.pop_peek();
+					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+						return Ok(x);
+					}
+				}
+				t!("<->") => {
+					self.pop_peek();
+					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+						return Ok(x);
+					}
+				}
+				t!("<-") => {
+					self.pop_peek();
+					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+						return Ok(x);
+					}
+				}
+				t!("..") => {
+					// TODO: error message suggesting `..`
+					to_do!(self)
+				}
+				_ => break,
+			}
+		}
+		Ok(Value::Idiom(Idiom(res)))
+	}
+
+	fn parse_graph_idiom(&mut self, res: &mut Vec<Part>, dir: Dir) -> ParseResult<Option<Value>> {
+		let graph = self.parse_graph(dir)?;
+		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
+		// alias or a condition.
+		if res.len() == 1 && graph.alias.is_none() && graph.cond.is_none() {
+			match std::mem::replace(&mut res[0], Part::All) {
+				Part::Value(Value::Thing(t)) => {
+					let edge = Edges {
+						dir: graph.dir,
+						from: t,
+						what: graph.what,
+					};
+					let value = Value::Edges(Box::new(edge));
+
+					if !Self::continues_idiom(self.peek_kind()) {
+						return Ok(Some(value));
+					}
+					res[0] = Part::Value(value);
+					return Ok(None);
+				}
+				x => {
+					res[0] = x;
+				}
+			}
+		}
+		res.push(Part::Graph(graph));
+		Ok(None)
 	}
 
 	/// Returns if the token kind could continua an idiom
@@ -267,8 +341,8 @@ impl Parser<'_> {
 				x => vec![Part::Value(x)],
 			};
 
-			let idiom = self.parse_remaining_idiom(start)?;
-			Ok(Value::Idiom(idiom))
+			let idiom = self.parse_remaining_value_idiom(start)?;
+			Ok(idiom)
 		} else {
 			Ok(start)
 		}

@@ -1,6 +1,6 @@
 use crate::sql::Number;
 use crate::syn::lexer::{unicode::U8Ext, Error as LexError, Lexer};
-use crate::syn::token::{Token, TokenKind};
+use crate::syn::token::Token;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -28,7 +28,7 @@ impl Lexer<'_> {
 		self.scratch.push(start as char);
 		loop {
 			let Some(x) = self.reader.peek() else {
-				return Ok(self.finish_token(TokenKind::Number, None));
+				return Ok(self.finish_int_token());
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -41,8 +41,8 @@ impl Lexer<'_> {
 					let backup = self.reader.offset();
 					self.reader.next();
 					let next = self.reader.peek();
-					if let Some(x @ b'0'..=b'9') = next {
-						self.scratch.push(x as char);
+					if let Some(b'0'..=b'9') = next {
+						self.scratch.push('.');
 						return self.lex_mantissa();
 					} else {
 						// indexing a number
@@ -111,7 +111,6 @@ impl Lexer<'_> {
 
 	/// Lexes the mantissa of a number, i.e. `.8` in `1.8`
 	pub fn lex_mantissa(&mut self) -> Result<Token, Error> {
-		self.scratch.push('.');
 		loop {
 			// lex_number already checks if there exists a digit after the dot.
 			// So this will never fail the first iteration of the loop.

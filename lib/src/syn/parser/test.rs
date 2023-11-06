@@ -2,17 +2,22 @@ use crate::{
 	sql::{
 		block::Entry,
 		changefeed::ChangeFeed,
+		filter::Filter,
+		index::{Distance, MTreeParams, SearchParams},
+		language::Language,
 		statements::{
 			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, CreateStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-			DefineTokenStatement, DefineUserStatement, DeleteStatement, OutputStatement,
-			UpdateStatement,
+			CommitStatement, ContinueStatement, CreateStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
+			DefineUserStatement, DeleteStatement, OutputStatement, UpdateStatement,
 		},
-		Algorithm, Base, Block, Cond, Data, Dir, Duration, Field, Fields, Future, Graph, Group,
-		Groups, Ident, Idiom, Kind, Number, Object, Operator, Output, Part, Permission,
-		Permissions, Statement, Strand, Table, Tables, Timeout, Value, Values,
+		tokenizer::Tokenizer,
+		Algorithm, Base, Block, Cond, Data, Dir, Duration, Edges, Field, Fields, Future, Graph,
+		Group, Groups, Id, Ident, Idiom, Idioms, Index, Kind, Number, Object, Operator, Output,
+		Part, Permission, Permissions, Scoring, Statement, Strand, Table, Tables, Thing, Timeout,
+		Value, Values,
 	},
 	syn::parser::mac::test_parse,
 };
@@ -96,26 +101,6 @@ fn parse_create() {
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 		}
-	);
-}
-
-#[test]
-fn parse_delete() {
-	let res = test_parse!(
-		parse_statement,
-		"DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL"
-	)
-	.unwrap();
-	assert_eq!(
-		res,
-		Statement::Delete(DeleteStatement {
-			only: true,
-			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
-			cond: Some(Cond(Value::Number(Number::Int(2)))),
-			output: Some(Output::After),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
-			parallel: true,
-		})
 	);
 }
 
@@ -349,9 +334,10 @@ fn parse_define_event() {
 
 #[test]
 fn parse_define_field() {
-	let res =
-		test_parse!(parse_stmt, r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#)
-			.unwrap();
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
+	).unwrap();
 
 	assert_eq!(
 		res,
@@ -379,6 +365,154 @@ fn parse_define_field() {
 			},
 			comment: None
 		}))
+	)
+}
+
+#[test]
+fn parse_define_index() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2) DOC_IDS_ORDER 1 DOC_LENGTHS_ORDER 2 POSTINGS_ORDER 3 TERMS_ORDER 4 HIGHLIGHTS"#
+	).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Index(DefineIndexStatement {
+			name: Ident("index".to_owned()),
+			what: Ident("table".to_owned()),
+			cols: Idioms(vec![
+				Idiom(vec![Part::Field(Ident("a".to_owned()))]),
+				Idiom(vec![Part::Field(Ident("b".to_owned())), Part::All])
+			]),
+			index: Index::Search(SearchParams {
+				az: Ident("ana".to_owned()),
+				hl: true,
+				sc: Scoring::Bm {
+					k1: 0.1,
+					b: 0.2
+				},
+				doc_ids_order: 1,
+				doc_lengths_order: 2,
+				postings_order: 3,
+				terms_order: 4
+			}),
+			comment: None
+		}))
+	);
+
+	let res =
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a UNIQUE"#).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Index(DefineIndexStatement {
+			name: Ident("index".to_owned()),
+			what: Ident("table".to_owned()),
+			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
+			index: Index::Uniq,
+			comment: None
+		}))
+	);
+
+	let res =
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7"#).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Index(DefineIndexStatement {
+			name: Ident("index".to_owned()),
+			what: Ident("table".to_owned()),
+			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
+			index: Index::MTree(MTreeParams {
+				dimension: 4,
+				distance: Distance::Minkowski(Number::Int(5)),
+				capacity: 6,
+				doc_ids_order: 7
+			}),
+			comment: None
+		}))
+	);
+}
+
+#[test]
+fn parse_define_analyzer() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT "#
+	).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
+			name: Ident("ana".to_owned()),
+			tokenizers: Some(vec![
+				Tokenizer::Blank,
+				Tokenizer::Camel,
+				Tokenizer::Class,
+				Tokenizer::Punct,
+			]),
+			filters: Some(vec![
+				Filter::Ascii,
+				Filter::EdgeNgram(1, 2),
+				Filter::Ngram(3, 4),
+				Filter::Lowercase,
+				Filter::Snowball(Language::Dutch),
+				Filter::Uppercase,
+			]),
+			comment: None,
+		})),
+	)
+}
+
+#[test]
+fn parse_delete() {
+	let res = test_parse!(
+		parse_statement,
+		"DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL"
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Delete(DeleteStatement {
+			only: true,
+			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			cond: Some(Cond(Value::Number(Number::Int(2)))),
+			output: Some(Output::After),
+			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			parallel: true,
+		})
+	);
+}
+
+#[test]
+fn parse_delete_2() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL"#
+	)
+	.unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Delete(DeleteStatement {
+			only: true,
+			what: Values(vec![Value::Idiom(Idiom(vec![
+				Part::Value(Value::Edges(Box::new(Edges {
+					dir: Dir::Out,
+					from: Thing {
+						tb: "a".to_owned(),
+						id: Id::String("b".to_owned()),
+					},
+					what: Tables::default(),
+				}))),
+				Part::Last,
+				Part::Where(Value::Bool(true)),
+			]))]),
+			cond: Some(Cond(Value::Null)),
+			output: Some(Output::Null),
+			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
+			parallel: true
+		})
 	)
 }
 

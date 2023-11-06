@@ -432,11 +432,18 @@ impl Parser<'_> {
 					let scoring = match self.next().kind {
 						t!("VS") => Scoring::Vs,
 						t!("BM25") => {
-							let k1 = self.parse_token_value()?;
-							let b = self.parse_token_value()?;
-							Scoring::Bm {
-								k1,
-								b,
+							if self.eat(t!("(")) {
+								let open = self.last_span();
+								let k1 = self.parse_token_value()?;
+								expected!(self, ",");
+								let b = self.parse_token_value()?;
+								self.expect_closing_delimiter(t!(")"), open)?;
+								Scoring::Bm {
+									k1,
+									b,
+								}
+							} else {
+								Scoring::bm25()
 							}
 						}
 						x => unexpected!(self, x, "`VS` or `BM25`"),
@@ -477,6 +484,7 @@ impl Parser<'_> {
 					});
 				}
 				t!("MTREE") => {
+					self.pop_peek();
 					expected!(self, "DIMENSION");
 					let dimension = self.parse_token_value()?;
 					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
@@ -559,7 +567,10 @@ impl Parser<'_> {
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
 							}
-							_ => break,
+							x => unexpected!(self, x, "a filter"),
+						}
+						if !self.eat(t!(",")) {
+							break;
 						}
 					}
 					res.filters = Some(filters);
@@ -574,9 +585,12 @@ impl Parser<'_> {
 							t!("CAMEL") => Tokenizer::Camel,
 							t!("CLASS") => Tokenizer::Class,
 							t!("PUNCT") => Tokenizer::Punct,
-							_ => break,
+							x => unexpected!(self, x, "a tokenizer"),
 						};
 						tokenizers.push(tokenizer);
+						if !self.eat(t!(",")) {
+							break;
+						}
 					}
 					res.tokenizers = Some(tokenizers);
 				}
