@@ -1,5 +1,5 @@
 use crate::{
-	sql::{statements::RelateStatement, Value},
+	sql::{statements::RelateStatement, Subquery, Value},
 	syn::{
 		parser::{
 			mac::{expected, unexpected},
@@ -68,6 +68,15 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
+			t!("IF") => {
+				self.pop_peek();
+				self.parse_if_stmt().map(|x| Value::Subquery(Box::new(Subquery::Ifelse(x))))
+			}
+			t!("(") => {
+				let span = self.pop_peek().span;
+				let res = self.parse_subquery(Some(span)).map(|x| Value::Subquery(Box::new(x)))?;
+				Ok(res)
+			}
 			_ => self.parse_thing().map(Value::Thing),
 		}
 	}

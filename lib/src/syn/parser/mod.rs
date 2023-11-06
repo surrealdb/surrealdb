@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_token_at(&mut self, at: u8) -> Token {
-		for _ in at..=self.token_buffer.len() {
+		for _ in self.token_buffer.len()..=at {
 			self.token_buffer.push(self.lexer.next_token());
 		}
 		self.token_buffer.at(at).unwrap()

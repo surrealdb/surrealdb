@@ -18,8 +18,9 @@ impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
 	pub fn try_parse_data(&mut self) -> ParseResult<Option<Data>> {
-		let res = match self.next().kind {
+		let res = match self.peek().kind {
 			t!("SET") => {
+				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
 					let idiom = self.parse_plain_idiom()?;
@@ -39,13 +40,26 @@ impl Parser<'_> {
 				Data::SetExpression(set_list)
 			}
 			t!("UNSET") => {
+				self.pop_peek();
 				let idiom_list = self.parse_idiom_list()?;
 				Data::UnsetExpression(idiom_list)
 			}
-			t!("PATCH") => Data::PatchExpression(self.parse_value()?),
-			t!("MERGE") => Data::MergeExpression(self.parse_value()?),
-			t!("REPLACE") => Data::ReplaceExpression(self.parse_value()?),
-			t!("CONTENT") => Data::ContentExpression(self.parse_value()?),
+			t!("PATCH") => {
+				self.pop_peek();
+				Data::PatchExpression(self.parse_value()?)
+			}
+			t!("MERGE") => {
+				self.pop_peek();
+				Data::MergeExpression(self.parse_value()?)
+			}
+			t!("REPLACE") => {
+				self.pop_peek();
+				Data::ReplaceExpression(self.parse_value()?)
+			}
+			t!("CONTENT") => {
+				self.pop_peek();
+				Data::ContentExpression(self.parse_value()?)
+			}
 			_ => return Ok(None),
 		};
 		Ok(Some(res))

@@ -330,7 +330,7 @@ impl Parser<'_> {
 		expected!(self, "=");
 		let what = match self.next().kind {
 			t!("true") => true,
-			t!("false") => true,
+			t!("false") => false,
 			x => unexpected!(self, x, "either 'true' or 'false'"),
 		};
 		Ok(OptionStatement {
@@ -340,7 +340,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_return_stmt(&mut self) -> ParseResult<OutputStatement> {
-		let what = self.parse_value()?;
+		let what = self.parse_value_field()?;
 		let fetch = self.try_parse_fetch()?;
 		Ok(OutputStatement {
 			what,

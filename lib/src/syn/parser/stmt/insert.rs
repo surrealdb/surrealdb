@@ -10,10 +10,9 @@ impl Parser<'_> {
 	pub(crate) fn parse_insert_stmt(&mut self) -> ParseResult<InsertStatement> {
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, "INTO");
-		let next = self.peek();
-		let into = match self.next().kind {
+		let next = self.next();
+		let into = match next.kind {
 			t!("$param") => {
-				self.pop_peek();
 				let str = self.lexer.strings[u32::from(next.data_index.unwrap()) as usize].clone();
 				Value::Param(Param(Ident(str)))
 			}
@@ -23,7 +22,7 @@ impl Parser<'_> {
 			}
 		};
 
-		let data = match self.peek().kind {
+		let data = match self.peek_kind() {
 			t!("(") => {
 				let start = self.pop_peek().span;
 				let fields = self.parse_idiom_list()?;

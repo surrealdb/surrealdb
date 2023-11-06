@@ -11,17 +11,17 @@ use crate::{
 
 impl Parser<'_> {
 	pub fn parse_if_stmt(&mut self) -> ParseResult<IfelseStatement> {
-		let condition = self.parse_value()?;
-		let next = self.next();
+		let condition = self.parse_value_field()?;
 
 		let mut res = IfelseStatement {
 			exprs: Vec::new(),
 			close: None,
 		};
 
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("THEN") => {
-				let body = self.parse_value()?;
+				let body = self.parse_value_field()?;
 				res.exprs.push((condition, body));
 				self.parse_worded_tail(&mut res)?;
 			}
@@ -42,12 +42,12 @@ impl Parser<'_> {
 				t!("END") => return Ok(()),
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
-						let condition = self.parse_value()?;
+						let condition = self.parse_value_field()?;
 						expected!(self, "THEN");
-						let body = self.parse_value()?;
+						let body = self.parse_value_field()?;
 						res.exprs.push((condition, body));
 					} else {
-						let value = self.parse_value()?;
+						let value = self.parse_value_field()?;
 						expected!(self, "END");
 						res.close = Some(value);
 						return Ok(());
@@ -63,7 +63,7 @@ impl Parser<'_> {
 			match self.next().kind {
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
-						let condition = self.parse_value()?;
+						let condition = self.parse_value_field()?;
 						let span = expected!(self, "{").span;
 						let body = self.parse_block(span)?;
 						res.exprs.push((condition, body.into()));

@@ -35,7 +35,7 @@ impl Parser<'_> {
 			t!("FUNCTION") => {
 				let name = self.parse_custom_function_name()?;
 				let next = self.peek();
-				if let t!("(") = next.kind {
+				if self.eat(t!("(")) {
 					self.expect_closing_delimiter(t!(")"), next.span)?;
 				}
 				RemoveStatement::Function(RemoveFunctionStatement {

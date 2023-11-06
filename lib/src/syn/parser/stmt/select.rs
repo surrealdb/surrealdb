@@ -105,8 +105,9 @@ impl Parser<'_> {
 
 		self.eat(t!("BY"));
 
-		let orders = match self.next().kind {
+		let orders = match self.peek_kind() {
 			t!("RAND") => {
+				self.pop_peek();
 				let start = expected!(self, "(").span;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				vec![Order {
@@ -131,6 +132,7 @@ impl Parser<'_> {
 
 	fn parse_order(&mut self) -> ParseResult<Order> {
 		let start = self.parse_basic_idiom()?;
+		dbg!(self.peek());
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
 		let direction = match self.next().kind {

@@ -215,7 +215,7 @@ impl Parser<'_> {
 			t!("123") => Part::Index(self.parse_token_value()?),
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				Part::Where(self.parse_value()?)
+				Part::Where(self.parse_value_field()?)
 			}
 			t!("$param") => Part::Value(Value::Param(self.parse_token_value()?)),
 			TokenKind::Strand => Part::Value(Value::Strand(self.parse_token_value()?)),

@@ -61,6 +61,7 @@ pub use self::define::DefineTableStatement;
 pub use self::define::DefineTokenStatement;
 pub use self::define::DefineUserStatement;
 
+pub use self::remove::RemoveAnalyzerStatement;
 pub use self::remove::RemoveDatabaseStatement;
 pub use self::remove::RemoveEventStatement;
 pub use self::remove::RemoveFieldStatement;

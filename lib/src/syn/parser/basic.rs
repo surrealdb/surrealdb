@@ -279,7 +279,9 @@ impl TokenValue for Datetime {
 		let TokenKind::DateTime = token.kind else {
 			unexpected!(parser, token.kind, "a duration")
 		};
-		to_do!(parser)
+		let index = u32::from(token.data_index.unwrap());
+		let datetime = parser.lexer.datetime[index as usize].clone();
+		Ok(datetime)
 	}
 }
 
