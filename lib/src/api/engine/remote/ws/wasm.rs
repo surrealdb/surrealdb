@@ -313,7 +313,7 @@ pub(crate) fn router(
 										// If `id` is not set, this may be a live query notification
 										None => match response.result {
 											Ok(Data::Live(notification)) => {
-												let live_query_id = notification.id;
+												let live_query_id = notification.live_id;
 												// Check if this live query is registered
 												if let Some(sender) =
 													live_queries.get(&live_query_id)
@@ -469,14 +469,14 @@ impl Response {
 				// This is a workaround until live queries add support to send messages over binary
 				if let Ok(Value::Object(Object(mut response))) = crate::sql::json(text) {
 					if let Some(Value::Object(Object(mut map))) = response.remove("result") {
-						if let Some(Value::Uuid(id)) = map.remove("id") {
+						if let Some(Value::Uuid(live_id)) = map.remove("id") {
 							if let Some(value) = map.remove("action") {
 								if let Ok(action) = from_value(value) {
 									if let Some(result) = map.remove("result") {
 										return Ok(Some(Self {
 											id: None,
 											result: Ok(Data::Live(Notification {
-												id,
+												live_id,
 												action,
 												result,
 											})),

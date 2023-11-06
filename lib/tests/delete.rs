@@ -419,7 +419,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(
 		not,
 		Notification {
-			id: live_id,
+			live_id,
 			action: Action::Delete,
 			result: Value::parse(
 				"{
