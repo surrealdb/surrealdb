@@ -401,7 +401,14 @@ pub(crate) fn router(
 							}
 						}
 					}
+					// Close connection request received
 					Either::Request(None) => {
+						match ws.close().await {
+							Ok(..) => trace!("Connection closed successfully"),
+							Err(error) => {
+								warn!("Failed to close database connection; {error}")
+							}
+						}
 						break 'router;
 					}
 				}

@@ -32,14 +32,12 @@ use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use serde::Deserialize;
-use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -457,7 +455,14 @@ pub(crate) fn router(
 								}
 							}
 						}
+						// Close connection request received
 						Either::Request(None) => {
+							match socket_sink.send(Message::Close(None)).await {
+								Ok(..) => trace!("Connection closed successfully"),
+								Err(error) => {
+									warn!("Failed to close database connection; {error}")
+								}
+							}
 							break 'router;
 						}
 					}
@@ -562,18 +567,3 @@ impl Response {
 }
 
 pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>);
-
-impl Drop for Socket {
-	fn drop(&mut self) {
-		if let Some(mut conn) = mem::take(&mut self.0) {
-			futures::executor::block_on(async move {
-				match conn.borrow_mut().close().await {
-					Ok(..) => trace!("Connection closed successfully"),
-					Err(error) => {
-						trace!("Failed to close database connection; {error}")
-					}
-				}
-			});
-		}
-	}
-}
