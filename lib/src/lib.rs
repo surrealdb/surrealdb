@@ -136,8 +136,6 @@ pub mod key;
 pub mod kvs;
 
 #[doc(inline)]
-pub use crate::dbs::Action;
-#[doc(inline)]
 pub use api::engine;
 #[doc(inline)]
 pub use api::method;
@@ -166,6 +164,27 @@ pub mod channel {
 pub mod error {
 	pub use crate::api::err::Error as Api;
 	pub use crate::err::Error as Db;
+}
+
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
+}
+
+impl From<dbs::Action> for Action {
+	fn from(action: dbs::Action) -> Self {
+		match action {
+			dbs::Action::Create => Self::Create,
+			dbs::Action::Update => Self::Update,
+			dbs::Action::Delete => Self::Delete,
+		}
+	}
 }
 
 /// A live query notification

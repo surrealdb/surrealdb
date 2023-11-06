@@ -2,12 +2,8 @@ use crate::sql::{Object, Uuid, Value};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-/// The action performed on a record
-///
-/// This is used in live query notifications.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[non_exhaustive]
 pub enum Action {
 	Create,
 	Update,
