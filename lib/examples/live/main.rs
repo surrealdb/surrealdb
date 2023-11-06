@@ -42,7 +42,7 @@ fn print(result: Result<Notification<Account>>) {
 		Ok(notification) => {
 			let action = notification.action;
 			let account = notification.data;
-			println!("{action}: {account:?}");
+			println!("{action:?}: {account:?}");
 		}
 		Err(error) => eprintln!("{error}"),
 	}
