@@ -196,7 +196,7 @@ mod test {
 	use crate::kvs::bootstrap::{delete_live_queries, test_util};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
+	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue, NodeScanPage};
 	use crate::sql::{Uuid, Value};
 
 	// const RETRY_DURATION: Duration = Duration::from_millis(0);
@@ -357,10 +357,11 @@ mod test {
 
 		// Now verify that it was in fact deleted
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tbres = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
-		let ndres = tx.scan_ndlq(&self_node_id, 1000).await;
+		let tb_res = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
+		let page = NodeScanPage::new(&self_node_id);
+		let nd_res = tx.scan_ndlq(&page, 1000).await;
 		tx.commit().await.unwrap();
-		match tbres {
+		match tb_res {
 			Ok(_) => {
 				panic!("Expected error due to live query being deleted")
 			}
@@ -373,7 +374,7 @@ mod test {
 				_ => panic!("Expected LvNotFound error"),
 			},
 		}
-		let ndres = ndres.unwrap();
-		assert_eq!(ndres.len(), 0);
+		let nd_res = nd_res.unwrap().0;
+		assert_eq!(nd_res.len(), 0);
 	}
 }

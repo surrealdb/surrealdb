@@ -15,7 +15,9 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{
+	bootstrap, LockType, LockType::*, NodeScanPage, TransactionType, TransactionType::*, NO_LIMIT,
+};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -502,6 +504,7 @@ impl Datastore {
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
+			BOOTSTRAP_BATCH_SIZE as u32,
 		));
 
 		// In several new transactions, archive removed node live queries
@@ -679,9 +682,20 @@ impl Datastore {
 		// Scan node live queries for every node
 		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for cl in &cluster {
-			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-                Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-            })?, NO_LIMIT).await?;
+			let node_id = uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+				Error::Unimplemented(format!(
+					"cluster id was not uuid when parsing to aggregate cluster live queries: {:?}",
+					e
+				))
+			})?;
+			let page = NodeScanPage::new(&node_id);
+			let (nds, next_page) = tx.scan_ndlq(&page, 100_000).await?;
+			if next_page.is_some() {
+				return Err(Error::Unimplemented(
+					"clear unreachable state detected a next page and this is unhandled"
+						.to_string(),
+				));
+			}
 			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
@@ -722,7 +736,13 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, NO_LIMIT).await?;
+		let page = NodeScanPage::new(&self.id.0);
+		let (lqs, next_page) = tx.scan_ndlq(&page, 1000).await?;
+		if next_page.is_some() {
+			return Err(Error::Unimplemented(
+				"garbage collect detected a next page and this is unhandled".to_string(),
+			));
+		}
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {

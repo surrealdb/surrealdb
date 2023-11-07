@@ -3,6 +3,7 @@ use crate::kvs::{LqValue, NO_LIMIT};
 #[tokio::test]
 #[serial]
 async fn write_scan_ndlq() {
+	// TODO this test much change
 	let nd = Uuid::from_str("7a17446f-721f-4855-8fc7-81086752ca44").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(nd, clock).await.unwrap();
@@ -18,8 +19,9 @@ async fn write_scan_ndlq() {
 
 	// Verify scan
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let res_lim = tx.scan_ndlq(&nd, 100).await.unwrap();
-	let res_no_lim = tx.scan_ndlq(&nd, NO_LIMIT).await.unwrap();
+	let page = NodeScanPage::new(&nd);
+	let res_lim = tx.scan_ndlq(page, 100).await.unwrap().0;
+	let res_no_lim = tx.scan_ndlq(page, 100).await.unwrap().0;
 	tx.commit().await.unwrap();
 	assert_eq!(
 		res_lim,

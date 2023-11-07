@@ -30,7 +30,8 @@ async fn scan_node_lq() {
 	tx.commit().await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
-	let res = tx.scan_ndlq(&node_id, 100).await.unwrap();
+	let page = NodeScanPage::new(&node_id);
+	let res = tx.scan_ndlq(&page, 100).await.unwrap().0;
 	assert_eq!(res.len(), 1);
 	for val in res {
 		assert_eq!(val.nd, node_id);

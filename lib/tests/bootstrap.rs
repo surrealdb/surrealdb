@@ -11,8 +11,8 @@ use helpers::new_ds;
 use serial_test::serial;
 use surrealdb::err::Error;
 use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
+use surrealdb::kvs::{NodeScanPage, Transaction};
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
 
@@ -100,7 +100,8 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 
 	// Verify node live query is deleted
 	let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
-	let res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
+	let page = NodeScanPage::new(&valid_data.node_id.unwrap().0);
+	let res = tx.scan_ndlq(&page, 1000).await.unwrap().0;
 	tx.commit().await.unwrap();
 	assert_eq!(res.len(), 1, "We expect the node to be available");
 	let tested_entry = res.get(0).unwrap();

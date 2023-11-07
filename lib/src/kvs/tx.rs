@@ -6,7 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::dbs::Notification;
-use crate::err::{Error, InternalCause, LiveQueryCause};
+use crate::err::{Error, InternalCause, LiveQueryCause, UnreachableCause};
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
 #[cfg(debug_assertions)]
@@ -82,6 +82,45 @@ pub(super) enum Inner {
 pub enum TransactionType {
 	Read,
 	Write,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Limit {
+	Unlimited,
+	Limited(u32),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum NodeScanPage<'a> {
+	Node(Uuid, Limit),
+	Page(Uuid, Limit, &'a [u8]),
+}
+
+impl NodeScanPage {
+	pub fn new(node: &Uuid) -> Self {
+		NodeScanPage::Node(*node, Limit::Unlimited)
+	}
+
+	pub(crate) fn node(&self) -> &Uuid {
+		match self {
+			NodeScanPage::Node(n, _) => n,
+			NodeScanPage::Page(n, _, _) => n,
+		}
+	}
+
+	pub(crate) fn limit(&self) -> &Limit {
+		match self {
+			NodeScanPage::Node(_, l) => l,
+			NodeScanPage::Page(_, l, _) => l,
+		}
+	}
+
+	pub(crate) fn prefix(&self) -> Option<&Vec<u8>> {
+		match self {
+			NodeScanPage::Node(_, _) => None,
+			NodeScanPage::Page(_, _, p) => Some(p),
+		}
+	}
 }
 
 impl From<bool> for TransactionType {
@@ -1221,65 +1260,86 @@ impl Transaction {
 		self.del(key).await
 	}
 
-	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
-		let beg = crate::key::node::lq::prefix_nd(node);
-		let end = crate::key::node::lq::suffix_nd(node);
+	pub async fn scan_ndlq<'a>(
+		&mut self,
+		page: NodeScanPage,
+		batch_size: u32,
+	) -> Result<(Vec<LqValue>, Option<NodeScanPage>), Error> {
+		let beg_from_prefix = crate::key::node::lq::prefix_nd(page.node());
+		let beg = page.prefix().unwrap_or(&beg_from_prefix);
+		let end = crate::key::node::lq::suffix_nd(page.node());
 		trace!(
 			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&beg),
+			crate::key::debug::sprint_key(beg),
 			crate::key::debug::sprint_key(&end),
 		);
 		let mut nxt: Option<Key> = None;
-		let mut num = limit;
+		let mut num_remaining_in_batch = match page.limit() {
+			Limit::Limited(n) => std::cmp::min(*n, batch_size),
+			Limit::Unlimited => batch_size,
+		};
 		let mut out: Vec<LqValue> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
+		let batch_size = match num_remaining_in_batch {
+			NO_LIMIT => 1000,
+			_ => std::cmp::min(1000, num_remaining_in_batch),
+		};
+		// Get records batch
+		let res = match nxt {
+			None => {
+				let min = beg.clone();
+				let max = end.clone();
+				self.scan(min..max, batch_size).await?
 			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
-				let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
-				let tb: String = String::from_utf8(value).unwrap();
-				trace!("scan_lq Found tb: {:?}", tb);
-				out.push(LqValue {
-					nd: lq.nd.into(),
-					ns: lq.ns.to_string(),
-					db: lq.db.to_string(),
-					tb,
-					lq: lq.lq.into(),
-				});
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
+			Some(ref mut beg) => {
+				beg.push(0x00);
+				let min = beg.clone();
+				let max = end.clone();
+				self.scan(min..max, batch_size).await?
 			}
+		};
+		// Get total results
+		let n = res.len();
+		// Exit when settled
+		if n == 0 {
+			return Ok((vec![], None));
 		}
-		Ok(out)
+		// Loop over results
+		for (i, (key, value)) in res.into_iter().enumerate() {
+			// Ready the next
+			if n == i + 1 {
+				nxt = Some(key.clone());
+			}
+			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
+			let tb: String = String::from_utf8(value).unwrap();
+			trace!("scan_lq Found tb: {:?}", tb);
+			out.push(LqValue {
+				nd: lq.nd.into(),
+				ns: lq.ns.to_string(),
+				db: lq.db.to_string(),
+				tb,
+				lq: lq.lq.into(),
+			});
+			// Count
+			num_remaining_in_batch -= 1;
+		}
+		let reached_end = out.len() < batch_size as usize;
+		if reached_end {
+			// We reached the end of the scan
+			// Return None for the next page
+			return Ok((out, None));
+		}
+		let new_limit = match page.limit() {
+			Limit::Unlimited => Limit::Unlimited,
+			Limit::Limited(i) => Limit::Limited(i - out.len()),
+		};
+		Ok((
+			out,
+			Some(NodeScanPage::Page(
+				*page.node(),
+				new_limit,
+				nxt.ok_or(Error::UnreachableCause(UnreachableCause::AlwaysSet)).unwrap(),
+			)),
+		))
 	}
 
 	pub async fn scan_tblq<'a>(

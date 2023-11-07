@@ -5,13 +5,14 @@ use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
 use crate::err::ChannelVariant::{BootstrapScan, BootstrapTxSupplier};
 use crate::err::Error;
 use crate::kvs::bootstrap::{TxRequestOneshot, TxResponseOneshot};
-use crate::kvs::{BootstrapOperationResult, NO_LIMIT};
+use crate::kvs::{BootstrapOperationResult, NodeScanPage};
 use crate::sql::Uuid;
 
 pub(crate) async fn scan_node_live_queries(
 	tx_req: mpsc::Sender<TxRequestOneshot>,
 	nodes: Vec<Uuid>,
 	sender: mpsc::Sender<BootstrapOperationResult>,
+	batch_size: u32,
 ) -> Result<(), Error> {
 	let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 		oneshot::channel();
@@ -24,14 +25,20 @@ pub(crate) async fn scan_node_live_queries(
 			println!("Received tx in scan - {:?} nodes", nodes);
 			trace!("Received tx in scan - {:?} nodes", nodes);
 			for nd in nodes {
-				match tx.scan_ndlq(&nd, NO_LIMIT).await {
-					Ok(node_lqs) => {
+				let page = NodeScanPage::new(&nd);
+				match tx.scan_ndlq(page, batch_size).await {
+					Ok((node_lqs, None)) => {
 						println!("Received node lqs in scan - {:?}", node_lqs);
 						for lq in node_lqs {
 							sender.send((lq, None)).await.map_err(|_| {
 								Error::BootstrapError(ChannelSendError(BootstrapScan))
 							})?;
 						}
+					}
+					Ok((_node_lqs, Some(_next_page))) => {
+						return Err(Error::Unimplemented(
+							"Pagination for scan not yet implemented".to_string(),
+						))
 					}
 					Err(e) => {
 						println!("Failed scanning node live queries: {:?}", e);
@@ -80,7 +87,8 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
-		let scan_task = tokio::spawn(scan_node_live_queries(tx_req, vec![ds.id], output_lq_send));
+		let scan_task =
+			tokio::spawn(scan_node_live_queries(tx_req, vec![ds.id], output_lq_send, 1000));
 
 		// We don't know the order of the live queries because the lq id is random
 		let mut lq_map = map! {lq1 => true, lq2 => true};
