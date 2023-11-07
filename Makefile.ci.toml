@@ -15,7 +15,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--all-features", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,has-storage", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -31,7 +31,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
 
 [tasks.ci-ws-integration]
 category = "CI - INTEGRATION TESTS"

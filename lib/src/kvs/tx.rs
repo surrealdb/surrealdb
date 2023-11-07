@@ -851,6 +851,29 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => v.delr(rng, limit).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.delr(rng).await,
+			#[allow(unreachable_patterns)]
+			_ => self._delr(rng, limit).await,
+		}
+	}
+
+	/// Delete a range of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
+	async fn _delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let mut nxt: Option<Key> = None;
@@ -956,44 +979,10 @@ impl Transaction {
 		trace!("Delp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
-		// Start processing
-		while num > 0 {
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
-				// Delete
-				self.del(k).await?;
-				// Count
-				num -= 1;
-			}
-		}
+		let min = beg.clone();
+		let max = end.clone();
+		let num = std::cmp::min(1000, limit);
+		self.delr(min..max, num).await?;
 		Ok(())
 	}
 
