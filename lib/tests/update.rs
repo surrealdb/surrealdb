@@ -695,9 +695,7 @@ async fn update_only() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"NONE",
-	);
+	let val = Value::parse("NONE");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

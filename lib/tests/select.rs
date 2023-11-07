@@ -1024,27 +1024,19 @@ async fn select_only() -> Result<(), Error> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"123",
-	);
+	let val = Value::parse("123");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"NONE",
-	);
+	let val = Value::parse("NONE");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"NONE",
-	);
+	let val = Value::parse("NONE");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"123",
-	);
+	let val = Value::parse("123");
 	assert_eq!(tmp, val);
 	//
 	match res.remove(0).result {
