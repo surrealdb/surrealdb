@@ -1,7 +1,7 @@
 use crate::{
 	sql,
 	syn::{
-		lexer::Lexer,
+		lexer::{Error as LexError, Lexer},
 		parser::mac::unexpected,
 		token::{t, Span, Token, TokenKind},
 	},
@@ -27,6 +27,21 @@ pub use error::{NumberParseError, ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
+#[derive(Debug)]
+pub enum PartialResult<T> {
+	/// The parser might require more source to make a decision
+	Pending {
+		value: Result<T, ParseError>,
+		used: usize,
+	},
+	/// The parser parsed a value.
+	Ready {
+		value: Result<T, ParseError>,
+		used: usize,
+	},
+}
+
+/// The SurrealQL parser.
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
@@ -36,9 +51,26 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
 	/// Create a new parser from a give source.
-	pub fn new(source: &'a str) -> Self {
+	pub fn new(source: &'a [u8]) -> Self {
 		Parser {
 			lexer: Lexer::new(source),
+			last_span: Span::empty(),
+			token_buffer: TokenBuffer::new(),
+			table_as_field: false,
+		}
+	}
+
+	pub fn reset(&mut self) {
+		self.last_span = Span::empty();
+		self.token_buffer.clear();
+		self.table_as_field = false;
+		self.lexer.reset();
+	}
+
+	/// Change the source of the parser reusing the existing buffers.
+	pub fn change_source<'b>(self, source: &'b [u8]) -> Parser<'b> {
+		Parser {
+			lexer: self.lexer.change_source(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			table_as_field: false,
@@ -156,5 +188,64 @@ impl<'a> Parser<'a> {
 	/// Parse a single statement.
 	pub fn parse_statement(&mut self) -> ParseResult<sql::Statement> {
 		self.parse_stmt()
+	}
+
+	pub fn parse_partial_statement(&mut self) -> PartialResult<sql::Statement> {
+		while self.eat(t!(";")) {}
+
+		let res = self.parse_stmt();
+		match res {
+			Err(ParseError {
+				kind: ParseErrorKind::UnexpectedEof {
+					..
+				},
+				..
+			})
+			| Err(ParseError {
+				kind: ParseErrorKind::InvalidToken(LexError::UnexpectedEof),
+				..
+			}) => {
+				return PartialResult::Pending {
+					value: res,
+					used: self.lexer.reader.offset(),
+				};
+			}
+			Err(ParseError {
+				kind: ParseErrorKind::Unexpected {
+					..
+				},
+				at,
+				..
+			}) => {
+				// Ensure the we are sure that the last token was fully parsed.
+				self.backup_after(at);
+				if self.peek().kind != TokenKind::Eof || self.lexer.ate_whitespace() {
+					// if there is a next token or we ate whitespace after the eof we can be sure
+					// that the error is not the result of a token only being partially present.
+					return PartialResult::Ready {
+						value: res,
+						used: self.lexer.reader.offset(),
+					};
+				}
+			}
+			_ => {}
+		};
+
+		let colon = self.next();
+		if colon.kind != t!(";") {
+			return PartialResult::Pending {
+				value: res,
+				used: self.lexer.reader.offset(),
+			};
+		}
+
+		// Might have peeked more tokens past the final ";" so backup to after the semi-colon.
+		self.backup_after(colon.span);
+		let used = self.lexer.reader.offset();
+
+		PartialResult::Ready {
+			value: res,
+			used,
+		}
 	}
 }

@@ -173,7 +173,6 @@ impl<'a> Lexer<'a> {
 		if !self.eat(end_char) {
 			return Err(Error::ExpectedEnd);
 		}
-		self.reader.next();
 
 		// calculate the given datetime from individual parts.
 		let Some(date) = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32) else {

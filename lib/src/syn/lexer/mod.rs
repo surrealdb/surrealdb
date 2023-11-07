@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Datetime, Number, Uuid},
+	sql::{Datetime, Number, Regex, Uuid},
 	syn::token::{DataIndex, Span, Token, TokenKind},
 };
 
@@ -65,6 +65,7 @@ pub struct Lexer<'a> {
 	last_offset: u32,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
 	/// like for example strings with escape characters.
+	ate_whitespace: bool,
 	scratch: String,
 
 	// below are a collection of buffers with values produced by tokens.
@@ -77,6 +78,7 @@ pub struct Lexer<'a> {
 	pub strings: Vec<String>,
 	pub durations: Vec<Duration>,
 	pub datetime: Vec<Datetime>,
+	pub regex: Vec<Regex>,
 	pub uuid: Vec<Uuid>,
 	pub error: Option<Error>,
 }
@@ -87,26 +89,67 @@ impl<'a> Lexer<'a> {
 	/// # Panic
 	///
 	/// Will panic if the size of the provided slice exceeds `u32::MAX`.
-	pub fn new(source: &'a str) -> Lexer<'a> {
-		let reader = BytesReader::new(source.as_bytes());
+	pub fn new(source: &'a [u8]) -> Lexer<'a> {
+		let reader = BytesReader::new(source);
 		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
 		Lexer {
 			reader,
 			last_offset: 0,
+			ate_whitespace: false,
 			scratch: String::new(),
 			numbers: Vec::new(),
 			strings: Vec::new(),
 			datetime: Vec::new(),
 			durations: Vec::new(),
+			regex: Vec::new(),
 			uuid: Vec::new(),
 			error: None,
 		}
+	}
+
+	pub fn reset(&mut self) {
+		self.last_offset = 0;
+		self.scratch.clear();
+		self.numbers.clear();
+		self.strings.clear();
+		self.durations.clear();
+		self.datetime.clear();
+		self.regex.clear();
+		self.uuid.clear();
+		self.error = None;
+	}
+
+	pub fn change_source<'b>(self, source: &'b [u8]) -> Lexer<'b> {
+		let reader = BytesReader::<'b>::new(source);
+		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
+		Lexer {
+			reader,
+			last_offset: 0,
+			ate_whitespace: false,
+			scratch: self.scratch,
+			numbers: self.numbers,
+			strings: self.strings,
+			datetime: self.datetime,
+			durations: self.durations,
+			regex: self.regex,
+			uuid: self.uuid,
+			error: self.error,
+		}
+	}
+
+	pub fn ate_whitespace(&self) -> bool {
+		self.ate_whitespace
 	}
 
 	/// Returns the next token, driving the lexer forward.
 	///
 	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
+		self.ate_whitespace = false;
+		self.next_token_inner()
+	}
+
+	fn next_token_inner(&mut self) -> Token {
 		let Some(byte) = self.reader.next() else {
 			return self.eof_token();
 		};

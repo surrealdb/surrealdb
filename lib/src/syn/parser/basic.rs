@@ -1,5 +1,8 @@
 use crate::{
-	sql::{language::Language, Datetime, Dir, Duration, Ident, Number, Param, Strand, Table, Uuid},
+	sql::{
+		language::Language, Datetime, Dir, Duration, Ident, Number, Param, Regex, Strand, Table,
+		Uuid,
+	},
 	syn::{
 		parser::mac::{to_do, unexpected},
 		token::{t, Token, TokenKind},
@@ -305,6 +308,16 @@ impl TokenValue for Uuid {
 		};
 		let index = u32::from(token.data_index.unwrap());
 		Ok(parser.lexer.uuid[index as usize].clone())
+	}
+}
+
+impl TokenValue for Regex {
+	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
+		let TokenKind::Regex = token.kind else {
+			unexpected!(parser, token.kind, "a regex")
+		};
+		let index = u32::from(token.data_index.unwrap());
+		Ok(parser.lexer.regex[index as usize].clone())
 	}
 }
 

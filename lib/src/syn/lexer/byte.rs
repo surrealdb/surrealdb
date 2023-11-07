@@ -1,12 +1,16 @@
-use crate::syn::lexer::{
-	unicode::{byte, chars},
-	Error, Lexer,
-};
 use crate::syn::token::{t, Token};
+use crate::syn::{
+	lexer::{
+		unicode::{byte, chars},
+		Error, Lexer,
+	},
+	token::TokenKind,
+};
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment and returns the next token.
 	fn eat_single_line_comment(&mut self) -> Token {
+		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
 				return self.eof_token();
@@ -35,11 +39,12 @@ impl<'a> Lexer<'a> {
 			}
 		}
 		self.skip_offset();
-		self.next_token()
+		self.next_token_inner()
 	}
 
 	/// Eats a multi line comment and returns the next token.
 	fn eat_multi_line_comment(&mut self) -> Token {
+		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
 				return self.eof_token();
@@ -50,7 +55,7 @@ impl<'a> Lexer<'a> {
 				};
 				if b'/' == byte {
 					self.skip_offset();
-					return self.next_token();
+					return self.next_token_inner();
 				}
 			}
 		}
@@ -58,6 +63,7 @@ impl<'a> Lexer<'a> {
 
 	/// Eats a whitespace and returns the next token.
 	fn eat_whitespace(&mut self) -> Token {
+		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.peek() else {
 				return self.eof_token();
@@ -89,7 +95,44 @@ impl<'a> Lexer<'a> {
 			}
 		}
 		self.skip_offset();
-		self.next_token()
+		self.next_token_inner()
+	}
+
+	// re-lexes a `/` token to a regex token.
+	pub fn relex_regex(&mut self, token: Token) -> Token {
+		debug_assert_eq!(token.kind, t!("/"));
+		debug_assert_eq!(token.span.offset + 1, self.last_offset);
+		debug_assert_eq!(token.span.len, 1);
+
+		self.last_offset = token.span.offset;
+		loop {
+			match self.reader.next() {
+				Some(b'\\') => {
+					if let Some(b'/') = self.reader.peek() {
+						self.reader.next();
+						self.scratch.push('/')
+					} else {
+						self.scratch.push('\\')
+					}
+				}
+				Some(b'/') => break,
+				Some(x) => {
+					if x.is_ascii() {
+						self.scratch.push(x as char);
+					} else {
+						match self.reader.complete_char(x) {
+							Ok(x) => {
+								self.scratch.push(x);
+							}
+							Err(e) => return self.invalid_token(e.into()),
+						}
+					}
+				}
+				None => return self.invalid_token(Error::UnexpectedEof),
+			}
+		}
+
+		return self.finish_string_token(TokenKind::Regex);
 	}
 
 	/// Lex the next token, starting from the given byte.

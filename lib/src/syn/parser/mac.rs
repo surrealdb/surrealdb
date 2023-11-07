@@ -77,7 +77,7 @@ macro_rules! to_do {
 #[cfg(test)]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
-		let mut parser = $crate::syn::parser::Parser::new($t);
+		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
 		parser.$func($($($e),*)*)
 	}};
 }

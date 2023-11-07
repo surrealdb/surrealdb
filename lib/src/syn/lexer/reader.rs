@@ -68,11 +68,11 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn used(&self) -> &'a [u8] {
+		let len = self.offset();
 		unsafe {
 			// SAFETY: current and end are created from the same pointer so have the
 			// same providance.
 			// Furthermore implementation ensures that end is always past start.
-			let len = self.current.as_ptr().offset_from(self.start.as_ptr()) as usize;
 			// SAFETY: We are essentially recreating the original slice here, since we keep track
 			// of the lifetime with the marker type this is like returning the original slice we
 			// passed in.
@@ -82,11 +82,8 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn remaining(&self) -> &'a [u8] {
+		let len = self.len();
 		unsafe {
-			// SAFETY: current and end are created from the same pointer so have the
-			// same providance.
-			// Furthermore implementation ensures that end is always past start.
-			let len = self.end.as_ptr().offset_from(self.current.as_ptr()) as usize;
 			// SAFETY: We are essentially recreating the original slice here, since we keep track
 			// of the lifetime with the marker type this is like returning the original slice we
 			// passed in.

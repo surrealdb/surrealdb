@@ -132,7 +132,6 @@ impl Parser<'_> {
 
 	fn parse_order(&mut self) -> ParseResult<Order> {
 		let start = self.parse_basic_idiom()?;
-		dbg!(self.peek());
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
 		let direction = match self.next().kind {

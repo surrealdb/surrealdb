@@ -45,6 +45,11 @@ impl Parser<'_> {
 				let start = self.pop_peek().span;
 				self.parse_mock(start).map(Value::Mock)
 			}
+			t!("/") => {
+				let token = self.pop_peek();
+				let regex = self.lexer.relex_regex(token);
+				self.from_token(regex).map(Value::Regex)
+			}
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
