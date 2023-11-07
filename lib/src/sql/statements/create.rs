@@ -71,7 +71,9 @@ impl CreateStatement {
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
 				1 => Ok(a.remove(0)),
-				// There were no results
+				// There was no result
+				0 => Ok(Value::None),
+				// There was more than 1 result
 				_ => Err(Error::SingleOnlyOutput),
 			},
 			// This is standard query result
