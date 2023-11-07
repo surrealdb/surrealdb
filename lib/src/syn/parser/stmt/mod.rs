@@ -219,9 +219,6 @@ impl Parser<'_> {
 	}
 
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
-		let keyword = self.next();
-		debug_assert_eq!(keyword.kind, t!("USE"));
-
 		let (ns, db) = if self.eat(t!("NAMESPACE")) {
 			let ns = self.parse_token_value::<Ident>()?.0;
 			let db = self
@@ -370,10 +367,11 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "`TABLE` or `DATABASE`"),
 		};
 		expected!(self, "SINCE");
-		let since = match self.peek_kind() {
-			TokenKind::Number => ShowSince::Versionstamp(self.parse_token_value()?),
-			// TODO: date time
-			x => unexpected!(self, x, "a version stamp of date-time"),
+		let next = self.next();
+		let since = match next.kind {
+			TokenKind::Number => ShowSince::Versionstamp(self.from_token(next)?),
+			TokenKind::DateTime => ShowSince::Timestamp(self.from_token(next)?),
+			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};
 
 		let limit = self.eat(t!("LIMIT")).then(|| self.parse_token_value()).transpose()?;

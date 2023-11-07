@@ -8,18 +8,19 @@ use crate::{
 		index::{Distance, MTreeParams, SearchParams},
 		language::Language,
 		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, CreateStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
-			DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-			InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveScopeStatement, RemoveStatement,
-			RemoveTableStatement, RemoveTokenStatement, RemoveUserStatement, SelectStatement,
-			UpdateStatement,
+			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
+			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineTokenStatement, DefineUserStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			OptionStatement, OutputStatement, RelateStatement, RemoveAnalyzerStatement,
+			RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+			RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+			RemoveParamStatement, RemoveScopeStatement, RemoveStatement, RemoveTableStatement,
+			RemoveTokenStatement, RemoveUserStatement, SelectStatement, SetStatement,
+			ThrowStatement, UpdateStatement, UseStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -723,6 +724,118 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			explain: Some(Explain(true)),
 		}),
 	);
+}
+
+#[test]
+fn parse_let() {
+	let res = test_parse!(parse_stmt, r#"LET $param = 1"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Set(SetStatement {
+			name: "param".to_owned(),
+			what: Value::Number(Number::Int(1))
+		})
+	);
+
+	let res = test_parse!(parse_stmt, r#"$param = 1"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Set(SetStatement {
+			name: "param".to_owned(),
+			what: Value::Number(Number::Int(1))
+		})
+	);
+}
+
+#[test]
+fn parse_show() {
+	let res = test_parse!(parse_stmt, r#"SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10"#).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Show(ShowStatement {
+			table: Some(Table("foo".to_owned())),
+			since: ShowSince::Versionstamp(1),
+			limit: Some(10)
+		})
+	);
+
+	let offset = Utc.fix();
+	let expected_datetime = offset
+		.from_local_datetime(
+			&NaiveDate::from_ymd_opt(2012, 4, 23)
+				.unwrap()
+				.and_hms_nano_opt(18, 25, 43, 51_100)
+				.unwrap(),
+		)
+		.earliest()
+		.unwrap()
+		.with_timezone(&Utc);
+
+	let res = test_parse!(
+		parse_stmt,
+		r#"SHOW CHANGES FOR DATABASE SINCE t"2012-04-23T18:25:43.0000511Z""#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Show(ShowStatement {
+			table: None,
+			since: ShowSince::Timestamp(Datetime(expected_datetime)),
+			limit: None
+		})
+	)
+}
+
+#[test]
+fn parse_sleep() {
+	let res = test_parse!(parse_stmt, r"SLEEP 1s").unwrap();
+
+	let expect = Statement::Sleep(SleepStatement {
+		duration: Duration(std::time::Duration::from_secs(1)),
+	});
+	assert_eq!(res, expect)
+}
+
+#[test]
+fn parse_use() {
+	let res = test_parse!(parse_stmt, r"USE NS foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("foo".to_owned()),
+		db: None,
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"USE DB foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: None,
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"USE NS bar DB foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("bar".to_owned()),
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+}
+
+#[test]
+fn parse_value_stmt() {
+	let res = test_parse!(parse_stmt, r"1s").unwrap();
+	let expect = Statement::Value(Value::Duration(Duration(std::time::Duration::from_secs(1))));
+	assert_eq!(res, expect);
+}
+
+#[test]
+fn parse_throw() {
+	let res = test_parse!(parse_stmt, r"THROW 1s").unwrap();
+
+	let expect = Statement::Throw(ThrowStatement {
+		error: Value::Duration(Duration(std::time::Duration::from_secs(1))),
+	});
+	assert_eq!(res, expect)
 }
 
 #[test]
