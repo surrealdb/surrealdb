@@ -96,9 +96,9 @@ impl<'a> Document<'a> {
 				// relevant notification based on the statement.
 				let mut tx = txn.lock().await;
 				let ts = tx.clock().await;
-				let ns = Box::new(opt.ns().to_string());
-				let db = Box::new(opt.db().to_string());
-				let tb = Box::new(self.id.unwrap().tb.to_string());
+				let ns = opt.ns().to_string();
+				let db = opt.db().to_string();
+				let tb = self.id.unwrap().tb.to_string();
 				let not_id = crate::sql::Uuid::new_v4();
 				if stm.is_delete() {
 					// Send a DELETE notification
