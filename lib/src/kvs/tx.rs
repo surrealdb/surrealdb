@@ -16,6 +16,7 @@ use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
+use crate::kvs::Limit::Unlimited;
 use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
@@ -51,6 +52,37 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub(crate) const NO_LIMIT: u32 = 0;
+
+#[derive(Copy, Clone, Debug)]
+pub enum Limit {
+	Unlimited,
+	Limited(u32),
+}
+
+pub struct ScanPage<K>
+where
+	K: Into<Key> + Debug + Clone,
+{
+	pub range: Range<K>,
+	pub limit: Limit,
+}
+
+impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
+	fn from(value: Range<Vec<u8>>) -> Self {
+		ScanPage {
+			range: value,
+			limit: Limit::Unlimited,
+		}
+	}
+}
+
+pub struct ScanResult<K>
+where
+	K: Into<Key> + Debug + Clone,
+{
+	pub next_page: Option<ScanPage<K>>,
+	pub values: Vec<(Key, Val)>,
+}
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -649,50 +681,73 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&mut self,
+		page: ScanPage<K>,
+		batch_limit: u32,
+	) -> Result<ScanResult<K>, Error>
 	where
 		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!(
 			"Scan {:?} - {:?}",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
+			debug::sprint_key(&page.range.start.clone().into()),
+			debug::sprint_key(&page.range.end.clone().into())
 		);
-		match self {
+		let res = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(rng, limit),
+			} => v.scan(page.range, batch_limit),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(page.range, batch_limit).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(page.range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(page.range, batch_limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(page.range, batch_limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(page.range, batch_limit).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
-		}
+		};
+		// Construct next page
+		res.map(|tup_vec| {
+			if tup_vec.len() < batch_limit as usize {
+				ScanResult {
+					next_page: None,
+					values: tup_vec,
+				}
+			} else {
+				let mut rng = page.range.clone();
+				rng.start = tup_vec.last().unwrap().0.clone();
+				ScanResult {
+					next_page: Some(ScanPage {
+						range: rng,
+						limit: page.limit,
+					}),
+					values: tup_vec,
+				}
+			}
+		})
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -811,16 +866,24 @@ impl Transaction {
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(
+						ScanPage {
+							range: min..max,
+							limit: Unlimited,
+						},
+						num,
+					)
+					.await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled
@@ -885,14 +948,14 @@ impl Transaction {
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 			};
 			// Get total results
@@ -937,14 +1000,14 @@ impl Transaction {
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0);
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 			};
 			// Get total results
@@ -1104,13 +1167,13 @@ impl Transaction {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
 			// Get total results
@@ -1157,13 +1220,13 @@ impl Transaction {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
 			// Get total results
@@ -1229,13 +1292,13 @@ impl Transaction {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
 			// Get total results
@@ -1296,13 +1359,13 @@ impl Transaction {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					self.scan(min..max, batch_size).await?
+					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
 			// Get total results
@@ -2482,21 +2545,11 @@ impl Transaction {
 					// Fetch records
 					let beg = crate::key::thing::prefix(ns, db, &tb.name);
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
-					let mut nxt: Option<Vec<u8>> = None;
-					loop {
-						let res = match nxt {
-							None => {
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-							Some(ref mut beg) => {
-								beg.push(0x00);
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-						};
+					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
+					while nxt.is_some() {
+						let res = self.scan(nxt.unwrap(), 1000).await?;
+						nxt = res.next_page;
+						let res = res.values;
 						if !res.is_empty() {
 							// Get total results
 							let n = res.len();
@@ -2505,11 +2558,7 @@ impl Transaction {
 								break;
 							}
 							// Loop over results
-							for (i, (k, v)) in res.into_iter().enumerate() {
-								// Ready the next
-								if n == i + 1 {
-									nxt = Some(k.clone());
-								}
+							for (k, v) in res.into_iter() {
 								// Parse the key and the value
 								let k: crate::key::thing::Thing = (&k).into();
 								let v: Value = (&v).into();
