@@ -77,6 +77,7 @@ pub(crate) mod with;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub mod depth;
 pub mod serde;
 pub mod statements;
 

@@ -2759,7 +2759,7 @@ impl TryNeg for Value {
 pub fn value(i: &str) -> IResult<&str, Value> {
 	let (i, start) = single(i)?;
 	if let (i, Some(o)) = opt(operator::binary)(i)? {
-		let _diving = crate::sql::parser::depth::dive(i)?;
+		let _diving = crate::sql::depth::dive(i)?;
 		let (i, r) = cut(value)(i)?;
 		let expr = match r {
 			Value::Expression(r) => r.augment(start, o),
@@ -2776,7 +2776,7 @@ pub fn value(i: &str) -> IResult<&str, Value> {
 pub fn single(i: &str) -> IResult<&str, Value> {
 	// Dive in `single` (as opposed to `value`) since it is directly
 	// called by `Cast`
-	let _diving = crate::sql::parser::depth::dive(i)?;
+	let _diving = crate::sql::depth::dive(i)?;
 	let (i, v) = alt((
 		alt((
 			terminated(
@@ -2869,7 +2869,7 @@ pub fn path_like(i: &str) -> IResult<&str, Value> {
 }
 
 pub fn select(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
+	let _diving = crate::sql::depth::dive(i)?;
 	let (i, start) = select_start(i)?;
 	if let (i, Some(op)) = opt(operator::binary)(i)? {
 		// In a binary expression single ident's arent tables but paths.
@@ -2891,7 +2891,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 
 /// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
+	let _diving = crate::sql::depth::dive(i)?;
 	let (i, v) = alt((
 		into(idiom::multi_without_start),
 		path_like,
@@ -2912,7 +2912,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
+	let _diving = crate::sql::depth::dive(i)?;
 	// Use a specific parser for JSON objects
 	fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;

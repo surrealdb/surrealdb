@@ -31,7 +31,7 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let token = self.pop_peek();
-				self.parse_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))
+				self.parse_inner_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("<") => {
 				self.pop_peek();
@@ -57,7 +57,7 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x))),
+			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x))),
 			_ => {
 				let table = self.parse_token_value::<Table>()?;
 				if self.peek_kind() == t!(":") {
@@ -127,7 +127,7 @@ impl Parser<'_> {
 				Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
 			}
 			t!("(") => {
-				self.parse_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))?
+				self.parse_inner_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))?
 			}
 			t!("RETURN")
 			| t!("SELECT")
@@ -136,7 +136,7 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => self.parse_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
+			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
 				let name: Ident = self.from_token(token)?;
 				if self.peek_kind() == t!(":") {
@@ -238,7 +238,23 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
+	pub fn parse_full_subquery(&mut self) -> ParseResult<Subquery> {
+		let peek = self.peek();
+		match peek.kind {
+			t!("(") => {
+				self.pop_peek();
+				self.parse_inner_subquery(Some(peek.span))
+			}
+			t!("IF") => {
+				self.pop_peek();
+				let if_stmt = self.parse_if_stmt()?;
+				Ok(Subquery::Ifelse(if_stmt))
+			}
+			_ => self.parse_inner_subquery(None),
+		}
+	}
+
+	pub fn parse_inner_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
 		let res = match self.peek().kind {
 			t!("RETURN") => {
 				self.pop_peek();

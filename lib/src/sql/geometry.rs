@@ -627,7 +627,7 @@ impl hash::Hash for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
+	let _diving = crate::sql::depth::dive(i)?;
 	alt((simple, normal))(i)
 }
 

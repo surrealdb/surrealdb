@@ -6,7 +6,6 @@ use std::fmt::Write;
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
 use std::ops::Bound;
-use std::ops::Range;
 use thiserror::Error;
 
 mod utils;
@@ -14,7 +13,10 @@ pub use utils::*;
 mod render;
 pub use render::*;
 
+#[cfg(feature = "experimental_parser")]
 use crate::syn::token::Span;
+#[cfg(feature = "experimental_parser")]
+use std::ops::Range;
 
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<I> {
@@ -173,6 +175,7 @@ impl Location {
 		unreachable!()
 	}
 
+	#[cfg(feature = "experimental_parser")]
 	pub fn of_span_start(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 		let offset = span.offset as usize;
@@ -196,6 +199,7 @@ impl Location {
 		unreachable!()
 	}
 
+	#[cfg(feature = "experimental_parser")]
 	pub fn of_span_end(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 		let offset = span.offset as usize + span.len as usize;
@@ -219,6 +223,7 @@ impl Location {
 		unreachable!()
 	}
 
+	#[cfg(feature = "experimental_parser")]
 	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
 		// Bytes of input before substr.
 		let offset = span.offset as usize;

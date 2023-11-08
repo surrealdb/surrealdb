@@ -45,6 +45,7 @@ impl Display for Query {
 	}
 }
 
+#[cfg(not(feature = "experimental_parser"))]
 pub fn query(i: &str) -> IResult<&str, Query> {
 	let (i, v) = statements(i)?;
 	if !i.is_empty() {
@@ -57,6 +58,7 @@ pub fn query(i: &str) -> IResult<&str, Query> {
 	Ok((i, Query(v)))
 }
 
+#[cfg(not(feature = "experimental_parser"))]
 #[cfg(test)]
 mod tests {
 

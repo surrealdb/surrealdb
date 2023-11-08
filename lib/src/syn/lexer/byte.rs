@@ -132,7 +132,7 @@ impl<'a> Lexer<'a> {
 			}
 		}
 
-		return self.finish_string_token(TokenKind::Regex);
+		self.finish_string_token(TokenKind::Regex)
 	}
 
 	/// Lex the next token, starting from the given byte.

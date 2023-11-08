@@ -114,9 +114,6 @@ mod exe;
 mod fnc;
 mod vs;
 
-pub mod sql;
-pub mod syn;
-
 #[doc(hidden)]
 pub mod cnf;
 #[doc(hidden)]
@@ -135,6 +132,11 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
+#[doc(hidden)]
+pub mod sql;
+#[cfg(feature = "experimental_parser")]
+#[doc(hidden)]
+pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;

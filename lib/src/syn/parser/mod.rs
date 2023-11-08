@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Change the source of the parser reusing the existing buffers.
-	pub fn change_source<'b>(self, source: &'b [u8]) -> Parser<'b> {
+	pub fn change_source(self, source: &[u8]) -> Parser {
 		Parser {
 			lexer: self.lexer.change_source(source),
 			last_span: Span::empty(),
