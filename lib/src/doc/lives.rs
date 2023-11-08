@@ -7,12 +7,8 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::paths::META;
-use crate::sql::paths::SC;
-use crate::sql::paths::SD;
-use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
-use crate::sql::Value;
-use futures::SinkExt;
+use crate::sql::{Uuid, Value};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -102,8 +98,34 @@ impl<'a> Document<'a> {
 				let ns = opt.ns().to_string();
 				let db = opt.db().to_string();
 				let tb = self.id.unwrap().tb.to_string();
-				let not_id = crate::sql::Uuid::new_v4();
+				let not_id = Uuid::new_v4();
 				if stm.is_delete() {
+					// Send previous notifications
+					let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
+					match previous_nots {
+						Ok(nots) => {
+							for not in &nots {
+								// Consume the notification entry
+								let key = crate::key::table::nt::Nt::new(
+									opt.ns(),
+									opt.db(),
+									&tb,
+									not.live_id,
+									not.timestamp,
+									not.notification_id,
+								);
+								let key_enc = key.encode()?;
+								tx.del(key_enc).await?;
+								// Send the notification to the channel
+								if let Err(e) = chn.send(not.clone()).await {
+									error!("Error sending scanned notification: {}", e);
+								}
+							}
+						}
+						Err(err) => {
+							error!("Error scanning notifications: {}", err);
+						}
+					}
 					// Send a DELETE notification
 					let notification = Notification {
 						live_id: lv.id,
@@ -279,6 +301,7 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::sql;
+	use crate::sql::uuid::Uuid;
 	use crate::sql::Value;
 
 	#[tokio::test]
@@ -420,7 +443,7 @@ mod tests {
 		// Setup
 		let ds = Datastore::new("memory").await.unwrap().with_notifications();
 		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
-		let node_id = uuid::Uuid::parse_str("6da5535b-9c0b-493b-8077-c26449738608").unwrap();
+		let node_id = Uuid::try_from("6da5535b-9c0b-493b-8077-c26449738608").unwrap();
 
 		// Perform a CREATE statement
 		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
@@ -439,13 +462,12 @@ mod tests {
 		};
 
 		// Create remote notification artificially
-		let expected_not_id =
-			sql::uuid::Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
+		let expected_not_id = Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
 		let not = Notification {
 			live_id: *lq_id,
-			node_id: sql::uuid::Uuid::from(node_id),
+			node_id,
 			notification_id: expected_not_id,
 			action: Action::Create,
 			result: Value::Strand(sql::Strand::from(
@@ -473,8 +495,8 @@ mod tests {
 		// Verify we received the remote notification before the create notification
 		let receiver = ds.notifications().unwrap();
 		let first_notification = receiver.try_recv().unwrap();
-		let second_notification = receiver.try_recv().unwrap();
 		assert_eq!(first_notification.notification_id, expected_not_id);
+		let second_notification = receiver.try_recv().unwrap();
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
 		// verify remote notifications have been consumed

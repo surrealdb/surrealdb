@@ -444,13 +444,7 @@ async fn live_creates_remote_notification_for_delete() {
 	let mut res = tx
 		.lock()
 		.await
-		.scan_tbnt(
-			namespace.as_str(),
-			database.as_str(),
-			table,
-			sql::uuid::Uuid::from(live_query_id),
-			1000,
-		)
+		.scan_tbnt(namespace.as_str(), database.as_str(), table, live_query_id, 1000)
 		.await
 		.unwrap();
 	tx.lock().await.commit().await.unwrap();
@@ -462,12 +456,16 @@ async fn live_creates_remote_notification_for_delete() {
 	assert!(!not.notification_id.is_nil());
 	not.notification_id = Default::default();
 	// The notification value for delete is just the ID of the record
+	let expected_result = Value::Object(Object(map! {
+		"id".to_string() => Value::Thing(thing),
+		"name".to_string() => Value::Strand(Strand::from("a name")),
+	}));
 	let expected_remote_notification = Notification {
-		live_id: crate::sql::uuid::Uuid::from(live_query_id),
-		node_id: crate::sql::uuid::Uuid::from(remote_node),
+		live_id: live_query_id,
+		node_id: remote_node,
 		notification_id: Default::default(),
 		action: Action::Delete,
-		result: Value::Thing(thing),
+		result: expected_result,
 		timestamp: t1,
 	};
 	assert_eq!(not, &expected_remote_notification);
