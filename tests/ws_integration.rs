@@ -625,7 +625,7 @@ mod ws_integration {
 		let lq_notif = msgs.iter().find(|v| common::ws_msg_is_notification_from_lq(v, live_id));
 		assert!(
 			lq_notif.is_some(),
-			"Expected to find a notification for LQ id {}: {:#?}",
+			"Expected to find a notification for LQ id {}: but the messages instead were {:#?}",
 			live_id,
 			msgs
 		);
