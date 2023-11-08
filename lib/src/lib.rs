@@ -166,6 +166,39 @@ pub mod error {
 	pub use crate::err::Error as Db;
 }
 
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
+}
+
+impl From<dbs::Action> for Action {
+	fn from(action: dbs::Action) -> Self {
+		match action {
+			dbs::Action::Create => Self::Create,
+			dbs::Action::Update => Self::Update,
+			dbs::Action::Delete => Self::Delete,
+		}
+	}
+}
+
+/// A live query notification
+///
+/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// the action is create or update.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub struct Notification<R> {
+	pub action: Action,
+	pub data: R,
+}
+
 /// An error originating from the SurrealDB client library
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum Error {

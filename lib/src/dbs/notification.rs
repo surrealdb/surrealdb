@@ -1,5 +1,5 @@
 use crate::dbs::node::Timestamp;
-use crate::sql::{Uuid, Value};
+use crate::sql::{Object, Uuid, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ impl Display for Action {
 #[revisioned(revision = 1)]
 pub struct Notification {
 	// The Live Query ID used to differentiate between requests
+	#[serde(rename = "id")]
 	pub live_id: Uuid,
 	// Node ID of the destined SurrealDB recipient
 	pub node_id: Uuid,
@@ -43,10 +44,15 @@ pub struct Notification {
 
 impl Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"Notification {{live_id: {}, node_id: {}, notification_id: {}, action: {}, result: {}, timestamp: {}}}",
-			self.live_id, self.node_id, self.notification_id, self.action, self.result, self.timestamp
-		)
+		let obj: Object = map! {
+			"live_id".to_string() => self.live_id.to_string().into(),
+			"node_id".to_string() => self.node_id.to_string().into(),
+			"notification_id".to_string() => self.notification_id.to_string().into(),
+			"action".to_string() => self.action.to_string().into(),
+			"result".to_string() => self.result.clone(),
+			"timestamp".to_string() => self.timestamp.to_string().into(),
+		}
+		.into();
+		write!(f, "{}", obj)
 	}
 }

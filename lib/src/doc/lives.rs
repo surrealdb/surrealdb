@@ -6,8 +6,13 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::paths::META;
+use crate::sql::paths::SC;
+use crate::sql::paths::SD;
+use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
+use futures::SinkExt;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -23,10 +28,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
-		if let Some(chn) = &opt.sender.get() {
+		if let Some(mut chn) = &opt.sender.get() {
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
 				// Create a new statement
@@ -102,41 +105,24 @@ impl<'a> Document<'a> {
 				let not_id = crate::sql::Uuid::new_v4();
 				if stm.is_delete() {
 					// Send a DELETE notification
-					let thing = (*rid).clone();
 					let notification = Notification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
 						action: Action::Delete,
-						result: Value::Thing(thing),
+						result: {
+							// Ensure futures are run
+							let lqopt: &Options = &lqopt.new_with_futures(true);
+							// Output the full document before any changes were applied
+							let mut value = doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+							// Remove metadata fields on output
+							value.del(&lqctx, lqopt, txn, &*META).await?;
+							// Output result
+							value
+						},
 						timestamp: ts,
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
-						match previous_nots {
-							Ok(nots) => {
-								for not in nots {
-									// Consume the notification
-									let key = crate::key::table::nt::Nt::new(
-										&ns,
-										&db,
-										&tb,
-										not.live_id,
-										not.timestamp,
-										not.notification_id,
-									);
-									let key_enc = key.encode()?;
-									tx.del(key_enc).await?;
-									// Send the notification
-									if let Err(e) = chn.send(not).await {
-										error!("Error sending scanned notification: {}", e);
-									}
-								}
-							}
-							Err(err) => {
-								error!("Error scanning notifications: {}", err);
-							}
-						}
 						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);

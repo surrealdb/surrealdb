@@ -1,12 +1,12 @@
 // Tests common to all protocols and storage engines
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn connect() {
 	let db = new_db().await;
 	db.health().await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn yuse() {
 	let db = new_db().await;
 	let item = Ulid::new().to_string();
@@ -29,7 +29,7 @@ async fn yuse() {
 	db.create(Resource::from(item)).await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn invalidate() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -42,7 +42,7 @@ async fn invalidate() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn signup_scope() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -70,7 +70,7 @@ async fn signup_scope() {
 	.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn signin_ns() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -88,7 +88,7 @@ async fn signin_ns() {
 	.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn signin_db() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -108,7 +108,7 @@ async fn signin_db() {
 	.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn signin_scope() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -149,7 +149,7 @@ async fn signin_scope() {
 	.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn scope_throws_error() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -216,7 +216,7 @@ async fn scope_throws_error() {
 	};
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn scope_invalid_query() {
 	let db = new_db().await;
 	let database = Ulid::new().to_string();
@@ -281,7 +281,7 @@ async fn scope_invalid_query() {
 	};
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn authenticate() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -301,7 +301,7 @@ async fn authenticate() {
 	db.authenticate(token).await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn query() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -323,7 +323,7 @@ async fn query() {
 	assert_eq!(name, "John Doe");
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn query_decimals() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -335,7 +335,7 @@ async fn query_decimals() {
 	let _ = db.query(sql).await.unwrap().check().unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn query_binds() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -367,7 +367,7 @@ async fn query_binds() {
 	assert_eq!(record.name, "John Doe");
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn query_chaining() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -383,7 +383,7 @@ async fn query_chaining() {
 	response.check().unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn mixed_results_query() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -393,7 +393,7 @@ async fn mixed_results_query() {
 	let _: Option<RecordId> = response.take(1).unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn create_record_no_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -401,7 +401,7 @@ async fn create_record_no_id() {
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn create_record_with_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -410,7 +410,7 @@ async fn create_record_with_id() {
 	let _: Value = db.create(Resource::from("user:doe")).await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn create_record_no_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -430,7 +430,7 @@ async fn create_record_no_id_with_content() {
 		.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn create_record_with_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -452,7 +452,7 @@ async fn create_record_with_id_with_content() {
 	assert_eq!(value.record(), thing("user:jane").ok());
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn select_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -464,7 +464,7 @@ async fn select_table() {
 	assert_eq!(users.len(), 3);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn select_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -478,7 +478,7 @@ async fn select_record_id() {
 	assert_eq!(value.record(), thing("user:john").ok());
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn select_record_ranges() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -513,7 +513,7 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["john"]);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn update_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -525,7 +525,7 @@ async fn update_table() {
 	assert_eq!(users.len(), 2);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn update_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -536,7 +536,7 @@ async fn update_record_id() {
 	assert_eq!(users.len(), 2);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn update_table_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -579,7 +579,7 @@ async fn update_table_with_content() {
 	assert_eq!(users, expected);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn update_record_range_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -637,7 +637,7 @@ async fn update_record_range_with_content() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn update_record_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -677,7 +677,7 @@ struct Person {
 	marketing: bool,
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn merge_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -713,7 +713,7 @@ async fn merge_record_id() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn patch_record_id() {
 	#[derive(Debug, Deserialize, Eq, PartialEq)]
 	struct Record {
@@ -751,7 +751,7 @@ async fn patch_record_id() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn delete_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -767,7 +767,7 @@ async fn delete_table() {
 	assert!(users.is_empty());
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn delete_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -785,7 +785,7 @@ async fn delete_record_id() {
 	assert_eq!(value, Value::None);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn delete_record_range() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -828,7 +828,7 @@ async fn delete_record_range() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn changefeed() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1001,13 +1001,13 @@ async fn changefeed() {
 	);
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn version() {
 	let db = new_db().await;
 	db.version().await.unwrap();
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn set_unset() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1025,7 +1025,7 @@ async fn set_unset() {
 	assert!(name.is_none());
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn return_bool() {
 	let db = new_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();

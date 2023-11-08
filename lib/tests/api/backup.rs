@@ -3,7 +3,7 @@
 
 use tokio::fs::remove_file;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn export_import() {
 	let db = new_db().await;
 	let db_name = Ulid::new().to_string();

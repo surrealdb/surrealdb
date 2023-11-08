@@ -251,7 +251,7 @@ impl Connection {
 							// Convert internal notification representation to external
 							let notification = surrealdb::api::model::Notification::from(notification);
 							// Find which WebSocket the notification belongs to
-							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.live_id) {
 								// Check to see if the WebSocket exists
 								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
 									// Serialize the message to send
