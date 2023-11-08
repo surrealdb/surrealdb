@@ -6,6 +6,7 @@ pub mod method;
 pub mod opt;
 
 mod conn;
+pub mod model;
 
 pub use method::query::Response;
 
