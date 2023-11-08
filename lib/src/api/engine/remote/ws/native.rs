@@ -526,8 +526,11 @@ impl Response {
 											id: None,
 											result: Ok(Data::Live(Notification {
 												live_id,
+												node_id: Default::default(),
+												notification_id: Default::default(),
 												action,
 												result,
+												timestamp: Default::default(),
 											})),
 										}));
 									}
