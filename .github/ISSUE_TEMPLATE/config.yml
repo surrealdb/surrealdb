@@ -1,5 +1,7 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Documentation
+    url: https://github.com/surrealdb/www.surrealdb.com/issues/new?assignees=Ekwuno&labels=documentation&projects=&template=documentation.yml&title=Documentation%3A+
   - name: Question or idea
     url: https://github.com/surrealdb/surrealdb/discussions
     about: Ask questions and discuss ideas here.
