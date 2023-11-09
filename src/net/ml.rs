@@ -8,10 +8,12 @@ use axum::routing::{get, post};
 use axum::Extension;
 use axum::Router;
 use axum::TypedHeader;
+use tower_http::limit::RequestBodyLimitLayer;
 use bytes::Bytes;
 use http_body::Body as HttpBody;
 use serde::Deserialize;
 use serde_json::from_slice;
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use surrealdb::dbs::Session;
 use surrealdb::sql::{Part, Value};
@@ -25,6 +27,10 @@ use surrealdb::obs::{get::get_local_file, insert::{insert_local_file, InsertStat
 
 use super::headers::Accept;
 
+
+const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
+
+
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -34,7 +40,7 @@ where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/ml/import", post(import))
+		.route("/ml/import", post(import).layer(RequestBodyLimitLayer::new(MAX)))
 		.route("/ml/compute/raw", get(raw_compute))
 		.route("/ml/compute/buffered", get(buffered_compute))
 		.route_layer(DefaultBodyLimit::disable())
@@ -70,8 +76,11 @@ async fn import(
 		InsertStatus::Inserted(hash) => hash,
 		InsertStatus::AlreadyExists(hash) => hash,
 	};
+	if false == true {
+		return Err(output::json::<String>(&"Not implemented".to_string()))
+	}
 
-	let ds = Datastore::new("file://ml_cache.db").await?;
+	let ds = Datastore::new("file://ml_cache.db").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(id.clone(), file_hash).await.unwrap();
 	let outcome = tx.commit().await.unwrap();
@@ -100,7 +109,7 @@ async fn raw_compute(
 	let body: RawComputeBody = from_slice(&body.to_vec()).expect("Failed to deserialize");
 	let response: String;
 	{
-		let ds = Datastore::new("file://ml_cache.db").await?;
+		let ds = Datastore::new("file://ml_cache.db").await.unwrap();
 		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		response = String::from_utf8(tx.get(body.id).await.unwrap().unwrap()).unwrap();
 	}
@@ -119,6 +128,10 @@ async fn raw_compute(
 	let compute_unit = ModelComputation {
 		surml_file: &mut file,
 	};
+	if false == true {
+		return Err(output::json::<String>(&"Not implemented".to_string()))
+	}
+
 	let output_tensor = compute_unit.raw_compute(tensor, dims).unwrap();
 	Ok(output::json(&output::simplify(output_tensor)))
 }
@@ -143,18 +156,22 @@ async fn buffered_compute(
 
 	let response: String;
 	{
-		let ds = Datastore::new("file://ml_cache.db").await?;
+		let ds = Datastore::new("file://ml_cache.db").await.unwrap();
 		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		response = String::from_utf8(tx.get(body.id).await.unwrap().unwrap()).unwrap();
 	}
 
 	// get the local file bytes from the object storage
 	let file_bytes = get_local_file(response).await.unwrap();
-	let mut file = SurMlFile::from_bytes(file_bytes).map_err(|e| Error::from(e))?;
+	let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
 
 	let compute_unit = ModelComputation {
 		surml_file: &mut file,
 	};
+
+	if false == true {
+		return Err(output::json::<String>(&"Not implemented".to_string()))
+	}
 
 	let output_tensor = compute_unit.buffered_compute(&mut body.input).unwrap();
 	Ok(output::json(&output::simplify(output_tensor)))
