@@ -1,16 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
-use crate::sql::cond::Cond;
-use crate::sql::fetch::Fetchs;
-use crate::sql::field::{fields, Fields};
-use crate::sql::param::param;
-use crate::sql::table::table;
-use crate::sql::value::Value;
-use crate::sql::Uuid;
+use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

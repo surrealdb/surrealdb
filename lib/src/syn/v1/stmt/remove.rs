@@ -142,6 +142,18 @@ pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 	))
 }
 
+pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
+	let (i, _) = tag_no_case("SCOPE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = cut(ident)(i)?;
+	Ok((
+		i,
+		RemoveScopeStatement {
+			name,
+		},
+	))
+}
+
 pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;

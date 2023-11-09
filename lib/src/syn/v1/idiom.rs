@@ -5,9 +5,8 @@ use super::{
 	part::dir,
 	IResult,
 };
-use crate::sql::{table::tables, Cond, Idiom, Tables};
+use crate::sql::{Cond, Idiom, Tables};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::opt};
-
 
 pub fn locals(i: &str) -> IResult<&str, Idioms> {
 	let (i, v) = separated_list1(commas, local)(i)?;

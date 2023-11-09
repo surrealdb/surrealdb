@@ -1,15 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::Iterator;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::{Iterable, Transaction};
+use crate::dbs::{Iterable, Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::data::Data;
-use crate::sql::output::Output;
-use crate::sql::thing::thing;
-use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::Value;
+use crate::sql::{Data, Output, Timeout, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

@@ -1,14 +1,9 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::ident::ident_raw;
-use crate::sql::value::{value, Value};
+use crate::sql::Value;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

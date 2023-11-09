@@ -1,5 +1,5 @@
+use super::ParseError;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::sql::ParseError;
 use nom::Err;
 use std::cell::Cell;
 use std::thread::panicking;

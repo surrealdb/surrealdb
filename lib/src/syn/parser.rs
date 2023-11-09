@@ -5,3 +5,7 @@ pub fn idiom(i: &str) -> ! {
 pub fn json(i: &str) -> ! {
 	todo!()
 }
+
+pub fn parse(i: &str) -> ! {
+	todo!()
+}

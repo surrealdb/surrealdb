@@ -1,34 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::Iterator;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::{Iterable, Transaction};
+use crate::dbs::{Iterable, Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
-use crate::sql::comment::shouldbespace;
-use crate::sql::cond::{cond, Cond};
-use crate::sql::ending;
-use crate::sql::error::expect_tag_no_case;
-use crate::sql::error::expected;
-use crate::sql::error::IResult;
-use crate::sql::explain::{explain, Explain};
-use crate::sql::fetch::{fetch, Fetchs};
-use crate::sql::field::{fields, Field, Fields};
-use crate::sql::group::{group, Groups};
-use crate::sql::idiom::Idioms;
-use crate::sql::limit::{limit, Limit};
-use crate::sql::omit::omit;
-use crate::sql::order::{order, Orders};
-use crate::sql::special::check_group_by_fields;
-use crate::sql::special::check_order_by_fields;
-use crate::sql::special::check_split_on_fields;
-use crate::sql::split::{split, Splits};
-use crate::sql::start::{start, Start};
-use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{selects, Value, Values};
-use crate::sql::version::{version, Version};
-use crate::sql::with::{with, With};
+use crate::sql::{
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Orders, Splits, Start, Timeout,
+	Value, Values, Version, With,
+};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

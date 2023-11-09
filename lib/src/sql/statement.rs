@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
-	statement::{
+	statements::{
 		AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
 		ContinueStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 		IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement,
@@ -13,6 +13,7 @@ use crate::sql::{
 	},
 	value::Value,
 };
+use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{

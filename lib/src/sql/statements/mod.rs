@@ -25,6 +25,7 @@ pub(crate) mod throw;
 pub(crate) mod update;
 pub(crate) mod r#use;
 
+pub use self::analyze::AnalyzeStatement;
 pub use self::begin::BeginStatement;
 pub use self::cancel::CancelStatement;
 pub use self::commit::CommitStatement;
@@ -44,6 +45,8 @@ pub use self::r#use::UseStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;
+pub use self::show::ShowStatement;
+pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 

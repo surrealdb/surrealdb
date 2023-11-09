@@ -35,22 +35,3 @@ impl fmt::Display for ContinueStatement {
 		f.write_str("CONTINUE")
 	}
 }
-
-pub fn r#continue(i: &str) -> IResult<&str, ContinueStatement> {
-	let (i, _) = tag_no_case("CONTINUE")(i)?;
-	Ok((i, ContinueStatement))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn continue_basic() {
-		let sql = "CONTINUE";
-		let res = r#continue(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CONTINUE", format!("{}", out))
-	}
-}

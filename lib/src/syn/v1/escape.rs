@@ -1,4 +1,4 @@
-use crate::sql::common::val_u8;
+use super::common::val_u8;
 use nom::character::is_digit;
 use std::borrow::Cow;
 

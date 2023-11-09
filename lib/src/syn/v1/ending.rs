@@ -1,15 +1,15 @@
-use crate::sql::comment::comment;
-use crate::sql::comment::{mightbespace, shouldbespace};
-use crate::sql::error::IResult;
-use crate::sql::operator::{assigner, binary};
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::bytes::complete::tag_no_case;
-use nom::character::complete::char;
-use nom::character::complete::multispace1;
-use nom::combinator::peek;
-use nom::combinator::{eof, value};
-use nom::sequence::preceded;
+use super::{
+	comment::{comment, mightbespace, shouldbespace},
+	operator::{assigner, binary},
+	IResult,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{tag, tag_no_case},
+	character::complete::{char, multispace1},
+	combinator::{eof, peek, value},
+	sequence::preceded,
+};
 
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((

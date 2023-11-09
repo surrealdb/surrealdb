@@ -1,14 +1,16 @@
-use crate::sql::comment::mightbespace;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::{IResult, ParseError};
-use nom::branch::alt;
-use nom::bytes::complete::take_while;
-use nom::bytes::complete::take_while_m_n;
-use nom::character::complete::char;
-use nom::character::is_alphanumeric;
-use nom::combinator::map_res;
-use nom::multi::many1;
-use nom::Err;
+use super::{
+	comment::{mightbespace, shouldbespace},
+	error::ParseError,
+	IResult,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{take_while, take_while_m_n},
+	character::{complete::char, is_alphanumeric},
+	combinator::map_res,
+	multi::many1,
+	Err, InputLength, Parser,
+};
 use std::ops::RangeBounds;
 
 pub fn colons(i: &str) -> IResult<&str, ()> {
