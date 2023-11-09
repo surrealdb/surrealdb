@@ -484,8 +484,11 @@ impl Response {
 											id: None,
 											result: Ok(Data::Live(KvsNotification {
 												live_id,
+												node_id: Default::default(),
+												notification_id: Default::default(),
 												action,
 												result,
+												timestamp: Default::default(),
 											})),
 										}));
 									}
