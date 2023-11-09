@@ -41,7 +41,7 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
@@ -452,7 +452,7 @@ async fn router(
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
-	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
+	live_queries: &mut HashMap<Uuid, Sender<KvsNotification>>,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 

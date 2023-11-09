@@ -17,7 +17,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::from_value;
@@ -524,7 +524,7 @@ impl Response {
 									if let Some(result) = map.remove("result") {
 										return Ok(Some(Self {
 											id: None,
-											result: Ok(Data::Live(Notification {
+											result: Ok(Data::Live(KvsNotification {
 												live_id,
 												node_id: Default::default(),
 												notification_id: Default::default(),

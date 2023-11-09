@@ -12,7 +12,7 @@ use crate::api::err::Error;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Status;
 use crate::opt::IntoEndpoint;
 use crate::sql::Strand;
@@ -83,7 +83,7 @@ pub(crate) struct Failure {
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
-	Live(Notification),
+	Live(KvsNotification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;

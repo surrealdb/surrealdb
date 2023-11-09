@@ -5,7 +5,7 @@ use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::err::{Error, InternalCause, LiveQueryCause};
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
@@ -1343,7 +1343,7 @@ impl Transaction {
 		tb: &str,
 		lq: sql::Uuid,
 		limit: u32,
-	) -> Result<Vec<Notification>, Error> {
+	) -> Result<Vec<KvsNotification>, Error> {
 		let beg = crate::key::table::nt::prefix(ns, db, tb, lq);
 		let end = crate::key::table::nt::suffix(ns, db, tb, lq);
 		trace!(
@@ -1353,7 +1353,7 @@ impl Transaction {
 		);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
-		let mut out: Vec<Notification> = vec![];
+		let mut out: Vec<KvsNotification> = vec![];
 		while limit == NO_LIMIT || num > 0 {
 			let batch_size = match num {
 				0 => 1000,
@@ -1386,7 +1386,7 @@ impl Transaction {
 					nxt = Some(key.clone());
 				}
 
-				let val: Notification = value.into();
+				let val: KvsNotification = value.into();
 				out.push(val);
 				// Count
 				if limit != NO_LIMIT {
@@ -1438,8 +1438,8 @@ impl Transaction {
 	pub async fn putc_tbnt<'a>(
 		&mut self,
 		key: crate::key::table::nt::Nt<'a>,
-		nt: Notification,
-		expected: Option<Notification>,
+		nt: KvsNotification,
+		expected: Option<KvsNotification>,
 	) -> Result<(), Error> {
 		// Sanity check
 		if nt.timestamp != key.ts {

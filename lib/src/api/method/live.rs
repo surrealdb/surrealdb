@@ -246,7 +246,7 @@ where
 pub struct Stream<'r, C: Connection, R> {
 	router: &'r Router<C>,
 	id: Value,
-	rx: Receiver<dbs::Notification>,
+	rx: Receiver<dbs::KvsNotification>,
 	response_type: PhantomData<R>,
 }
 
@@ -269,7 +269,7 @@ macro_rules! poll_next {
 	($action:ident, $result:ident => $body:expr) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 			match self.as_mut().rx.poll_next_unpin(cx) {
-				Poll::Ready(Some(dbs::Notification {
+				Poll::Ready(Some(dbs::KvsNotification {
 					$action,
 					$result,
 					..

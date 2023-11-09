@@ -177,12 +177,12 @@ pub enum Action {
 	Delete,
 }
 
-impl From<dbs::Action> for Action {
-	fn from(action: dbs::Action) -> Self {
+impl From<dbs::KvsAction> for Action {
+	fn from(action: dbs::KvsAction) -> Self {
 		match action {
-			dbs::Action::Create => Self::Create,
-			dbs::Action::Update => Self::Update,
-			dbs::Action::Delete => Self::Delete,
+			dbs::KvsAction::Create => Self::Create,
+			dbs::KvsAction::Update => Self::Update,
+			dbs::KvsAction::Delete => Self::Delete,
 		}
 	}
 }

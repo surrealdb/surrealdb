@@ -1,8 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Action, Transaction};
+use crate::dbs::{KvsAction, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
@@ -127,11 +127,11 @@ impl<'a> Document<'a> {
 						}
 					}
 					// Send a DELETE notification
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Delete,
+						action: KvsAction::Delete,
 						result: {
 							// Ensure futures are run
 							let lqopt: &Options = &lqopt.new_with_futures(true);
@@ -153,11 +153,11 @@ impl<'a> Document<'a> {
 				} else if self.is_new() {
 					// Send a CREATE notification
 					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Create,
+						action: KvsAction::Create,
 						result: plucked,
 						timestamp: ts,
 					};
@@ -194,11 +194,11 @@ impl<'a> Document<'a> {
 					}
 				} else {
 					// Send a UPDATE notification
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Update,
+						action: KvsAction::Update,
 						result: self.pluck(_ctx, opt, txn, &lq).await?,
 						timestamp: ts,
 					};
@@ -295,7 +295,7 @@ impl<'a> Document<'a> {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
-	use crate::dbs::{Action, Notification, Session};
+	use crate::dbs::{KvsAction, KvsNotification, Session};
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
@@ -326,11 +326,11 @@ mod tests {
 			sql::uuid::Uuid::try_from("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
 			node_id: sql::uuid::Uuid::from(node_id),
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
@@ -396,11 +396,11 @@ mod tests {
 			sql::uuid::Uuid::try_from("4511114c-1780-4d46-8657-efcbd9a45d12").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
 			node_id: sql::uuid::Uuid::from(node_id),
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
@@ -465,11 +465,11 @@ mod tests {
 		let expected_not_id = Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
 			node_id,
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),

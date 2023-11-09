@@ -5,7 +5,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Capabilities;
 use crate::dbs::Executor;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -113,7 +113,7 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: OnceLock<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: OnceLock<(Sender<KvsNotification>, Receiver<KvsNotification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -1210,12 +1210,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+	pub fn notifications(&self) -> Option<Receiver<KvsNotification>> {
 		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn live_sender(&self) -> Option<Sender<KvsNotification>> {
 		self.notification_channel.get().map(|v| v.0.clone())
 	}
 

@@ -1,4 +1,4 @@
-use crate::dbs::{Action, Notification};
+use crate::dbs::{KvsAction, KvsNotification};
 use crate::sql::statements::{CreateStatement, DeleteStatement, UpdateStatement};
 use crate::sql::Data::ContentExpression;
 use crate::sql::{Array, Data, Id, Object, Strand, Thing, Values};
@@ -115,11 +115,11 @@ async fn live_creates_remote_notification_for_create() {
 	// Notification ID is random, so we set it to a known value
 	assert!(!not.notification_id.is_nil());
 	not.notification_id = Default::default();
-	let expected_remote_notification = Notification {
+	let expected_remote_notification = KvsNotification {
 		live_id: live_query_id,
 		node_id: remote_node,
 		notification_id: Default::default(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result: Value::Object(create_value),
 		timestamp: t1,
 	};
@@ -237,19 +237,19 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	second_not.timestamp = Default::default();
 
 	let expected = vec![
-		Notification {
+		KvsNotification {
 			live_id: Default::default(),
 			node_id: local_node,
 			notification_id: Default::default(),
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: safe_pop(first_create),
 			timestamp: Default::default(),
 		},
-		Notification {
+		KvsNotification {
 			live_id: Default::default(),
 			node_id: local_node,
 			notification_id: Default::default(),
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: safe_pop(local_create_value),
 			timestamp: Default::default(),
 		},
@@ -355,11 +355,11 @@ async fn live_creates_remote_notification_for_update() {
 	assert!(!not.notification_id.is_nil());
 	not.notification_id = Default::default();
 	// TODO bug that update notifs are array
-	let expected_remote_notification = Notification {
+	let expected_remote_notification = KvsNotification {
 		live_id: live_query_id,
 		node_id: remote_node,
 		notification_id: Default::default(),
-		action: Action::Update,
+		action: KvsAction::Update,
 		result: update_value,
 		timestamp: t1,
 	};
@@ -460,11 +460,11 @@ async fn live_creates_remote_notification_for_delete() {
 		"id".to_string() => Value::Thing(thing),
 		"name".to_string() => Value::Strand(Strand::from("a name")),
 	}));
-	let expected_remote_notification = Notification {
+	let expected_remote_notification = KvsNotification {
 		live_id: live_query_id,
 		node_id: remote_node,
 		notification_id: Default::default(),
-		action: Action::Delete,
+		action: KvsAction::Delete,
 		result: expected_result,
 		timestamp: t1,
 	};

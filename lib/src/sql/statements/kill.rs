@@ -149,7 +149,7 @@ mod tests {
 	#[tokio::test]
 	#[cfg(feature = "kv-mem")]
 	async fn kill_removes_notifications() {
-		use crate::dbs::{Action, Notification, Session};
+		use crate::dbs::{KvsAction, KvsNotification, Session};
 		use crate::iam::{Level, Role};
 		use crate::kvs::Datastore;
 		use crate::kvs::LockType::Optimistic;
@@ -187,11 +187,11 @@ mod tests {
 		let ts = txn.clock().await;
 		let key =
 			crate::key::table::nt::new(ns, db, tb, lq.clone(), ts.clone(), remote_not_id.clone());
-		let nt = Notification {
+		let nt = KvsNotification {
 			live_id: lq.clone(),
 			node_id: remote_node.clone(),
 			notification_id: remote_not_id.clone(),
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(Strand::from("this would be an object")),
 			timestamp: ts,
 		};
