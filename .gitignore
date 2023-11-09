@@ -41,6 +41,7 @@ Temporary Items
 /bin/
 /docker/
 /.direnv/
+localstore/
 
 # -----------------------------------
 # Specific

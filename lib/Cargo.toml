@@ -116,6 +116,15 @@ trice = "0.3.1"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.4.0"
 
+# object store
+object_store = "0.7.1"
+hex = "0.4.3"
+
+surrealml-core = "0.0.1"
+# surrealml = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
+# surrealml_utils = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
+ndarray = "0.15.6"
+
 [dev-dependencies]
 criterion = { version="0.4", features= ["async_futures"] }
 env_logger = "0.10.0"

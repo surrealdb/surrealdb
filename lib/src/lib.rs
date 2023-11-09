@@ -134,6 +134,8 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
+#[doc(hidden)]
+pub mod obs;
 
 #[doc(inline)]
 pub use api::engine;
