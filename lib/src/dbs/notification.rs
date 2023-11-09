@@ -14,16 +14,6 @@ pub enum KvsAction {
 	Delete,
 }
 
-impl Display for KvsAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match *self {
-			KvsAction::Create => write!(f, "CREATE"),
-			KvsAction::Update => write!(f, "UPDATE"),
-			KvsAction::Delete => write!(f, "DELETE"),
-		}
-	}
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct KvsNotification {
@@ -42,21 +32,6 @@ pub struct KvsNotification {
 	pub timestamp: Timestamp,
 }
 
-impl Display for KvsNotification {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let obj: Object = map! {
-			"live_id".to_string() => self.live_id.to_string().into(),
-			"node_id".to_string() => self.node_id.to_string().into(),
-			"notification_id".to_string() => self.notification_id.to_string().into(),
-			"action".to_string() => self.action.to_string().into(),
-			"result".to_string() => self.result.clone(),
-			"timestamp".to_string() => self.timestamp.to_string().into(),
-		}
-		.into();
-		write!(f, "{}", obj)
-	}
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Action {
@@ -65,32 +40,12 @@ pub enum Action {
 	Delete,
 }
 
-impl Display for Action {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match *self {
-			Action::Create => write!(f, "CREATE"),
-			Action::Update => write!(f, "UPDATE"),
-			Action::Delete => write!(f, "DELETE"),
-		}
-	}
-}
-
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
 	// Live query ID
 	pub id: Uuid,
 	pub action: Action,
 	pub result: Value,
-}
-
-impl Display for Notification {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"Notification {{id: {}, action: {}, result: {}}}",
-			self.id, self.action, self.result
-		)
-	}
 }
 
 impl From<&KvsNotification> for Notification {
