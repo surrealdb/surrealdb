@@ -1,9 +1,9 @@
 use crate::dbs::node::Timestamp;
-use crate::sql::{Object, Uuid, Value};
+use crate::sql::{Uuid, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
+use std::fmt::{Debug};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]
