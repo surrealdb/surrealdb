@@ -25,7 +25,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Check if we can send notifications
-		if let Some(mut chn) = &opt.sender.get() {
+		if let Some(chn) = &opt.sender.get() {
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
 				// Create a new statement

@@ -41,18 +41,18 @@ impl Display for Notification {
 	}
 }
 
-impl From<crate::dbs::Notification> for Notification {
-	fn from(n: crate::dbs::Notification) -> Self {
+impl From<&crate::dbs::Notification> for Notification {
+	fn from(n: &crate::dbs::Notification) -> Self {
 		Self {
 			id: n.live_id,
-			action: Action::from(n.action),
-			result: n.result,
+			action: Action::from(&n.action),
+			result: n.result.clone(),
 		}
 	}
 }
 
-impl From<crate::dbs::Action> for Action {
-	fn from(value: crate::dbs::Action) -> Self {
+impl From<&crate::dbs::Action> for Action {
+	fn from(value: &crate::dbs::Action) -> Self {
 		match value {
 			crate::dbs::Action::Create => Self::Create,
 			crate::dbs::Action::Update => Self::Update,
