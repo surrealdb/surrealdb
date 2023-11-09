@@ -1,9 +1,4 @@
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

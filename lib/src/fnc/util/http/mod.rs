@@ -3,7 +3,9 @@ use crate::err::Error;
 use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
-use crate::sql::{json, Bytes};
+use crate::sql::Bytes;
+use crate::syn::parser::json;
+
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, RequestBuilder, Response};
 use url::Url;

@@ -1,4 +1,4 @@
-use crate::sql::error::IResult;
+use super::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_until;

@@ -1,4 +1,4 @@
-use crate::sql::{constant, error::ParseError, ident::ident_raw};
+use crate::sql::{error::ParseError, ident::ident_raw};
 use nom::{
 	bytes::complete::{tag, tag_no_case},
 	combinator::{opt, peek, value},
@@ -485,4 +485,39 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 		sleep => { fn },
 	}
 	_parse_builtin_name(i)
+}
+
+#[cfg(test)]
+mod tests {
+
+	use crate::sql::builtin::{builtin_name, BuiltinName};
+
+	use super::*;
+
+	#[test]
+	fn constant_lowercase() {
+		let sql = "math::pi";
+		let res = builtin_name(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
+	}
+
+	#[test]
+	fn constant_uppercase() {
+		let sql = "MATH::PI";
+		let res = builtin_name(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
+	}
+
+	#[test]
+	fn constant_mixedcase() {
+		let sql = "math::PI";
+		let res = builtin_name(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
+	}
 }

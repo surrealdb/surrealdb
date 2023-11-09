@@ -2,15 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::common::commas;
-use crate::sql::ending::field as ending;
-use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::{plain, Idiom};
-use crate::sql::parser::idiom;
+use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
-use crate::sql::value::{value, Value};
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{cut, opt};
@@ -242,25 +237,6 @@ impl Fields {
 	}
 }
 
-pub fn fields(i: &str) -> IResult<&str, Fields> {
-	alt((field_one, field_many))(i)
-}
-
-fn field_one(i: &str) -> IResult<&str, Fields> {
-	let (i, _) = tag_no_case("VALUE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, f) = alone(i)?;
-		let (i, _) = ending(i)?;
-		Ok((i, Fields(vec![f], true)))
-	})(i)
-}
-
-fn field_many(i: &str) -> IResult<&str, Fields> {
-	let (i, v) = separated_list1(commas, field)(i)?;
-	Ok((i, Fields(v, false)))
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Field {
@@ -292,100 +268,5 @@ impl Display for Field {
 				}
 			}
 		}
-	}
-}
-
-pub fn field(i: &str) -> IResult<&str, Field> {
-	alt((all, alone))(i)
-}
-
-pub fn all(i: &str) -> IResult<&str, Field> {
-	let (i, _) = tag_no_case("*")(i)?;
-	Ok((i, Field::All))
-}
-
-pub fn alone(i: &str) -> IResult<&str, Field> {
-	let (i, expr) = value(i)?;
-	let (i, alias) =
-		if let (i, Some(_)) = opt(delimited(shouldbespace, tag_no_case("AS"), shouldbespace))(i)? {
-			let (i, alias) = cut(plain)(i)?;
-			(i, Some(alias))
-		} else {
-			(i, None)
-		};
-	Ok((
-		i,
-		Field::Single {
-			expr,
-			alias,
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn field_all() {
-		let sql = "*";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("*", format!("{}", out));
-	}
-
-	#[test]
-	fn field_one() {
-		let sql = "field";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("field", format!("{}", out));
-	}
-
-	#[test]
-	fn field_value() {
-		let sql = "VALUE field";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("VALUE field", format!("{}", out));
-	}
-
-	#[test]
-	fn field_alias() {
-		let sql = "field AS one";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("field AS one", format!("{}", out));
-	}
-
-	#[test]
-	fn field_value_alias() {
-		let sql = "VALUE field AS one";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("VALUE field AS one", format!("{}", out));
-	}
-
-	#[test]
-	fn field_multiple() {
-		let sql = "field, other.field";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("field, other.field", format!("{}", out));
-	}
-
-	#[test]
-	fn field_aliases() {
-		let sql = "field AS one, other.field AS two";
-		let res = fields(sql);
-		let out = res.unwrap().1;
-		assert_eq!("field AS one, other.field AS two", format!("{}", out));
-	}
-
-	#[test]
-	fn field_value_only_one() {
-		let sql = "VALUE field, other.field";
-		fields(sql).unwrap_err();
 	}
 }

@@ -422,7 +422,7 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let builtin_name = crate::sql::builtin::builtin_name(name);
+			let builtin_name = crate::syn::test::builtin_name(name);
 			if builtin_name.is_err() {
 				problems.push(format!("couldn't parse {name} function"));
 			}
