@@ -1,7 +1,6 @@
 mod parse;
 use parse::Parse;
 
-use channel::{Receiver, TryRecvError};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::{Action, Notification, Session};
@@ -410,14 +409,10 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 
 	// Validate notification
-	let notifications = dbs.notifications();
-	let notifications = match notifications {
-		Some(notifications) => notifications,
-		None => panic!("expected notifications"),
-	};
-	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
+	let notifications = dbs.notifications().expect("expected notifications");
+	let notification = notifications.recv().await.unwrap();
 	assert_eq!(
-		not,
+		notification,
 		Notification {
 			live_id,
 			action: Action::Delete,
@@ -430,18 +425,4 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		}
 	);
 	Ok(())
-}
-
-fn recv_notification(
-	notifications: &Receiver<Notification>,
-	tries: u8,
-	poll_rate: std::time::Duration,
-) -> Result<Notification, TryRecvError> {
-	for _ in 0..tries {
-		if let Ok(not) = notifications.try_recv() {
-			return Ok(not);
-		}
-		std::thread::sleep(poll_rate);
-	}
-	notifications.try_recv()
 }
