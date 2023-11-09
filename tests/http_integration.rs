@@ -8,6 +8,7 @@ mod http_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use test_log::test;
+	use ulid::Ulid;
 
 	use super::common::{self, PASS, USER};
 
@@ -870,7 +871,7 @@ mod http_integration {
 	#[test(tokio::test)]
 	async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let table_name = "table";
+		let table_name = Ulid::new().to_string();
 		let num_records = 10;
 		let url = &format!("http://{addr}/key/{table_name}");
 
@@ -884,7 +885,7 @@ mod http_integration {
 			.default_headers(headers)
 			.build()?;
 
-		seed_table(&client, &addr, table_name, num_records).await?;
+		seed_table(&client, &addr, &table_name, num_records).await?;
 
 		// Modify all records
 		{
