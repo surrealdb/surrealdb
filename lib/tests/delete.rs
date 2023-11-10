@@ -416,15 +416,17 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		None => panic!("expected notifications"),
 	};
 	let not = recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
+	let thing: Thing = Thing {
+		tb: "person".to_string(),
+		id: Id::String("test_true".to_string()),
+	};
 	assert_eq!(
 		not,
 		Notification {
 			id: live_id,
 			action: Action::Delete,
-			result: Value::Thing(Thing {
-				tb: "person".to_string(),
-				id: Id::String("test_true".to_string()),
-			}),
+			recid: Value::Thing(thing.clone()),
+			result: Value::Thing(thing),
 		}
 	);
 	Ok(())

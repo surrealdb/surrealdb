@@ -107,6 +107,7 @@ impl<'a> Document<'a> {
 						chn.send(Notification {
 							id: lv.id.clone(),
 							action: Action::Delete,
+							recid: Value::Thing(thing.clone()),
 							result: Value::Thing(thing),
 						})
 						.await?;
@@ -116,9 +117,11 @@ impl<'a> Document<'a> {
 				} else if self.is_new() {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
+						let thing = (*rid).clone();
 						chn.send(Notification {
 							id: lv.id.clone(),
 							action: Action::Create,
+							recid: Value::Thing(thing),
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;
@@ -128,9 +131,11 @@ impl<'a> Document<'a> {
 				} else {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
+						let thing = (*rid).clone();
 						chn.send(Notification {
 							id: lv.id.clone(),
 							action: Action::Update,
+							recid: Value::Thing(thing),
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;

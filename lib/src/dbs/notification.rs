@@ -23,6 +23,7 @@ impl Display for Action {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
 	pub id: Uuid,
+	pub recid: Value,
 	pub action: Action,
 	pub result: Value,
 }
@@ -32,6 +33,7 @@ impl Display for Notification {
 		let obj: Object = map! {
 			"id".to_string() => self.id.to_string().into(),
 			"action".to_string() => self.action.to_string().into(),
+			"recid".to_string() => self.recid.clone(),
 			"result".to_string() => self.result.clone(),
 		}
 		.into();
