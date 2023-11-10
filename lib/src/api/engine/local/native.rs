@@ -114,6 +114,10 @@ pub(crate) fn router(
 
 		let kvs = match Datastore::new(endpoint).await {
 			Ok(kvs) => {
+				if let Err(error) = kvs.bootstrap().await {
+					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					return;
+				}
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
 					if let Err(error) = kvs.setup_initial_creds(root).await {
