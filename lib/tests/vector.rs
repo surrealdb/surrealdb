@@ -105,7 +105,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 async fn index_embedding() -> Result<(), Error> {
 	let sql = r#"
 		DEFINE INDEX idx_mtree_embedding ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST COSINE;
-		CREATE ONLY Document CONTENT {
+		CREATE ONLY Document:1 CONTENT {
   			"items": [
   				{
 					"content": "apple",
@@ -127,20 +127,20 @@ async fn index_embedding() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"[
-			{
-				dist: 2f,
-				id: pts:1
-			},
-			{
-				dist: 12f,
-				id: pts:4
-			},
-			{
-				dist: 20f,
-				id: pts:3
-			}
-		]",
+		"{
+			id: Document:1,
+			items: [
+				{
+					content: 'apple',
+					embedding: [
+						0.009953570552170277f,
+						-0.02680361643433571f,
+						-0.018817437812685966f,
+						-0.08697346597909927f
+					]
+				}
+			]
+		}",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
