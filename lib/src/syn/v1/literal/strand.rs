@@ -1,3 +1,27 @@
+use super::{
+	super::{
+		common::{closeparentheses, commas, expect_delimited, openparentheses},
+		error::expected,
+		thing::id,
+		IResult, ParseError,
+	},
+	ident_raw,
+};
+use crate::sql::Strand;
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char},
+	combinator::{cut, map, map_res, opt, value},
+	number::complete::recognize_float,
+	sequence::{preceded, terminated},
+	Err,
+};
+use std::ops::RangeInclusive;
+
+const LEADING_SURROGATES: RangeInclusive<u16> = 0xD800..=0xDBFF;
+const TRAILING_SURROGATES: RangeInclusive<u16> = 0xDC00..=0xDFFF;
+
 pub fn strand(i: &str) -> IResult<&str, Strand> {
 	let (i, v) = strand_raw(i)?;
 	Ok((i, Strand(v)))
@@ -10,22 +34,22 @@ pub fn strand_raw(i: &str) -> IResult<&str, String> {
 fn strand_blank(i: &str) -> IResult<&str, String> {
 	alt((
 		|i| {
-			let (i, _) = char(SINGLE)(i)?;
-			let (i, _) = char(SINGLE)(i)?;
+			let (i, _) = char('\'')(i)?;
+			let (i, _) = char('\'')(i)?;
 			Ok((i, String::new()))
 		},
 		|i| {
-			let (i, _) = char(DOUBLE)(i)?;
-			let (i, _) = char(DOUBLE)(i)?;
+			let (i, _) = char('\"')(i)?;
+			let (i, _) = char('\"')(i)?;
 			Ok((i, String::new()))
 		},
 	))(i)
 }
 
 fn strand_single(i: &str) -> IResult<&str, String> {
-	let (i, _) = char(SINGLE)(i)?;
+	let (i, _) = char('\'')(i)?;
 	let (i, v) = escaped_transform(
-		is_not(SINGLE_ESC_NUL),
+		is_not("\'\\\0"),
 		'\\',
 		alt((
 			char_unicode,
@@ -39,14 +63,14 @@ fn strand_single(i: &str) -> IResult<&str, String> {
 			value('\u{09}', char('t')),
 		)),
 	)(i)?;
-	let (i, _) = char(SINGLE)(i)?;
+	let (i, _) = char('\'')(i)?;
 	Ok((i, v))
 }
 
 fn strand_double(i: &str) -> IResult<&str, String> {
-	let (i, _) = char(DOUBLE)(i)?;
+	let (i, _) = char('\"')(i)?;
 	let (i, v) = escaped_transform(
-		is_not(DOUBLE_ESC_NUL),
+		is_not("\"\\\0"),
 		'\\',
 		alt((
 			char_unicode,
@@ -60,7 +84,7 @@ fn strand_double(i: &str) -> IResult<&str, String> {
 			value('\u{09}', char('t')),
 		)),
 	)(i)?;
-	let (i, _) = char(DOUBLE)(i)?;
+	let (i, _) = char('\"')(i)?;
 	Ok((i, v))
 }
 

@@ -1,3 +1,19 @@
+use super::super::{common::commas, ending::field as ending, idiom::plain, value::value, IResult};
+use crate::{
+	sql::{Field, Fields},
+	syn::v1::comment::shouldbespace,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char},
+	combinator::{cut, map, map_res, opt, recognize},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn fields(i: &str) -> IResult<&str, Fields> {
 	alt((field_one, field_many))(i)
 }

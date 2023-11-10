@@ -1,3 +1,19 @@
+use super::{
+	common::{commas, val_char},
+	error::expected,
+	IResult,
+};
+use crate::sql::{Ident, Param, Table, Tables};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped_transform, is_not, tag, take_while1},
+	character::complete::char,
+	combinator::{cut, recognize, value},
+	multi::separated_list1,
+	sequence::delimited,
+};
+
+pub mod algorithm;
 pub mod datetime;
 pub mod duration;
 pub mod filter;
@@ -13,6 +29,19 @@ pub mod strand;
 pub mod timeout;
 pub mod tokenizer;
 pub mod uuid;
+
+pub use algorithm::algorithm;
+pub use datetime::datetime;
+pub use duration::duration;
+pub use filter::filters;
+pub use scoring::scoring;
+pub use strand::strand;
+pub use timeout::timeout;
+pub use uuid::uuid;
+
+const BRACKET_L: char = '⟨';
+const BRACKET_R: char = '⟩';
+const BRACKET_END_NUL: &str = "⟩\0";
 
 pub fn ident(i: &str) -> IResult<&str, Ident> {
 	let (i, v) = expected("an identifier", ident_raw)(i)?;
@@ -35,9 +64,9 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_backtick(i: &str) -> IResult<&str, String> {
-	let (i, _) = char(BACKTICK)(i)?;
+	let (i, _) = char('`')(i)?;
 	let (i, v) = escaped_transform(
-		is_not(BACKTICK_ESC_NUL),
+		is_not("`\\\0"),
 		'\\',
 		alt((
 			value('\u{5c}', char('\\')),
@@ -50,7 +79,7 @@ fn ident_backtick(i: &str) -> IResult<&str, String> {
 			value('\u{09}', char('t')),
 		)),
 	)(i)?;
-	let (i, _) = char(BACKTICK)(i)?;
+	let (i, _) = char('`')(i)?;
 	Ok((i, v))
 }
 

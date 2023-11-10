@@ -29,7 +29,7 @@ pub(super) fn reset() {
 /// Call at least once in recursive parsing code paths to limit recursion depth.
 #[inline(never)]
 #[must_use = "must store and implicitly drop when returning"]
-pub(crate) fn dive<I>(position: I) -> Result<Diving, Err<crate::sql::ParseError<I>>> {
+pub(crate) fn dive<I>(position: I) -> Result<Diving, Err<ParseError<I>>> {
 	DEPTH.with(|cell| {
 		let depth = cell.get().saturating_add(DEPTH_PER_DIVE);
 		if depth <= *MAX_COMPUTATION_DEPTH {
@@ -280,8 +280,6 @@ mod tests {
 		n: usize,
 		excessive: bool,
 	) {
-		use crate::sql::error::ParseError;
-
 		let mut sql = String::from(prefix);
 		for _ in 0..n {
 			sql.push_str(recursive_start);
@@ -291,7 +289,7 @@ mod tests {
 			sql.push_str(recursive_end);
 		}
 		let start = Instant::now();
-		let res = query(&sql).finish();
+		let res = crate::syn::parser::query(&sql).finish();
 		let elapsed = start.elapsed();
 		if excessive {
 			assert!(

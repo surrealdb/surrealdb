@@ -4,8 +4,11 @@ use super::super::{
 	IResult,
 };
 use crate::sql::Datetime;
-use chrono::{FixedOffset, NaiveDate, NaiveTime, Offset, Utc};
-use nom::{branch::alt, error::ErrorKind, error_position, sequence::delimited, Err};
+use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
+use nom::{
+	branch::alt, character::complete::char, combinator::map, error::ErrorKind, error_position,
+	sequence::delimited, Err,
+};
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 	expected("a datetime", alt((datetime_single, datetime_double)))(i)

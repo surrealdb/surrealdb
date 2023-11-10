@@ -1,3 +1,15 @@
+use super::super::{ending::number as ending, IResult, ParseError};
+use crate::sql::Number;
+use nom::{
+	branch::alt,
+	bytes::complete::tag,
+	character::complete::i64,
+	combinator::{opt, value},
+	number::complete::recognize_float,
+	Err,
+};
+use rust_decimal::Decimal;
+
 fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
 	let (i, suffix) = suffix(i)?;

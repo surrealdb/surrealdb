@@ -1,32 +1,21 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
-use crate::dbs::node::Timestamp;
-use crate::dbs::Attach;
-use crate::dbs::Capabilities;
-use crate::dbs::Executor;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Response;
-use crate::dbs::Session;
-use crate::dbs::Variables;
+use crate::dbs::{
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
+};
 use crate::err::Error;
-use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
-use crate::sql;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Base;
-use crate::sql::Value;
-use crate::sql::{Query, Uuid};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::Oracle;
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use futures::Future;
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -969,7 +958,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = sql::parse(txt)?;
+		let ast = syn::parser::parse(txt)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}

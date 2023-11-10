@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind, Role};
-use crate::sql::{fmt::Fmt, Base, Ident, Strand, Value};
+use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Strand, Value};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
 	Argon2,

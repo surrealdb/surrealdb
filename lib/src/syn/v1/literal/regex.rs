@@ -1,8 +1,21 @@
+use super::{
+	super::{thing::id, IResult, ParseError},
+	ident_raw,
+};
+use crate::sql::Regex;
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, is_not},
+	character::complete::{anychar, char},
+	combinator::{map, opt},
+	sequence::{preceded, terminated},
+};
+
 pub fn regex(i: &str) -> IResult<&str, Regex> {
 	let (i, _) = char('/')(i)?;
 	let (i, v) = escaped(is_not("\\/"), '\\', anychar)(i)?;
 	let (i, _) = char('/')(i)?;
-	let regex = v.parse().map_err(|_| nom::Err::Error(crate::sql::ParseError::Base(v)))?;
+	let regex = v.parse().map_err(|_| nom::Err::Error(ParseError::Base(v)))?;
 	Ok((i, regex))
 }
 

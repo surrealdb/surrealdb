@@ -1,22 +1,24 @@
 use crate::sql::Query;
+use nom::Err;
 
 mod literal;
 mod part;
 mod stmt;
 
+mod block;
 mod builtin;
 mod comment;
 mod common;
 mod depth;
 mod ending;
 mod error;
-mod escape;
 mod expression;
 mod function;
 mod idiom;
 mod kind;
 mod omit;
 mod operator;
+mod special;
 mod subquery;
 mod thing;
 mod value;
@@ -27,7 +29,7 @@ pub use error::{IResult, ParseError};
 pub(crate) mod test;
 
 pub fn query(i: &str) -> IResult<&str, Query> {
-	let (i, v) = statements(i)?;
+	let (i, v) = stmt::statements(i)?;
 	if !i.is_empty() {
 		return Err(Err::Failure(ParseError::ExplainedExpected {
 			tried: i,

@@ -1,5 +1,27 @@
+use crate::sql::Geometry;
+
+use super::super::{
+	comment::mightbespace,
+	common::{
+		closebraces, closebracket, closeparentheses, commas, delimited_list0, delimited_list1,
+		openbraces, openbracket, openparentheses,
+	},
+	depth, IResult,
+};
+
+use geo::{LineString, Point, Polygon};
+use nom::{
+	branch::alt,
+	bytes::complete::{tag, tag_no_case},
+	character::complete::{char, u16},
+	combinator::{cut, opt},
+	multi::separated_list1,
+	number::complete::double,
+	sequence::{delimited, preceded, terminated},
+};
+
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
-	let _diving = crate::sql::depth::dive(i)?;
+	let _diving = depth::dive(i)?;
 	alt((simple, normal))(i)
 }
 
@@ -216,56 +238,56 @@ fn coordinate(i: &str) -> IResult<&str, (f64, f64)> {
 
 fn point_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("Point"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("Point"), char(DOUBLE)),
+		delimited(char('\''), tag("Point"), char('\'')),
+		delimited(char('\"'), tag("Point"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn line_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("LineString"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("LineString"), char(DOUBLE)),
+		delimited(char('\''), tag("LineString"), char('\'')),
+		delimited(char('\"'), tag("LineString"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn polygon_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("Polygon"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("Polygon"), char(DOUBLE)),
+		delimited(char('\''), tag("Polygon"), char('\'')),
+		delimited(char('\"'), tag("Polygon"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn multipoint_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("MultiPoint"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("MultiPoint"), char(DOUBLE)),
+		delimited(char('\''), tag("MultiPoint"), char('\'')),
+		delimited(char('\"'), tag("MultiPoint"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn multiline_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("MultiLineString"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("MultiLineString"), char(DOUBLE)),
+		delimited(char('\''), tag("MultiLineString"), char('\'')),
+		delimited(char('\"'), tag("MultiLineString"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn multipolygon_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("MultiPolygon"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("MultiPolygon"), char(DOUBLE)),
+		delimited(char('\''), tag("MultiPolygon"), char('\'')),
+		delimited(char('\"'), tag("MultiPolygon"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
 
 fn collection_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
-		delimited(char(SINGLE), tag("GeometryCollection"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("GeometryCollection"), char(DOUBLE)),
+		delimited(char('\''), tag("GeometryCollection"), char('\'')),
+		delimited(char('\"'), tag("GeometryCollection"), char('\"')),
 	))(i)?;
 	Ok((i, v))
 }
@@ -277,8 +299,8 @@ fn collection_type(i: &str) -> IResult<&str, &str> {
 fn key_type(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
 		tag("type"),
-		delimited(char(SINGLE), tag("type"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("type"), char(DOUBLE)),
+		delimited(char('\''), tag("type"), char('\'')),
+		delimited(char('\"'), tag("type"), char('\"')),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(':')(i)?;
@@ -289,8 +311,8 @@ fn key_type(i: &str) -> IResult<&str, &str> {
 fn key_vals(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
 		tag("coordinates"),
-		delimited(char(SINGLE), tag("coordinates"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("coordinates"), char(DOUBLE)),
+		delimited(char('\''), tag("coordinates"), char('\'')),
+		delimited(char('\"'), tag("coordinates"), char('\"')),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(':')(i)?;
@@ -301,8 +323,8 @@ fn key_vals(i: &str) -> IResult<&str, &str> {
 fn key_geom(i: &str) -> IResult<&str, &str> {
 	let (i, v) = alt((
 		tag("geometries"),
-		delimited(char(SINGLE), tag("geometries"), char(SINGLE)),
-		delimited(char(DOUBLE), tag("geometries"), char(DOUBLE)),
+		delimited(char('\''), tag("geometries"), char('\'')),
+		delimited(char('\"'), tag("geometries"), char('\"')),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(':')(i)?;

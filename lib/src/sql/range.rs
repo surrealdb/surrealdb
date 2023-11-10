@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::id::Id;
-use crate::sql::value::Value;
+use crate::sql::{strand::no_nul_bytes, Id, Value};
+use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -33,7 +33,7 @@ impl FromStr for Range {
 impl TryFrom<&str> for Range {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match range(v) {
+		match syn::parser::range(v) {
 			Ok((_, v)) => Ok(v),
 			_ => Err(()),
 		}

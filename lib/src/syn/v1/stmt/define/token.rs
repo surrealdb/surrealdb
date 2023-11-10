@@ -1,3 +1,39 @@
+use super::super::super::{
+	block::block,
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, commas, commasorspace, openparentheses},
+	ending,
+	error::{expect_tag_no_case, expected, ExplainResultExt},
+	idiom::{self, basic, plain},
+	literal::{
+		algorithm, datetime, duration, filters, ident, param, scoring, strand, strand::strand_raw,
+		table, tables, timeout, tokenizer,
+	},
+	operator::{assigner, dir},
+	part::{
+		base, base_or_scope, cond, data,
+		data::{single, update},
+		output,
+		permission::permissions,
+	},
+	thing::thing,
+	value::{value, values, whats},
+	IResult,
+};
+use crate::sql::{
+	statements::DefineTokenStatement, Algorithm, Idioms, Index, Kind, Permissions, Strand, Value,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	multi::{many0, separated_list1},
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
 	let (i, _) = shouldbespace(i)?;

@@ -149,7 +149,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let id = match id {
-				Some(id) => crate::sql::thing(&id)?.into(),
+				Some(id) => crate::syn::parser::thing(&id)?.into(),
 				None => Value::None,
 			};
 			// Get the scope token
@@ -185,7 +185,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let id = crate::sql::thing(&id)?;
+			let id = crate::syn::parser::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;

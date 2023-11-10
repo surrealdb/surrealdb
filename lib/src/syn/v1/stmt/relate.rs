@@ -1,11 +1,31 @@
+use super::super::{
+	block::block,
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, commas, commasorspace, openparentheses},
+	error::{expect_tag_no_case, expected, ExplainResultExt},
+	idiom::{basic, plain},
+	literal::{datetime, duration, ident, param, scoring, table, tables, timeout},
+	operator::{assigner, dir},
+	part::{
+		cond, data,
+		data::{single, update},
+		fetch, fields, output,
+	},
+	subquery::subquery,
+	thing::thing,
+	value::{array, value, values, whats},
+	IResult,
+};
+use crate::sql::{statements::RelateStatement, Fields, Value};
 use nom::{
 	branch::alt,
-	bytes::complete::{tag, tag_no_case},
-	combinator::cut,
-	combinator::into,
-	combinator::opt,
-	combinator::value,
-	sequence::preceded,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
 };
 
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {

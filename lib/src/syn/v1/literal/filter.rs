@@ -1,3 +1,14 @@
+use super::super::{
+	common::{closeparentheses, commas, openparentheses},
+	literal::language::language,
+	IResult,
+};
+use crate::sql::filter::Filter;
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, character::complete::u16, combinator::cut,
+	multi::separated_list1,
+};
+
 fn ascii(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("ASCII")(i)?;
 	Ok((i, Filter::Ascii))
@@ -51,6 +62,6 @@ fn filter(i: &str) -> IResult<&str, Filter> {
 	alt((ascii, edgengram, lowercase, ngram, snowball, uppercase))(i)
 }
 
-pub(super) fn filters(i: &str) -> IResult<&str, Vec<Filter>> {
+pub fn filters(i: &str) -> IResult<&str, Vec<Filter>> {
 	separated_list1(commas, filter)(i)
 }

@@ -15,8 +15,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-use super::dir::dir;
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -1,4 +1,4 @@
-use crate::sql::Operator;
+use crate::sql::{Dir, Operator};
 
 use super::{
 	comment::{mightbespace, shouldbespace},
@@ -138,4 +138,38 @@ pub fn knn(i: &str) -> IResult<&str, Operator> {
 	let (i, k) = u32(i)?;
 	let (i, _) = char('>')(i)?;
 	Ok((i, Operator::Knn(k)))
+}
+
+pub fn dir(i: &str) -> IResult<&str, Dir> {
+	alt((value(Dir::Both, tag("<->")), value(Dir::In, tag("<-")), value(Dir::Out, tag("->"))))(i)
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn dir_in() {
+		let sql = "<-";
+		let res = dir(sql);
+		let out = res.unwrap().1;
+		assert_eq!("<-", format!("{}", out));
+	}
+
+	#[test]
+	fn dir_out() {
+		let sql = "->";
+		let res = dir(sql);
+		let out = res.unwrap().1;
+		assert_eq!("->", format!("{}", out));
+	}
+
+	#[test]
+	fn dir_both() {
+		let sql = "<->";
+		let res = dir(sql);
+		let out = res.unwrap().1;
+		assert_eq!("<->", format!("{}", out));
+	}
 }

@@ -1,13 +1,9 @@
-use crate::sql::fmt::Fmt;
-use crate::sql::id::Id;
-use crate::sql::ident::Ident;
-use crate::sql::thing::Thing;
+use crate::sql::{escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 

@@ -1,3 +1,28 @@
+use super::{
+	super::{
+		comment::{mightbespace, shouldbespace},
+		common::commas,
+		error::expect_tag_no_case,
+		literal::{ident, scoring, tables},
+		value::value,
+		IResult,
+	},
+	cond,
+	field::fields,
+	group,
+};
+use crate::{sql::View, syn::v1::error::expected};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, map, map_res, opt, recognize},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn view(i: &str) -> IResult<&str, View> {
 	let select_view = |i| {
 		let (i, _) = tag_no_case("SELECT")(i)?;

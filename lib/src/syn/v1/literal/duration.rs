@@ -1,3 +1,17 @@
+use super::super::{ending::duration as ending, error::expected, IResult, ParseError};
+use crate::{
+	sql::{
+		duration::{
+			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
+			SECONDS_PER_YEAR,
+		},
+		Duration,
+	},
+	syn::v1::common::take_u64,
+};
+use nom::{branch::alt, bytes::complete::tag, multi::many1};
+use std::time;
+
 pub fn duration(i: &str) -> IResult<&str, Duration> {
 	expected("a duration", |i| {
 		let (i, v) = many1(duration_raw)(i)?;
@@ -24,7 +38,7 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 		_ => unreachable!("shouldn't have parsed {u} as duration unit"),
 	};
 
-	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(crate::sql::ParseError::Base(i)))
+	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(ParseError::Base(i)))
 }
 
 fn part(i: &str) -> IResult<&str, u64> {

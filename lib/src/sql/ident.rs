@@ -1,12 +1,9 @@
+use crate::sql::{escape::escape_ident, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
-const BRACKET_L: char = '⟨';
-const BRACKET_R: char = '⟩';
-const BRACKET_END_NUL: &str = "⟩\0";
 
 const BACKTICK: char = '`';
 const BACKTICK_ESC_NUL: &str = "`\\\0";

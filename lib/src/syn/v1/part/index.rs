@@ -1,3 +1,24 @@
+use super::super::{
+	comment::{mightbespace, shouldbespace},
+	common::commas,
+	literal::{ident, scoring},
+	IResult,
+};
+use crate::sql::{
+	index::{Distance, MTreeParams, SearchParams, VectorType},
+	Ident, Index,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, map, map_res, opt, recognize},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn index(i: &str) -> IResult<&str, Index> {
 	alt((unique, search, mtree))(i)
 }
@@ -19,7 +40,7 @@ fn order<'a>(label: &'static str, i: &'a str) -> IResult<&'a str, u32> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case(label)(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, order) = cut(uint32)(i)?;
+	let (i, order) = cut(u32)(i)?;
 	Ok((i, order))
 }
 
@@ -59,7 +80,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 		Ok((
 			i,
 			Index::Search(SearchParams {
-				az: az.unwrap_or_else(|| Ident::from(Analyzers::LIKE)),
+				az: az.unwrap_or_else(|| Ident::from("like")),
 				sc,
 				hl,
 				doc_ids_order: o1.unwrap_or(100),
@@ -88,7 +109,7 @@ pub fn distance(i: &str) -> IResult<&str, Distance> {
 pub fn minkowski(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = tag_no_case("MINKOWSKI")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, order) = uint32(i)?;
+	let (i, order) = u32(i)?;
 	Ok((i, Distance::Minkowski(order.into())))
 }
 
@@ -110,7 +131,7 @@ pub fn dimension(i: &str) -> IResult<&str, u16> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIMENSION")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, dim) = uint16(i)?;
+	let (i, dim) = u16(i)?;
 	Ok((i, dim))
 }
 
@@ -118,7 +139,7 @@ pub fn capacity(i: &str) -> IResult<&str, u16> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("CAPACITY")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, capacity) = uint16(i)?;
+	let (i, capacity) = u16(i)?;
 	Ok((i, capacity))
 }
 

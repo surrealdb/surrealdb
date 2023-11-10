@@ -1,3 +1,4 @@
+use crate::sql::strand::no_nul_bytes;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

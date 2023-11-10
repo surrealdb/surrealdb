@@ -2,7 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::sql::{
+	fmt::{pretty_indent, Fmt, Pretty},
+	Number, Operation, Value,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

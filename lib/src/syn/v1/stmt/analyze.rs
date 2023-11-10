@@ -1,5 +1,27 @@
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
+use super::super::{
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, commas, commasorspace, openparentheses},
+	error::{expect_tag_no_case, expected},
+	idiom::{basic, plain},
+	literal::{datetime, duration, ident, scoring, table, tables},
+	operator::{assigner, dir},
+	thing::thing,
+	// TODO: go through and check every import for alias.
+	value::value,
+	IResult,
+};
+use crate::sql::statements::AnalyzeStatement;
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn analyze(i: &str) -> IResult<&str, AnalyzeStatement> {
 	let (i, _) = tag_no_case("ANALYZE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -13,14 +35,6 @@ pub fn analyze(i: &str) -> IResult<&str, AnalyzeStatement> {
 		let (i, tb) = ident(i)?;
 		Ok((i, AnalyzeStatement::Idx(tb, idx)))
 	})(i)
-}
-
-impl Display for AnalyzeStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Idx(tb, idx) => write!(f, "ANALYZE INDEX {idx} ON {tb}"),
-		}
-	}
 }
 
 #[cfg(test)]

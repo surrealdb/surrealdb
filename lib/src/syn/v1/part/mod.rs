@@ -1,20 +1,56 @@
-mod field;
-mod index;
-mod split;
-mod start;
-mod view;
-mod with;
+use super::{
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, commas, commasorspace, openparentheses},
+	error::{expect_tag_no_case, expected},
+	idiom::{basic, plain},
+	literal::{datetime, duration, ident, scoring, table, tables},
+	operator::{assigner, dir},
+	thing::thing,
+	// TODO: go through and check every import for alias.
+	value::value,
+	IResult,
+};
+use crate::sql::{
+	Base, ChangeFeed, Cond, Data, Edges, Explain, Fetch, Fetchs, Group, Groups, Limit, Order,
+	Orders, Output, Tables, Version,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
+pub mod data;
+pub mod field;
+pub mod index;
+pub mod permission;
+pub mod split;
+pub mod start;
+pub mod view;
+pub mod with;
+
+pub use data::data;
+pub use field::{field, fields};
+pub use split::split;
+pub use start::start;
+pub use view::view;
+pub use with::with;
 
 pub fn base(i: &str) -> IResult<&str, Base> {
 	expected(
 		"a base, one of NAMESPACE, DATABASE, ROOT or KV",
 		alt((
-			value(Base::Ns, tag_no_case("NAMESPACE")),
-			value(Base::Db, tag_no_case("DATABASE")),
-			value(Base::Root, tag_no_case("ROOT")),
-			value(Base::Ns, tag_no_case("NS")),
-			value(Base::Db, tag_no_case("DB")),
-			value(Base::Root, tag_no_case("KV")),
+			map_value(Base::Ns, tag_no_case("NAMESPACE")),
+			map_value(Base::Db, tag_no_case("DATABASE")),
+			map_value(Base::Root, tag_no_case("ROOT")),
+			map_value(Base::Ns, tag_no_case("NS")),
+			map_value(Base::Db, tag_no_case("DB")),
+			map_value(Base::Root, tag_no_case("KV")),
 		)),
 	)(i)
 }
@@ -26,31 +62,6 @@ pub fn base_or_scope(i: &str) -> IResult<&str, Base> {
 		let (i, v) = cut(ident)(i)?;
 		Ok((i, Base::Sc(v)))
 	}))(i)
-}
-
-pub fn entry(i: &str) -> IResult<&str, Entry> {
-	delimited(
-		mightbespace,
-		alt((
-			map(set, Entry::Set),
-			map(output, Entry::Output),
-			map(ifelse, Entry::Ifelse),
-			map(select, Entry::Select),
-			map(create, Entry::Create),
-			map(update, Entry::Update),
-			map(relate, Entry::Relate),
-			map(delete, Entry::Delete),
-			map(insert, Entry::Insert),
-			map(define, Entry::Define),
-			map(remove, Entry::Remove),
-			map(throw, Entry::Throw),
-			map(r#break, Entry::Break),
-			map(r#continue, Entry::Continue),
-			map(foreach, Entry::Foreach),
-			map(value, Entry::Value),
-		)),
-		mightbespace,
-	)(i)
 }
 
 pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
@@ -70,107 +81,6 @@ pub fn cond(i: &str) -> IResult<&str, Cond> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(value)(i)?;
 	Ok((i, Cond(v)))
-}
-
-pub fn data(i: &str) -> IResult<&str, Data> {
-	alt((set, unset, patch, merge, replace, content))(i)
-}
-
-fn set(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("SET")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(separated_list1(
-		commas,
-		cut(|i| {
-			let (i, l) = idiom(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, o) = assigner(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, r) = value(i)?;
-			Ok((i, (l, o, r)))
-		}),
-	))(i)?;
-	Ok((i, Data::SetExpression(v)))
-}
-
-fn unset(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("UNSET")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(separated_list1(commas, idiom))(i)?;
-	Ok((i, Data::UnsetExpression(v)))
-}
-
-fn patch(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("PATCH")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(value)(i)?;
-	Ok((i, Data::PatchExpression(v)))
-}
-
-fn merge(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("MERGE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(value)(i)?;
-	Ok((i, Data::MergeExpression(v)))
-}
-
-fn replace(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("REPLACE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(value)(i)?;
-	Ok((i, Data::ReplaceExpression(v)))
-}
-
-fn content(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("CONTENT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(value)(i)?;
-	Ok((i, Data::ContentExpression(v)))
-}
-
-pub fn single(i: &str) -> IResult<&str, Data> {
-	let (i, v) = value(i)?;
-	Ok((i, Data::SingleExpression(v)))
-}
-
-pub fn values(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("(")(i)?;
-	// TODO: look at call tree here.
-	let (i, fields) = separated_list1(commas, idiom)(i)?;
-	let (i, _) = tag_no_case(")")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("VALUES")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, values) = separated_list1(commas, |i| {
-		let (i, _) = tag_no_case("(")(i)?;
-		let (i, v) = separated_list1(commas, value)(i)?;
-		let (i, _) = tag_no_case(")")(i)?;
-		Ok((i, v))
-	})(i)?;
-	Ok((
-		i,
-		Data::ValuesExpression(
-			values.into_iter().map(|row| fields.iter().cloned().zip(row).collect()).collect(),
-		),
-	))
-}
-
-pub fn update(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("ON DUPLICATE KEY UPDATE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_list1(commas, |i| {
-		let (i, l) = idiom(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, o) = assigner(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, r) = value(i)?;
-		Ok((i, (l, o, r)))
-	})(i)?;
-	Ok((i, Data::UpdateExpression(v)))
-}
-
-pub fn dir(i: &str) -> IResult<&str, Dir> {
-	alt((value(Dir::Both, tag("<->")), value(Dir::In, tag("<-")), value(Dir::Out, tag("->"))))(i)
 }
 
 pub fn edges(i: &str) -> IResult<&str, Edges> {
@@ -220,7 +130,7 @@ pub fn fetch(i: &str) -> IResult<&str, Fetchs> {
 }
 
 fn fetch_raw(i: &str) -> IResult<&str, Fetch> {
-	let (i, v) = idiom(i)?;
+	let (i, v) = plain(i)?;
 	Ok((i, Fetch(v)))
 }
 

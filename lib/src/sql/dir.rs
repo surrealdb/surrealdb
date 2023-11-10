@@ -25,37 +25,3 @@ impl fmt::Display for Dir {
 		})
 	}
 }
-
-pub fn dir(i: &str) -> IResult<&str, Dir> {
-	alt((value(Dir::Both, tag("<->")), value(Dir::In, tag("<-")), value(Dir::Out, tag("->"))))(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn dir_in() {
-		let sql = "<-";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<-", format!("{}", out));
-	}
-
-	#[test]
-	fn dir_out() {
-		let sql = "->";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("->", format!("{}", out));
-	}
-
-	#[test]
-	fn dir_both() {
-		let sql = "<->";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<->", format!("{}", out));
-	}
-}

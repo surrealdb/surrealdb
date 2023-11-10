@@ -2,10 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::operation::Operation;
-use crate::sql::thing::Thing;
-use crate::sql::value::{value, Value};
+use crate::sql::{
+	escape::escape_key,
+	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
+	strand::no_nul_bytes,
+	Operation, Thing, Value,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

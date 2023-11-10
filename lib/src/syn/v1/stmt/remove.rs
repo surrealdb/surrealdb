@@ -1,4 +1,39 @@
-use nom::{bytes::complete::tag_no_case, combinator::cut};
+use super::super::{
+	block::block,
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, commas, commasorspace, openparentheses},
+	error::{expect_tag_no_case, expected, ExplainResultExt},
+	idiom::{self, basic, plain},
+	literal::{datetime, duration, ident, scoring, tables, timeout},
+	operator::{assigner, dir},
+	part::{
+		base, base_or_scope, cond, data,
+		data::{single, update},
+		fetch, fields, output,
+	},
+	thing::thing,
+	value::{value, values, whats},
+	IResult,
+};
+use crate::sql::{
+	statements::{
+		RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+		RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+		RemoveNamespaceStatement, RemoveParamStatement, RemoveScopeStatement, RemoveStatement,
+		RemoveTableStatement, RemoveTokenStatement, RemoveUserStatement,
+	},
+	Fields, Value,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	multi::separated_list1,
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
 
 pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;

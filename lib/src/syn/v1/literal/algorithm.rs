@@ -1,3 +1,7 @@
+use super::super::IResult;
+use crate::sql::Algorithm;
+use nom::{branch::alt, bytes::complete::tag, combinator::value};
+
 pub fn algorithm(i: &str) -> IResult<&str, Algorithm> {
 	alt((
 		value(Algorithm::EdDSA, tag("EDDSA")),

@@ -1,6 +1,4 @@
-use crate::sql::{
-	fmt::Fmt, graph::Graph, ident::Ident, idiom::Idiom, number::Number, value::Value,
-};
+use crate::sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

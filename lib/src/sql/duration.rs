@@ -1,5 +1,6 @@
 use crate::sql::datetime::Datetime;
 use crate::sql::strand::Strand;
+use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -9,13 +10,13 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::time;
 
-static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
-static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
-static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
-static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
-static SECONDS_PER_MINUTE: u64 = 60;
-static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
-static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
+pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
+pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
+pub(crate) static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
+pub(crate) static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
+pub(crate) static SECONDS_PER_MINUTE: u64 = 60;
+pub(crate) static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
+pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
@@ -60,7 +61,7 @@ impl TryFrom<Strand> for Duration {
 impl TryFrom<&str> for Duration {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match duration(v) {
+		match syn::parser::duration(v) {
 			Ok((_, v)) => Ok(v),
 			_ => Err(()),
 		}

@@ -70,3 +70,11 @@ impl AnalyzeStatement {
 		}
 	}
 }
+
+impl Display for AnalyzeStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Idx(tb, idx) => write!(f, "ANALYZE INDEX {idx} ON {tb}"),
+		}
+	}
+}

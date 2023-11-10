@@ -1,5 +1,6 @@
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
+use crate::syn;
 use chrono::{
 	DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, SecondsFormat, TimeZone,
 	Utc,
@@ -11,6 +12,8 @@ use std::ops;
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
+
+use super::escape::quote_str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
@@ -61,7 +64,7 @@ impl TryFrom<Strand> for Datetime {
 impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match datetime_all_raw(v) {
+		match syn::parser::datetime(v) {
 			Ok((_, v)) => Ok(v),
 			_ => Err(()),
 		}

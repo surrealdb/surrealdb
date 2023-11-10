@@ -1,4 +1,4 @@
-use crate::sql::strand::Strand;
+use crate::sql::{escape::quote_str, strand::Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

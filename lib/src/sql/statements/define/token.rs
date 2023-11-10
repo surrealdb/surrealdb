@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Algorithm, Base, Ident, Strand, Value};
+use crate::sql::{escape::quote_str, Algorithm, Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,31 @@
+use super::{
+	super::{
+		comment::{mightbespace, shouldbespace},
+		common::{commas, commasorspace},
+		error::{expect_tag_no_case, expected},
+		literal::{ident, scoring, tables},
+		value::value,
+		IResult,
+	},
+	cond,
+	field::fields,
+	group,
+};
+use crate::sql::{
+	permission::{Permission, PermissionKind},
+	Permissions,
+};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
+	character::complete::{anychar, char, u16, u32},
+	combinator::{self, cut, map, map_res, opt, recognize},
+	multi::{separated_list0, separated_list1},
+	number::complete::recognize_float,
+	sequence::{delimited, preceded, terminated, tuple},
+	Err,
+};
+
 pub fn permissions(i: &str) -> IResult<&str, Permissions> {
 	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
 	let (i, _) = shouldbespace(i)?;

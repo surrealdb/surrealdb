@@ -1,3 +1,4 @@
+use crate::sql::escape::quote_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -12,9 +13,6 @@ const SINGLE_ESC_NUL: &str = "'\\\0";
 
 const DOUBLE: char = '"';
 const DOUBLE_ESC_NUL: &str = "\"\\\0";
-
-const LEADING_SURROGATES: RangeInclusive<u16> = 0xD800..=0xDBFF;
-const TRAILING_SURROGATES: RangeInclusive<u16> = 0xDC00..=0xDFFF;
 
 /// A string that doesn't contain NUL bytes.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]

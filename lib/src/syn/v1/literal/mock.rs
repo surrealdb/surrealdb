@@ -1,8 +1,20 @@
+use crate::sql::Mock;
+use nom::{
+	branch::alt,
+	character::complete::{char, u64},
+	combinator::map,
+};
+
+use super::{
+	super::{value::value, IResult, ParseError},
+	ident_raw,
+};
+
 pub fn mock(i: &str) -> IResult<&str, Mock> {
 	let (i, _) = char('|')(i)?;
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
-	let (i, c) = take_u64(i)?;
+	let (i, c) = u64(i)?;
 	let (i, e) = alt((value(None, char('|')), map(mock_range, Some)))(i)?;
 	if let Some(e) = e {
 		Ok((i, Mock::Range(t, c, e)))
@@ -14,7 +26,7 @@ pub fn mock(i: &str) -> IResult<&str, Mock> {
 fn mock_range(i: &str) -> IResult<&str, u64> {
 	let (i, _) = char('.')(i)?;
 	let (i, _) = char('.')(i)?;
-	let (i, e) = take_u64(i)?;
+	let (i, e) = u64(i)?;
 	let (i, _) = char('|')(i)?;
 	Ok((i, e))
 }
