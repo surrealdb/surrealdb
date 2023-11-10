@@ -239,8 +239,6 @@ impl<'a> Processor<'a> {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns(), opt.db(), &v);
 		let end = thing::suffix(opt.ns(), opt.db(), &v);
-		// Prepare the next holder key
-		let mut nxt: Option<Vec<u8>> = None;
 		// Loop until no more keys
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
@@ -256,10 +254,8 @@ impl<'a> Processor<'a> {
 			if res.is_empty() {
 				break;
 			}
-			// Get total results
-			let n = res.len();
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
+			for (k, v) in res.into_iter() {
 				// Check the context
 				if ctx.is_done() {
 					break;
@@ -315,69 +311,43 @@ impl<'a> Processor<'a> {
 				key
 			}
 		};
-		// Prepare the next holder key
-		let mut nxt: Option<Vec<u8>> = None;
 		// Loop until no more keys
-		loop {
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
+			let res = txn.clone().lock().await.scan(page, PROCESSOR_BATCH_SIZE).await?;
+			next_page = res.next_page;
 			// Get the next batch of key-value entries
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone()
-						.lock()
-						.await
-						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
-						.await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone()
-						.lock()
-						.await
-						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
-						.await?
-				}
-			};
 			let res = res.values;
 			// If there are key-value entries then fetch them
-			if !res.is_empty() {
-				// Get total results
-				let n = res.len();
-				// Loop over results
-				for (i, (k, v)) in res.into_iter().enumerate() {
-					// Check the context
-					if ctx.is_done() {
-						break;
-					}
-					// Ready the next
-					if n == i + 1 {
-						nxt = Some(k.clone());
-					}
-					// Parse the data from the store
-					let key: thing::Thing = (&k).into();
-					let val: Value = (&v).into();
-					let rid = Thing::from((key.tb, key.id));
-					// Create a new operable value
-					let val = Operable::Value(val);
-					// Process the record
-					let pro = Processed {
-						ir: None,
-						rid: Some(rid),
-						doc_id: None,
-						val,
-					};
-					self.process(ctx, opt, txn, stm, pro).await?;
-				}
-				continue;
+			if res.is_empty() {
+				break;
 			}
-			break;
+			// Loop over results
+			for (k, v) in res.into_iter() {
+				// Check the context
+				if ctx.is_done() {
+					break;
+				}
+				// Parse the data from the store
+				let key: thing::Thing = (&k).into();
+				let val: Value = (&v).into();
+				let rid = Thing::from((key.tb, key.id));
+				// Create a new operable value
+				let val = Operable::Value(val);
+				// Process the record
+				let pro = Processed {
+					ir: None,
+					rid: Some(rid),
+					doc_id: None,
+					val,
+				};
+				self.process(ctx, opt, txn, stm, pro).await?;
+			}
+			continue;
 		}
 		// Everything ok
 		Ok(())
