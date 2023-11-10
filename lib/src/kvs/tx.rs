@@ -48,8 +48,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-pub(crate) const NO_LIMIT: u32 = 0; // TODO delete
-
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
 	Unlimited,
@@ -636,8 +634,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -731,8 +727,8 @@ impl Transaction {
 			} else {
 				let mut rng = page.range.clone();
 				rng.start = match tup_vec.last() {
-					Some((k, _)) => K::from(k.clone()),
-					None => rng.start, // TODO error instead
+					Some((k, _)) => K::from(k.clone().add(0)),
+					None => rng.start,
 				};
 				ScanResult {
 					next_page: Some(ScanPage {
@@ -752,8 +748,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -1150,7 +1144,6 @@ impl Transaction {
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
 			}
 		}
-		trace!("scan_hb: {:?}", out);
 		Ok(out)
 	}
 
@@ -1159,8 +1152,6 @@ impl Transaction {
 	pub async fn scan_nd(&mut self, batch_size: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
 		let mut next_page = Some(ScanPage::from(beg..end));
@@ -1205,7 +1196,7 @@ impl Transaction {
 		while let Some(page) = next_page {
 			let res = self.scan(page, batch_size).await?;
 			next_page = res.next_page;
-			for (i, (key, value)) in res.values.into_iter().enumerate() {
+			for (key, value) in res.values.into_iter() {
 				let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
 				let tb: String = String::from_utf8(value).unwrap();
 				out.push(LqValue {
@@ -1225,50 +1216,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::table::lq::prefix(ns, db, tb);
 		let end = crate::key::table::lq::suffix(ns, db, tb);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&beg),
-			crate::key::debug::sprint_key(&end),
-		);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-			};
-			let res = res.values;
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (key, value) in res.values.into_iter() {
 				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 				let val: LiveStatement = value.into();
 				out.push(LqValue {
@@ -1278,10 +1235,6 @@ impl Transaction {
 					tb: lv.tb.to_string(),
 					lq: val.id.clone(),
 				});
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
 			}
 		}
 		Ok(out)
@@ -1298,6 +1251,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}

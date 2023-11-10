@@ -15,7 +15,7 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::{SizedClock, SystemClock};
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -572,7 +572,7 @@ impl Datastore {
 		for nd in nodes.iter() {
 			trace!("Archiving node {}", &nd);
 			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, NO_LIMIT).await?;
+			let node_lqs = tx.scan_ndlq(nd, 100_000).await?;
 			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
@@ -612,7 +612,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(NO_LIMIT).await?;
+		let cluster = tx.scan_nd(100_000).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
@@ -623,7 +623,7 @@ impl Datastore {
 			// We remove one, because the scan range adds one
 			value: u64::MAX - 1,
 		};
-		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
+		let hbs = tx.scan_hb(&end_of_time, 100_000).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			match unreachable_nodes.remove(&hb.nd.to_string()) {
@@ -649,7 +649,7 @@ impl Datastore {
 		for cl in &cluster {
 			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
                 Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-            })?, NO_LIMIT).await?;
+            })?, 100_000).await?;
 			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
@@ -658,7 +658,7 @@ impl Datastore {
 		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 100_000).await?;
 			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
@@ -690,7 +690,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, NO_LIMIT).await?;
+		let lqs = tx.scan_ndlq(&self.id, 100_000).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
@@ -751,7 +751,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
 		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), NO_LIMIT).await?;
+		tx.delr_hb(dead.clone(), 100_000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
 		}
