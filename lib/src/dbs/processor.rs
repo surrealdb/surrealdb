@@ -434,73 +434,47 @@ impl<'a> Processor<'a> {
 			// Prepare the next holder key
 			let mut nxt: Option<Vec<u8>> = None;
 			// Loop until no more keys
-			loop {
+			let mut next_page = Some(ScanPage::from(beg.clone()..end.clone()));
+			while let Some(page) = next_page {
 				// Check if the context is finished
 				if ctx.is_done() {
 					break;
 				}
 				// Get the next batch key-value entries
-				let res = match nxt {
-					None => {
-						let min = beg.clone();
-						let max = end.clone();
-						txn.lock()
-							.await
-							.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
-							.await?
-					}
-					Some(ref mut beg) => {
-						beg.push(0x00);
-						let min = beg.clone();
-						let max = end.clone();
-						txn.lock()
-							.await
-							.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
-							.await?
-					}
-				};
+				let res = txn.lock().await.scan(page, PROCESSOR_BATCH_SIZE).await?;
+				next_page = res.next_page;
 				let res = res.values;
 				// If there are key-value entries then fetch them
-				if !res.is_empty() {
-					// Get total results
-					let n = res.len();
-					// Exit when settled
-					if n == 0 {
+				if res.is_empty() {
+					break;
+				}
+				// Loop over results
+				for (k, _) in res.into_iter() {
+					// Check the context
+					if ctx.is_done() {
 						break;
 					}
-					// Loop over results
-					for (i, (k, _)) in res.into_iter().enumerate() {
-						// Check the context
-						if ctx.is_done() {
-							break;
-						}
-						// Ready the next
-						if n == i + 1 {
-							nxt = Some(k.clone());
-						}
-						// Parse the data from the store
-						let gra: graph::Graph = (&k).into();
-						// Fetch the data from the store
-						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
-						let val = txn.lock().await.get(key).await?;
-						let rid = Thing::from((gra.ft, gra.fk));
-						// Parse the data from the store
-						let val = Operable::Value(match val {
-							Some(v) => Value::from(v),
-							None => Value::None,
-						});
-						// Process the record
-						let pro = Processed {
-							ir: None,
-							rid: Some(rid),
-							doc_id: None,
-							val,
-						};
-						self.process(ctx, opt, txn, stm, pro).await?;
-					}
-					continue;
+					// Parse the data from the store
+					let gra: graph::Graph = (&k).into();
+					// Fetch the data from the store
+					let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
+					let val = txn.lock().await.get(key).await?;
+					let rid = Thing::from((gra.ft, gra.fk));
+					// Parse the data from the store
+					let val = Operable::Value(match val {
+						Some(v) => Value::from(v),
+						None => Value::None,
+					});
+					// Process the record
+					let pro = Processed {
+						ir: None,
+						rid: Some(rid),
+						doc_id: None,
+						val,
+					};
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
-				break;
+				continue;
 			}
 		}
 		// Everything ok
