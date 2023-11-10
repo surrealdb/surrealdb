@@ -8,15 +8,12 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
-#[cfg(debug_assertions)]
-use crate::key::debug;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
-use crate::kvs::Limit::Unlimited;
 use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
@@ -864,14 +861,7 @@ impl Transaction {
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
-					self.scan(
-						ScanPage {
-							range: min..max,
-							limit: Unlimited,
-						},
-						num,
-					)
-					.await?
+					self.scan(ScanPage::from(min..max), num).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
@@ -1146,53 +1136,18 @@ impl Transaction {
 	pub async fn scan_hb(
 		&mut self,
 		time_to: &Timestamp,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		let beg = crate::key::root::hb::Hb::prefix();
 		let end = crate::key::root::hb::Hb::suffix(time_to);
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-			};
-			let res = res.values;
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (k, _) in res.values.into_iter() {
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
-				// Count
-				if limit > 0 {
-					num -= 1;
-				}
 			}
 		}
 		trace!("scan_hb: {:?}", out);
