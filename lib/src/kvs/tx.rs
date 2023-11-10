@@ -2339,36 +2339,30 @@ impl Transaction {
 						let res = self.scan(nxt.unwrap(), 1000).await?;
 						nxt = res.next_page;
 						let res = res.values;
-						if !res.is_empty() {
-							// Get total results
-							let n = res.len();
-							// Exit when settled
-							if n == 0 {
-								break;
-							}
-							// Loop over results
-							for (k, v) in res.into_iter() {
-								// Parse the key and the value
-								let k: crate::key::thing::Thing = (&k).into();
-								let v: Value = (&v).into();
-								let t = Thing::from((k.tb, k.id));
-								// Check if this is a graph edge
-								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
-									// This is a graph edge record
-									(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
-										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
-										chn.send(bytes!(sql)).await?;
-									}
-									// This is a normal record
-									_ => {
-										let sql = format!("UPDATE {t} CONTENT {v};");
-										chn.send(bytes!(sql)).await?;
-									}
+						if res.is_empty() {
+							break;
+						}
+						// Loop over results
+						for (k, v) in res.into_iter() {
+							// Parse the key and the value
+							let k: crate::key::thing::Thing = (&k).into();
+							let v: Value = (&v).into();
+							let t = Thing::from((k.tb, k.id));
+							// Check if this is a graph edge
+							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+								// This is a graph edge record
+								(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
+									let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
+									chn.send(bytes!(sql)).await?;
+								}
+								// This is a normal record
+								_ => {
+									let sql = format!("UPDATE {t} CONTENT {v};");
+									chn.send(bytes!(sql)).await?;
 								}
 							}
-							continue;
 						}
-						break;
+						continue;
 					}
 					chn.send(bytes!("")).await?;
 				}
