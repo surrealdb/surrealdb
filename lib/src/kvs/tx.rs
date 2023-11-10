@@ -48,7 +48,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-pub(crate) const NO_LIMIT: u32 = 0;
+pub(crate) const NO_LIMIT: u32 = 0; // TODO delete
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -1156,55 +1156,21 @@ impl Transaction {
 
 	/// scan_nd will scan all the cluster membership registers
 	/// setting limit to 0 will result in scanning all entries
-	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_nd(&mut self, batch_size: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
 		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while (limit == NO_LIMIT) || (num > 0) {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-			};
-			let res = res.values;
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
-				out.push((&v).into());
-				// Count
-				if limit > 0 {
-					num -= 1;
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (_, v) in res.values.into_iter() {
+				out.push(v.into());
 			}
 		}
-		trace!("scan_nd: {:?}", out);
 		Ok(out)
 	}
 
