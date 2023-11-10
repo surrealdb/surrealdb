@@ -844,14 +844,15 @@ impl Transaction {
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
-		let mut next_page = Some(ScanPage::from(beg..end));
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
 		// Start processing
 		while let Some(page) = next_page {
 			// Get records batch
-			let res = self.scan(page, num).await?;
+			let res = self.scan(page, 1000).await?;
 			next_page = res.next_page;
 			let res = res.values;
 			// Exit when settled
@@ -933,7 +934,6 @@ impl Transaction {
 		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
 		let mut next_page = Some(ScanPage {
@@ -941,7 +941,7 @@ impl Transaction {
 			limit: Limit::Limited(limit),
 		});
 		while let Some(page) = next_page {
-			let res = self.scan(page, limit).await?;
+			let res = self.scan(page, 1000).await?;
 			next_page = res.next_page;
 			// Get records batch
 			let res = res.values;
@@ -953,8 +953,6 @@ impl Transaction {
 			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(out)

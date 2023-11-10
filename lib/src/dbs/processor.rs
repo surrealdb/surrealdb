@@ -431,8 +431,6 @@ impl<'a> Processor<'a> {
 		};
 		//
 		for (beg, end) in keys.iter() {
-			// Prepare the next holder key
-			let mut nxt: Option<Vec<u8>> = None;
 			// Loop until no more keys
 			let mut next_page = Some(ScanPage::from(beg.clone()..end.clone()));
 			while let Some(page) = next_page {
