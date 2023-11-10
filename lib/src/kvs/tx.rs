@@ -900,42 +900,24 @@ impl Transaction {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(ScanPage::from(min..max), num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(ScanPage::from(min..max), num).await?
-				}
-			};
-			// Get total results
-			let n = res.values.len();
+			let res = self.scan(page, limit).await?;
+			next_page = res.next_page;
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
 			}
 			// Loop over results
-			for (i, (k, _)) in res.values.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, _) in res.into_iter() {
 				// Delete
 				self.del(k).await?;
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(())
