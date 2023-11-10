@@ -687,45 +687,40 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
 	{
-		#[cfg(debug_assertions)]
-		trace!(
-			"Scan {:?} - {:?}",
-			debug::sprint_key(&page.range.start.clone().into()),
-			debug::sprint_key(&page.range.end.clone().into())
-		);
+		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(page.range, batch_limit),
+			} => v.scan(range, batch_limit),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.scan(page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
 				..
-			} => v.scan(page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.scan(page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.scan(page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
@@ -738,7 +733,10 @@ impl Transaction {
 				}
 			} else {
 				let mut rng = page.range.clone();
-				rng.start = tup_vec.last().unwrap().0.clone();
+				rng.start = match tup_vec.last() {
+					Some((k, _)) => K::from(k.clone()),
+					None => rng.start, // TODO error instead
+				};
 				ScanResult {
 					next_page: Some(ScanPage {
 						range: rng,
@@ -959,13 +957,13 @@ impl Transaction {
 				}
 			};
 			// Get total results
-			let n = res.len();
+			let n = res.values.len();
 			// Exit when settled
 			if n == 0 {
 				break;
 			}
 			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
+			for (i, (k, _)) in res.values.into_iter().enumerate() {
 				// Ready the next
 				if n == i + 1 {
 					nxt = Some(k.clone());
@@ -1010,6 +1008,7 @@ impl Transaction {
 					self.scan(ScanPage::from(min..max), num).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled
@@ -1176,6 +1175,7 @@ impl Transaction {
 					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled
@@ -1229,6 +1229,7 @@ impl Transaction {
 					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled
@@ -1301,6 +1302,7 @@ impl Transaction {
 					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled
@@ -1368,6 +1370,7 @@ impl Transaction {
 					self.scan(ScanPage::from(min..max), batch_size).await?
 				}
 			};
+			let res = res.values;
 			// Get total results
 			let n = res.len();
 			// Exit when settled

@@ -7,6 +7,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Tr
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
 use crate::key::{graph, thing};
+use crate::kvs::ScanPage;
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
@@ -251,15 +252,24 @@ impl<'a> Processor<'a> {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone()
+						.lock()
+						.await
+						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+						.await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone()
+						.lock()
+						.await
+						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+						.await?
 				}
 			};
+			let res = res.values;
 			// If there are key-value entries then fetch them
 			if !res.is_empty() {
 				// Get total results
@@ -340,15 +350,24 @@ impl<'a> Processor<'a> {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone()
+						.lock()
+						.await
+						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+						.await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone()
+						.lock()
+						.await
+						.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+						.await?
 				}
 			};
+			let res = res.values;
 			// If there are key-value entries then fetch them
 			if !res.is_empty() {
 				// Get total results
@@ -477,15 +496,22 @@ impl<'a> Processor<'a> {
 					None => {
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+						txn.lock()
+							.await
+							.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+							.await?
 					}
 					Some(ref mut beg) => {
 						beg.push(0x00);
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+						txn.lock()
+							.await
+							.scan(ScanPage::from(min..max), PROCESSOR_BATCH_SIZE)
+							.await?
 					}
 				};
+				let res = res.values;
 				// If there are key-value entries then fetch them
 				if !res.is_empty() {
 					// Get total results

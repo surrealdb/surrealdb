@@ -5,7 +5,7 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::key::index::Index;
-use crate::kvs::Key;
+use crate::kvs::{Key, ScanPage};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing, Value};
 use roaring::RoaringTreemap;
@@ -65,7 +65,8 @@ impl IndexEqualThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = txn.lock().await.scan(min..max, limit).await?;
+		let res = txn.lock().await.scan(ScanPage::from(min..max), limit).await?;
+		let res = res.values;
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
 			key.push(0x00);
@@ -177,7 +178,8 @@ impl IndexRangeThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
-		let res = txn.lock().await.scan(min..max, limit).await?;
+		let res = txn.lock().await.scan(ScanPage::from(min..max), limit).await?;
+		let res = res.values;
 		if let Some((key, _)) = res.last() {
 			self.r.beg = key.clone();
 			self.r.beg.push(0x00);
@@ -312,7 +314,8 @@ impl UniqueRangeThingIterator {
 		let max = self.r.end.clone();
 		limit += 1;
 		let mut tx = txn.lock().await;
-		let res = tx.scan(min..max, limit).await?;
+		let res = tx.scan(ScanPage::from(min..max), limit).await?;
+		let res = res.values;
 		let mut r = Vec::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;
