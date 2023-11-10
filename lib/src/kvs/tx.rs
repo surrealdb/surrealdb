@@ -971,40 +971,24 @@ impl Transaction {
 		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
+			let res = self.scan(page, limit).await?;
+			next_page = res.next_page;
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(ScanPage::from(min..max), num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(ScanPage::from(min..max), num).await?
-				}
-			};
 			let res = res.values;
-			// Get total results
-			let n = res.len();
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
-			}
+			};
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
 				// Count
