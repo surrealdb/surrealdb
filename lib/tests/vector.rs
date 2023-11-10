@@ -100,3 +100,48 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn index_embedding() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE INDEX idx_mtree_embedding ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST COSINE;
+		CREATE ONLY Document CONTENT {
+  			"items": [
+  				{
+					"content": "apple",
+					"embedding": [
+						0.009953570552170277, -0.02680361643433571, -0.018817437812685966,
+						-0.08697346597909927
+					]
+ 				}
+  			]
+		};
+		"#;
+
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				dist: 2f,
+				id: pts:1
+			},
+			{
+				dist: 12f,
+				id: pts:4
+			},
+			{
+				dist: 20f,
+				id: pts:3
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
