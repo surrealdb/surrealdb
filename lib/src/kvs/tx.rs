@@ -1193,63 +1193,28 @@ impl Transaction {
 		self.del(key).await
 	}
 
-	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
+	pub async fn scan_ndlq<'a>(
+		&mut self,
+		node: &Uuid,
+		batch_size: u32,
+	) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::node::lq::prefix_nd(node);
 		let end = crate::key::node::lq::suffix_nd(node);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&beg),
-			crate::key::debug::sprint_key(&end),
-		);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(ScanPage::from(min..max), batch_size).await?
-				}
-			};
-			let res = res.values;
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
-				let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (i, (key, value)) in res.values.into_iter().enumerate() {
+				let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
 				let tb: String = String::from_utf8(value).unwrap();
-				trace!("scan_lq Found tb: {:?}", tb);
 				out.push(LqValue {
-					nd: lq.nd.into(),
-					ns: lq.ns.to_string(),
-					db: lq.db.to_string(),
+					nd: lv.nd.into(),
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
 					tb,
-					lq: lq.lq.into(),
+					lq: lv.lq.into(),
 				});
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
 			}
 		}
 		Ok(out)
