@@ -336,8 +336,8 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override and default_clock to remove warning when no kv is enabled.
-				let _ = (clock_override, default_clock);
+				// use clock_override to remove warning when no kv is enabled.
+				let _ = clock_override;
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}

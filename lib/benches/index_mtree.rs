@@ -1,4 +1,3 @@
-use criterion::async_executor::FuturesExecutor;
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use futures::executor::block_on;
@@ -13,6 +12,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
 use surrealdb::sql::index::Distance;
+use tokio::runtime::Runtime;
 
 fn bench_index_mtree_dim_3(c: &mut Criterion) {
 	bench_index_mtree(c, 1_000, 100_000, 3, 120);
@@ -51,7 +51,8 @@ fn bench_index_mtree(
 		let mut group = get_group(c, "index_mtree_insert", samples_len, measurement_secs);
 		let id = format!("len_{}_dim_{}", samples_len, vector_dimension);
 		group.bench_function(id, |b| {
-			b.to_async(FuturesExecutor).iter(|| insert_objects(&ds, samples_len, vector_dimension));
+			b.to_async(Runtime::new().unwrap())
+				.iter(|| insert_objects(&ds, samples_len, vector_dimension));
 		});
 		group.finish();
 	}
@@ -62,7 +63,7 @@ fn bench_index_mtree(
 		for knn in [1, 10] {
 			let id = format!("knn_{}_len_{}_dim_{}", knn, samples_len, vector_dimension);
 			group.bench_function(id, |b| {
-				b.to_async(FuturesExecutor)
+				b.to_async(Runtime::new().unwrap())
 					.iter(|| knn_lookup_objects(&ds, 100_000, vector_dimension, knn));
 			});
 		}
