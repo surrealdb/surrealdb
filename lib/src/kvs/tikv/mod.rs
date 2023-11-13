@@ -395,4 +395,31 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
+	/// Delete a range of keys from the databases
+	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		// Scan the keys
+		let res = self.inner.scan_keys(rng, limit).await?;
+		// Delete all the keys
+		for key in res {
+			self.inner.delete(key).await?;
+		}
+		// Return result
+		Ok(())
+	}
 }

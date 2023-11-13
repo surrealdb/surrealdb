@@ -116,7 +116,7 @@ pub async fn init(
 	};
 
 	if !hide_welcome {
-		let hints = vec![
+		let hints = [
 			(true, "Different statements within a query should be separated by a (;) semicolon."),
 			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
 			(true, "To exit, send a SIGTERM or press CTRL+C")
