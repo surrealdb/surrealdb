@@ -7,7 +7,7 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator, KnnThingIterator,
+	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -21,7 +21,6 @@ use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Object, Table, Thing, Value};
-use roaring::RoaringTreemap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -296,7 +295,7 @@ impl QueryExecutor {
 	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(it_ref as usize) {
 			if let Some(mte) = self.mt_entries.get(exp.as_ref()) {
-				let it = KnnThingIterator::new(mte.doc_ids.clone(), mte.res.clone());
+				let it = DocIdsIterator::new(mte.doc_ids.clone(), mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -466,7 +465,7 @@ impl FtEntry {
 #[derive(Clone)]
 pub(super) struct MtEntry {
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<RoaringTreemap>,
+	res: VecDeque<DocId>,
 }
 
 impl MtEntry {

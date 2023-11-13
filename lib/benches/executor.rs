@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use futures::Future;
 use pprof::criterion::{Output, PProfProfiler};
 use surrealdb::{
 	dbs::{Capabilities, Session},
@@ -11,7 +12,7 @@ macro_rules! query {
 	};
 	($c: expr, $name: ident, $setup: expr, $query: expr) => {
 		$c.bench_function(stringify!($name), |b| {
-			let (dbs, ses) = futures::executor::block_on(async {
+			let (dbs, ses) = block_on(async {
 				let dbs =
 					Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 				let ses = Session::owner().with_ns("test").with_db("test");
@@ -23,12 +24,17 @@ macro_rules! query {
 			});
 
 			b.iter(|| {
-				futures::executor::block_on(async {
+				block_on(async {
 					black_box(dbs.execute(black_box($query), &ses, None).await).unwrap();
 				});
 			})
 		});
 	};
+}
+
+#[tokio::main]
+async fn block_on<T>(future: impl Future<Output = T>) -> T {
+	future.await
 }
 
 fn bench_executor(c: &mut Criterion) {
