@@ -300,6 +300,7 @@
 "string::len("
 "string::lowercase("
 "string::repeat("
+"string::replaceAll("
 "string::replace("
 "string::reverse("
 "string::similarity::fuzzy("

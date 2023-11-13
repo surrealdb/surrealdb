@@ -1,6 +1,9 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
+use regex::Regex;
+use std::collections::hash_map::Entry;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -73,6 +76,25 @@ pub fn replace((val, old, new): (String, String, String)) -> Result<Value, Error
 		)?;
 	}
 	Ok(val.replace(&old, &new).into())
+}
+
+fn do_replace_all(regex: &Regex, val: String, replacement: String) -> Result<Value, Error> {
+	Ok(regex.replace_all(&val, replacement).into_owned().into())
+}
+
+pub async fn replace_all(
+	ctx: &Context<'_>,
+	(val, regex, replacement): (String, String, String),
+) -> Result<Value, Error> {
+	match ctx.get_compiled_regex().lock().await.entry(regex) {
+		Entry::Occupied(e) => do_replace_all(e.get(), val, replacement),
+		Entry::Vacant(e) => {
+			let regex = Regex::new(e.key())?;
+			let res = do_replace_all(&regex, val, replacement);
+			e.insert(regex);
+			res
+		}
+	}
 }
 
 pub fn reverse((string,): (String,)) -> Result<Value, Error> {
@@ -180,6 +202,7 @@ pub mod is {
 	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
 		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
 	}
+
 	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
 		Ok(addr::parse_domain_name(arg.as_str()).is_ok().into())
 	}

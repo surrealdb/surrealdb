@@ -3664,6 +3664,29 @@ async fn function_string_lowercase() -> Result<(), Error> {
 	Ok(())
 }
 
+// "<[^>]*>" , ""
+
+#[tokio::test]
+async fn function_string_replace_all() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::replaceAll('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>',"<[^>]*>", "");
+		RETURN string::replaceAll('<p>This one is already <strong>compiled!<strong></p>',"<[^>]*>", "");
+"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This is a sample string with HTML tags.");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This one is already compiled!");
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_string_repeat() -> Result<(), Error> {
 	let sql = r#"

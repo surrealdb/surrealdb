@@ -350,6 +350,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			len => { fn },
 			lowercase => { fn },
 			repeat => { fn },
+			replace_all = "replaceAll" => { fn },
 			replace => { fn },
 			reverse => { fn },
 			slice => { fn },

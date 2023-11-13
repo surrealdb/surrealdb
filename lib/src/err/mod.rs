@@ -230,6 +230,10 @@ pub enum Error {
 		current: String,
 	},
 
+	/// Invalid regular expression
+	#[error("Invalid regular expression: {0:?}")]
+	InvalidRegex(String),
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -735,6 +739,12 @@ impl From<Base64Error> for Error {
 impl From<JWTError> for Error {
 	fn from(_: JWTError) -> Error {
 		Error::InvalidAuth
+	}
+}
+
+impl From<regex::Error> for Error {
+	fn from(error: regex::Error) -> Self {
+		Error::InvalidRegex(error.to_string())
 	}
 }
 
