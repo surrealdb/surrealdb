@@ -715,7 +715,7 @@ impl Transaction {
 				..
 			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
+			_ => Err(Error::Unreachable),
 		};
 		// Construct next page
 		res.map(|tup_vec| {
