@@ -5,18 +5,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-const SINGLE: char = '\'';
-const SINGLE_ESC_NUL: &str = "'\\\0";
-
-const DOUBLE: char = '"';
-const DOUBLE_ESC_NUL: &str = "\"\\\0";
-
-const BACKTICK: char = '`';
-const BACKTICK_ESC_NUL: &str = "`\\\0";
-
-const OBJECT_BEG: char = '{';
-const OBJECT_END: char = '}';
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Script(#[serde(with = "no_nul_bytes")] pub String);

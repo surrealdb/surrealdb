@@ -33,8 +33,8 @@ impl FromStr for Range {
 impl TryFrom<&str> for Range {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::parser::range(v) {
-			Ok((_, v)) => Ok(v),
+		match syn::range(v) {
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}

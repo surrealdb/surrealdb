@@ -1,12 +1,24 @@
 use super::{
-	comment::shouldbespace,
-	common::{expect_delimited, openparentheses},
-	literal::table,
-	part::dir,
-	IResult,
+	comment::{mightbespace, shouldbespace},
+	common::{
+		closebracket, closeparentheses, commas, expect_delimited, openbracket, openparentheses,
+	},
+	ending,
+	error::{expected, ExplainResultExt},
+	literal::{ident, number, param, strand, table, tables},
+	operator::dir,
+	part::cond,
+	value, IResult,
 };
-use crate::sql::{Cond, Idiom, Tables};
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::opt};
+use crate::sql::{Cond, Fields, Graph, Idiom, Idioms, Part, Tables, Value};
+use nom::{
+	branch::alt,
+	bytes::complete::{tag, tag_no_case},
+	character::complete::char,
+	combinator::{self, cut, map, not, opt, peek},
+	multi::{many0, many1, separated_list1},
+	sequence::{preceded, terminated},
+};
 
 pub fn locals(i: &str) -> IResult<&str, Idioms> {
 	let (i, v) = separated_list1(commas, local)(i)?;
@@ -52,7 +64,7 @@ fn custom(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
 				let (i, _) = shouldbespace(i)?;
 				let (i, _) = tag_no_case("AS")(i)?;
 				let (i, _) = shouldbespace(i)?;
-				let (i, v) = idiom(i)?;
+				let (i, v) = plain(i)?;
 				Ok((i, v))
 			})(i)?;
 			Ok((i, (w, c, a)))
@@ -100,7 +112,7 @@ pub fn basic(i: &str) -> IResult<&str, Idiom> {
 /// A simple idiom with one or more parts
 pub fn plain(i: &str) -> IResult<&str, Idiom> {
 	expected("a idiom", |i| {
-		let (i, p) = alt((first, graph))(i)?;
+		let (i, p) = alt((first, map(graph, Part::Graph)))(i)?;
 		let (i, mut v) = many0(part)(i)?;
 		v.insert(0, p);
 		Ok((i, Idiom::from(v)))
@@ -126,7 +138,7 @@ pub fn multi_without_start(i: &str) -> IResult<&str, Idiom> {
 		|i| {
 			let (i, p) = graph(i)?;
 			let (i, mut v) = many0(part)(i)?;
-			v.insert(0, p);
+			v.insert(0, Part::Graph(p));
 			Ok((i, Idiom::from(v)))
 		},
 		|i| {
@@ -151,12 +163,10 @@ pub fn path(i: &str) -> IResult<&str, Idiom> {
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
 	use nom::combinator::fail;
 
-	use crate::sql::value::value;
-
 	alt((
 		plain,
 		alt((multi_without_start, |i| {
-			let (i, v) = value(i)?;
+			let (i, v) = value::value(i)?;
 			let (i, v) = reparse_idiom_start(v, i)?;
 			if let Value::Idiom(x) = v {
 				return Ok((i, x));
@@ -171,7 +181,7 @@ pub fn part(i: &str) -> IResult<&str, Part> {
 		flatten,
 		preceded(tag("."), cut(dot_part)),
 		expect_delimited(openbracket, cut(bracketed_part), closebracket),
-		graph,
+		map(graph, Part::Graph),
 	))(i)
 }
 
@@ -210,7 +220,7 @@ pub fn basic_part(i: &str) -> IResult<&str, Part> {
 fn dot_part(i: &str) -> IResult<&str, Part> {
 	alt((
 		combinator::value(Part::All, tag("*")),
-		map(terminated(ident::ident, ending), Part::Field),
+		map(terminated(ident, ending::ident), Part::Field),
 	))(i)
 }
 
@@ -239,8 +249,8 @@ fn bracketed_part(i: &str) -> IResult<&str, Part> {
 
 pub fn first(i: &str) -> IResult<&str, Part> {
 	let (i, _) = peek(not(number))(i)?;
-	let (i, v) = ident::ident(i)?;
-	let (i, _) = ending(i)?;
+	let (i, v) = ident(i)?;
+	let (i, _) = ending::ident(i)?;
 	Ok((i, Part::Field(v)))
 }
 
@@ -255,16 +265,16 @@ pub fn bracketed_where(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
-	let (i, v) = alt((
-		map(strand::strand, Value::Strand),
-		map(param::param, Value::Param),
-		map(idiom::basic, Value::Idiom),
-	))(i)?;
+	let (i, v) =
+		alt((map(strand, Value::Strand), map(param, Value::Param), map(basic, Value::Idiom)))(i)?;
 	Ok((i, Part::Value(v)))
 }
 
 #[cfg(test)]
 mod tests {
+
+	use crate::sql::{Dir, Expression, Number, Param, Table, Thing};
+	use crate::syn::test::Parse;
 
 	use super::*;
 

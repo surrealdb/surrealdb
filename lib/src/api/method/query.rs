@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::future::IntoFuture;
+use std::mem;
 use std::pin::Pin;
 
 /// A query future
@@ -110,7 +111,7 @@ where
 					if let Value::Array(Array(array)) = &mut bindings {
 						if let [Value::Strand(Strand(key)), value] = &mut array[..] {
 							let mut map = BTreeMap::new();
-							map.insert(key, value);
+							map.insert(mem::take(key), mem::take(value));
 							bindings = map.into();
 						}
 					}

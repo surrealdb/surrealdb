@@ -1,10 +1,7 @@
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
-use chrono::{
-	DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, SecondsFormat, TimeZone,
-	Utc,
-};
+use chrono::{DateTime, SecondsFormat, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -64,8 +61,8 @@ impl TryFrom<Strand> for Datetime {
 impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::parser::datetime(v) {
-			Ok((_, v)) => Ok(v),
+		match syn::datetime_raw(v) {
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}

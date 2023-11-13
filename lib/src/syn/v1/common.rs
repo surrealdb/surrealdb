@@ -6,7 +6,7 @@ use super::{
 use nom::{
 	branch::alt,
 	bytes::complete::{take_while, take_while_m_n},
-	character::{complete::char, is_alphanumeric},
+	character::complete::char,
 	combinator::map_res,
 	multi::many1,
 	Err, InputLength, Parser,
@@ -94,11 +94,6 @@ pub fn is_hex(chr: char) -> bool {
 #[inline]
 pub fn is_digit(chr: char) -> bool {
 	chr.is_ascii_digit()
-}
-
-#[inline]
-pub fn val_u8(chr: u8) -> bool {
-	is_alphanumeric(chr) || chr == b'_'
 }
 
 #[inline]

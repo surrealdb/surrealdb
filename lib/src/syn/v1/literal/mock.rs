@@ -2,13 +2,10 @@ use crate::sql::Mock;
 use nom::{
 	branch::alt,
 	character::complete::{char, u64},
-	combinator::map,
+	combinator::{map, value},
 };
 
-use super::{
-	super::{value::value, IResult, ParseError},
-	ident_raw,
-};
+use super::{super::IResult, ident_raw};
 
 pub fn mock(i: &str) -> IResult<&str, Mock> {
 	let (i, _) = char('|')(i)?;

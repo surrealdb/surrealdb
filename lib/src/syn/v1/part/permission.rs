@@ -1,15 +1,9 @@
-use super::{
-	super::{
-		comment::{mightbespace, shouldbespace},
-		common::{commas, commasorspace},
-		error::{expect_tag_no_case, expected},
-		literal::{ident, scoring, tables},
-		value::value,
-		IResult,
-	},
-	cond,
-	field::fields,
-	group,
+use super::super::{
+	comment::shouldbespace,
+	common::{commas, commasorspace},
+	error::expected,
+	value::value,
+	IResult,
 };
 use crate::sql::{
 	permission::{Permission, PermissionKind},
@@ -17,13 +11,10 @@ use crate::sql::{
 };
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{self, cut, map, map_res, opt, recognize},
+	bytes::complete::tag_no_case,
+	combinator::{self, cut, map},
 	multi::{separated_list0, separated_list1},
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	sequence::tuple,
 };
 
 pub fn permissions(i: &str) -> IResult<&str, Permissions> {
@@ -123,4 +114,58 @@ fn rule(i: &str) -> IResult<&str, Vec<(PermissionKind, Permission)>> {
 		))(i)?;
 		Ok((i, kind.into_iter().map(|k| (k, expr.clone())).collect()))
 	})(i)
+}
+
+#[cfg(test)]
+mod test {
+	use crate::sql::{Expression, Value};
+	use crate::syn::test::Parse;
+
+	use super::*;
+
+	#[test]
+	fn permissions_none() {
+		let sql = "PERMISSIONS NONE";
+		let res = permissions(sql);
+		let out = res.unwrap().1;
+		assert_eq!("PERMISSIONS NONE", format!("{}", out));
+		assert_eq!(out, Permissions::none());
+	}
+
+	#[test]
+	fn permissions_full() {
+		let sql = "PERMISSIONS FULL";
+		let res = permissions(sql);
+		let out = res.unwrap().1;
+		assert_eq!("PERMISSIONS FULL", format!("{}", out));
+		assert_eq!(out, Permissions::full());
+	}
+
+	#[test]
+	fn permissions_specific() {
+		let sql =
+			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE";
+		let res = permissions(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Permissions {
+				select: Permission::Full,
+				create: Permission::Specific(Value::from(Expression::parse("public = true"))),
+				update: Permission::Specific(Value::from(Expression::parse("public = true"))),
+				delete: Permission::None,
+			}
+		);
+	}
+
+	#[test]
+	fn no_empty_permissions() {
+		// This was previouslly allowed,
+		let sql = "PERMISSION ";
+		permission(sql).unwrap_err();
+	}
 }

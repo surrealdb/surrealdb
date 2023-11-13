@@ -1,24 +1,11 @@
-use super::{
-	super::{
-		comment::shouldbespace,
-		common::{closeparentheses, commas, expect_delimited, is_hex, openparentheses},
-		error::expected,
-		thing::id,
-		IResult, ParseError,
-	},
-	duration::duration,
-	ident_raw,
-};
+use super::super::{common::is_hex, IResult};
 use crate::sql::Uuid;
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char},
-	combinator::{cut, map, map_res, opt, recognize, value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	bytes::complete::take_while_m_n,
+	character::complete::char,
+	combinator::recognize,
+	sequence::{delimited, tuple},
 };
 
 pub fn uuid(i: &str) -> IResult<&str, Uuid> {

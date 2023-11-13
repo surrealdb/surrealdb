@@ -4,8 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
-use nom::bytes::complete::tag;
-use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

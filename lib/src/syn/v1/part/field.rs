@@ -5,13 +5,10 @@ use crate::{
 };
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char},
-	combinator::{cut, map, map_res, opt, recognize},
+	bytes::complete::tag_no_case,
+	combinator::{cut, opt},
 	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	sequence::delimited,
 };
 
 pub fn fields(i: &str) -> IResult<&str, Fields> {

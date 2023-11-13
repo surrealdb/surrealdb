@@ -1,40 +1,22 @@
 use super::super::super::{
-	block::block,
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
+	comment::shouldbespace,
+	common::commas,
 	ending,
-	error::{expect_tag_no_case, expected, ExplainResultExt},
-	idiom::{self, basic, plain},
-	literal::{
-		datetime, duration, filters, ident, param, scoring, strand, strand::strand_raw, table,
-		tables, timeout, tokenizer,
-	},
-	operator::{assigner, dir},
-	part::{
-		base, cond, data,
-		data::{single, update},
-		output,
-		permission::permissions,
-	},
-	thing::thing,
-	value::{value, values, whats},
+	error::{expect_tag_no_case, expected},
+	literal::{ident, strand, strand::strand_raw},
+	part::base,
 	IResult, ParseError,
 };
 use crate::{
 	iam::Role,
-	sql::{
-		statements::DefineUserStatement, Ident, Idioms, Index, Kind, Permissions, Strand, Value,
-	},
+	sql::{statements::DefineUserStatement, Ident, Strand},
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	bytes::complete::tag_no_case,
+	combinator::cut,
 	multi::{many0, separated_list1},
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
 	Err,
 };
 use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};

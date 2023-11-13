@@ -1,3 +1,7 @@
+use crate::syn::{
+	common::Location,
+	error::{RenderedError, Snippet},
+};
 use nom::error::ErrorKind;
 use nom::error::FromExternalError;
 use nom::error::ParseError as NomParseError;

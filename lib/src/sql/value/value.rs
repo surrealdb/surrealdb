@@ -10,9 +10,9 @@ use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	operator, Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function,
-	Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range,
-	Regex, Strand, Subquery, Table, Thing, Uuid,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
+	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
+	Strand, Subquery, Table, Thing, Uuid,
 };
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
@@ -2712,8 +2712,8 @@ impl TryNeg for Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::test::Parse;
 	use crate::sql::uuid::Uuid;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn check_none() {

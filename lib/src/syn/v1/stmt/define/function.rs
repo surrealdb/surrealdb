@@ -1,46 +1,28 @@
 use super::super::super::{
 	block::block,
 	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, delimited_list0, openparentheses},
+	common::{closeparentheses, commas, delimited_list0, openparentheses},
 	ending,
-	error::{expect_tag_no_case, expected, ExplainResultExt},
-	idiom::{self, basic, plain},
+	error::expected,
 	kind::kind,
-	literal::{
-		datetime, duration, filters, ident, param, scoring, strand, table, tables, timeout,
-		tokenizer,
-	},
-	operator::{assigner, dir},
-	part::{
-		changefeed, cond, data,
-		data::{single, update},
-		output,
-		permission::permission,
-	},
-	thing::thing,
-	value::{value, values, whats},
+	literal::{ident, ident_path, strand},
+	part::permission::permission,
 	IResult,
 };
-use crate::sql::{
-	filter::Filter, statements::DefineFunctionStatement, ChangeFeed, Permission, Strand, Tokenizer,
-	Value,
-};
+use crate::sql::{statements::DefineFunctionStatement, Permission, Strand};
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
-	multi::{many0, separated_list1},
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	bytes::complete::{tag, tag_no_case},
+	character::complete::char,
+	combinator::cut,
+	multi::many0,
 };
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
-	let (i, name) = ident::multi(i)?;
+	let (i, name) = ident_path(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, args) = delimited_list0(
 		openparentheses,

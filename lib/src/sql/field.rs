@@ -2,17 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::fmt::Fmt;
-use crate::sql::idiom::Idiom;
-use crate::sql::part::Part;
-use crate::sql::value::Value;
+use crate::sql::{fmt::Fmt, Idiom, Part, Value};
 use crate::syn;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::{cut, opt};
-// use nom::combinator::cut;
-use nom::multi::separated_list1;
-use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -191,7 +182,7 @@ impl Fields {
 									// This value is always an array, so we can convert it
 									for (name, expr) in args.into_iter().zip(expr) {
 										// This value is always a string, so we can convert it
-										let name = syn::parser::idiom(&name.to_raw_string())?;
+										let name = syn::idiom(&name.to_raw_string())?;
 										// Check if this is a single VALUE field expression
 										out.set(ctx, opt, txn, name.as_ref(), expr).await?
 									}
@@ -214,7 +205,7 @@ impl Fields {
 										v => v.to_owned(),
 									};
 									// This value is always a string, so we can convert it
-									let name = syn::parser::idiom(&name.to_raw_string())?;
+									let name = syn::idiom(&name.to_raw_string())?;
 									// Add the projected field to the output document
 									out.set(ctx, opt, txn, name.as_ref(), expr).await?
 								}

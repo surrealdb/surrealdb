@@ -67,7 +67,7 @@ impl From<Edges> for Resource {
 
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		match syn::parser::thing(s) {
+		match syn::thing(s) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}
@@ -82,7 +82,7 @@ impl From<&String> for Resource {
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		match syn::parser::thing(s.as_str()) {
+		match syn::thing(s.as_str()) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}

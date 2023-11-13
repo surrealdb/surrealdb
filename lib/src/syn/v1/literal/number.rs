@@ -9,6 +9,7 @@ use nom::{
 	Err,
 };
 use rust_decimal::Decimal;
+use std::str::FromStr;
 
 fn not_nan(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
@@ -83,7 +84,7 @@ pub fn integer(i: &str) -> IResult<&str, i64> {
 mod tests {
 
 	use super::*;
-	use std::ops::Div;
+	use std::{cmp::Ordering, ops::Div};
 
 	#[test]
 	fn number_nan() {

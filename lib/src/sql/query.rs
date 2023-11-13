@@ -2,7 +2,6 @@ use crate::sql::fmt::Pretty;
 use crate::sql::statement::{Statement, Statements};
 use crate::sql::Value;
 use derive::Store;
-use nom::Err;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;

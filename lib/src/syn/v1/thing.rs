@@ -1,11 +1,17 @@
 use super::{
+	error::expected,
 	literal::{ident_raw, number::integer},
 	value::{array, object},
 	IResult,
 };
-use crate::sql::Id;
-use nom::branch::alt;
-
+use crate::sql::{id::Gen, Id, Thing};
+use nom::{
+	branch::alt,
+	bytes::complete::tag,
+	character::complete::char,
+	combinator::{map, value},
+	sequence::delimited,
+};
 
 pub fn thing(i: &str) -> IResult<&str, Thing> {
 	expected("a thing", alt((thing_raw, thing_single, thing_double)))(i)
@@ -19,7 +25,7 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 	delimited(char('\"'), thing_raw, char('\"'))(i)
 }
 
-fn thing_raw(i: &str) -> IResult<&str, Thing> {
+pub fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, v) = alt((
@@ -37,7 +43,6 @@ fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	))
 }
 
-
 pub fn id(i: &str) -> IResult<&str, Id> {
 	alt((
 		map(integer, Id::Number),
@@ -46,8 +51,6 @@ pub fn id(i: &str) -> IResult<&str, Id> {
 		map(array, Id::Array),
 	))(i)
 }
-
-
 
 #[cfg(test)]
 mod tests {

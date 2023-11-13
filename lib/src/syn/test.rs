@@ -1,14 +1,7 @@
-use crate::sql::array::Array;
-use crate::sql::expression::Expression;
-use crate::sql::idiom::Idiom;
-use crate::sql::param::Param;
-use crate::sql::script::Script;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
+pub(crate) use super::v1::builtin::builtin_name;
+use crate::sql::{Array, Expression, Idiom, Param, Script, Thing, Value};
 
-fn builtin_name(name: &str) -> Value {
-	todo!()
-}
+use super::v1::test::*;
 
 pub trait Parse<T> {
 	fn parse(val: &str) -> T;
@@ -16,42 +9,42 @@ pub trait Parse<T> {
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {
-		todo!();
+		value(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Array {
 	fn parse(val: &str) -> Self {
-		todo!();
+		array(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Param {
 	fn parse(val: &str) -> Self {
-		todo!();
+		param(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Idiom {
 	fn parse(val: &str) -> Self {
-		todo!();
+		idiom(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Script {
 	fn parse(val: &str) -> Self {
-		todo!();
+		script(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Thing {
 	fn parse(val: &str) -> Self {
-		todo!();
+		thing(val).unwrap().1
 	}
 }
 
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
-		todo!();
+		expression(val).unwrap().1
 	}
 }

@@ -1,12 +1,18 @@
-use super::IResult;
+use super::{
+	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, expect_delimited, openparentheses},
+	ending,
+	error::ExplainResultExt,
+	stmt::{create, define, delete, ifelse, insert, output, relate, remove, select, update},
+	value::value,
+	IResult,
+};
 use crate::sql::Subquery;
 use nom::{
 	branch::alt,
-	bytes::complete::{is_not, tag, tag_no_case, take_while1},
-	character::complete::char,
-	combinator::{self, cut, into, opt},
-	multi::separated_list0,
-	sequence::{delimited, terminated},
+	bytes::complete::{tag, tag_no_case},
+	combinator::{map, opt, peek},
+	sequence::tuple,
 };
 
 pub fn subquery(i: &str) -> IResult<&str, Subquery> {
@@ -25,7 +31,7 @@ fn subquery_value(i: &str) -> IResult<&str, Subquery> {
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 	alt((expect_delimited(openparentheses, subquery_inner, closeparentheses), |i| {
 		let (i, v) = subquery_inner(i)?;
-		let (i, _) = ending(i)?;
+		let (i, _) = ending::subquery(i)?;
 		let (i, _) = eat_semicolon(i)?;
 		Ok((i, v))
 	}))(i)

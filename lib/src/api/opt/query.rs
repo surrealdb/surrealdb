@@ -1,6 +1,6 @@
 use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
 use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
-use crate::syn::parser;
+use crate::syn;
 use serde::de::DeserializeOwned;
 use std::mem;
 
@@ -152,19 +152,19 @@ impl IntoQuery for OptionStatement {
 
 impl IntoQuery for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		parser::parse(self)?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		parser::parse(self)?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		parser::parse(&self)?.into_query()
+		syn::parse(&self)?.into_query()
 	}
 }
 

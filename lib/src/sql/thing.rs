@@ -2,11 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{
-	escape::escape_rid,
-	id::{Gen, Id},
-	Strand, Value,
-};
+use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
 use revision::revisioned;
@@ -78,8 +74,8 @@ impl TryFrom<Strand> for Thing {
 impl TryFrom<&str> for Thing {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::parser::thing_raw(v) {
-			Ok((_, v)) => Ok(v),
+		match syn::thing_raw(v) {
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}

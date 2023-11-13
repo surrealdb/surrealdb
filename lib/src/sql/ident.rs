@@ -5,9 +5,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-const BACKTICK: char = '`';
-const BACKTICK_ESC_NUL: &str = "`\\\0";
-
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);

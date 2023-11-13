@@ -31,9 +31,12 @@ pub mod tokenizer;
 pub mod uuid;
 
 pub use algorithm::algorithm;
-pub use datetime::datetime;
+pub use datetime::{datetime, datetime_all_raw};
 pub use duration::duration;
 pub use filter::filters;
+pub use number::number;
+pub use range::range;
+pub use regex::regex;
 pub use scoring::scoring;
 pub use strand::strand;
 pub use timeout::timeout;
@@ -48,7 +51,7 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 	Ok((i, Ident::from(v)))
 }
 
-pub fn multi(i: &str) -> IResult<&str, Ident> {
+pub fn ident_path(i: &str) -> IResult<&str, Ident> {
 	let (i, v) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 	Ok((i, Ident::from(v)))
 }
@@ -110,6 +113,7 @@ pub fn tables(i: &str) -> IResult<&str, Tables> {
 mod tests {
 
 	use super::*;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn ident_normal() {

@@ -20,7 +20,6 @@ pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
-use nom::bytes::complete::tag_no_case;
 pub use param::DefineParamStatement;
 pub use scope::DefineScopeStatement;
 pub use table::DefineTableStatement;

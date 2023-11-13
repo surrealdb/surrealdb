@@ -186,9 +186,8 @@ impl fmt::Display for Snippet {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::error::{Location, Truncation};
-
-	use super::Snippet;
+	use super::{Snippet, Truncation};
+	use crate::syn::common::Location;
 
 	#[test]
 	fn truncate_whitespace() {

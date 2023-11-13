@@ -1,4 +1,3 @@
-use crate::idx::ft::analyzer::Analyzers;
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::sql::Number;

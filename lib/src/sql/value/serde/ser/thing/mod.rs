@@ -23,7 +23,7 @@ impl ser::Serializer for Serializer {
 	const EXPECTED: &'static str = "a struct `Thing`";
 
 	fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
-		syn::parser::thing(value)
+		syn::thing(value)
 	}
 
 	#[inline]

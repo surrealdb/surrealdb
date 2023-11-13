@@ -24,11 +24,12 @@ has-storage = []
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
 
 [profile.release]
-lto = true
-strip = true
+#lto = true
+strip = false
 opt-level = 3
+debug = "full"
 panic = 'abort'
-codegen-units = 1
+#codegen-units = 1
 
 [profile.bench]
 strip = false

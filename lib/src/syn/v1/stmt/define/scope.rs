@@ -1,39 +1,13 @@
 use super::super::super::{
-	block::block,
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
+	comment::shouldbespace,
 	ending,
-	error::{expect_tag_no_case, expected, ExplainResultExt},
-	idiom::{self, basic, plain},
-	literal::{
-		datetime, duration, filters, ident, param, scoring, strand, table, tables, timeout,
-		tokenizer,
-	},
-	operator::{assigner, dir},
-	part::{
-		changefeed, cond, data,
-		data::{single, update},
-		output,
-		permission::permissions,
-		view,
-	},
-	thing::thing,
-	value::{value, values, whats},
+	error::expected,
+	literal::{duration, ident, strand},
+	value::value,
 	IResult,
 };
-use crate::sql::{
-	statements::DefineScopeStatement, Duration, Idioms, Index, Kind, Permissions, Strand, Value,
-};
-use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
-	multi::{many0, separated_list1},
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
-};
+use crate::sql::{statements::DefineScopeStatement, Duration, Strand, Value};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
 pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;

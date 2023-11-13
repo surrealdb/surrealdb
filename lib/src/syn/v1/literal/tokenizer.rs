@@ -1,27 +1,8 @@
-use super::{
-	super::{
-		comment::shouldbespace,
-		common::{closeparentheses, commas, expect_delimited, openparentheses},
-		error::expected,
-		thing::id,
-		IResult, ParseError,
-	},
-	duration::duration,
-	ident_raw,
-};
+use super::super::{common::commas, IResult};
 use crate::sql::Tokenizer;
-use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char},
-	combinator::{cut, map, map_res, opt, value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{preceded, terminated},
-	Err,
-};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::value, multi::separated_list1};
 
-fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
+pub fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
 	let (i, t) = alt((
 		value(Tokenizer::Blank, tag_no_case("BLANK")),
 		value(Tokenizer::Camel, tag_no_case("CAMEL")),
@@ -31,6 +12,6 @@ fn tokenizer(i: &str) -> IResult<&str, Tokenizer> {
 	Ok((i, t))
 }
 
-fn tokenizers(i: &str) -> IResult<&str, Vec<Tokenizer>> {
+pub fn tokenizers(i: &str) -> IResult<&str, Vec<Tokenizer>> {
 	separated_list1(commas, tokenizer)(i)
 }

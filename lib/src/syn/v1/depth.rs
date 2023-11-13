@@ -60,7 +60,10 @@ impl Drop for Diving {
 #[cfg(test)]
 mod tests {
 
+	use super::super::{super::super::syn, query};
 	use super::*;
+	use crate::sql::{Query, Value};
+	use nom::Finish;
 	use serde::Serialize;
 	use std::{
 		collections::HashMap,
@@ -70,44 +73,44 @@ mod tests {
 	#[test]
 	fn no_ending() {
 		let sql = "SELECT * FROM test";
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_query_string() {
 		let sql = "SELECT * FROM test;";
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 	}
 
 	#[test]
 	fn trim_query_string() {
 		let sql = "    SELECT    *    FROM    test    ;    ";
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_complex_rubbish() {
 		let sql = "    SELECT    *    FROM    test    ; /* shouldbespace */ ;;;    ";
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_complex_failure() {
 		let sql = "    SELECT    *    FROM    { }} ";
-		parse(sql).unwrap_err();
+		syn::parse(sql).unwrap_err();
 	}
 
 	#[test]
 	fn parse_ok_recursion() {
 		let sql = "SELECT * FROM ((SELECT * FROM (5))) * 5;";
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 	}
 
 	#[test]
 	fn parse_ok_recursion_deeper() {
 		let sql = "SELECT * FROM (((( SELECT * FROM ((5)) + ((5)) + ((5)) )))) * ((( function() {return 5;} )));";
 		let start = Instant::now();
-		parse(sql).unwrap();
+		syn::parse(sql).unwrap();
 		let elapsed = start.elapsed();
 		assert!(
 			elapsed < Duration::from_millis(2000),
@@ -197,7 +200,7 @@ mod tests {
 
 		CREATE person SET name = 'Tobie', age += 18;
 		";
-		let tmp = parse(sql).unwrap();
+		let tmp = syn::parse(sql).unwrap();
 
 		let enc: Vec<u8> = Vec::from(&tmp);
 		let dec: Query = Query::from(enc);
@@ -208,7 +211,7 @@ mod tests {
 	fn parser_full() {
 		let sql = std::fs::read("test.surql").unwrap();
 		let sql = std::str::from_utf8(&sql).unwrap();
-		let res = parse(sql);
+		let res = syn::parse(sql);
 		let tmp = res.unwrap();
 
 		let enc: Vec<u8> = Vec::from(&tmp);
@@ -220,7 +223,7 @@ mod tests {
 	#[cfg_attr(debug_assertions, ignore)]
 	fn json_benchmark() {
 		// From the top level of the repository,
-		// cargo test sql::parser::tests::json_benchmark --package surrealdb --lib --release -- --nocapture --exact
+		// cargo test sql::syn::tests::json_benchmark --package surrealdb --lib --release -- --nocapture --exact
 
 		#[derive(Clone, Serialize)]
 		struct Data {
@@ -289,7 +292,7 @@ mod tests {
 			sql.push_str(recursive_end);
 		}
 		let start = Instant::now();
-		let res = crate::syn::parser::query(&sql).finish();
+		let res = query(&sql).finish();
 		let elapsed = start.elapsed();
 		if excessive {
 			assert!(

@@ -4,7 +4,6 @@ use super::{
 	super::{thing::id, IResult},
 	ident_raw,
 };
-use crate::opt;
 use crate::sql::Range;
 use nom::{
 	branch::alt,

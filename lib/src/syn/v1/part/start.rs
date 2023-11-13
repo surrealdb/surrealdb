@@ -1,20 +1,9 @@
-use super::super::{
-	comment::{mightbespace, shouldbespace},
-	common::commas,
-	literal::{ident, scoring},
-	value::value,
-	IResult,
-};
+use super::super::{comment::shouldbespace, value::value, IResult};
 use crate::sql::Start;
 use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, map, map_res, opt, recognize},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	bytes::complete::tag_no_case,
+	combinator::{cut, opt},
+	sequence::terminated,
 };
 
 pub fn start(i: &str) -> IResult<&str, Start> {
@@ -29,8 +18,8 @@ pub fn start(i: &str) -> IResult<&str, Start> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
+	use crate::sql::Value;
 
 	#[test]
 	fn start_statement() {

@@ -1,5 +1,5 @@
 use super::super::{comment::shouldbespace, IResult};
-use crate::sql::{statement::DefineStatement, statements::DefineStatement};
+use crate::sql::statements::DefineStatement;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::map};
 
 mod analyzer;

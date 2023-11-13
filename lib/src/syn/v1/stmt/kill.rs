@@ -1,31 +1,10 @@
 use super::super::{
-	block::block,
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
-	error::{expect_tag_no_case, expected, ExplainResultExt},
-	idiom::{basic, plain},
-	literal::{datetime, duration, ident, param, scoring, table, tables, timeout, uuid},
-	operator::{assigner, dir},
-	part::{
-		cond, data,
-		data::{single, update},
-		output,
-	},
-	thing::thing,
-	value::{value, values, whats},
+	comment::shouldbespace,
+	literal::{param, uuid},
 	IResult,
 };
-use crate::sql::{statements::KillStatement, Value};
-use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
-};
+use crate::sql::statements::KillStatement;
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::into};
 
 pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 	let (i, _) = tag_no_case("KILL")(i)?;
@@ -42,7 +21,7 @@ pub fn kill(i: &str) -> IResult<&str, KillStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::{Ident, Param, Uuid};
+	use crate::sql::{Ident, Param, Uuid, Value};
 
 	#[test]
 	fn kill_uuid() {
@@ -55,7 +34,7 @@ mod tests {
 		assert_eq!(
 			out,
 			KillStatement {
-				id: Value::Uuid(Uuid::from(uuid::Uuid::parse_str(uuid_str).unwrap()))
+				id: Value::Uuid(Uuid::from(::uuid::Uuid::parse_str(uuid_str).unwrap()))
 			}
 		);
 		assert_eq!("KILL 'c005b8da-63a4-48bc-a371-07e95b39d58e'", format!("{}", out));

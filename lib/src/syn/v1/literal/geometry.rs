@@ -12,10 +12,9 @@ use super::super::{
 use geo::{LineString, Point, Polygon};
 use nom::{
 	branch::alt,
-	bytes::complete::{tag, tag_no_case},
-	character::complete::{char, u16},
-	combinator::{cut, opt},
-	multi::separated_list1,
+	bytes::complete::tag,
+	character::complete::char,
+	combinator::opt,
 	number::complete::double,
 	sequence::{delimited, preceded, terminated},
 };

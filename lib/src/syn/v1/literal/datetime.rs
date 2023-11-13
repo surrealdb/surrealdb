@@ -22,7 +22,7 @@ fn datetime_double(i: &str) -> IResult<&str, Datetime> {
 	delimited(char('\"'), datetime_raw, char('\"'))(i)
 }
 
-fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {
+pub fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {
 	alt((nano, time, date))(i)
 }
 

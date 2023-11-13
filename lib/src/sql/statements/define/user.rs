@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind, Role};
+use crate::iam::{Action, ResourceKind};
 use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Strand, Value};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},

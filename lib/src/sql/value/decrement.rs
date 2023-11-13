@@ -41,7 +41,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::sql::idiom::Idiom;
-	use crate::sql::test::Parse;
+	use crate::syn::test::Parse;
 
 	#[tokio::test]
 	async fn decrement_none() {

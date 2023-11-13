@@ -1,26 +1,13 @@
 use super::super::{
 	comment::{mightbespace, shouldbespace},
-	common::{commas, commasorspace},
-	error::{expect_tag_no_case, expected},
+	common::commas,
 	idiom::plain,
-	literal::{duration, ident, scoring, tables},
-	operator::{assigner, dir},
-	thing::thing,
-	// TODO: go through and check every import for alias.
+	operator::assigner,
 	value::value,
 	IResult,
 };
-use crate::sql::{Base, ChangeFeed, Cond, Data, Edges};
-use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, map, map_res, opt, recognize, value as map_value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
-};
+use crate::sql::Data;
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::separated_list1};
 
 pub fn data(i: &str) -> IResult<&str, Data> {
 	alt((set, unset, patch, merge, replace, content))(i)
@@ -117,4 +104,92 @@ pub fn update(i: &str) -> IResult<&str, Data> {
 		Ok((i, (l, o, r)))
 	})(i)?;
 	Ok((i, Data::UpdateExpression(v)))
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn data_set_statement() {
+		let sql = "SET field = true";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("SET field = true", format!("{}", out));
+	}
+
+	#[test]
+	fn data_set_statement_multiple() {
+		let sql = "SET field = true, other.field = false";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("SET field = true, other.field = false", format!("{}", out));
+	}
+
+	#[test]
+	fn data_unset_statement() {
+		let sql = "UNSET field";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field", format!("{}", out));
+	}
+
+	#[test]
+	fn data_unset_statement_multiple_fields() {
+		let sql = "UNSET field, other.field";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field, other.field", format!("{}", out));
+	}
+
+	#[test]
+	fn data_patch_statement() {
+		let sql = "PATCH [{ field: true }]";
+		let res = patch(sql);
+		let out = res.unwrap().1;
+		assert_eq!("PATCH [{ field: true }]", format!("{}", out));
+	}
+
+	#[test]
+	fn data_merge_statement() {
+		let sql = "MERGE { field: true }";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("MERGE { field: true }", format!("{}", out));
+	}
+
+	#[test]
+	fn data_content_statement() {
+		let sql = "CONTENT { field: true }";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("CONTENT { field: true }", format!("{}", out));
+	}
+
+	#[test]
+	fn data_replace_statement() {
+		let sql = "REPLACE { field: true }";
+		let res = data(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REPLACE { field: true }", format!("{}", out));
+	}
+
+	#[test]
+	fn data_values_statement() {
+		let sql = "(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])";
+		let res = values(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			"(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])",
+			format!("{}", out)
+		);
+	}
+
+	#[test]
+	fn data_update_statement() {
+		let sql = "ON DUPLICATE KEY UPDATE field = true, other.field = false";
+		let res = update(sql);
+		let out = res.unwrap().1;
+		assert_eq!("ON DUPLICATE KEY UPDATE field = true, other.field = false", format!("{}", out));
+	}
 }

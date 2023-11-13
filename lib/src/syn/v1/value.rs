@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::{
+	block::block,
+	builtin,
 	builtin::builtin_name,
 	comment::mightbespace,
 	common::{
@@ -13,22 +15,24 @@ use super::{
 	function::{builtin_function, defined_function, model},
 	idiom::{self, reparse_idiom_start},
 	literal::{
-		datetime::datetime, duration::duration, geometry::geometry, mock::mock, number::number,
-		param, range::range, strand::strand, table,
+		datetime::datetime, duration::duration, geometry::geometry, mock::mock, number, param,
+		range::range, regex, strand::strand, table, uuid,
 	},
 	operator,
 	part::edges,
 	subquery::subquery,
+	thing::thing,
 	IResult,
 };
-use crate::sql::{Algorithm, Array, Expression, Idiom, Object, Table, Value};
+use crate::sql::{Array, Expression, Idiom, Object, Table, Value, Values};
 use nom::{
 	branch::alt,
-	bytes::complete::{is_not, tag, tag_no_case, take_while1},
+	bytes::complete::{is_not, tag_no_case, take_while1},
 	character::complete::char,
 	combinator::{self, cut, into, opt},
-	multi::separated_list0,
+	multi::{separated_list0, separated_list1},
 	sequence::{delimited, terminated},
+	Err,
 };
 
 pub fn values(i: &str) -> IResult<&str, Values> {
@@ -45,7 +49,6 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	let (i, v) = separated_list1(commas, what)(i)?;
 	Ok((i, Values(v)))
 }
-
 
 /// Parse any `Value` including expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
@@ -90,7 +93,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			into(subquery),
 			into(datetime),
 			into(duration),
-			into(unique),
+			into(uuid),
 			into(number),
 			into(unary),
 			into(object),
@@ -129,7 +132,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 			into(subquery),
 			into(datetime),
 			into(duration),
-			into(unique),
+			into(uuid),
 			into(number),
 			into(object),
 			into(array),
@@ -241,7 +244,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		combinator::value(Value::Bool(false), tag_no_case("false".as_bytes())),
 		into(datetime),
 		into(geometry),
-		into(unique),
+		into(uuid),
 		into(number),
 		into(object),
 		into(array),
@@ -312,8 +315,8 @@ fn key_double(i: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
+	use crate::sql::array::{Clump, Transpose, Uniq};
 
 	#[test]
 	fn object_normal() {

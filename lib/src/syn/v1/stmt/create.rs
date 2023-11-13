@@ -1,25 +1,15 @@
 use super::super::{
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
-	error::{expect_tag_no_case, expected},
-	idiom::{basic, plain},
-	literal::{datetime, duration, ident, scoring, table, tables, timeout},
-	operator::{assigner, dir},
+	comment::shouldbespace,
+	literal::timeout,
 	part::{data, output},
-	thing::thing,
-	value::{value, whats},
+	value::whats,
 	IResult,
 };
 use crate::sql::statements::CreateStatement;
 use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	bytes::complete::tag_no_case,
+	combinator::{cut, opt},
+	sequence::preceded,
 };
 
 pub fn create(i: &str) -> IResult<&str, CreateStatement> {

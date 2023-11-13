@@ -1,14 +1,8 @@
-use super::{
-	super::{thing::id, IResult, ParseError},
-	ident_raw,
-};
+use super::super::{IResult, ParseError};
 use crate::sql::Regex;
 use nom::{
-	branch::alt,
 	bytes::complete::{escaped, is_not},
 	character::complete::{anychar, char},
-	combinator::{map, opt},
-	sequence::{preceded, terminated},
 };
 
 pub fn regex(i: &str) -> IResult<&str, Regex> {

@@ -1,3 +1,36 @@
+use super::{
+	comment::{block, mightbespace, slash},
+	common::{
+		closechevron, closeparentheses, commas, delimited_list0, delimited_list1, expect_delimited,
+		openchevron, openparentheses, val_char,
+	},
+	depth,
+	error::{expect_tag_no_case, expected},
+	value::value,
+	IResult,
+};
+use crate::sql::{Function, Model, Script};
+use nom::{
+	branch::alt,
+	bytes::complete::{escaped, is_not, tag, take_while1},
+	character::complete::{anychar, char, i64, multispace0},
+	combinator::{cut, recognize},
+	multi::{many0, many1, separated_list1},
+	sequence::{delimited, terminated},
+};
+
+const SINGLE: char = '\'';
+const SINGLE_ESC_NUL: &str = "'\\\0";
+
+const DOUBLE: char = '"';
+const DOUBLE_ESC_NUL: &str = "\"\\\0";
+
+const BACKTICK: char = '`';
+const BACKTICK_ESC_NUL: &str = "`\\\0";
+
+const OBJECT_BEG: char = '{';
+const OBJECT_END: char = '}';
+
 pub fn defined_function(i: &str) -> IResult<&str, Function> {
 	alt((custom, script))(i)
 }
@@ -92,13 +125,13 @@ pub fn script_body(i: &str) -> IResult<&str, Script> {
 }
 
 fn script_body_raw(i: &str) -> IResult<&str, &str> {
-	let _diving = crate::sql::depth::dive(i)?;
+	let _diving = depth::dive(i)?;
 	recognize(many0(alt((
-		script_comment,
-		script_object,
-		script_string,
-		script_maths,
-		script_other,
+		script_body_comment,
+		script_body_object,
+		script_body_string,
+		script_body_maths,
+		script_body_other,
 	))))(i)
 }
 
@@ -115,7 +148,7 @@ fn script_body_comment(i: &str) -> IResult<&str, &str> {
 }
 
 fn script_body_object(i: &str) -> IResult<&str, &str> {
-	recognize(delimited(char(OBJECT_BEG), script_raw, char(OBJECT_END)))(i)
+	recognize(delimited(char(OBJECT_BEG), script_body_raw, char(OBJECT_END)))(i)
 }
 
 fn script_body_string(i: &str) -> IResult<&str, &str> {
@@ -153,11 +186,10 @@ fn script_body_string(i: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod tests {
+	use super::super::builtin::{builtin_name, BuiltinName};
 	use super::*;
-	use crate::sql::{
-		builtin::{builtin_name, BuiltinName},
-		test::Parse,
-	};
+	use crate::sql::Value;
+	use crate::syn::{self, test::Parse};
 
 	fn function(i: &str) -> IResult<&str, Function> {
 		alt((defined_function, |i| {
@@ -266,8 +298,8 @@ mod tests {
 				purchased_before: array::len(->purchased->property) > 0,
 			}) AS likely_to_buy FROM person:tobie;
 		";
-		let res = query::query(sql);
-		let out = res.unwrap().1.to_string();
+		let res = syn::parse(sql);
+		let out = res.unwrap().to_string();
 		assert_eq!(
 			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
 			out,
@@ -277,15 +309,15 @@ mod tests {
 	#[test]
 	fn ml_model_with_mutiple_arguments() {
 		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,);";
-		let res = query::query(sql);
-		let out = res.unwrap().1.to_string();
+		let res = syn::parse(sql);
+		let out = res.unwrap().to_string();
 		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4);", out,);
 	}
 
 	#[test]
 	fn script_basic() {
 		let sql = "return true;";
-		let res = script(sql);
+		let res = script_body(sql);
 		let out = res.unwrap().1;
 		assert_eq!("return true;", format!("{}", out));
 		assert_eq!(out, Script::from("return true;"));
@@ -294,7 +326,7 @@ mod tests {
 	#[test]
 	fn script_object() {
 		let sql = "return { test: true, something: { other: true } };";
-		let res = script(sql);
+		let res = script_body(sql);
 		let out = res.unwrap().1;
 		assert_eq!("return { test: true, something: { other: true } };", format!("{}", out));
 		assert_eq!(out, Script::from("return { test: true, something: { other: true } };"));
@@ -303,7 +335,7 @@ mod tests {
 	#[test]
 	fn script_closure() {
 		let sql = "return this.values.map(v => `This value is ${Number(v * 3)}`);";
-		let res = script(sql);
+		let res = script_body(sql);
 		let out = res.unwrap().1;
 		assert_eq!(
 			"return this.values.map(v => `This value is ${Number(v * 3)}`);",
@@ -318,7 +350,7 @@ mod tests {
 	#[test]
 	fn script_complex() {
 		let sql = r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#;
-		let res = script(sql);
+		let res = script_body(sql);
 		let out = res.unwrap().1;
 		assert_eq!(
 			r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#,
@@ -355,7 +387,7 @@ mod tests {
 			let x = 3 / 4 * 2;
 			let x = /* something */ 45 + 2;
 		"#;
-		let res = script(sql);
+		let res = script_body(sql);
 		let out = res.unwrap().1;
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Script::from(sql));

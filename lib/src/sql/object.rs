@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::sql::{
 	escape::escape_key,
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
-	strand::no_nul_bytes,
 	Operation, Thing, Value,
 };
 use revision::revisioned;

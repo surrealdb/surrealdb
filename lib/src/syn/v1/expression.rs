@@ -1,6 +1,14 @@
-use nom::{branch::alt, combinator::cut, sequence::delimited};
-
-use super::{comment::mightbespace, kind::kind};
+use super::{
+	block::block,
+	comment::mightbespace,
+	common::{closechevron, expect_delimited, openchevron},
+	kind::kind,
+	operator,
+	value::single,
+	IResult,
+};
+use crate::sql::{Cast, Expression, Future};
+use nom::{bytes::complete::tag, character::complete::char, combinator::cut, sequence::delimited};
 
 pub fn cast(i: &str) -> IResult<&str, Cast> {
 	let (i, k) = delimited(char('<'), cut(kind), char('>'))(i)?;
@@ -24,11 +32,16 @@ pub fn unary(i: &str) -> IResult<&str, Expression> {
 
 #[cfg(test)]
 pub fn binary(i: &str) -> IResult<&str, Expression> {
+	use crate::sql::Value;
+
+	use super::depth;
+	use super::value;
+
 	let (i, l) = single(i)?;
 	let (i, o) = operator::binary(i)?;
 	// Make sure to dive if the query is a right-deep binary tree.
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, r) = crate::sql::value::value(i)?;
+	let _diving = depth::dive(i)?;
+	let (i, r) = value::value(i)?;
 	let v = match r {
 		Value::Expression(r) => r.augment(l, o),
 		_ => Expression::new(l, o, r),
@@ -49,6 +62,7 @@ pub fn future(i: &str) -> IResult<&str, Future> {
 mod tests {
 
 	use super::*;
+	use crate::sql::{Block, Kind, Number, Operator, Value};
 
 	#[test]
 	fn cast_int() {
@@ -155,37 +169,13 @@ mod tests {
 		let res = future(sql);
 		let out = res.unwrap().1;
 		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
-		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));
-	}
-
-	#[test]
-	fn matches_without_reference() {
-		let res = matches("@@");
-		let out = res.unwrap().1;
-		assert_eq!("@@", format!("{}", out));
-		assert_eq!(out, Operator::Matches(None));
-	}
-
-	#[test]
-	fn matches_with_reference() {
-		let res = matches("@12@");
-		let out = res.unwrap().1;
-		assert_eq!("@12@", format!("{}", out));
-		assert_eq!(out, Operator::Matches(Some(12u8)));
-	}
-
-	#[test]
-	fn matches_with_invalid_reference() {
-		let res = matches("@256@");
-		res.unwrap_err();
-	}
-
-	#[test]
-	fn test_knn() {
-		let res = knn("<5>");
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<5>", format!("{}", out));
-		assert_eq!(out, Operator::Knn(5));
+		assert_eq!(
+			out,
+			Future(Block::from(Value::from(Expression::Binary {
+				l: Value::Number(Number::Int(5)),
+				o: Operator::Add,
+				r: Value::Number(Number::Int(10))
+			})))
+		);
 	}
 }

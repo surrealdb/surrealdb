@@ -1,7 +1,7 @@
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
-use crate::sql::value::{value, Value};
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -111,7 +111,7 @@ impl Display for Permissions {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-enum PermissionKind {
+pub(crate) enum PermissionKind {
 	Select,
 	Create,
 	Update,

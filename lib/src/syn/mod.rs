@@ -2,14 +2,11 @@
 
 pub mod common;
 pub mod error;
-pub mod parser;
-pub mod test;
-
-#[cfg(feature = "experimental_parser")]
-pub mod lexer;
-#[cfg(feature = "experimental_parser")]
-pub mod parser;
-#[cfg(feature = "experimental_parser")]
-pub mod token;
 
 pub mod v1;
+pub use v1::{
+	datetime, datetime_raw, duration, idiom, json, parse, range, subquery, thing, thing_raw, value,
+};
+
+#[cfg(test)]
+pub mod test;

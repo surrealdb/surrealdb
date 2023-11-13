@@ -244,7 +244,7 @@ mod tests {
 	use crate::dbs::test::mock;
 	use crate::sql::id::Id;
 	use crate::sql::idiom::Idiom;
-	use crate::sql::test::Parse;
+	use crate::syn::test::Parse;
 	use crate::sql::thing::Thing;
 
 	#[tokio::test]

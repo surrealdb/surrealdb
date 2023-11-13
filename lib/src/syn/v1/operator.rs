@@ -1,13 +1,12 @@
-use crate::sql::{Dir, Operator};
-
 use super::{
 	comment::{mightbespace, shouldbespace},
 	IResult,
 };
+use crate::sql::{Dir, Operator};
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
-	character::complete::{u32, u8},
+	character::complete::{char, u32, u8},
 	combinator::{cut, opt, value},
 };
 
@@ -171,5 +170,36 @@ mod tests {
 		let res = dir(sql);
 		let out = res.unwrap().1;
 		assert_eq!("<->", format!("{}", out));
+	}
+
+	#[test]
+	fn matches_without_reference() {
+		let res = matches("@@");
+		let out = res.unwrap().1;
+		assert_eq!("@@", format!("{}", out));
+		assert_eq!(out, Operator::Matches(None));
+	}
+
+	#[test]
+	fn matches_with_reference() {
+		let res = matches("@12@");
+		let out = res.unwrap().1;
+		assert_eq!("@12@", format!("{}", out));
+		assert_eq!(out, Operator::Matches(Some(12u8)));
+	}
+
+	#[test]
+	fn matches_with_invalid_reference() {
+		let res = matches("@256@");
+		res.unwrap_err();
+	}
+
+	#[test]
+	fn test_knn() {
+		let res = knn("<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5));
 	}
 }

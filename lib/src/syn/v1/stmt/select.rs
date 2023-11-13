@@ -1,33 +1,19 @@
 use super::super::{
-	block::block,
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
+	comment::shouldbespace,
 	ending,
-	error::{expect_tag_no_case, expected, ExplainResultExt},
-	idiom::{basic, plain},
-	literal::{datetime, duration, ident, ident_raw, param, scoring, table, tables, timeout},
+	error::{expect_tag_no_case, expected},
+	literal::timeout,
 	omit::omit,
-	operator::{assigner, dir},
-	part::{
-		cond, data,
-		data::{single, update},
-		explain, fetch, fields, group, limit, order, output, split, start, version, with,
-	},
+	part::{cond, explain, fetch, fields, group, limit, order, split, start, version, with},
 	special::{check_group_by_fields, check_order_by_fields, check_split_on_fields},
-	thing::thing,
-	value::{selects, value, values, whats},
+	value::selects,
 	IResult,
 };
-use crate::sql::{statements::SelectStatement, Fields, Value};
+use crate::sql::statements::SelectStatement;
 use nom::{
-	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, peek, recognize, value as map_value},
-	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	bytes::complete::tag_no_case,
+	combinator::{cut, opt, peek},
+	sequence::preceded,
 };
 
 pub fn select(i: &str) -> IResult<&str, SelectStatement> {

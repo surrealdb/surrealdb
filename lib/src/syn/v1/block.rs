@@ -52,3 +52,54 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 		mightbespace,
 	)(i)
 }
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn block_empty() {
+		let sql = "{}";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
+	fn block_value() {
+		let sql = "{ 80 }";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
+	fn block_ifelse() {
+		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{}", out))
+	}
+
+	#[test]
+	fn block_multiple() {
+		let sql = r#"{
+
+	LET $person = (SELECT * FROM person WHERE first = $first AND last = $last AND birthday = $birthday);
+
+	RETURN IF $person[0].id THEN
+		$person[0]
+	ELSE
+		(CREATE person SET first = $first, last = $last, birthday = $birthday)
+	END;
+
+}"#;
+		let res = block(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(sql, format!("{:#}", out))
+	}
+}

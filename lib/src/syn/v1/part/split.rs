@@ -1,14 +1,10 @@
+use super::super::{comment::shouldbespace, common::commas, idiom::basic, IResult};
+use crate::sql::{Split, Splits};
 use nom::{
 	bytes::complete::tag_no_case,
 	combinator::{cut, opt},
 	multi::separated_list1,
 	sequence::terminated,
-	IResult,
-};
-
-use crate::{
-	sql::{Split, Splits},
-	syn::v1::{comment::shouldbespace, common::commas, idiom::basic},
 };
 
 pub fn split(i: &str) -> IResult<&str, Splits> {
@@ -28,7 +24,7 @@ fn split_raw(i: &str) -> IResult<&str, Split> {
 mod tests {
 
 	use super::*;
-	use crate::sql::test::Parse;
+	use crate::{sql::Idiom, syn::test::Parse};
 
 	#[test]
 	fn split_statement() {

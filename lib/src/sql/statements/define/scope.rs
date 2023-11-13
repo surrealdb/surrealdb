@@ -5,7 +5,8 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Duration, Ident, Strand, Value};
 use derive::Store;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -43,6 +44,10 @@ impl DefineScopeStatement {
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	pub fn random_code() -> String {
+		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
 }
 

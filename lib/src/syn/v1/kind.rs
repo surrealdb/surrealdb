@@ -1,3 +1,20 @@
+use super::{
+	comment::mightbespace,
+	common::{
+		closeparentheses, commas, delimited_list1, expect_terminator, openparentheses, verbar,
+	},
+	literal::table,
+	IResult,
+};
+use crate::sql::Kind;
+use nom::{
+	branch::alt,
+	bytes::complete::tag,
+	character::complete::{char, u64},
+	combinator::{cut, map, opt, value},
+	multi::separated_list1,
+};
+
 pub fn kind(i: &str) -> IResult<&str, Kind> {
 	alt((any, either, option))(i)
 }

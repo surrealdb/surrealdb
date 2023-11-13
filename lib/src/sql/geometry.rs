@@ -15,9 +15,6 @@ use std::{fmt, hash};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
-const SINGLE: char = '\'';
-const DOUBLE: char = '\"';
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]
 #[revisioned(revision = 1)]

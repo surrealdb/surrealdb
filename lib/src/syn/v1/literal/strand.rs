@@ -1,20 +1,11 @@
-use super::{
-	super::{
-		common::{closeparentheses, commas, expect_delimited, openparentheses},
-		error::expected,
-		thing::id,
-		IResult, ParseError,
-	},
-	ident_raw,
-};
+use super::super::{error::expected, IResult, ParseError};
 use crate::sql::Strand;
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char},
-	combinator::{cut, map, map_res, opt, value},
-	number::complete::recognize_float,
-	sequence::{preceded, terminated},
+	bytes::complete::{escaped_transform, is_not, tag, take, take_while_m_n},
+	character::complete::char,
+	combinator::value,
+	sequence::preceded,
 	Err,
 };
 use std::ops::RangeInclusive;

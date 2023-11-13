@@ -3,16 +3,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
-use std::ops::{self, RangeInclusive};
+use std::ops::{self};
 use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
-
-const SINGLE: char = '\'';
-const SINGLE_ESC_NUL: &str = "'\\\0";
-
-const DOUBLE: char = '"';
-const DOUBLE_ESC_NUL: &str = "\"\\\0";
 
 /// A string that doesn't contain NUL bytes.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]

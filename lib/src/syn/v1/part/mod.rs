@@ -1,28 +1,26 @@
 use super::{
-	comment::{mightbespace, shouldbespace},
-	common::{closeparentheses, commas, commasorspace, openparentheses},
-	error::{expect_tag_no_case, expected},
+	comment::shouldbespace,
+	common::{closeparentheses, commas, openparentheses},
+	error::expected,
 	idiom::{basic, plain},
-	literal::{datetime, duration, ident, scoring, table, tables},
-	operator::{assigner, dir},
+	literal::{datetime, duration, ident, table, tables},
+	operator::dir,
 	thing::thing,
 	// TODO: go through and check every import for alias.
 	value::value,
 	IResult,
 };
 use crate::sql::{
-	Base, ChangeFeed, Cond, Data, Edges, Explain, Fetch, Fetchs, Group, Groups, Limit, Order,
-	Orders, Output, Tables, Version,
+	Base, ChangeFeed, Cond, Edges, Explain, Fetch, Fetchs, Group, Groups, Limit, Order, Orders,
+	Output, Tables, Version,
 };
 use nom::{
 	branch::alt,
-	bytes::complete::{escaped, escaped_transform, is_not, tag, tag_no_case, take, take_while_m_n},
-	character::complete::{anychar, char, u16, u32},
-	combinator::{cut, into, map, map_res, opt, recognize, value as map_value},
+	bytes::complete::tag_no_case,
+	character::complete::char,
+	combinator::{cut, into, map, opt, value as map_value},
 	multi::separated_list1,
-	number::complete::recognize_float,
-	sequence::{delimited, preceded, terminated, tuple},
-	Err,
+	sequence::{terminated, tuple},
 };
 
 pub mod data;
@@ -195,8 +193,8 @@ fn order_raw(i: &str) -> IResult<&str, Order> {
 	let (i, c) = opt(tuple((shouldbespace, tag_no_case("COLLATE"))))(i)?;
 	let (i, n) = opt(tuple((shouldbespace, tag_no_case("NUMERIC"))))(i)?;
 	let (i, d) = opt(alt((
-		value(true, tuple((shouldbespace, tag_no_case("ASC")))),
-		value(false, tuple((shouldbespace, tag_no_case("DESC")))),
+		map_value(true, tuple((shouldbespace, tag_no_case("ASC")))),
+		map_value(false, tuple((shouldbespace, tag_no_case("DESC")))),
 	)))(i)?;
 	Ok((
 		i,
@@ -215,11 +213,11 @@ pub fn output(i: &str) -> IResult<&str, Output> {
 	let (i, _) = shouldbespace(i)?;
 	cut(|i| {
 		let (i, v) = alt((
-			value(Output::None, tag_no_case("NONE")),
-			value(Output::Null, tag_no_case("NULL")),
-			value(Output::Diff, tag_no_case("DIFF")),
-			value(Output::After, tag_no_case("AFTER")),
-			value(Output::Before, tag_no_case("BEFORE")),
+			map_value(Output::None, tag_no_case("NONE")),
+			map_value(Output::Null, tag_no_case("NULL")),
+			map_value(Output::Diff, tag_no_case("DIFF")),
+			map_value(Output::After, tag_no_case("AFTER")),
+			map_value(Output::Before, tag_no_case("BEFORE")),
 			map(fields, Output::Fields),
 		))(i)?;
 		Ok((i, v))
@@ -237,52 +235,9 @@ pub fn version(i: &str) -> IResult<&str, Version> {
 mod tests {
 
 	use super::*;
-
-	#[test]
-	fn block_empty() {
-		let sql = "{}";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_value() {
-		let sql = "{ 80 }";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_ifelse() {
-		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_multiple() {
-		let sql = r#"{
-
-	LET $person = (SELECT * FROM person WHERE first = $first AND last = $last AND birthday = $birthday);
-
-	RETURN IF $person[0].id THEN
-		$person[0]
-	ELSE
-		(CREATE person SET first = $first, last = $last, birthday = $birthday)
-	END;
-
-}"#;
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{:#}", out))
-	}
+	use crate::sql::{Datetime, Idiom, Value};
+	use crate::syn::test::Parse;
+	use std::time;
 
 	#[test]
 	fn changefeed_missing() {
@@ -319,113 +274,6 @@ mod tests {
 		let res = cond(sql);
 		let out = res.unwrap().1;
 		assert_eq!("WHERE field = true AND other.field = false", format!("{}", out));
-	}
-
-	#[test]
-	fn data_set_statement() {
-		let sql = "SET field = true";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("SET field = true", format!("{}", out));
-	}
-
-	#[test]
-	fn data_set_statement_multiple() {
-		let sql = "SET field = true, other.field = false";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("SET field = true, other.field = false", format!("{}", out));
-	}
-
-	#[test]
-	fn data_unset_statement() {
-		let sql = "UNSET field";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("UNSET field", format!("{}", out));
-	}
-
-	#[test]
-	fn data_unset_statement_multiple_fields() {
-		let sql = "UNSET field, other.field";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("UNSET field, other.field", format!("{}", out));
-	}
-
-	#[test]
-	fn data_patch_statement() {
-		let sql = "PATCH [{ field: true }]";
-		let res = patch(sql);
-		let out = res.unwrap().1;
-		assert_eq!("PATCH [{ field: true }]", format!("{}", out));
-	}
-
-	#[test]
-	fn data_merge_statement() {
-		let sql = "MERGE { field: true }";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("MERGE { field: true }", format!("{}", out));
-	}
-
-	#[test]
-	fn data_content_statement() {
-		let sql = "CONTENT { field: true }";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CONTENT { field: true }", format!("{}", out));
-	}
-
-	#[test]
-	fn data_replace_statement() {
-		let sql = "REPLACE { field: true }";
-		let res = data(sql);
-		let out = res.unwrap().1;
-		assert_eq!("REPLACE { field: true }", format!("{}", out));
-	}
-
-	#[test]
-	fn data_values_statement() {
-		let sql = "(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])";
-		let res = values(sql);
-		let out = res.unwrap().1;
-		assert_eq!(
-			"(one, two, three) VALUES ($param, true, [1, 2, 3]), ($param, false, [4, 5, 6])",
-			format!("{}", out)
-		);
-	}
-
-	#[test]
-	fn data_update_statement() {
-		let sql = "ON DUPLICATE KEY UPDATE field = true, other.field = false";
-		let res = update(sql);
-		let out = res.unwrap().1;
-		assert_eq!("ON DUPLICATE KEY UPDATE field = true, other.field = false", format!("{}", out));
-	}
-
-	#[test]
-	fn dir_in() {
-		let sql = "<-";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<-", format!("{}", out));
-	}
-
-	#[test]
-	fn dir_out() {
-		let sql = "->";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("->", format!("{}", out));
-	}
-
-	#[test]
-	fn dir_both() {
-		let sql = "<->";
-		let res = dir(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<->", format!("{}", out));
 	}
 
 	#[test]
@@ -778,52 +626,6 @@ mod tests {
 		let res = output(sql);
 		let out = res.unwrap().1;
 		assert_eq!("RETURN field, other.field", format!("{}", out));
-	}
-
-	#[test]
-	fn permissions_none() {
-		let sql = "PERMISSIONS NONE";
-		let res = permissions(sql);
-		let out = res.unwrap().1;
-		assert_eq!("PERMISSIONS NONE", format!("{}", out));
-		assert_eq!(out, Permissions::none());
-	}
-
-	#[test]
-	fn permissions_full() {
-		let sql = "PERMISSIONS FULL";
-		let res = permissions(sql);
-		let out = res.unwrap().1;
-		assert_eq!("PERMISSIONS FULL", format!("{}", out));
-		assert_eq!(out, Permissions::full());
-	}
-
-	#[test]
-	fn permissions_specific() {
-		let sql =
-			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE";
-		let res = permissions(sql);
-		let out = res.unwrap().1;
-		assert_eq!(
-			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Permissions {
-				select: Permission::Full,
-				create: Permission::Specific(Value::from(Expression::parse("public = true"))),
-				update: Permission::Specific(Value::from(Expression::parse("public = true"))),
-				delete: Permission::None,
-			}
-		);
-	}
-
-	#[test]
-	fn no_empty_permissions() {
-		// This was previouslly allowed,
-		let sql = "PERMISSION ";
-		permission(sql).unwrap_err();
 	}
 
 	#[test]

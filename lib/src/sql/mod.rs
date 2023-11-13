@@ -102,6 +102,7 @@ pub use self::index::Index;
 pub use self::kind::Kind;
 pub use self::limit::Limit;
 pub use self::mock::Mock;
+pub use self::model::Model;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
@@ -131,10 +132,12 @@ pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
+pub use self::value::serde::to_value;
 pub use self::value::Value;
 pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 
-pub use self::value::serde::to_value;
+// to not break code.
+pub use crate::syn::*;

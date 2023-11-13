@@ -490,8 +490,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 
 #[cfg(test)]
 mod tests {
-
-	use crate::sql::builtin::{builtin_name, BuiltinName};
+	use crate::sql::constant::Constant;
 
 	use super::*;
 
