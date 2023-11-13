@@ -718,7 +718,7 @@ impl Transaction {
 			_ => Err(Error::Unreachable),
 		};
 		// Construct next page
-		res.map(|tup_vec| {
+		res.map(|tup_vec: Vec<(Key, Val)>| {
 			if tup_vec.len() < batch_limit as usize {
 				ScanResult {
 					next_page: None,
