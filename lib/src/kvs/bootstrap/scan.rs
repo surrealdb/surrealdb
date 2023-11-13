@@ -5,7 +5,8 @@ use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
 use crate::err::ChannelVariant::{BootstrapScan, BootstrapTxSupplier};
 use crate::err::Error;
 use crate::kvs::bootstrap::{TxRequestOneshot, TxResponseOneshot};
-use crate::kvs::{BootstrapOperationResult, NodeScanPage};
+use crate::kvs::Limit::Unlimited;
+use crate::kvs::{BootstrapOperationResult, LqValue, ScanPage};
 use crate::sql::Uuid;
 
 pub(crate) async fn scan_node_live_queries(
@@ -25,26 +26,37 @@ pub(crate) async fn scan_node_live_queries(
 			println!("Received tx in scan - {:?} nodes", nodes);
 			trace!("Received tx in scan - {:?} nodes", nodes);
 			for nd in nodes {
-				let page = NodeScanPage::new(&nd);
-				match tx.scan_ndlq(page, batch_size).await {
-					Ok((node_lqs, None)) => {
-						println!("Received node lqs in scan - {:?}", node_lqs);
-						for lq in node_lqs {
-							sender.send((lq, None)).await.map_err(|_| {
-								Error::BootstrapError(ChannelSendError(BootstrapScan))
-							})?;
+				let beg = crate::key::node::lq::prefix_nd(&nd.0);
+				let end = crate::key::node::lq::suffix_nd(&nd.0);
+				let mut next_page = Some(ScanPage {
+					range: beg..end,
+					limit: Unlimited,
+				});
+				while let Some(page) = next_page {
+					match tx.scan(page, batch_size).await {
+						Ok(scan_result) => {
+							next_page = scan_result.next_page;
+							for (key, value) in scan_result.values {
+								let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
+								let tb: String = String::from_utf8(value).unwrap();
+								let lq = LqValue {
+									nd: lv.nd.into(),
+									ns: lv.ns.to_string(),
+									db: lv.db.to_string(),
+									tb,
+									lq: lv.lq.into(),
+								};
+								sender.send((lq, None)).await.map_err(|_| {
+									Error::BootstrapError(ChannelSendError(BootstrapScan))
+								})?;
+							}
 						}
-					}
-					Ok((_node_lqs, Some(_next_page))) => {
-						return Err(Error::Unimplemented(
-							"Pagination for scan not yet implemented".to_string(),
-						))
-					}
-					Err(e) => {
-						println!("Failed scanning node live queries: {:?}", e);
-						error!("Failed scanning node live queries: {:?}", e);
-						tx.cancel().await?;
-						return Err(e);
+						Err(e) => {
+							println!("Failed scanning node live queries: {:?}", e);
+							error!("Failed scanning node live queries: {:?}", e);
+							tx.cancel().await?;
+							return Err(e);
+						}
 					}
 				}
 			}

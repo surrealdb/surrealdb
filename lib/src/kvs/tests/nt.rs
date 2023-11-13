@@ -50,12 +50,11 @@ async fn can_scan_notifications() {
 	// Read all the data
 	for pair in notifications {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		// TODO revisit
 		let scanned_notifications =
 			tx.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), 1000).await.unwrap();
-		let scanned_no_limit = tx
-			.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), NO_LIMIT)
-			.await
-			.unwrap();
+		let scanned_no_limit =
+			tx.scan_tbnt(pair.0.ns, pair.0.db, pair.0.tb, sqlUuid(pair.0.lq), 1).await.unwrap();
 		tx.commit().await.unwrap();
 		assert_eq!(scanned_notifications, vec![pair.1]);
 		assert_eq!(scanned_notifications, scanned_no_limit);

@@ -6,7 +6,7 @@ use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Level, Role};
-use crate::kvs::{LockType::*, LqType, NodeScanPage, TransactionType::*};
+use crate::kvs::{LockType::*, LqType, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -300,16 +300,14 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// Verify node live query was deleted
 	let mut tx = second_node.transaction(Write, Optimistic).await.unwrap();
-	let page = NodeScanPage::new(&old_node_id);
-	let (found, _next_page) = tx
-		.scan_ndlq(&page, 100)
+	let found = tx
+		.scan_ndlq(&old_node_id, 100)
 		.await
 		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
 		.unwrap();
 	assert_eq!(0, found.len(), "Found: {:?}", found);
-	let page = NodeScanPage::new(&new_node_id);
-	let (found, _next_page) = tx
-		.scan_ndlq(&page, 100)
+	let found = tx
+		.scan_ndlq(&new_node_id, 100)
 		.await
 		.map_err(|e| format!("Error scanning ndlq: {:?}", e))
 		.unwrap();

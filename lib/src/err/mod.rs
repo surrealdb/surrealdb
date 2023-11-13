@@ -827,6 +827,9 @@ pub enum UnreachableCause {
 
 	#[error("The value operated on will always be set")]
 	AlwaysSet,
+
+	#[error("All logical enums evaluated")]
+	CatchAll,
 }
 
 #[derive(Error, Debug)]

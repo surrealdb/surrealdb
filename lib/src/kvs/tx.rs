@@ -111,45 +111,6 @@ pub enum TransactionType {
 	Write,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Limit {
-	Unlimited,
-	Limited(u32),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum NodeScanPage<'a> {
-	Node(Uuid, Limit),
-	Page(Uuid, Limit, &'a [u8]),
-}
-
-impl NodeScanPage {
-	pub fn new(node: &Uuid) -> Self {
-		NodeScanPage::Node(*node, Limit::Unlimited)
-	}
-
-	pub(crate) fn node(&self) -> &Uuid {
-		match self {
-			NodeScanPage::Node(n, _) => n,
-			NodeScanPage::Page(n, _, _) => n,
-		}
-	}
-
-	pub(crate) fn limit(&self) -> &Limit {
-		match self {
-			NodeScanPage::Node(_, l) => l,
-			NodeScanPage::Page(_, l, _) => l,
-		}
-	}
-
-	pub(crate) fn prefix(&self) -> Option<&Vec<u8>> {
-		match self {
-			NodeScanPage::Node(_, _) => None,
-			NodeScanPage::Page(_, _, p) => Some(p),
-		}
-	}
-}
-
 impl From<bool> for TransactionType {
 	fn from(value: bool) -> Self {
 		match value {
@@ -756,7 +717,7 @@ impl Transaction {
 				..
 			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::UnreachableCause(UnreachableCause::CatchAll)),
 		};
 		// Construct next page
 		res.map(|tup_vec| {
@@ -1171,22 +1132,11 @@ impl Transaction {
 
 	pub async fn scan_ndlq<'a>(
 		&mut self,
-		page: NodeScanPage,
+		node: &Uuid,
 		batch_size: u32,
-	) -> Result<(Vec<LqValue>, Option<NodeScanPage>), Error> {
-		let beg_from_prefix = crate::key::node::lq::prefix_nd(page.node());
-		let beg = page.prefix().unwrap_or(&beg_from_prefix);
-		let end = crate::key::node::lq::suffix_nd(page.node());
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(beg),
-			crate::key::debug::sprint_key(&end),
-		);
-		let mut nxt: Option<Key> = None;
-		let mut num_remaining_in_batch = match page.limit() {
-			Limit::Limited(n) => std::cmp::min(*n, batch_size),
-			Limit::Unlimited => batch_size,
-		};
+	) -> Result<Vec<LqValue>, Error> {
+		let beg = crate::key::node::lq::prefix_nd(node);
+		let end = crate::key::node::lq::suffix_nd(node);
 		let mut out: Vec<LqValue> = vec![];
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
@@ -1204,18 +1154,7 @@ impl Transaction {
 				});
 			}
 		}
-		let new_limit = match page.limit() {
-			Limit::Unlimited => Limit::Unlimited,
-			Limit::Limited(i) => Limit::Limited(i - out.len()),
-		};
-		Ok((
-			out,
-			Some(NodeScanPage::Page(
-				*page.node(),
-				new_limit,
-				nxt.ok_or(Error::UnreachableCause(UnreachableCause::AlwaysSet)).unwrap(),
-			)),
-		))
+		Ok(out)
 	}
 
 	pub async fn scan_tblq<'a>(
@@ -1253,7 +1192,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		lq: sql::Uuid,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<KvsNotification>, Error> {
 		let beg = crate::key::table::nt::prefix(ns, db, tb, lq);
 		let end = crate::key::table::nt::suffix(ns, db, tb, lq);
@@ -1262,47 +1201,14 @@ impl Transaction {
 			crate::key::debug::sprint_key(&beg),
 			crate::key::debug::sprint_key(&end),
 		);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<KvsNotification> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
-
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (_, value) in res.values.into_iter() {
 				let val: KvsNotification = value.into();
 				out.push(val);
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
 			}
 		}
 		Ok(out)

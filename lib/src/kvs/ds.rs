@@ -15,9 +15,9 @@ use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
-#[allow(unused_imports)]
+#[allow(unused_imports)] // TODO fix
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -354,8 +354,6 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override and default_clock to remove warning when no kv is enabled.
-				let _ = (clock_override, default_clock);
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -702,14 +700,7 @@ impl Datastore {
 					e
 				))
 			})?;
-			let page = NodeScanPage::new(&node_id);
-			let (nds, next_page) = tx.scan_ndlq(&page, 100_000).await?;
-			if next_page.is_some() {
-				return Err(Error::Unimplemented(
-					"clear unreachable state detected a next page and this is unhandled"
-						.to_string(),
-				));
-			}
+			let nds = tx.scan_ndlq(&node_id, 100_000).await?;
 			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
