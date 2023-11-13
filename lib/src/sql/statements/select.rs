@@ -322,5 +322,7 @@ mod tests {
 	}
 
 	#[test]
-	fn select_with_function() {}
+	fn select_order_by_rand() {
+		assert_parsable("SELECT foo, bar FROM test ORDER BY RAND()");
+	}
 }
