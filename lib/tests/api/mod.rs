@@ -1,14 +1,17 @@
 // Tests common to all protocols and storage engines
 
+static PERMITS: Semaphore = Semaphore::const_new(1);
+
 #[test_log::test(tokio::test)]
 async fn connect() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
+	drop(permit);
 	db.health().await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
 async fn yuse() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let item = Ulid::new().to_string();
 	match db.create(Resource::from(item.as_str())).await.unwrap_err() {
 		// Local engines return this error
@@ -27,12 +30,14 @@ async fn yuse() {
 	}
 	db.use_db(item.as_str()).await.unwrap();
 	db.create(Resource::from(item)).await.unwrap();
+	drop(permit);
 }
 
 #[test_log::test(tokio::test)]
 async fn invalidate() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	db.invalidate().await.unwrap();
 	let error = db.create::<Option<RecordId>>(("user", "john")).await.unwrap_err();
 	assert!(
@@ -44,7 +49,7 @@ async fn invalidate() {
 
 #[test_log::test(tokio::test)]
 async fn signup_scope() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let scope = Ulid::new().to_string();
@@ -56,6 +61,7 @@ async fn signup_scope() {
     "
 	);
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	db.signup(Scope {
 		namespace: NS,
@@ -72,12 +78,13 @@ async fn signup_scope() {
 
 #[test_log::test(tokio::test)]
 async fn signin_ns() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
 	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	db.signin(Namespace {
 		namespace: NS,
@@ -90,13 +97,14 @@ async fn signin_ns() {
 
 #[test_log::test(tokio::test)]
 async fn signin_db() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
 	let sql = format!("DEFINE USER {user} ON DATABASE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	db.signin(Database {
 		namespace: NS,
@@ -110,7 +118,7 @@ async fn signin_db() {
 
 #[test_log::test(tokio::test)]
 async fn signin_scope() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let scope = Ulid::new().to_string();
@@ -124,6 +132,7 @@ async fn signin_scope() {
     "
 	);
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	db.signup(Scope {
 		namespace: NS,
@@ -151,7 +160,7 @@ async fn signin_scope() {
 
 #[test_log::test(tokio::test)]
 async fn scope_throws_error() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let scope = Ulid::new().to_string();
@@ -165,6 +174,7 @@ async fn scope_throws_error() {
     "
 	);
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 
 	match db
@@ -218,7 +228,7 @@ async fn scope_throws_error() {
 
 #[test_log::test(tokio::test)]
 async fn scope_invalid_query() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let scope = Ulid::new().to_string();
@@ -232,6 +242,7 @@ async fn scope_invalid_query() {
     "
 	);
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 
 	match db
@@ -283,12 +294,13 @@ async fn scope_invalid_query() {
 
 #[test_log::test(tokio::test)]
 async fn authenticate() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
 	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	let token = db
 		.signin(Namespace {
@@ -303,8 +315,9 @@ async fn authenticate() {
 
 #[test_log::test(tokio::test)]
 async fn query() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let _ = db
 		.query(
 			"
@@ -325,7 +338,7 @@ async fn query() {
 
 #[test_log::test(tokio::test)]
 async fn query_decimals() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let sql = "
 	    DEFINE TABLE foo;
@@ -333,12 +346,14 @@ async fn query_decimals() {
 	    CREATE foo CONTENT { bar: 42.69 };
     ";
 	let _ = db.query(sql).await.unwrap().check().unwrap();
+	drop(permit);
 }
 
 #[test_log::test(tokio::test)]
 async fn query_binds() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let mut response =
 		db.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
@@ -369,8 +384,9 @@ async fn query_binds() {
 
 #[test_log::test(tokio::test)]
 async fn query_chaining() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let response = db
 		.query(BeginStatement)
 		.query("CREATE account:one SET balance = 135605.16")
@@ -385,8 +401,9 @@ async fn query_chaining() {
 
 #[test_log::test(tokio::test)]
 async fn mixed_results_query() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let sql = "CREATE bar SET baz = rand('a'); CREATE foo;";
 	let mut response = db.query(sql).await.unwrap();
 	response.take::<Value>(0).unwrap_err();
@@ -395,16 +412,18 @@ async fn mixed_results_query() {
 
 #[test_log::test(tokio::test)]
 async fn create_record_no_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let _: Vec<RecordId> = db.create("user").await.unwrap();
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
 async fn create_record_with_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let _: Option<RecordId> = db.create(("user", "jane")).await.unwrap();
 	let _: Value = db.create(Resource::from(("user", "john"))).await.unwrap();
 	let _: Value = db.create(Resource::from("user:doe")).await.unwrap();
@@ -412,8 +431,9 @@ async fn create_record_with_id() {
 
 #[test_log::test(tokio::test)]
 async fn create_record_no_id_with_content() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let _: Vec<RecordId> = db
 		.create("user")
 		.content(Record {
@@ -432,8 +452,9 @@ async fn create_record_no_id_with_content() {
 
 #[test_log::test(tokio::test)]
 async fn create_record_with_id_with_content() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let record: Option<RecordId> = db
 		.create(("user", "john"))
 		.content(Record {
@@ -454,8 +475,9 @@ async fn create_record_with_id_with_content() {
 
 #[test_log::test(tokio::test)]
 async fn select_table() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let table = "user";
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
@@ -466,8 +488,9 @@ async fn select_table() {
 
 #[test_log::test(tokio::test)]
 async fn select_record_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let record_id = ("user", "john");
 	let _: Option<RecordId> = db.create(record_id).await.unwrap();
 	let Some(record): Option<RecordId> = db.select(record_id).await.unwrap() else {
@@ -480,8 +503,9 @@ async fn select_record_id() {
 
 #[test_log::test(tokio::test)]
 async fn select_record_ranges() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let table = "user";
 	let _: Option<RecordId> = db.create((table, "amos")).await.unwrap();
 	let _: Option<RecordId> = db.create((table, "jane")).await.unwrap();
@@ -515,8 +539,9 @@ async fn select_record_ranges() {
 
 #[test_log::test(tokio::test)]
 async fn update_table() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let table = "user";
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
@@ -527,8 +552,9 @@ async fn update_table() {
 
 #[test_log::test(tokio::test)]
 async fn update_record_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let table = "user";
 	let _: Option<RecordId> = db.create((table, "john")).await.unwrap();
 	let _: Option<RecordId> = db.create((table, "jane")).await.unwrap();
@@ -538,8 +564,9 @@ async fn update_record_id() {
 
 #[test_log::test(tokio::test)]
 async fn update_table_with_content() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let sql = "
         CREATE type::thing($table, 'amos') SET name = 'Amos';
         CREATE type::thing($table, 'jane') SET name = 'Jane';
@@ -581,8 +608,9 @@ async fn update_table_with_content() {
 
 #[test_log::test(tokio::test)]
 async fn update_record_range_with_content() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let sql = "
         CREATE type::thing($table, 'amos') SET name = 'Amos';
         CREATE type::thing($table, 'jane') SET name = 'Jane';
@@ -639,8 +667,9 @@ async fn update_record_range_with_content() {
 
 #[test_log::test(tokio::test)]
 async fn update_record_id_with_content() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let record_id = ("user", "john");
 	let user: Option<RecordName> = db
 		.create(record_id)
@@ -679,8 +708,9 @@ struct Person {
 
 #[test_log::test(tokio::test)]
 async fn merge_record_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let record_id = ("person", "jaime");
 	let mut jaime: Option<Person> = db
 		.create(record_id)
@@ -722,8 +752,9 @@ async fn patch_record_id() {
 		hello: Vec<String>,
 	}
 
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let id = "john";
 	let _: Option<RecordId> = db
 		.create(("user", id))
@@ -753,8 +784,9 @@ async fn patch_record_id() {
 
 #[test_log::test(tokio::test)]
 async fn delete_table() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let table = "user";
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
 	let _: Vec<RecordId> = db.create(table).await.unwrap();
@@ -769,8 +801,9 @@ async fn delete_table() {
 
 #[test_log::test(tokio::test)]
 async fn delete_record_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let record_id = ("user", "john");
 	let _: Option<RecordId> = db.create(record_id).await.unwrap();
 	let _: Option<RecordId> = db.select(record_id).await.unwrap();
@@ -787,8 +820,9 @@ async fn delete_record_id() {
 
 #[test_log::test(tokio::test)]
 async fn delete_record_range() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let sql = "
         CREATE type::thing($table, 'amos') SET name = 'Amos';
         CREATE type::thing($table, 'jane') SET name = 'Jane';
@@ -830,13 +864,14 @@ async fn delete_record_range() {
 
 #[test_log::test(tokio::test)]
 async fn changefeed() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
 	let response = db.query(sql).await.unwrap();
+	drop(permit);
 	response.check().unwrap();
 	// Create and update users
 	let sql = "
@@ -1003,14 +1038,16 @@ async fn changefeed() {
 
 #[test_log::test(tokio::test)]
 async fn version() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
+	drop(permit);
 	db.version().await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
 async fn set_unset() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let (key, value) = ("name", "Doe");
 	let sql = "RETURN $name";
 	db.set(key, value).await.unwrap();
@@ -1027,8 +1064,9 @@ async fn set_unset() {
 
 #[test_log::test(tokio::test)]
 async fn return_bool() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();
+	drop(permit);
 	let Some(boolean): Option<bool> = response.take(0).unwrap() else {
 		panic!("record not found");
 	};

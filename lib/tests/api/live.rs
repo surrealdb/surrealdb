@@ -8,7 +8,8 @@ use surrealdb::Notification;
 
 #[test_log::test(tokio::test)]
 async fn live_select_table() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
+
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
@@ -57,11 +58,14 @@ async fn live_select_table() {
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
+
+	drop(permit);
 }
 
 #[test_log::test(tokio::test)]
 async fn live_select_record_id() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
+
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
@@ -110,11 +114,14 @@ async fn live_select_record_id() {
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
+
+	drop(permit);
 }
 
 #[test_log::test(tokio::test)]
 async fn live_select_record_ranges() {
-	let db = new_db().await;
+	let (permit, db) = new_db().await;
+
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
@@ -164,4 +171,6 @@ async fn live_select_record_ranges() {
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
+
+	drop(permit);
 }
