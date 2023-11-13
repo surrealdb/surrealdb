@@ -17,7 +17,6 @@ impl_module_def!(
 	"join" => run,
 	"len" => run,
 	"lowercase" => run,
-	"regex" => run,
 	"repeat" => run,
 	"replaceAll" => run,
 	"replace" => run,
