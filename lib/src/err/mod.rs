@@ -592,8 +592,8 @@ pub enum Error {
 	#[error("Index is corrupted")]
 	CorruptedIndex,
 
-	/// The query planner did not find an index able to support the match @@ operator on a given expression
-	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
 	},
