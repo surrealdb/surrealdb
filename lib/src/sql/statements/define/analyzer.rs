@@ -11,13 +11,13 @@ use crate::sql::ending;
 use crate::sql::error::expected;
 use crate::sql::error::IResult;
 use crate::sql::filter::{filters, Filter};
-use crate::sql::ident::{ident, Ident};
+use crate::sql::ident::{ident, multi, Ident};
 use crate::sql::strand::{strand, Strand};
 use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::cut;
 use nom::multi::many0;
 use revision::revisioned;
@@ -25,9 +25,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
+	pub function: Option<Ident>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
@@ -62,6 +64,9 @@ impl DefineAnalyzerStatement {
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER {}", self.name)?;
+		if let Some(ref i) = self.function {
+			write!(f, " FUNCTION fn::{i}")?
+		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " TOKENIZERS {}", tokens.join(","))?;
@@ -82,7 +87,7 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(analyzer_opts)(i)?;
-	let (i, _) = expected("one of FILTERS, TOKENIZERS, or COMMENT", ending::query)(i)?;
+	let (i, _) = expected("one of FUNCTION, FILTERS, TOKENIZERS, or COMMENT", ending::query)(i)?;
 	// Create the base statement
 	let mut res = DefineAnalyzerStatement {
 		name,
@@ -91,6 +96,9 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	// Assign any defined options
 	for opt in opts {
 		match opt {
+			DefineAnalyzerOption::Function(i) => {
+				res.function = Some(i);
+			}
 			DefineAnalyzerOption::Comment(v) => {
 				res.comment = Some(v);
 			}
@@ -107,13 +115,23 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 }
 
 enum DefineAnalyzerOption {
+	Function(Ident),
 	Comment(Strand),
 	Filters(Vec<Filter>),
 	Tokenizers(Vec<Tokenizer>),
 }
 
 fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
-	alt((analyzer_comment, analyzer_filters, analyzer_tokenizers))(i)
+	alt((analyzer_function, analyzer_comment, analyzer_filters, analyzer_tokenizers))(i)
+}
+
+fn analyzer_function(i: &str) -> IResult<&str, DefineAnalyzerOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag("fn::")(i)?;
+	let (i, name) = multi(i)?;
+	Ok((i, DefineAnalyzerOption::Function(name)))
 }
 
 fn analyzer_comment(i: &str) -> IResult<&str, DefineAnalyzerOption> {
