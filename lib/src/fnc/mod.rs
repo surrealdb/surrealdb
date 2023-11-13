@@ -389,6 +389,7 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
+		"search::analyze" => search::analyze((ctx, txn, opt)).await,
 		"search::score" => search::score((ctx, txn, doc)).await,
 		"search::highlight" => search::highlight((ctx,txn, doc)).await,
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,

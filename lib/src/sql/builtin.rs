@@ -328,6 +328,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			},
 		},
 		search => {
+			analyze => { fn },
 			score => { fn },
 			highlight => { fn },
 			offsets => { fn },
