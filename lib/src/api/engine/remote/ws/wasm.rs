@@ -310,7 +310,7 @@ pub(crate) fn router(
 										// If `id` is not set, this may be a live query notification
 										None => match response.result {
 											Ok(Data::Live(notification)) => {
-												let live_query_id = notification.live_id;
+												let live_query_id = notification.id;
 												// Check if this live query is registered
 												if let Some(sender) =
 													live_queries.get(&live_query_id)

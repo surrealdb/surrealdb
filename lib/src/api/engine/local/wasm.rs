@@ -180,7 +180,7 @@ pub(crate) fn router(
 					}
 				}
 				Either::Right(notification) => {
-					let id = notification.live_id;
+					let id = notification.id;
 					if let Some(sender) = live_queries.get(&id) {
 						if sender.send(notification).await.is_err() {
 							live_queries.remove(&id);

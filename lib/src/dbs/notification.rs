@@ -22,8 +22,7 @@ impl Display for Action {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
-	#[serde(rename = "id")]
-	pub live_id: Uuid,
+	pub id: Uuid,
 	pub action: Action,
 	pub result: Value,
 }
@@ -31,7 +30,7 @@ pub struct Notification {
 impl Display for Notification {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let obj: Object = map! {
-			"live_id".to_string() => self.live_id.to_string().into(),
+			"id".to_string() => self.id.to_string().into(),
 			"action".to_string() => self.action.to_string().into(),
 			"result".to_string() => self.result.clone(),
 		}
