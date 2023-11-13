@@ -1,4 +1,4 @@
-use crate::kvs::{LqValue, NO_LIMIT};
+use crate::kvs::LqValue;
 
 #[tokio::test]
 #[serial]
@@ -19,12 +19,11 @@ async fn write_scan_ndlq() {
 
 	// Verify scan
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let page = NodeScanPage::new(&nd);
-	let res_lim = tx.scan_ndlq(page, 100).await.unwrap().0;
-	let res_no_lim = tx.scan_ndlq(page, 100).await.unwrap().0;
+	let res_many_batches = tx.scan_ndlq(&nd, 1).await.unwrap();
+	let res_single_batch = tx.scan_ndlq(&nd, 100_000).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(
-		res_lim,
+		res_many_batches,
 		vec![LqValue {
 			nd,
 			ns: ns.to_string(),
@@ -33,5 +32,5 @@ async fn write_scan_ndlq() {
 			lq
 		}]
 	);
-	assert_eq!(res_lim, res_no_lim);
+	assert_eq!(res_many_batches, res_single_batch);
 }

@@ -22,14 +22,14 @@ async fn write_scan_hb() {
 		.unwrap();
 	tx.commit().await.unwrap();
 
-	// Scan limit 1000
+	// Scan in batches of 1
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let vals_lim = tx.scan_hb(&t3, 1000).await.unwrap();
+	let vals_lim = tx.scan_hb(&t3, 1).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	// Scan limit 0
+	// Scan in batches of 100k
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let vals_no_lim = tx.scan_hb(&t3, NO_LIMIT).await.unwrap();
+	let vals_no_lim = tx.scan_hb(&t3, 100_000).await.unwrap();
 	tx.cancel().await.unwrap();
 
 	// Assert equal

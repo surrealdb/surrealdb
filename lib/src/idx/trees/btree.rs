@@ -703,7 +703,7 @@ mod tests {
 	};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
+	use crate::kvs::{Datastore, Key, LockType::*, ScanPage, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
@@ -1047,7 +1047,7 @@ mod tests {
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
 		// There should be one record per node
-		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(10, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len());
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, |count, depth, node_id, node| match count {
@@ -1152,7 +1152,7 @@ mod tests {
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
 		// There should be one record per node
-		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(7, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len());
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, |count, depth, node_id, node| {
@@ -1285,7 +1285,7 @@ mod tests {
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
-		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(0, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len());
 		tx.cancel().await.unwrap();
 	}
 

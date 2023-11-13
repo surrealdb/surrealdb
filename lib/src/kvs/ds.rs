@@ -17,9 +17,7 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{
-	bootstrap, LockType, LockType::*, NodeScanPage, TransactionType, TransactionType::*, NO_LIMIT,
-};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql;
 use crate::sql::statements::DefineUserStatement;
@@ -663,7 +661,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(NO_LIMIT).await?;
+		let cluster = tx.scan_nd(100_000).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
@@ -674,7 +672,7 @@ impl Datastore {
 			// We remove one, because the scan range adds one
 			value: u64::MAX - 1,
 		};
-		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
+		let hbs = tx.scan_hb(&end_of_time, 100_000).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			match unreachable_nodes.remove(&hb.nd.to_string()) {
@@ -720,7 +718,7 @@ impl Datastore {
 		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 100_000).await?;
 			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
@@ -752,13 +750,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let page = NodeScanPage::new(&self.id.0);
-		let (lqs, next_page) = tx.scan_ndlq(&page, 1000).await?;
-		if next_page.is_some() {
-			return Err(Error::Unimplemented(
-				"garbage collect detected a next page and this is unhandled".to_string(),
-			));
-		}
+		let lqs = tx.scan_ndlq(&self.id, 100_000).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
@@ -819,7 +811,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
 		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), NO_LIMIT).await?;
+		tx.delr_hb(dead.clone(), 100_000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
 		}
