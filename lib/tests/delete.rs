@@ -5,11 +5,11 @@ use channel::{Receiver, TryRecvError};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::node::Timestamp;
-use surrealdb::dbs::{Action, Notification, Session};
+use surrealdb::dbs::{KvsAction, KvsNotification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql;
-use surrealdb::sql::{Id, Thing, Value};
+use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn delete() -> Result<(), Error> {
@@ -427,14 +427,16 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	not.notification_id = sql::Uuid::default();
 	assert_eq!(
 		not,
-		Notification {
+		KvsNotification {
 			live_id,
 			node_id: sql::Uuid::from(node_id),
-			action: Action::Delete,
-			result: Value::Thing(Thing {
-				tb: "person".to_string(),
-				id: Id::String("test_true".to_string()),
-			}),
+			action: KvsAction::Delete,
+			result: Value::parse(
+				"{
+					id: person:test_true,
+					condition: true,
+				}"
+			),
 			notification_id: Default::default(),
 			timestamp: Timestamp::default(),
 		}
@@ -443,10 +445,10 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 }
 
 fn recv_notification(
-	notifications: &Receiver<Notification>,
+	notifications: &Receiver<KvsNotification>,
 	tries: u8,
 	poll_rate: std::time::Duration,
-) -> Result<Notification, TryRecvError> {
+) -> Result<KvsNotification, TryRecvError> {
 	for _ in 0..tries {
 		if let Ok(not) = notifications.try_recv() {
 			return Ok(not);

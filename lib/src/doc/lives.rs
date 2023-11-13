@@ -1,13 +1,14 @@
 use crate::ctx::Context;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Action, Transaction};
+use crate::dbs::{KvsAction, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::paths::META;
 use crate::sql::permission::Permission;
-use crate::sql::Value;
+use crate::sql::{Uuid, Value};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -23,8 +24,6 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender.get() {
 			// Loop through all index statements
@@ -96,47 +95,56 @@ impl<'a> Document<'a> {
 				// relevant notification based on the statement.
 				let mut tx = txn.lock().await;
 				let ts = tx.clock().await;
-				let ns = Box::new(opt.ns().to_string());
-				let db = Box::new(opt.db().to_string());
-				let tb = Box::new(self.id.unwrap().tb.to_string());
-				let not_id = crate::sql::Uuid::new_v4();
+				let ns = opt.ns().to_string();
+				let db = opt.db().to_string();
+				let tb = self.id.unwrap().tb.to_string();
+				let not_id = Uuid::new_v4();
 				if stm.is_delete() {
+					// Send previous notifications
+					let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
+					match previous_nots {
+						Ok(nots) => {
+							for not in &nots {
+								// Consume the notification entry
+								let key = crate::key::table::nt::Nt::new(
+									opt.ns(),
+									opt.db(),
+									&tb,
+									not.live_id,
+									not.timestamp,
+									not.notification_id,
+								);
+								let key_enc = key.encode()?;
+								tx.del(key_enc).await?;
+								// Send the notification to the channel
+								if let Err(e) = chn.send(not.clone()).await {
+									error!("Error sending scanned notification: {}", e);
+								}
+							}
+						}
+						Err(err) => {
+							error!("Error scanning notifications: {}", err);
+						}
+					}
 					// Send a DELETE notification
-					let thing = (*rid).clone();
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Delete,
-						result: Value::Thing(thing),
+						action: KvsAction::Delete,
+						result: {
+							// Ensure futures are run
+							let lqopt: &Options = &lqopt.new_with_futures(true);
+							// Output the full document before any changes were applied
+							let mut value = doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+							// Remove metadata fields on output
+							value.del(&lqctx, lqopt, txn, &*META).await?;
+							// Output result
+							value
+						},
 						timestamp: ts,
 					};
 					if opt.id()? == lv.node.0 {
-						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
-						match previous_nots {
-							Ok(nots) => {
-								for not in nots {
-									// Consume the notification
-									let key = crate::key::table::nt::Nt::new(
-										&ns,
-										&db,
-										&tb,
-										not.live_id,
-										not.timestamp,
-										not.notification_id,
-									);
-									let key_enc = key.encode()?;
-									tx.del(key_enc).await?;
-									// Send the notification
-									if let Err(e) = chn.send(not).await {
-										error!("Error sending scanned notification: {}", e);
-									}
-								}
-							}
-							Err(err) => {
-								error!("Error scanning notifications: {}", err);
-							}
-						}
 						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
@@ -145,11 +153,11 @@ impl<'a> Document<'a> {
 				} else if self.is_new() {
 					// Send a CREATE notification
 					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Create,
+						action: KvsAction::Create,
 						result: plucked,
 						timestamp: ts,
 					};
@@ -186,11 +194,11 @@ impl<'a> Document<'a> {
 					}
 				} else {
 					// Send a UPDATE notification
-					let notification = Notification {
+					let notification = KvsNotification {
 						live_id: lv.id,
 						node_id: lv.node,
 						notification_id: not_id,
-						action: Action::Update,
+						action: KvsAction::Update,
 						result: self.pluck(_ctx, opt, txn, &lq).await?,
 						timestamp: ts,
 					};
@@ -287,12 +295,13 @@ impl<'a> Document<'a> {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
-	use crate::dbs::{Action, Notification, Session};
+	use crate::dbs::{KvsAction, KvsNotification, Session};
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::sql;
+	use crate::sql::uuid::Uuid;
 	use crate::sql::Value;
 
 	#[tokio::test]
@@ -317,11 +326,11 @@ mod tests {
 			sql::uuid::Uuid::try_from("dccad9ab-2ffd-45a9-b7f7-89ba622d7cc6").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
 			node_id: sql::uuid::Uuid::from(node_id),
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
@@ -387,11 +396,11 @@ mod tests {
 			sql::uuid::Uuid::try_from("4511114c-1780-4d46-8657-efcbd9a45d12").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
 			node_id: sql::uuid::Uuid::from(node_id),
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
@@ -434,7 +443,7 @@ mod tests {
 		// Setup
 		let ds = Datastore::new("memory").await.unwrap().with_notifications();
 		let sess = Session::for_level(Level::Root, Role::Owner).with_ns("testns").with_db("testdb");
-		let node_id = uuid::Uuid::parse_str("6da5535b-9c0b-493b-8077-c26449738608").unwrap();
+		let node_id = Uuid::try_from("6da5535b-9c0b-493b-8077-c26449738608").unwrap();
 
 		// Perform a CREATE statement
 		let qry = "CREATE test_table:123 CONTENT {\"name\":\"test\"}";
@@ -453,15 +462,14 @@ mod tests {
 		};
 
 		// Create remote notification artificially
-		let expected_not_id =
-			sql::uuid::Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
+		let expected_not_id = Uuid::try_from("859eb7ca-03cf-4b4c-a966-c28b5ccbbf3a").unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let ts = tx.clock().await;
-		let not = Notification {
+		let not = KvsNotification {
 			live_id: *lq_id,
-			node_id: sql::uuid::Uuid::from(node_id),
+			node_id,
 			notification_id: expected_not_id,
-			action: Action::Create,
+			action: KvsAction::Create,
 			result: Value::Strand(sql::Strand::from(
 				"normally, this would be an object or array of objects",
 			)),
@@ -487,8 +495,8 @@ mod tests {
 		// Verify we received the remote notification before the create notification
 		let receiver = ds.notifications().unwrap();
 		let first_notification = receiver.try_recv().unwrap();
-		let second_notification = receiver.try_recv().unwrap();
 		assert_eq!(first_notification.notification_id, expected_not_id);
+		let second_notification = receiver.try_recv().unwrap();
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
 		// verify remote notifications have been consumed

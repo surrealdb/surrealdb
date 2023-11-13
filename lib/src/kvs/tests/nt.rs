@@ -9,7 +9,7 @@ async fn can_scan_notifications() {
 	let database = "testdb";
 	let table = "testtb";
 	let node_id = sql::uuid::Uuid::try_from("10e59cba-98bd-42b1-b60d-6ab32d989b65").unwrap();
-	let notifications: Vec<(Nt, Notification)> = vec![
+	let notifications: Vec<(Nt, KvsNotification)> = vec![
 		create_nt_tuple(
 			namespace,
 			database,
@@ -77,11 +77,11 @@ async fn can_delete_notifications() {
 	};
 	let not_id = sql::uuid::Uuid::try_from("7719f939-e901-416d-89ff-5e6d97e2a49d").unwrap();
 	let live_id = sql::uuid::Uuid::try_from("cfaea67b-6cca-436e-8bf0-819c2277100e").unwrap();
-	let not = Notification {
+	let not = KvsNotification {
 		live_id: live_id.clone(),
 		node_id: node_id.clone(),
 		notification_id: not_id.clone(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result: Value::Strand(Strand("this would be an object".to_string())),
 		timestamp: ts.clone(),
 	};
@@ -125,29 +125,29 @@ async fn putc_tbnt_sanity_checks_key_with_value() {
 	let not_id = sql::uuid::Uuid::try_from("bb4be42a-e04c-4245-8cee-55263bd19eeb").unwrap();
 
 	// Test erroneous data
-	let not_bad_ts = Notification {
+	let not_bad_ts = KvsNotification {
 		live_id: live_id.clone(),
 		node_id: node_id.clone(),
 		notification_id: not_id.clone(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result: Value::None,
 		timestamp: Timestamp {
 			value: 0x0bad,
 		},
 	};
-	let not_bad_lq = Notification {
+	let not_bad_lq = KvsNotification {
 		live_id: Default::default(),
 		node_id: node_id.clone(),
 		notification_id: not_id.clone(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result: Value::None,
 		timestamp: ts.clone(),
 	};
-	let not_bad_nt = Notification {
+	let not_bad_nt = KvsNotification {
 		live_id: live_id.clone(),
 		node_id: node_id.clone(),
 		notification_id: Default::default(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result: Value::None,
 		timestamp: ts.clone(),
 	};
@@ -172,16 +172,16 @@ fn create_nt_tuple<'a>(
 	node_id: sqlUuid,
 	live_id: sqlUuid,
 	not_id: sqlUuid,
-) -> (Nt<'a>, Notification) {
+) -> (Nt<'a>, KvsNotification) {
 	let result = Value::Strand(Strand::from("teststrand result"));
 	let timestamp = Timestamp {
 		value: 123,
 	};
-	let not = Notification {
+	let not = KvsNotification {
 		live_id: live_id.clone(),
 		node_id: node_id.clone(),
 		notification_id: not_id.clone(),
-		action: Action::Create,
+		action: KvsAction::Create,
 		result,
 		timestamp: timestamp.clone(),
 	};

@@ -5,7 +5,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Capabilities;
 use crate::dbs::Executor;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -14,7 +14,9 @@ use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
 use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Role};
 use crate::key::root::hb::Hb;
-use crate::kvs::clock::{SizedClock, SystemClock};
+use crate::kvs::clock::SizedClock;
+#[allow(unused_imports)]
+use crate::kvs::clock::SystemClock;
 use crate::kvs::{
 	bootstrap, LockType, LockType::*, NodeScanPage, TransactionType, TransactionType::*, NO_LIMIT,
 };
@@ -131,7 +133,7 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel:
-		OnceLock<(channel::Sender<Notification>, channel::Receiver<Notification>)>,
+		OnceLock<(channel::Sender<KvsNotification>, channel::Receiver<KvsNotification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -232,10 +234,8 @@ impl Datastore {
 	#[allow(dead_code)]
 	async fn new_full_impl(
 		path: &str,
-		clock_override: Option<Arc<RwLock<SizedClock>>>,
+		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
-		let default_clock: Arc<RwLock<SizedClock>> =
-			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
@@ -243,6 +243,8 @@ impl Datastore {
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store in {}", path);
 					Ok((v, clock))
@@ -258,6 +260,8 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store at {}", path);
 					Ok((v, clock))
@@ -274,6 +278,8 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -289,6 +295,8 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -304,6 +312,8 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -319,6 +329,8 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -334,6 +346,8 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -1250,12 +1264,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<channel::Receiver<Notification>> {
+	pub fn notifications(&self) -> Option<channel::Receiver<KvsNotification>> {
 		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<channel::Sender<Notification>> {
+	pub(crate) fn live_sender(&self) -> Option<channel::Sender<KvsNotification>> {
 		self.notification_channel.get().map(|v| v.0.clone())
 	}
 

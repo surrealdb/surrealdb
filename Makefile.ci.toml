@@ -76,7 +76,7 @@ command = "cargo"
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
 
 [tasks.ci-api-integration]
-env = { _START_SURREALDB_PATH = "fdb:/etc/foundationdb/fdb.cluster" }
+env = { _START_SURREALDB_PATH = "memory" }
 private = true
 run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"], fork = true }
 
@@ -145,9 +145,9 @@ dependencies = ["build-surrealdb"]
 script = """
    #!/bin/bash -ex
 
-   target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb.log &
+   target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
-   echo $! > /tmp/surreal.pid
+   echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
    set +e
    echo "Waiting for surreal to be ready..."
@@ -164,9 +164,9 @@ script = """
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
 script = """
-        kill $(cat /tmp/surreal.pid) || true
+        kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
         sleep 5
-        kill -9 $(cat /tmp/surreal.pid) || true
+        kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
 """
 
 [tasks.start-tikv]
@@ -204,7 +204,7 @@ script = "kill $(cat /tmp/tiup.pid) || true"
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 command = "cargo"
-args = ["build", "--locked", "--no-default-features", "--features", "storage-mem,storage-fdb"]
+args = ["build", "--locked", "--no-default-features", "--features", "storage-mem"]
 
 #
 # Benchmarks

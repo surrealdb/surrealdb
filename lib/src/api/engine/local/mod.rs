@@ -41,20 +41,23 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::channel;
+use crate::dbs::KvsNotification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
+use crate::sql::statements::KillStatement;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
+use crate::sql::Uuid;
 use crate::sql::Value;
+use channel::Sender;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
@@ -431,11 +434,25 @@ where
 	})
 }
 
+async fn kill_live_query(
+	kvs: &Datastore,
+	id: Uuid,
+	session: &Session,
+	vars: BTreeMap<String, Value>,
+) -> Result<Value> {
+	let query = Query(Statements(vec![Statement::Kill(KillStatement {
+		id: id.into(),
+	})]));
+	let response = kvs.process(query, session, Some(vars)).await?;
+	take(true, response).await
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
+	live_queries: &mut HashMap<Uuid, Sender<KvsNotification>>,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 
@@ -544,9 +561,9 @@ async fn router(
 		Method::Export => {
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			let (tx, rx) = channel::new(1);
+			let (tx, rx) = crate::channel::new(1);
 
-			match (param.file, param.sender) {
+			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {
 					let (mut writer, mut reader) = io::duplex(10_240);
 
@@ -660,27 +677,20 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Live => {
-			let table = match &mut params[..] {
-				[value] => mem::take(value),
-				_ => unreachable!(),
-			};
-			let mut vars = BTreeMap::new();
-			vars.insert("table".to_owned(), table);
-			let response = kvs
-				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars))
-				.await?;
-			let value = take(true, response).await?;
-			Ok(DbResponse::Other(value))
+			if let Some(sender) = param.notification_sender {
+				if let [Value::Uuid(id)] = &params[..1] {
+					live_queries.insert(*id, sender);
+				}
+			}
+			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Kill => {
-			let id = match &mut params[..] {
-				[value] => mem::take(value),
+			let id = match &params[..] {
+				[Value::Uuid(id)] => *id,
 				_ => unreachable!(),
 			};
-			let mut vars = BTreeMap::new();
-			vars.insert("id".to_owned(), id);
-			let response = kvs.execute("KILL type::string($id)", &*session, Some(vars)).await?;
-			let value = take(true, response).await?;
+			live_queries.remove(&id);
+			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}

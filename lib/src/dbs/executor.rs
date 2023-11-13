@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::response::Response;
-use crate::dbs::Notification;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
@@ -136,7 +136,7 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, rcv: Receiver<Notification>) {
+	async fn clear(&self, _: &Context<'_>, rcv: Receiver<KvsNotification>) {
 		while rcv.try_recv().is_ok() {
 			// Ignore notification
 		}
@@ -144,7 +144,7 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<Notification>) {
+	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<KvsNotification>) {
 		if let Some(chn) = ctx.notifications() {
 			while let Ok(v) = rcv.try_recv() {
 				let _ = chn.send(v).await;

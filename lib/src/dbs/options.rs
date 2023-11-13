@@ -1,5 +1,5 @@
 use super::capabilities::Capabilities;
-use crate::dbs::{Notification, Session};
+use crate::dbs::{KvsNotification, Session};
 use crate::err::Error;
 use crate::err::UnreachableCause::NodeIdAlwaysSet;
 use crate::iam::{Action, Auth, ResourceKind, Role};
@@ -52,7 +52,7 @@ pub struct Options {
 	/// The channel over which we send notifications
 	/// Must be set alongside live, and preferably populated via datastore notifications channel
 	/// TODO create ticket to sort this
-	pub sender: OnceLock<Sender<Notification>>,
+	pub sender: OnceLock<Sender<KvsNotification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
 }
@@ -383,7 +383,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_sender(&self, sender: Sender<KvsNotification>) -> Self {
 		let once_lock = OnceLock::new();
 		once_lock.set(sender).unwrap();
 		Self {

@@ -6,7 +6,6 @@ pub mod method;
 pub mod opt;
 
 mod conn;
-pub mod model;
 
 pub use method::query::Response;
 
@@ -124,6 +123,7 @@ where
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) enum ExtraFeatures {
 	Backup,
+	LiveQueries,
 }
 
 /// A database client instance for embedded or remote databases
