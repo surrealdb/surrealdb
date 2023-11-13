@@ -123,6 +123,7 @@ where
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) enum ExtraFeatures {
 	Backup,
+	LiveQueries,
 }
 
 /// A database client instance for embedded or remote databases
