@@ -139,5 +139,10 @@ pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 
-// to not break code.
-pub use crate::syn::*;
+// module reexporting parsing function to prevent a breaking change.
+#[doc(hidden)]
+mod parser {
+	pub use crate::syn::*;
+}
+
+pub use self::parser::{idiom, json, parse, subquery, thing, value};

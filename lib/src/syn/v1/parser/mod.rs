@@ -1,9 +1,7 @@
-
-
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::idiom::Idiom;
-use crate::sql::query::{Query};
+use crate::sql::query::Query;
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;

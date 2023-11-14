@@ -41,48 +41,66 @@ fn query(i: &str) -> IResult<&str, Query> {
 	Ok((i, Query(v)))
 }
 
-pub fn parse(i: &str) -> Result<Query, Error> {
-	parse_impl(i, query)
+/// Parses a SurrealQL [`Query`]
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// a computation depth limit. If the limit is reached, parsing will return
+/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
+/// overflowing the call stack.
+///
+/// If you encounter this limit and believe that it should be increased,
+/// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn parse(input: &str) -> Result<Query, Error> {
+	parse_impl(input, query)
 }
 
-pub fn value(i: &str) -> Result<Value, Error> {
-	parse_impl(i, value::value)
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn value(input: &str) -> Result<Value, Error> {
+	parse_impl(input, value::value)
 }
 
-pub fn json(i: &str) -> Result<Value, Error> {
-	parse_impl(i, value::json)
+/// Parses JSON into an inert SurrealQL [`Value`]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn json(input: &str) -> Result<Value, Error> {
+	parse_impl(input, value::json)
+}
+/// Parses a SurrealQL Subquery [`Subquery`]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn subquery(input: &str) -> Result<Subquery, Error> {
+	parse_impl(input, subquery::subquery)
 }
 
-pub fn subquery(i: &str) -> Result<Subquery, Error> {
-	parse_impl(i, subquery::subquery)
+/// Parses a SurrealQL [`Idiom`]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn idiom(input: &str) -> Result<Idiom, Error> {
+	parse_impl(input, idiom::plain)
 }
 
-pub fn idiom(i: &str) -> Result<Idiom, Error> {
-	parse_impl(i, idiom::plain)
+pub fn datetime(input: &str) -> Result<Datetime, Error> {
+	parse_impl(input, literal::datetime)
 }
 
-pub fn datetime(i: &str) -> Result<Datetime, Error> {
-	parse_impl(i, literal::datetime)
+pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
+	parse_impl(input, literal::datetime_all_raw)
 }
 
-pub fn datetime_raw(i: &str) -> Result<Datetime, Error> {
-	parse_impl(i, literal::datetime_all_raw)
+pub fn duration(input: &str) -> Result<Duration, Error> {
+	parse_impl(input, literal::duration)
 }
 
-pub fn duration(i: &str) -> Result<Duration, Error> {
-	parse_impl(i, literal::duration)
+pub fn range(input: &str) -> Result<Range, Error> {
+	parse_impl(input, literal::range)
 }
 
-pub fn range(i: &str) -> Result<Range, Error> {
-	parse_impl(i, literal::range)
+pub fn thing(input: &str) -> Result<Thing, Error> {
+	parse_impl(input, thing::thing)
 }
 
-pub fn thing(i: &str) -> Result<Thing, Error> {
-	parse_impl(i, thing::thing)
-}
-
-pub fn thing_raw(i: &str) -> Result<Thing, Error> {
-	parse_impl(i, thing::thing_raw)
+pub fn thing_raw(input: &str) -> Result<Thing, Error> {
+	parse_impl(input, thing::thing_raw)
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
