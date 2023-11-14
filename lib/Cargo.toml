@@ -91,7 +91,7 @@ pbkdf2 = { version = "0.12.2", features = ["simple"] }
 pin-project-lite = "0.2.12"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-regex = "1.9.3"
+regex = "1.10.2"
 reqwest = { version = "0.11.18", default-features = false, features = ["json", "stream", "multipart"], optional = true }
 revision = "0.5.0"
 roaring = { version = "0.10.2", features = ["serde"] }
