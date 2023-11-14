@@ -2837,10 +2837,4 @@ mod tests {
 		let dec: Value = enc.try_into().unwrap();
 		assert_eq!(res, dec);
 	}
-
-	#[test]
-	fn parse_false_exponent_number() {
-		let (_, v) = what("3e").unwrap();
-		assert_eq!(v, Value::Table(Table("3e".to_owned())))
-	}
 }

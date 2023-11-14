@@ -419,4 +419,10 @@ mod tests {
 		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
 		assert_eq!(out.0.len(), 4);
 	}
+
+	#[test]
+	fn parse_false_exponent_number() {
+		let (_, v) = what("3e").unwrap();
+		assert_eq!(v, Value::Table(Table("3e".to_owned())))
+	}
 }

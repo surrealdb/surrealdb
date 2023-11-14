@@ -18,7 +18,7 @@ async fn archive_lv_for_node_archives() {
 	let key = crate::key::node::lq::new(node_id, lv_id.0, namespace, database);
 	tx.putc(key, table, None).await.unwrap();
 
-	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table), None, None);
+	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table.into()), None, None);
 	stm.id = lv_id.clone();
 	tx.putc_tblq(namespace, database, table, stm, None).await.unwrap();
 
