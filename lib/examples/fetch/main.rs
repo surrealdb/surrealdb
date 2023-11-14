@@ -7,10 +7,10 @@ use surrealdb::Surreal;
 
 // Dance classes table name
 const DANCE: &str = "dance";
-// Student classes table name
+// Students table name
 const STUDENT: &str = "student";
 
-// Dance class schema
+// Dance class table schema
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DanceClass {
@@ -19,7 +19,7 @@ struct DanceClass {
 	created_at: Datetime,
 }
 
-// Student schema
+// Student table schema
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Student {
@@ -41,7 +41,7 @@ async fn main() -> surrealdb::Result<()> {
 	})
 	.await?;
 
-	// Select the username and namespace to use
+	// Select the namespace and database to use
 	db.use_ns("namespace").use_db("database").await?;
 
 	// Create a dance class and store the result
@@ -56,7 +56,8 @@ async fn main() -> surrealdb::Result<()> {
 
 	// Create a student and assign them to the previous dance class
 	// We don't care about the result here so we don't need to
-	// type-hint and store it. We use `Resource::from` to avoid that.
+	// type-hint and store it. We use `Resource::from` to return
+	// a `sql::Value` instead and ignore it.
 	db.create(Resource::from(STUDENT))
 		.content(Student {
 			classes,
