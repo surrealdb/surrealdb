@@ -17,12 +17,9 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
-use crate::opt::from_value;
 use crate::sql::serde::{deserialize, serialize};
-use crate::sql::Object;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -345,8 +342,7 @@ pub(crate) fn router(
 													// If `id` is not set, this may be a live query notification
 													None => match response.result {
 														Ok(Data::Live(notification)) => {
-															let live_query_id =
-																notification.live_id;
+															let live_query_id = notification.id;
 															// Check if this live query is registered
 															if let Some(sender) =
 																live_queries.get(&live_query_id)
@@ -514,28 +510,6 @@ impl Response {
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
-				// Live queries currently don't support the binary protocol
-				// This is a workaround until live queries add support to send messages over binary
-				if let Ok(Value::Object(Object(mut response))) = crate::sql::json(text) {
-					if let Some(Value::Object(Object(mut map))) = response.remove("result") {
-						if let Some(Value::Uuid(live_id)) = map.remove("id") {
-							if let Some(value) = map.remove("action") {
-								if let Ok(action) = from_value(value) {
-									if let Some(result) = map.remove("result") {
-										return Ok(Some(Self {
-											id: None,
-											result: Ok(Data::Live(Notification {
-												live_id,
-												action,
-												result,
-											})),
-										}));
-									}
-								}
-							}
-						}
-					}
-				}
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}

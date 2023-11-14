@@ -743,7 +743,14 @@ impl Sort for Vec<Number> {
 }
 
 fn not_nan(i: &str) -> IResult<&str, Number> {
-	let (i, v) = recognize_float(i)?;
+	// recognize_float can return a failure, since identifiers in surrealql can look like numbers
+	// it should never prematuraly stop parsing if we encounter a number, which is why we change
+	// a failure here to a normal error.
+	let (i, v) = match recognize_float(i) {
+		Ok(x) => x,
+		Err(Err::Failure(e)) | Err(Err::Error(e)) => return Err(Err::Error(e)),
+		Err(x) => return Err(x),
+	};
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
 	let number = match suffix {
