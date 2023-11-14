@@ -13,9 +13,11 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
@@ -27,14 +29,12 @@ use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use serde::Deserialize;
-use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -130,9 +130,12 @@ impl Connection for Client {
 
 			router(url, maybe_connector, capacity, config, socket, route_rx);
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
+
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
+					features,
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -189,6 +192,7 @@ pub(crate) fn router(
 					0 => HashMap::new(),
 					capacity => HashMap::with_capacity(capacity),
 				};
+				let mut live_queries = HashMap::new();
 
 				let mut interval = time::interval(PING_INTERVAL);
 				// don't bombard the server with pings if we miss some ticks
@@ -231,6 +235,27 @@ pub(crate) fn router(
 										vars.remove(key);
 									}
 								}
+								Method::Live => {
+									if let Some(sender) = param.notification_sender {
+										if let [Value::Uuid(id)] = &params[..1] {
+											live_queries.insert(*id, sender);
+										}
+									}
+									if response
+										.into_send_async(Ok(DbResponse::Other(Value::None)))
+										.await
+										.is_err()
+									{
+										trace!("Receiver dropped");
+									}
+									// There is nothing to send to the server here
+									continue;
+								}
+								Method::Kill => {
+									if let [Value::Uuid(id)] = &params[..1] {
+										live_queries.remove(id);
+									}
+								}
 								_ => {}
 							}
 							let method_str = match method {
@@ -262,6 +287,7 @@ pub(crate) fn router(
 									last_activity = Instant::now();
 									match routes.entry(id) {
 										Entry::Vacant(entry) => {
+											// Register query route
 											entry.insert((method, response));
 										}
 										Entry::Occupied(..) => {
@@ -288,53 +314,120 @@ pub(crate) fn router(
 						Either::Response(result) => {
 							last_activity = Instant::now();
 							match result {
-								Ok(message) => match Response::try_from(&message) {
-									Ok(option) => {
-										if let Some(response) = option {
-											trace!("{response:?}");
-											if let Some(Ok(id)) =
-												response.id.map(Value::coerce_to_i64)
-											{
-												if let Some((_method, sender)) = routes.remove(&id)
-												{
-													let _res = sender
-														.into_send_async(DbResponse::from(
-															response.result,
-														))
-														.await;
-												}
-											}
-										}
-									}
-									Err(error) => {
-										#[derive(Deserialize)]
-										struct Response {
-											id: Option<Value>,
-										}
-
-										// Let's try to find out the ID of the response that failed to deserialise
-										if let Message::Binary(binary) = message {
-											if let Ok(Response {
-												id,
-											}) = deserialize(&binary)
-											{
-												// Return an error if an ID was returned
-												if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
-													if let Some((_method, sender)) =
-														routes.remove(&id)
-													{
-														let _res = sender
-															.into_send_async(Err(error))
-															.await;
+								Ok(message) => {
+									match Response::try_from(&message) {
+										Ok(option) => {
+											// We are only interested in responses that are not empty
+											if let Some(response) = option {
+												trace!("{response:?}");
+												match response.id {
+													// If `id` is set this is a normal response
+													Some(id) => {
+														if let Ok(id) = id.coerce_to_i64() {
+															// We can only route responses with IDs
+															if let Some((_method, sender)) =
+																routes.remove(&id)
+															{
+																// Send the response back to the caller
+																let _res = sender
+																	.into_send_async(
+																		DbResponse::from(
+																			response.result,
+																		),
+																	)
+																	.await;
+															}
+														}
 													}
+													// If `id` is not set, this may be a live query notification
+													None => match response.result {
+														Ok(Data::Live(notification)) => {
+															let live_query_id = notification.id;
+															// Check if this live query is registered
+															if let Some(sender) =
+																live_queries.get(&live_query_id)
+															{
+																// Send the notification back to the caller or kill live query if the receiver is already dropped
+																if sender
+																	.send(notification)
+																	.await
+																	.is_err()
+																{
+																	live_queries
+																		.remove(&live_query_id);
+																	let kill = {
+																		let mut request =
+																			BTreeMap::new();
+																		request.insert(
+																			"method".to_owned(),
+																			Method::Kill
+																				.as_str()
+																				.into(),
+																		);
+																		request.insert(
+																			"params".to_owned(),
+																			vec![Value::from(
+																				live_query_id,
+																			)]
+																			.into(),
+																		);
+																		let value =
+																			Value::from(request);
+																		let value =
+																			serialize(&value)
+																				.unwrap();
+																		Message::Binary(value)
+																	};
+																	if let Err(error) =
+																		socket_sink.send(kill).await
+																	{
+																		trace!("failed to send kill query to the server; {error:?}");
+																		break;
+																	}
+																}
+															}
+														}
+														Ok(..) => { /* Ignored responses like pings */
+														}
+														Err(error) => error!("{error:?}"),
+													},
 												}
-											} else {
-												// Unfortunately, we don't know which response failed to deserialize
-												warn!("Failed to deserialise message; {error:?}");
+											}
+										}
+										Err(error) => {
+											#[derive(Deserialize)]
+											struct Response {
+												id: Option<Value>,
+											}
+
+											// Let's try to find out the ID of the response that failed to deserialise
+											if let Message::Binary(binary) = message {
+												if let Ok(Response {
+													id,
+												}) = deserialize(&binary)
+												{
+													// Return an error if an ID was returned
+													if let Some(Ok(id)) =
+														id.map(Value::coerce_to_i64)
+													{
+														if let Some((_method, sender)) =
+															routes.remove(&id)
+														{
+															let _res = sender
+																.into_send_async(Err(error))
+																.await;
+														}
+													}
+												} else {
+													// Unfortunately, we don't know which response failed to deserialize
+													warn!(
+														"Failed to deserialise message; {error:?}"
+													);
+												}
 											}
 										}
 									}
-								},
+								}
 								Err(error) => {
 									match error {
 										WsError::ConnectionClosed => {
@@ -358,7 +451,14 @@ pub(crate) fn router(
 								}
 							}
 						}
+						// Close connection request received
 						Either::Request(None) => {
+							match socket_sink.send(Message::Close(None)).await {
+								Ok(..) => trace!("Connection closed successfully"),
+								Err(error) => {
+									warn!("Failed to close database connection; {error}")
+								}
+							}
 							break 'router;
 						}
 					}
@@ -441,18 +541,3 @@ impl Response {
 }
 
 pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>);
-
-impl Drop for Socket {
-	fn drop(&mut self) {
-		if let Some(mut conn) = mem::take(&mut self.0) {
-			futures::executor::block_on(async move {
-				match conn.borrow_mut().close().await {
-					Ok(..) => trace!("Connection closed successfully"),
-					Err(error) => {
-						trace!("Failed to close database connection; {error}")
-					}
-				}
-			});
-		}
-	}
-}

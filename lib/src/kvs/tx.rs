@@ -1177,7 +1177,7 @@ impl Transaction {
 					ns: lv.ns.to_string(),
 					db: lv.db.to_string(),
 					tb: lv.tb.to_string(),
-					lq: val.id.clone(),
+					lq: val.id,
 				});
 			}
 		}
