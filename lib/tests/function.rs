@@ -3803,6 +3803,26 @@ async fn function_string_replace_with_regex() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_matches() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::matches("foo", /foo/);
+		RETURN string::matches("bar", /foo/);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_repeat() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::repeat("", 3);

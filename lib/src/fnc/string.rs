@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
+use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -62,6 +63,10 @@ pub fn lowercase((string,): (String,)) -> Result<Value, Error> {
 pub fn repeat((val, num): (String, usize)) -> Result<Value, Error> {
 	limit("string::repeat", val.len().saturating_mul(num))?;
 	Ok(val.repeat(num).into())
+}
+
+pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
+	Ok(regex.0.is_match(&val).into())
 }
 
 pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
@@ -257,7 +262,7 @@ pub mod similarity {
 
 #[cfg(test)]
 mod tests {
-	use super::{contains, slice};
+	use super::{contains, matches, replace, slice};
 	use crate::sql::Value;
 
 	#[test]
@@ -298,6 +303,41 @@ mod tests {
 		test("abcde", "cbcd", false);
 		test("好世界", "世", true);
 		test("好世界", "你好", false);
+	}
+
+	#[test]
+	fn string_replace() {
+		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
+			assert_eq!(
+				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
+				Value::from(expected),
+				"replace({},{},{})",
+				base,
+				pattern,
+				replacement
+			);
+		}
+
+		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
+		test("foo bar", "bar".into(), "foo", "foo foo");
+	}
+
+	#[test]
+	fn string_matches() {
+		fn test(base: &str, regex: &str, expected: bool) {
+			assert_eq!(
+				matches((base.to_string(), regex.parse().unwrap())).unwrap(),
+				Value::from(expected),
+				"matches({},{})",
+				base,
+				regex
+			);
+		}
+
+		test("bar", "foo", false);
+		test("", "foo", false);
+		test("foo bar", "foo", true);
+		test("foo bar", "bar", true);
 	}
 
 	#[test]

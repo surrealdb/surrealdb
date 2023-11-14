@@ -301,6 +301,7 @@
 "string::join("
 "string::len("
 "string::lowercase("
+"string::matches("
 "string::repeat("
 "string::replace("
 "string::reverse("
