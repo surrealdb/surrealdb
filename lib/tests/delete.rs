@@ -416,7 +416,9 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 
 	// Validate notification
 	let notifications = dbs.notifications().expect("expected notifications");
-	let notification = notifications.recv().await.unwrap();
+	let mut notification = notifications.recv().await.unwrap();
+	assert_ne!(notification.notification_id, Default::default());
+	notification.notification_id = Default::default();
 	assert_eq!(
 		notification,
 		KvsNotification {
