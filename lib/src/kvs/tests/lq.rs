@@ -67,8 +67,8 @@ async fn live_creates_remote_notification_for_create() {
 	test.db.bootstrap().await.unwrap();
 
 	let send = test.db.live_sender().unwrap();
-	let local_options =
-		Options::new_from_sess(&ses, &local_node, false, true).new_with_sender(send);
+	let local_options = Options::new_from_sess(&ses, &local_node, false, true)
+		.new_with_sender(send.write().await.clone());
 	let remote_options = local_options.clone().with_id(*remote_node);
 
 	// Register a live query on the remote node
@@ -156,7 +156,7 @@ async fn live_query_reads_local_notifications_before_broadcast() {
 	test.db = test.db.with_node_id(remote_node).with_notifications();
 	test.db.bootstrap().await.unwrap();
 	let sender = test.db.live_sender().unwrap();
-	let local_options = local_options.new_with_sender(sender);
+	let local_options = local_options.new_with_sender(sender.write().await.clone());
 	let remote_options = local_options.clone().with_id(*remote_node);
 
 	// Create the table before starting live query
@@ -289,7 +289,7 @@ async fn live_creates_remote_notification_for_update() {
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(*local_node)
 		.with_live(true)
-		.new_with_sender(send)
+		.new_with_sender(send.write().await.clone())
 		.with_ns(ses.ns())
 		.with_db(ses.db());
 	let remote_options = local_options.clone().with_id(*remote_node);
@@ -394,7 +394,7 @@ async fn live_creates_remote_notification_for_delete() {
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)))
 		.with_id(*local_node)
 		.with_live(true)
-		.new_with_sender(send)
+		.new_with_sender(send.write().await.clone())
 		.with_ns(ses.ns())
 		.with_db(ses.db());
 	let remote_options = local_options.clone().with_id(*remote_node);

@@ -75,7 +75,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.check_vector_value(v)?;
+			let vector = self.extract_vector(v)?;
 			mtree.insert(tx, &mut store, vector, doc_id).await?;
 		}
 		Ok(())
@@ -86,13 +86,13 @@ impl MTreeIndex {
 		tx: &mut Transaction,
 		a: Array,
 		k: usize,
-	) -> Result<VecDeque<RoaringTreemap>, Error> {
+	) -> Result<VecDeque<DocId>, Error> {
 		// Extract the vector
 		let vector = self.check_vector_array(a)?;
 		// Lock the store
 		let mut store = self.store.lock().await;
 		let res = self.mtree.read().await.knn_search(tx, &mut store, &vector, k).await?;
-		Ok(res.objects)
+		Ok(res.docs)
 	}
 
 	fn check_vector_array(&self, a: Array) -> Result<Vector, Error> {
@@ -116,13 +116,33 @@ impl MTreeIndex {
 		Ok(vec)
 	}
 
-	fn check_vector_value(&self, v: Value) -> Result<Vector, Error> {
-		if let Value::Array(a) = v {
-			self.check_vector_array(a)
-		} else {
-			Err(Error::InvalidVectorValue {
-				current: v.clone().to_raw_string(),
-			})
+	fn extract_vector(&self, v: Value) -> Result<Vector, Error> {
+		let mut vec = Vector::new(self.vector_type, self.dim);
+		Self::check_vector_value(v, &mut vec)?;
+		if vec.len() != self.dim {
+			return Err(Error::InvalidVectorDimension {
+				current: vec.len(),
+				expected: self.dim,
+			});
+		}
+		Ok(vec)
+	}
+
+	fn check_vector_value(value: Value, vec: &mut Vector) -> Result<(), Error> {
+		match value {
+			Value::Array(a) => {
+				for v in a {
+					Self::check_vector_value(v, vec)?;
+				}
+				Ok(())
+			}
+			Value::Number(n) => {
+				vec.add(n);
+				Ok(())
+			}
+			_ => Err(Error::InvalidVectorValue {
+				current: value.clone().to_raw_string(),
+			}),
 		}
 	}
 
@@ -138,7 +158,7 @@ impl MTreeIndex {
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.check_vector_value(v)?;
+				let vector = self.extract_vector(v)?;
 				mtree.delete(tx, &mut store, vector, doc_id).await?;
 			}
 		}
@@ -163,8 +183,84 @@ impl MTreeIndex {
 	}
 }
 
+struct KnnResultBuilder {
+	knn: u64,
+	docs: RoaringTreemap,
+	priority_list: BTreeMap<PriorityResult, RoaringTreemap>,
+}
+
+impl KnnResultBuilder {
+	fn new(knn: usize) -> Self {
+		Self {
+			knn: knn as u64,
+			docs: RoaringTreemap::default(),
+			priority_list: BTreeMap::default(),
+		}
+	}
+	fn check_add(&self, dist: f64) -> bool {
+		if self.docs.len() < self.knn {
+			true
+		} else if let Some(pr) = self.priority_list.keys().last() {
+			dist <= pr.0
+		} else {
+			true
+		}
+	}
+
+	fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
+		let pr = PriorityResult(dist);
+		match self.priority_list.entry(pr) {
+			Entry::Vacant(e) => {
+				e.insert(docs.clone());
+			}
+			Entry::Occupied(mut e) => {
+				let d = e.get_mut();
+				for doc in docs {
+					d.insert(doc);
+				}
+			}
+		}
+		// Do possible eviction
+		let docs_len = self.docs.len();
+		if docs_len > self.knn {
+			if let Some((_, d)) = self.priority_list.last_key_value() {
+				if docs_len - d.len() >= self.knn {
+					self.priority_list.pop_last();
+				}
+			}
+		}
+	}
+
+	fn build(self, #[cfg(debug_assertions)] visited_nodes: usize) -> KnnResult {
+		let mut objects = VecDeque::with_capacity(self.knn as usize);
+		let mut left = self.knn;
+		for (_, docs) in self.priority_list {
+			let dl = docs.len();
+			if dl > left {
+				for doc_id in docs.iter().take(left as usize) {
+					objects.push_back(doc_id);
+				}
+				break;
+			}
+			for doc_id in docs {
+				objects.push_back(doc_id);
+			}
+			left -= dl;
+			// We don't expect anymore result, we can leave
+			if left == 0 {
+				break;
+			}
+		}
+		KnnResult {
+			docs: objects,
+			#[cfg(debug_assertions)]
+			visited_nodes,
+		}
+	}
+}
+
 pub struct KnnResult {
-	objects: VecDeque<RoaringTreemap>,
+	docs: VecDeque<DocId>,
 	#[cfg(debug_assertions)]
 	#[allow(dead_code)]
 	visited_nodes: usize,
@@ -200,7 +296,7 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		debug!("knn_search - v: {:?} - k: {}", v, k);
 		let mut queue = BinaryHeap::new();
-		let mut res = BTreeMap::new();
+		let mut res = KnnResultBuilder::new(k);
 		if let Some(root_id) = self.state.root {
 			queue.push(PriorityNode(0.0, root_id));
 		}
@@ -216,24 +312,10 @@ impl MTree {
 				MTreeNode::Leaf(ref n) => {
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v)?;
-						if Self::check_add(k, d, &res) {
-							#[cfg(debug_assertions)]
-							debug!("Leaf found: {} - Obj: {:?} - Docs: {:?}", node.id, o, p.docs);
-							let pr = PriorityResult(d);
-							match res.entry(pr) {
-								Entry::Vacant(e) => {
-									e.insert(p.docs.clone());
-								}
-								Entry::Occupied(mut e) => {
-									let docs = e.get_mut();
-									for doc in &p.docs {
-										docs.insert(doc);
-									}
-								}
-							}
-							if res.len() > k {
-								res.pop_last();
-							}
+						#[cfg(debug_assertions)]
+						debug!("Leaf found: {} - Obj: {:?} - Docs: {:?}", node.id, o, p.docs);
+						if res.check_add(d) {
+							res.add(d, &p.docs);
 						}
 					}
 				}
@@ -241,7 +323,7 @@ impl MTree {
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v)?;
 						let min_dist = (d - p.radius).max(0.0);
-						if Self::check_add(k, min_dist, &res) {
+						if res.check_add(min_dist) {
 							queue.push(PriorityNode(min_dist, p.node));
 						}
 					}
@@ -249,25 +331,10 @@ impl MTree {
 			}
 			store.set_node(node, false)?;
 		}
-		let mut objects = VecDeque::with_capacity(res.len());
-		for d in res.into_values() {
-			objects.push_back(d);
-		}
-		Ok(KnnResult {
-			objects,
+		Ok(res.build(
 			#[cfg(debug_assertions)]
 			visited_nodes,
-		})
-	}
-
-	fn check_add(k: usize, dist: f64, res: &BTreeMap<PriorityResult, RoaringTreemap>) -> bool {
-		if res.len() < k {
-			true
-		} else if let Some(pr) = res.keys().last() {
-			dist <= pr.0
-		} else {
-			true
-		}
+		))
 	}
 }
 
@@ -1460,7 +1527,6 @@ mod tests {
 	use std::collections::{BTreeMap, HashSet, VecDeque};
 	use std::sync::Arc;
 
-	use roaring::RoaringTreemap;
 	use test_log::test;
 	use tokio::sync::{Mutex, MutexGuard};
 
@@ -1512,7 +1578,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![]);
+			check_knn(&res.docs, vec![]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 0);
 		}
@@ -1534,7 +1600,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![1]]);
+			check_knn(&res.docs, vec![1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 1);
 			check_tree_properties(&mut tx, &mut s, &t).await.check(1, 1, Some(1), Some(1), 1, 1);
@@ -1553,7 +1619,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![1], vec![2]]);
+			check_knn(&res.docs, vec![1, 2]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 1);
 			assert_eq!(t.state.root, Some(0));
@@ -1570,7 +1636,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![2], vec![1]]);
+			check_knn(&res.docs, vec![2, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 1);
 		}
@@ -1587,7 +1653,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![2, 3], vec![1]]);
+			check_knn(&res.docs, vec![2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 1);
 			assert_eq!(t.state.root, Some(0));
@@ -1613,7 +1679,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec3, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![3], vec![2, 3], vec![1]]);
+			check_knn(&res.docs, vec![3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 1);
 			assert_eq!(t.state.root, Some(0));
@@ -1640,7 +1706,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec4, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![4], vec![3], vec![2, 3], vec![1]]);
+			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 3);
 			assert_eq!(t.state.root, Some(2));
@@ -1678,7 +1744,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec6, 10).await.unwrap();
-			check_knn(&res.objects, vec![vec![6], vec![4], vec![3], vec![2, 3], vec![1]]);
+			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 3);
 			assert_eq!(t.state.root, Some(2));
@@ -1854,10 +1920,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec8, 20).await.unwrap();
-			check_knn(
-				&res.objects,
-				vec![vec![8], vec![9], vec![6, 10], vec![4], vec![3], vec![2, 3], vec![1]],
-			);
+			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 7);
 		}
@@ -1866,7 +1929,7 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec4, 2).await.unwrap();
-			check_knn(&res.objects, vec![vec![4], vec![3]]);
+			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 7);
 		}
@@ -1876,13 +1939,13 @@ mod tests {
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
 			let res = t.knn_search(&mut tx, &mut s, &vec10, 2).await.unwrap();
-			check_knn(&res.objects, vec![vec![10], vec![9]]);
+			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes, 7);
 		}
 	}
 
-	async fn test_mtree_collection(collection: Vec<(DocId, Vector)>) {
+	async fn test_mtree_collection(collection: Vec<(DocId, Vector)>, is_unique: bool) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 
@@ -1905,15 +1968,30 @@ mod tests {
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
+			let max_knn = 20.max(collection.len());
 			for (doc_id, obj) in &collection {
-				let res = t.knn_search(&mut tx, &mut s, obj, 1).await.unwrap();
-				let mut found = false;
-				for docs in &res.objects {
-					if docs.contains(*doc_id) {
-						found = true;
+				for knn in 1..max_knn {
+					let res = t.knn_search(&mut tx, &mut s, obj, knn).await.unwrap();
+					if is_unique {
+						assert!(
+							res.docs.contains(doc_id),
+							"Search: {:?} - Knn: {} - Expected: {} - Got: {:?}",
+							obj,
+							knn,
+							doc_id,
+							res.docs
+						);
 					}
+					let expected_len = collection.len().min(knn);
+					assert_eq!(
+						expected_len,
+						res.docs.len(),
+						"Wrong knn count - Expected: {} - Got: {} - Collection: {}",
+						expected_len,
+						res.docs.len(),
+						collection.len(),
+					)
 				}
-				assert!(found, "Search: {:?} - Expected: {} - Got: {:?}", obj, doc_id, res.objects);
 			}
 		}
 
@@ -1935,9 +2013,7 @@ mod tests {
 				let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 				let mut s = s.lock().await;
 				let res = t.knn_search(&mut tx, &mut s, obj, 1).await.unwrap();
-				for docs in res.objects {
-					assert!(!docs.contains(*doc_id), "Found: {} {:?}", doc_id, obj);
-				}
+				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
 				let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
@@ -1961,7 +2037,7 @@ mod tests {
 			collection.push((doc_id, new_vec(doc_id as i64)));
 		}
 
-		test_mtree_collection(collection).await;
+		test_mtree_collection(collection, true).await;
 	}
 
 	#[test(tokio::test)]
@@ -1988,7 +2064,7 @@ mod tests {
 		let mut rng = get_seed_rnd();
 		collection.shuffle(&mut rng);
 
-		test_mtree_collection(collection).await;
+		test_mtree_collection(collection, true).await;
 	}
 
 	#[test(tokio::test)]
@@ -2012,7 +2088,7 @@ mod tests {
 			collection.push((doc_id as DocId, new_vec(obj as i64)));
 		}
 
-		test_mtree_collection(collection).await;
+		test_mtree_collection(collection, false).await;
 	}
 
 	#[test(tokio::test)]
@@ -2040,7 +2116,7 @@ mod tests {
 		let mut rng = get_seed_rnd();
 		collection.shuffle(&mut rng);
 
-		test_mtree_collection(collection).await;
+		test_mtree_collection(collection, false).await;
 	}
 
 	#[test(tokio::test)]
@@ -2131,13 +2207,9 @@ mod tests {
 		.await
 	}
 
-	fn check_knn(res: &VecDeque<RoaringTreemap>, expected: Vec<Vec<DocId>>) {
-		assert_eq!(res.len(), expected.len(), "{:?}", res);
-		for (i, (a, b)) in res.iter().zip(expected.iter()).enumerate() {
-			for id in b {
-				assert!(a.contains(*id), "{}: {}", i, id);
-			}
-		}
+	fn check_knn(res: &VecDeque<DocId>, expected: Vec<DocId>) {
+		let expected: VecDeque<DocId> = expected.into_iter().collect();
+		assert_eq!(res, &expected);
 	}
 
 	#[derive(Default, Debug)]

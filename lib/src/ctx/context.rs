@@ -6,9 +6,6 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, KvsNotification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
-use crate::sql::paths::SC;
-use crate::sql::paths::SD;
-use crate::sql::paths::TK;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -21,11 +18,6 @@ use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
-
-static SESSION_KEY: &str = "session";
-static AUTH_KEY: &str = "auth";
-static SCOPE_KEY: &str = "scope";
-static TOKEN_KEY: &str = "token";
 
 impl<'a> From<Value> for Cow<'a, Value> {
 	fn from(v: Value) -> Cow<'a, Value> {
@@ -97,14 +89,6 @@ impl<'a> Context<'a> {
 			query_planner: parent.query_planner,
 			capabilities: parent.capabilities.clone(),
 		}
-	}
-
-	pub fn with_live_value(mut self, sess: Value) -> Self {
-		self.add_value(AUTH_KEY, sess.pick(SD.as_ref()));
-		self.add_value(SCOPE_KEY, sess.pick(SC.as_ref()));
-		self.add_value(TOKEN_KEY, sess.pick(TK.as_ref()));
-		self.add_value(SESSION_KEY, sess);
-		self
 	}
 
 	/// Add a value to the context. It overwrites any previously set values

@@ -14,7 +14,7 @@ use crate::err;
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry::metrics::ws::record_rpc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OutputFormat {
 	Json, // JSON
 	Cbor, // CBOR
@@ -62,7 +62,6 @@ impl From<Notification> for Data {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
-	#[serde(skip_serializing_if = "Option::is_none")]
 	id: Option<Value>,
 	result: Result<Data, Failure>,
 }
@@ -93,7 +92,7 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, out: OutputFormat, chn: Sender<Message>) {
+	pub async fn send(self, out: OutputFormat, chn: &Sender<Message>) {
 		let span = Span::current();
 
 		debug!("Process RPC response");

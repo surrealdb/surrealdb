@@ -7,6 +7,9 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::paths::META;
+use crate::sql::paths::SC;
+use crate::sql::paths::SD;
+use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::{Uuid, Value};
 use std::ops::Deref;
@@ -60,7 +63,11 @@ impl<'a> Document<'a> {
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the session
 				// of the user who created the LIVE query.
-				let mut lqctx = Context::background().with_live_value(sess.clone());
+				let mut lqctx = Context::background();
+				lqctx.add_value("auth", sess.pick(SD.as_ref()));
+				lqctx.add_value("scope", sess.pick(SC.as_ref()));
+				lqctx.add_value("token", sess.pick(TK.as_ref()));
+				lqctx.add_value("session", sess);
 				// We need to create a new options which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data
@@ -151,6 +158,7 @@ impl<'a> Document<'a> {
 						tx.putc_tbnt(key, notification, None).await?;
 					}
 				} else if self.is_new() {
+					println!("THis is a create notif");
 					// Send a CREATE notification
 					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
 					let notification = KvsNotification {
@@ -165,6 +173,7 @@ impl<'a> Document<'a> {
 						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
+								println!("There were previous notifications len {}", nots.len());
 								for not in &nots {
 									// Consume the notification entry
 									let key = crate::key::table::nt::Nt::new(
@@ -187,6 +196,7 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
+						println!("Now sent the actual notificaton");
 						chn.send(notification).await?;
 					} else {
 						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
@@ -303,6 +313,8 @@ mod tests {
 	use crate::sql;
 	use crate::sql::uuid::Uuid;
 	use crate::sql::Value;
+	use core::time::Duration;
+	use tokio::time::timeout;
 
 	#[tokio::test]
 	async fn create_consumes_remote_notifications() {
@@ -355,8 +367,10 @@ mod tests {
 
 		// Verify we received the remote notification before the create notification
 		let receiver = ds.notifications().unwrap();
-		let first_notification = receiver.try_recv().unwrap();
-		let second_notification = receiver.try_recv().unwrap();
+		let first_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
+		let second_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
 		assert_eq!(first_notification.notification_id, expected_not_id);
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
@@ -425,8 +439,10 @@ mod tests {
 
 		// Verify we received the remote notification before the create notification
 		let receiver = ds.notifications().unwrap();
-		let first_notification = receiver.try_recv().unwrap();
-		let second_notification = receiver.try_recv().unwrap();
+		let first_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
+		let second_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
 		assert_eq!(first_notification.notification_id, expected_not_id);
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
@@ -494,9 +510,11 @@ mod tests {
 
 		// Verify we received the remote notification before the create notification
 		let receiver = ds.notifications().unwrap();
-		let first_notification = receiver.try_recv().unwrap();
+		let first_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
 		assert_eq!(first_notification.notification_id, expected_not_id);
-		let second_notification = receiver.try_recv().unwrap();
+		let second_notification =
+			timeout(Duration::from_secs(5), receiver.recv()).await.unwrap().unwrap();
 		assert_ne!(second_notification.notification_id, expected_not_id);
 
 		// verify remote notifications have been consumed

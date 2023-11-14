@@ -16,6 +16,8 @@ pub(crate) enum Kvs {
 	Fdb,
 }
 
+// This type is unsused when no store is enabled.
+#[allow(dead_code)]
 type ClockType = Arc<RwLock<SizedClock>>;
 
 #[cfg(any(feature = "kv-tikv", feature = "kv-fdb"))]

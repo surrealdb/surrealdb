@@ -139,7 +139,7 @@ impl Vector {
 		};
 	}
 
-	fn len(&self) -> usize {
+	pub(super) fn len(&self) -> usize {
 		match self {
 			Vector::F64(v) => v.len(),
 			Vector::F32(v) => v.len(),

@@ -48,9 +48,21 @@ impl From<Table> for Resource {
 	}
 }
 
+impl From<&Table> for Resource {
+	fn from(table: &Table) -> Self {
+		Self::Table(table.clone())
+	}
+}
+
 impl From<Thing> for Resource {
 	fn from(thing: Thing) -> Self {
 		Self::RecordId(thing)
+	}
+}
+
+impl From<&Thing> for Resource {
+	fn from(thing: &Thing) -> Self {
+		Self::RecordId(thing.clone())
 	}
 }
 
@@ -60,15 +72,33 @@ impl From<Object> for Resource {
 	}
 }
 
+impl From<&Object> for Resource {
+	fn from(object: &Object) -> Self {
+		Self::Object(object.clone())
+	}
+}
+
 impl From<Array> for Resource {
 	fn from(array: Array) -> Self {
 		Self::Array(array)
 	}
 }
 
+impl From<&Array> for Resource {
+	fn from(array: &Array) -> Self {
+		Self::Array(array.clone())
+	}
+}
+
 impl From<Edges> for Resource {
 	fn from(edges: Edges) -> Self {
 		Self::Edges(edges)
+	}
+}
+
+impl From<&Edges> for Resource {
+	fn from(edges: &Edges) -> Self {
+		Self::Edges(edges.clone())
 	}
 }
 

@@ -32,7 +32,7 @@ use futures::Future;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -113,7 +113,7 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: OnceLock<(Sender<KvsNotification>, Receiver<KvsNotification>)>,
+	notification_channel: Option<(Sender<KvsNotification>, Receiver<KvsNotification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 }
@@ -336,6 +336,8 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
+				// use clock_override to remove warning when no kv is enabled.
+				let _ = clock_override;
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -348,7 +350,7 @@ impl Datastore {
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: OnceLock::new(),
+			notification_channel: None,
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -368,8 +370,8 @@ impl Datastore {
 	}
 
 	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(self) -> Self {
-		self.notification_channel.set(channel::bounded(LQ_CHANNEL_SIZE)).unwrap();
+	pub fn with_notifications(mut self) -> Self {
+		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -1024,7 +1026,14 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::new_from_sess(sess, &self.id, self.strict, self.auth_enabled);
+		let opt = Options::default()
+			.with_id(self.id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -1035,7 +1044,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1099,7 +1108,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1168,7 +1177,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1211,12 +1220,12 @@ impl Datastore {
 	/// ```
 	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<KvsNotification>> {
-		self.notification_channel.get().map(|v| v.1.clone())
+		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Sender<KvsNotification>> {
-		self.notification_channel.get().map(|v| v.0.clone())
+	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<KvsNotification>>>> {
+		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
 	}
 
 	/// Performs a full database export as SQL

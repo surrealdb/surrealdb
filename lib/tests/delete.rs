@@ -1,7 +1,6 @@
 mod parse;
 use parse::Parse;
 
-use channel::{Receiver, TryRecvError};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::node::Timestamp;
@@ -416,17 +415,10 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 
 	// Validate notification
-	let notifications = dbs.notifications().unwrap();
-	let mut not =
-		recv_notification(&notifications, 10, std::time::Duration::from_millis(100)).unwrap();
-	// We cannot easily determine the timestamp
-	assert!(not.timestamp.value > 0);
-	not.timestamp = Timestamp::default();
-	// We cannot easily determine the notification ID either
-	assert_ne!(not.notification_id, sql::Uuid::default());
-	not.notification_id = sql::Uuid::default();
+	let notifications = dbs.notifications().expect("expected notifications");
+	let notification = notifications.recv().await.unwrap();
 	assert_eq!(
-		not,
+		notification,
 		KvsNotification {
 			live_id,
 			node_id: sql::Uuid::from(node_id),
@@ -442,18 +434,4 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		}
 	);
 	Ok(())
-}
-
-fn recv_notification(
-	notifications: &Receiver<KvsNotification>,
-	tries: u8,
-	poll_rate: std::time::Duration,
-) -> Result<KvsNotification, TryRecvError> {
-	for _ in 0..tries {
-		if let Ok(not) = notifications.try_recv() {
-			return Ok(not);
-		}
-		std::thread::sleep(poll_rate);
-	}
-	notifications.try_recv()
 }
