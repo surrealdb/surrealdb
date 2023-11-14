@@ -1,10 +1,9 @@
-use chrono::DateTime;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
-use surrealdb::sql::Thing;
+use surrealdb::sql::{Datetime, Thing};
 use surrealdb::Surreal;
 
 // Dance classes table name
@@ -18,7 +17,7 @@ const STUDENT: &str = "student";
 struct DanceClass {
 	id: Thing,
 	name: String,
-	created_at: DateTime<Utc>,
+	created_at: Datetime,
 }
 
 // Student schema
@@ -28,7 +27,7 @@ struct Student {
 	id: Thing,
 	name: String,
 	classes: Vec<DanceClass>,
-	created_at: DateTime<Utc>,
+	created_at: Datetime,
 }
 
 #[tokio::main]
@@ -52,7 +51,7 @@ async fn main() -> surrealdb::Result<()> {
 		.content(DanceClass {
 			id: Thing::from((DANCE, "dc101")),
 			name: "Introduction to Dancing".to_owned(),
-			created_at: Utc::now(),
+			created_at: Utc::now().into(),
 		})
 		.await?;
 
@@ -64,7 +63,7 @@ async fn main() -> surrealdb::Result<()> {
 			classes,
 			id: Thing::from((STUDENT, "jane")),
 			name: "Jane Doe".to_owned(),
-			created_at: Utc::now(),
+			created_at: Utc::now().into(),
 		})
 		.await?;
 
