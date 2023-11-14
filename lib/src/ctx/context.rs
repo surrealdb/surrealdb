@@ -8,7 +8,6 @@ use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::value::Value;
 use channel::Sender;
-use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -16,7 +15,6 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
@@ -47,8 +45,6 @@ pub struct Context<'a> {
 	query_planner: Option<&'a QueryPlanner<'a>>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	// Compiled regex
-	compiled_regex: Arc<Mutex<HashMap<String, Regex>>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -79,7 +75,6 @@ impl<'a> Context<'a> {
 			notifications: None,
 			query_planner: None,
 			capabilities: Arc::new(Capabilities::default()),
-			compiled_regex: Arc::new(Mutex::new(HashMap::new())),
 		}
 	}
 
@@ -93,7 +88,6 @@ impl<'a> Context<'a> {
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
 			capabilities: parent.capabilities.clone(),
-			compiled_regex: parent.compiled_regex.clone(),
 		}
 	}
 
@@ -259,9 +253,5 @@ impl<'a> Context<'a> {
 			}
 			_ => Err(Error::NetTargetNotAllowed(target.to_string())),
 		}
-	}
-
-	pub fn get_compiled_regex(&self) -> Arc<Mutex<HashMap<String, Regex>>> {
-		self.compiled_regex.clone()
 	}
 }

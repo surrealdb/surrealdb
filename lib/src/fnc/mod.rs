@@ -45,7 +45,6 @@ pub async fn run(
 		|| name.starts_with("http")
 		|| name.starts_with("type::field")
 		|| name.starts_with("type::fields")
-		|| name.starts_with("string::replaceAll")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
@@ -233,6 +232,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::lowercase" => string::lowercase,
 		"string::repeat" => string::repeat,
 		"string::replace" => string::replace,
+		"string::replaceAll" => string::replace_all,
 		"string::reverse" => string::reverse,
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
@@ -395,8 +395,6 @@ pub async fn asynchronous(
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
-		//
-		"string::replaceAll" => string::replace_all(ctx).await,
 		//
 		"type::field" => r#type::field((ctx, opt, txn, doc)).await,
 		"type::fields" => r#type::fields((ctx, opt, txn, doc)).await,

@@ -1,8 +1,10 @@
 use crate::sql::error::IResult;
+use lru::LruCache;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::character::complete::anychar;
 use nom::character::complete::char;
+use once_cell::sync::Lazy;
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -12,8 +14,10 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::str;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Mutex;
+use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
@@ -28,6 +32,25 @@ impl Regex {
 	}
 }
 
+fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+	static REGEX_CACHE: Lazy<Mutex<LruCache<String, regex::Regex>>> = Lazy::new(|| {
+		let cache_size: usize = env::var("SURREAL_REGEX_CACHE_SIZE")
+			.map_or(1000, |v| v.parse().unwrap_or(1000))
+			.max(10); // The minimum cache size is 10
+		Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))
+	});
+	let mut cache = match REGEX_CACHE.lock() {
+		Ok(guard) => guard,
+		Err(poisoned) => poisoned.into_inner(),
+	};
+	if let Some(re) = cache.get(str) {
+		return Ok(re.clone());
+	}
+	let re = regex::Regex::new(str)?;
+	cache.put(str.to_owned(), re.clone());
+	Ok(re)
+}
+
 impl FromStr for Regex {
 	type Err = <regex::Regex as FromStr>::Err;
 
@@ -35,7 +58,7 @@ impl FromStr for Regex {
 		if s.contains('\0') {
 			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
 		} else {
-			regex::Regex::new(&s.replace("\\/", "/")).map(Self)
+			regex_new(&s.replace("\\/", "/")).map(Self)
 		}
 	}
 }

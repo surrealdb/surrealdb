@@ -1175,7 +1175,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			},
 			tokens: {},
 			functions: {
-				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replaceAll($html, '<[^>]*>', ''); }"
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replaceAll($html, /<[^>]*>/, ''); }"
 			},
 			params: {},
 			scopes: {},

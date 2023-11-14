@@ -1,9 +1,7 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
-use regex::Regex;
-use std::collections::hash_map::Entry;
+use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -78,23 +76,8 @@ pub fn replace((val, old, new): (String, String, String)) -> Result<Value, Error
 	Ok(val.replace(&old, &new).into())
 }
 
-fn do_replace_all(regex: &Regex, val: String, replacement: String) -> Result<Value, Error> {
-	Ok(regex.replace_all(&val, replacement).into_owned().into())
-}
-
-pub async fn replace_all(
-	ctx: &Context<'_>,
-	(val, regex, replacement): (String, String, String),
-) -> Result<Value, Error> {
-	match ctx.get_compiled_regex().lock().await.entry(regex) {
-		Entry::Occupied(e) => do_replace_all(e.get(), val, replacement),
-		Entry::Vacant(e) => {
-			let regex = Regex::new(e.key())?;
-			let res = do_replace_all(&regex, val, replacement);
-			e.insert(regex);
-			res
-		}
-	}
+pub fn replace_all((val, regex, replacement): (String, Regex, String)) -> Result<Value, Error> {
+	Ok(regex.0.replace_all(&val, replacement).into_owned().into())
 }
 
 pub fn reverse((string,): (String,)) -> Result<Value, Error> {

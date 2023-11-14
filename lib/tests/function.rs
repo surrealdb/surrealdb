@@ -3302,7 +3302,7 @@ async fn function_string_ends_with() -> Result<(), Error> {
 async fn function_search_analyzer() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::stripHtml($html: string) {
-            RETURN string::replaceAll($html, "<[^>]*>", "");
+            RETURN string::replaceAll($html, /<[^>]*>/, "");
         };
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
 		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
@@ -3784,8 +3784,8 @@ async fn function_string_lowercase() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_replace_all() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::replaceAll('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>',"<[^>]*>", "");
-		RETURN string::replaceAll('<p>This one is already <strong>compiled!<strong></p>',"<[^>]*>", "");
+		RETURN string::replaceAll('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>', /<[^>]*>/, "");
+		RETURN string::replaceAll('<p>This one is already <strong>compiled!<strong></p>', /<[^>]*>/, "");
 "#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
