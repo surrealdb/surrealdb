@@ -1,9 +1,8 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
-use surrealdb::sql::{Datetime, Thing};
+use surrealdb::sql::{Datetime, Id, Thing};
 use surrealdb::Surreal;
 
 // Dance classes table name
@@ -49,9 +48,9 @@ async fn main() -> surrealdb::Result<()> {
 	let classes = db
 		.create(DANCE)
 		.content(DanceClass {
-			id: Thing::from((DANCE, "dc101")),
+			id: Thing::from((DANCE, Id::rand())),
 			name: "Introduction to Dancing".to_owned(),
-			created_at: Utc::now().into(),
+			created_at: Datetime::default(),
 		})
 		.await?;
 
@@ -61,9 +60,9 @@ async fn main() -> surrealdb::Result<()> {
 	db.create(Resource::from(STUDENT))
 		.content(Student {
 			classes,
-			id: Thing::from((STUDENT, "jane")),
+			id: Thing::from((STUDENT, Id::rand())),
 			name: "Jane Doe".to_owned(),
-			created_at: Utc::now().into(),
+			created_at: Datetime::default(),
 		})
 		.await?;
 
