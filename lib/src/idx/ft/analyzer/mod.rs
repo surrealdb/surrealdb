@@ -231,6 +231,7 @@ impl Analyzer {
 		Ok(Tokens::new(input))
 	}
 
+	/// Mainly used for exposing the analyzer as the SureralQL native function `search::analyze`
 	pub(crate) async fn analyze(
 		&self,
 		ctx: &Context<'_>,
