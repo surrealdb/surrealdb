@@ -30,17 +30,17 @@ pub mod timeout;
 pub mod tokenizer;
 pub mod uuid;
 
-pub use algorithm::algorithm;
-pub use datetime::{datetime, datetime_all_raw};
-pub use duration::duration;
-pub use filter::filters;
-pub use number::number;
-pub use range::range;
-pub use regex::regex;
-pub use scoring::scoring;
-pub use strand::strand;
-pub use timeout::timeout;
-pub use uuid::uuid;
+pub use self::algorithm::algorithm;
+pub use self::datetime::{datetime, datetime_all_raw};
+pub use self::duration::duration;
+pub use self::filter::filters;
+pub use self::number::number;
+pub use self::range::range;
+pub use self::regex::regex;
+pub use self::scoring::scoring;
+pub use self::strand::strand;
+pub use self::timeout::timeout;
+pub use self::uuid::uuid;
 
 const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
