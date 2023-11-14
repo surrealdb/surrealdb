@@ -31,7 +31,7 @@ impl KillStatement {
 		opt.valid_for_db()?;
 		// Resolve live query id
 		let live_query_id = match &self.id {
-			Value::Uuid(id) => id.clone(),
+			Value::Uuid(id) => *id,
 			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
 				Value::Uuid(id) => id,
 				_ => {

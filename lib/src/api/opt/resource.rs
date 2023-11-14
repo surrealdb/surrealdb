@@ -19,14 +19,13 @@ pub enum Resource {
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<Id>) -> Result<Value> {
+	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Range> {
 		match self {
 			Resource::Table(Table(table)) => Ok(sql::Range {
 				tb: table,
 				beg: range.start,
 				end: range.end,
-			}
-			.into()),
+			}),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),
@@ -41,9 +40,21 @@ impl From<Table> for Resource {
 	}
 }
 
+impl From<&Table> for Resource {
+	fn from(table: &Table) -> Self {
+		Self::Table(table.clone())
+	}
+}
+
 impl From<Thing> for Resource {
 	fn from(thing: Thing) -> Self {
 		Self::RecordId(thing)
+	}
+}
+
+impl From<&Thing> for Resource {
+	fn from(thing: &Thing) -> Self {
+		Self::RecordId(thing.clone())
 	}
 }
 
@@ -53,15 +64,33 @@ impl From<Object> for Resource {
 	}
 }
 
+impl From<&Object> for Resource {
+	fn from(object: &Object) -> Self {
+		Self::Object(object.clone())
+	}
+}
+
 impl From<Array> for Resource {
 	fn from(array: Array) -> Self {
 		Self::Array(array)
 	}
 }
 
+impl From<&Array> for Resource {
+	fn from(array: &Array) -> Self {
+		Self::Array(array.clone())
+	}
+}
+
 impl From<Edges> for Resource {
 	fn from(edges: Edges) -> Self {
 		Self::Edges(edges)
+	}
+}
+
+impl From<&Edges> for Resource {
+	fn from(edges: &Edges) -> Self {
+		Self::Edges(edges.clone())
 	}
 }
 

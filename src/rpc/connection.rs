@@ -255,9 +255,9 @@ impl Connection {
 									// Serialize the message to send
 									let message = success(None, notification);
 									// Get the current output format
-									let format = rpc.read().await.processor.format.clone();
+									let format = rpc.read().await.processor.format;
 									// Send the notification to the client
-									message.send(format, ws.clone()).await
+									message.send(format, ws).await
 								}
 							}
 						}
@@ -271,7 +271,7 @@ impl Connection {
 	/// Handle individual WebSocket messages
 	async fn handle_msg(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let mut out_fmt = rpc.read().await.processor.format.clone();
+		let mut out_fmt = rpc.read().await.processor.format;
 		// Prepare Span and Otel context
 		let span = span_for_request(&rpc.read().await.ws_id);
 
@@ -283,8 +283,12 @@ impl Connection {
 
 			match parse_request(msg).await {
 				Ok(req) => {
-					if let Some(_out_fmt) = req.out_fmt {
-						out_fmt = _out_fmt;
+					if let Some(fmt) = req.out_fmt {
+						if out_fmt != fmt {
+							// Update the default format
+							rpc.write().await.processor.format = fmt;
+							out_fmt = fmt;
+						}
 					}
 
 					// Now that we know the method, we can update the span and create otel context
@@ -303,11 +307,11 @@ impl Connection {
 						rpc.write().await.processor.process_request(&req.method, req.params).await;
 
 					// Process the response
-					res.into_response(req.id).send(out_fmt, chn).with_context(otel_cx).await
+					res.into_response(req.id).send(out_fmt, &chn).with_context(otel_cx).await
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err).send(out_fmt, chn).with_context(otel_cx.clone()).await
+					failure(None, err).send(out_fmt, &chn).with_context(otel_cx.clone()).await
 				}
 			}
 		}

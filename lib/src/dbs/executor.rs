@@ -17,9 +17,14 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use channel::Receiver;
 use futures::lock::Mutex;
+use futures::StreamExt;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
@@ -136,24 +141,27 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, rcv: Receiver<Notification>) {
-		while rcv.try_recv().is_ok() {
-			// Ignore notification
-		}
+	async fn clear(&self, _: &Context<'_>, mut rcv: Receiver<Notification>) {
+		spawn(async move {
+			while rcv.next().await.is_some() {
+				// Ignore notification
+			}
+		});
 	}
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<Notification>) {
-		if let Some(chn) = ctx.notifications() {
-			while let Ok(v) = rcv.try_recv() {
-				let _ = chn.send(v).await;
+	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
+		let sender = ctx.notifications();
+		spawn(async move {
+			while let Some(notification) = rcv.next().await {
+				if let Some(chn) = &sender {
+					if chn.send(notification).await.is_err() {
+						break;
+					}
+				}
 			}
-		} else {
-			while rcv.try_recv().is_ok() {
-				// Ignore notification
-			}
-		}
+		});
 	}
 
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {

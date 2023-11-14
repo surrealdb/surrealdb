@@ -404,8 +404,8 @@ mod tests {
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
 
-	#[test]
-	fn implementations_are_present() {
+	#[tokio::test]
+	async fn implementations_are_present() {
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -428,7 +428,7 @@ mod tests {
 			}
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
-			futures::executor::block_on(async {
+			{
 				use crate::sql::Value;
 
 				let name = name.replace("::", ".");
@@ -446,7 +446,7 @@ mod tests {
 				} else if tmp != Value::from("function") {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
-			});
+			}
 		}
 
 		if !problems.is_empty() {
