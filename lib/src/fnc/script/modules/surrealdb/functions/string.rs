@@ -18,7 +18,6 @@ impl_module_def!(
 	"len" => run,
 	"lowercase" => run,
 	"repeat" => run,
-	"replaceAll" => run,
 	"replace" => run,
 	"reverse" => run,
 	"similarity" => (similarity::Package),

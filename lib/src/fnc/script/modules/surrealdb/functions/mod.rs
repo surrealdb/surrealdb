@@ -18,6 +18,7 @@ mod math;
 mod meta;
 mod parse;
 mod rand;
+mod regex;
 mod search;
 mod session;
 mod string;
@@ -44,6 +45,7 @@ impl_module_def!(
 	"parse" => (parse::Package),
 	"rand" => (rand::Package),
 	"array" => (array::Package),
+	"regex" => (regex::Package),
 	"search" => (search::Package),
 	"session" => (session::Package),
 	"sleep" => fut Async,

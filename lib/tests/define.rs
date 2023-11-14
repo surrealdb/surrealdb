@@ -1150,7 +1150,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
         DEFINE FUNCTION fn::stripHtml($html: string) {
-            RETURN string::replaceAll($html, "<[^>]*>", "");
+            RETURN string::replace($html, /<[^>]*>/, "");
         };
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
 		INFO FOR DB;
@@ -1175,7 +1175,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			},
 			tokens: {},
 			functions: {
-				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replaceAll($html, /<[^>]*>/, ''); }"
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); }"
 			},
 			params: {},
 			scopes: {},

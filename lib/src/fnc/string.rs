@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
-use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -65,21 +64,28 @@ pub fn repeat((val, num): (String, usize)) -> Result<Value, Error> {
 	Ok(val.repeat(num).into())
 }
 
-pub fn replace((val, old, new): (String, String, String)) -> Result<Value, Error> {
-	if new.len() > old.len() {
-		let increase = new.len() - old.len();
-		limit(
-			"string::replace",
-			val.len().saturating_add(val.matches(&old).count().saturating_mul(increase)),
-		)?;
+pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
+	match old_or_regexp {
+		Value::Strand(old) => {
+			if new.len() > old.len() {
+				let increase = new.len() - old.len();
+				limit(
+					"string::replace",
+					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+				)?;
+			}
+			Ok(val.replace(&old.0, &new).into())
+		}
+		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		_ => Err(Error::InvalidArguments {
+			name: "string::replace".to_string(),
+			message: format!(
+				"Argument 2 was the wrong type. Expected a string but found {}",
+				old_or_regexp
+			),
+		}),
 	}
-	Ok(val.replace(&old, &new).into())
 }
-
-pub fn replace_all((val, regex, replacement): (String, Regex, String)) -> Result<Value, Error> {
-	Ok(regex.0.replace_all(&val, replacement).into_owned().into())
-}
-
 pub fn reverse((string,): (String,)) -> Result<Value, Error> {
 	Ok(string.chars().rev().collect::<String>().into())
 }

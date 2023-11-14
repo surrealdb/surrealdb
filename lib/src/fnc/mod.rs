@@ -232,7 +232,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::lowercase" => string::lowercase,
 		"string::repeat" => string::repeat,
 		"string::replace" => string::replace,
-		"string::replaceAll" => string::replace_all,
 		"string::reverse" => string::reverse,
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
