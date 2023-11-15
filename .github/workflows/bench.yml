@@ -24,7 +24,10 @@ defaults:
 jobs:
   common:
     name: Bench common
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - benches
+    timeout-minutes: 60
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,13 +37,12 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
       - name: Install dependencies
         run: |
           sudo apt-get -qq -y update
+          sudo apt-get -qq -y install clang curl
           cargo install --quiet critcmp cargo-make
 
       - name: Checkout changes
@@ -77,7 +79,7 @@ jobs:
         run: |
           BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
 
-          cargo make bench -- --load-baseline current --save-baseline previous
+          cargo make ci-bench -- --load-baseline current --save-baseline previous
           critcmp --export previous > bench-results/${{ matrix.target }}.json
 
           aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/${{ github.run_id }}
@@ -85,7 +87,9 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - benches
     timeout-minutes: 60
     permissions:
       id-token: write
@@ -125,13 +129,12 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
       - name: Install dependencies
         run: |
           sudo apt-get -qq -y update
+          sudo apt-get -qq -y install clang curl
           cargo install --quiet critcmp cargo-make
 
       # Install FoundationDB if needed
@@ -146,6 +149,9 @@ jobs:
         if: ${{ matrix.target == 'sdk-ws' }}
         run: |
           cargo make build
+          
+          # Kill any potential previous instance of the server. The runner may be reused.
+          pkill -9 surreal || true
           ./target/release/surreal start 2>&1 >surrealdb.log &
 
           set +e
@@ -163,6 +169,9 @@ jobs:
           BENCH_WORKER_THREADS: 2
         run: |
           cargo make bench-${{ matrix.target }} -- --save-baseline current
+
+          # Kill surreal server if it's running
+          pkill -9 surreal || true
       
       - name: Copy results from AWS S3 bucket
         run: |
