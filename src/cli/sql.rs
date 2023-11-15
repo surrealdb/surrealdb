@@ -10,9 +10,9 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
-use surrealdb::opt::Config;
-use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
+use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
 

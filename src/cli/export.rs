@@ -4,8 +4,8 @@ use crate::cli::abstraction::{
 use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
-use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
@@ -56,7 +56,7 @@ pub async fn init(
 			.with_namespace(Some(&namespace))
 			.with_database(Some(&database));
 
-                let client = connect(endpoint).await?;
+		let client = connect(endpoint).await?;
 
 		debug!("Signing in to the database engine with {:?}", auth_level);
 		match auth_level {

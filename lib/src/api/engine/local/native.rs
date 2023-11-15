@@ -107,12 +107,12 @@ pub(crate) fn router(
 			_ => None,
 		};
 
-	        let endpoint = match EndpointKind::from(address.url.scheme()) {
+		let endpoint = match EndpointKind::from(address.url.scheme()) {
 			EndpointKind::TiKv => address.url.as_str(),
 			_ => &address.path,
 		};
 
-	        let kvs = match Datastore::new(endpoint).await {
+		let kvs = match Datastore::new(endpoint).await {
 			Ok(kvs) => {
 				if let Err(error) = kvs.bootstrap().await {
 					let _ = conn_tx.into_send_async(Err(error.into())).await;
