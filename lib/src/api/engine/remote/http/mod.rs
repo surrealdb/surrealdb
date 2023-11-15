@@ -22,6 +22,10 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
+use crate::headers::AUTH_DB;
+use crate::headers::AUTH_NS;
+use crate::headers::DB;
+use crate::headers::NS;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
 use crate::sql::Array;
@@ -110,6 +114,8 @@ enum Auth {
 	Basic {
 		user: String,
 		pass: String,
+		ns: Option<String>,
+		db: Option<String>,
 	},
 	Bearer {
 		token: String,
@@ -126,7 +132,18 @@ impl Authenticate for RequestBuilder {
 			Some(Auth::Basic {
 				user,
 				pass,
-			}) => self.basic_auth(user, Some(pass)),
+				ns,
+				db,
+			}) => {
+				let mut req = self.basic_auth(user, Some(pass));
+				if let Some(ns) = ns {
+					req = req.header(&AUTH_NS, ns);
+				}
+				if let Some(db) = db {
+					req = req.header(&AUTH_DB, db);
+				}
+				req
+			}
 			Some(Auth::Bearer {
 				token,
 			}) => self.bearer_auth(token),
@@ -138,9 +155,11 @@ impl Authenticate for RequestBuilder {
 type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Root {
+struct Credentials {
 	user: String,
 	pass: String,
+	ns: Option<String>,
+	db: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -337,7 +356,7 @@ async fn router(
 			let ns = match ns {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
-						request = request.header("NS", &ns);
+						request = request.header(&NS, &ns);
 						Some(ns)
 					}
 					Err(_) => {
@@ -349,7 +368,7 @@ async fn router(
 			let db = match db {
 				Some(db) => match HeaderValue::try_from(&db) {
 					Ok(db) => {
-						request = request.header("DB", &db);
+						request = request.header(&DB, &db);
 						Some(db)
 					}
 					Err(_) => {
@@ -361,10 +380,10 @@ async fn router(
 			request = request.auth(auth).body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
-				headers.insert("NS", ns);
+				headers.insert(&NS, ns);
 			}
 			if let Some(db) = db {
-				headers.insert("DB", db);
+				headers.insert(&DB, db);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
@@ -377,14 +396,18 @@ async fn router(
 			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
 			let value = submit_auth(request).await?;
 			if let [credentials] = &mut params[..] {
-				if let Ok(Root {
+				if let Ok(Credentials {
 					user,
 					pass,
+					ns,
+					db,
 				}) = from_value(mem::take(credentials))
 				{
 					*auth = Some(Auth::Basic {
 						user,
 						pass,
+						ns,
+						db,
 					});
 				} else {
 					*auth = Some(Auth::Bearer {

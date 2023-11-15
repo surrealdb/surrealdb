@@ -1,5 +1,5 @@
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
+	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
@@ -10,9 +10,9 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
-use surrealdb::engine::any::connect;
-use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
+use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
+use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
 
@@ -23,7 +23,7 @@ pub struct SqlCommandArguments {
 	#[command(flatten)]
 	auth: AuthArguments,
 	#[command(flatten)]
-	sel: Option<DatabaseSelectionOptionalArguments>,
+	level: LevelSelectionArguments,
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
 	pretty: bool,
@@ -43,11 +43,15 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			auth_level,
 		},
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
-		sel,
+		level: LevelSelectionArguments {
+			namespace,
+			database,
+		},
 		pretty,
 		json,
 		multi,
@@ -60,26 +64,33 @@ pub async fn init(
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 
-	let client = if let Some((username, password)) = username.zip(password) {
-		let root = Root {
-			username: &username,
-			password: &password,
+	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
+	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	let client = if username.is_some()
+		&& password.is_some()
+		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
+	{
+		debug!("Connecting to the database engine with authentication");
+		let creds = CredentialsBuilder::default()
+			.with_username(username.as_deref())
+			.with_password(password.as_deref())
+			.with_namespace(namespace.as_deref())
+			.with_database(database.as_deref());
+
+		let client = connect(endpoint).await?;
+
+		debug!("Signing in to the database engine with {:?}", auth_level);
+		match auth_level {
+			CredentialsLevel::Root => client.signin(creds.for_root()?).await?,
+			CredentialsLevel::Namespace => client.signin(creds.for_namespace()?).await?,
+			CredentialsLevel::Database => client.signin(creds.for_database()?).await?,
+			// Clap shouldn't allow any other credentials level
+			_ => unreachable!("Invalid auth level"),
 		};
 
-		// Connect to the database engine with authentication
-		//
-		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
-		// * For remote engines, we connect to the endpoint and then signin.
-		#[cfg(feature = "has-storage")]
-		let address = (endpoint, config.user(root));
-		#[cfg(not(feature = "has-storage"))]
-		let address = endpoint;
-		let client = connect(address).await?;
-
-		// Sign in to the server
-		client.signin(root).await?;
 		client
 	} else {
+		debug!("Connecting to the database engine without authentication");
 		connect((endpoint, config)).await?
 	};
 
@@ -93,27 +104,22 @@ pub async fn init(
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
+
 	// Keep track of current namespace/database.
-	if let Some(DatabaseSelectionOptionalArguments {
-		namespace,
-		database,
-	}) = sel
-	{
-		let is_not_empty = |s: &&str| !s.is_empty();
-		let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
-		let database = database.as_deref().map(str::trim).filter(is_not_empty);
-		match (namespace, database) {
-			(Some(namespace), Some(database)) => {
-				client.use_ns(namespace).use_db(database).await?;
-				prompt = format!("{namespace}/{database}> ");
-			}
-			(Some(namespace), None) => {
-				client.use_ns(namespace).await?;
-				prompt = format!("{namespace}> ");
-			}
-			_ => {}
+	let is_not_empty = |s: &&str| !s.is_empty();
+	let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
+	let database = database.as_deref().map(str::trim).filter(is_not_empty);
+	match (namespace, database) {
+		(Some(namespace), Some(database)) => {
+			client.use_ns(namespace).use_db(database).await?;
+			prompt = format!("{namespace}/{database}> ");
 		}
-	};
+		(Some(namespace), None) => {
+			client.use_ns(namespace).await?;
+			prompt = format!("{namespace}> ");
+		}
+		_ => {}
+	}
 
 	if !hide_welcome {
 		let hints = [

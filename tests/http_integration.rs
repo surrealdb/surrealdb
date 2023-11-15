@@ -7,6 +7,7 @@ mod http_integration {
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
+	use surrealdb::headers::{DB, NS};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -19,8 +20,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -61,8 +62,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -113,8 +114,8 @@ mod http_integration {
 			// Check the selected namespace and database
 			let res = client
 				.post(url)
-				.header("NS", "N2")
-				.header("DB", "D2")
+				.header(&NS, "N2")
+				.header(&DB, "D2")
 				.bearer_auth(&token)
 				.body("SELECT * FROM session::ns(); SELECT * FROM session::db()")
 				.send()
@@ -147,8 +148,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -201,8 +202,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -273,8 +274,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -306,8 +307,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -374,8 +375,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -436,8 +437,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 
 		let client = reqwest::Client::builder()
@@ -579,8 +580,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -655,8 +656,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -743,8 +744,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -808,8 +809,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -877,8 +878,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -946,8 +947,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -998,8 +999,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1037,8 +1038,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1134,8 +1135,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1210,8 +1211,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1287,8 +1288,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", "N".parse()?);
-		headers.insert("DB", "D".parse()?);
+		headers.insert(&NS, "N".parse()?);
+		headers.insert(&DB, "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))

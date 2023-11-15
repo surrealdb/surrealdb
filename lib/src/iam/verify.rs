@@ -92,28 +92,42 @@ pub async fn basic(
 	session: &mut Session,
 	user: &str,
 	pass: &str,
+	ns: Option<&str>,
+	db: Option<&str>,
 ) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting basic authentication");
 
-	match verify_creds(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
-		Ok((au, _)) if au.is_root() => {
-			debug!("Authenticated as root user '{}'", user);
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok((au, _)) if au.is_ns() => {
-			debug!("Authenticated as namespace user '{}'", user);
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok((au, _)) if au.is_db() => {
-			debug!("Authenticated as database user '{}'", user);
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok(_) => Err(Error::InvalidAuth),
-		Err(e) => Err(e),
+	// Check if the parameters exist
+	match (ns, db) {
+		// DB signin
+		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
+			Ok(u) => {
+				debug!("Authenticated as database user '{}'", user);
+				session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
+				Ok(())
+			}
+			Err(err) => Err(err),
+		},
+		// NS signin
+		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
+			Ok(u) => {
+				debug!("Authenticated as namespace user '{}'", user);
+				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
+				Ok(())
+			}
+			Err(err) => Err(err),
+		},
+		// Root signin
+		(None, None) => match verify_root_creds(kvs, user, pass).await {
+			Ok(u) => {
+				debug!("Authenticated as root user '{}'", user);
+				session.au = Arc::new((&u, Level::Root).into());
+				Ok(())
+			}
+			Err(err) => Err(err),
+		},
+		(None, Some(_)) => Err(Error::InvalidAuth),
 	}
 }
 
@@ -265,7 +279,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
-			let de = tx.get_db_user(&ns, &db, &id).await?;
+			let de = tx.get_db_user(&ns, &db, &id).await.map_err(|e| {
+				trace!("Error while authenticating to database `{db}`: {e}");
+				Error::InvalidAuth
+			})?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -329,7 +346,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_ns_user(&ns, &id).await?;
+			let de = tx.get_ns_user(&ns, &id).await.map_err(|e| {
+				trace!("Error while authenticating to namespace `{ns}`: {e}");
+				Error::InvalidAuth
+			})?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -355,7 +375,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_root_user(&id).await?;
+			let de = tx.get_root_user(&id).await.map_err(|e| {
+				trace!("Error while authenticating to root: {e}");
+				Error::InvalidAuth
+			})?;
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -386,51 +409,7 @@ pub fn parse(value: &str) -> Result<Value, Error> {
 	json(value).map_err(|_| Error::InvalidAuth)
 }
 
-pub async fn verify_creds(
-	ds: &Datastore,
-	ns: Option<&String>,
-	db: Option<&String>,
-	user: &str,
-	pass: &str,
-) -> Result<(Auth, DefineUserStatement), Error> {
-	if user.is_empty() || pass.is_empty() {
-		return Err(Error::InvalidAuth);
-	}
-
-	// TODO(sgirones): Keep the same behaviour as before, where it would try to authenticate as a KV first, then NS and then DB.
-	// In the future, we want the client to specify the type of user it wants to authenticate as, so we can remove this chain.
-
-	// Try to authenticate as a ROOT user
-	match verify_root_creds(ds, user, pass).await {
-		Ok(u) => Ok(((&u, Level::Root).into(), u)),
-		Err(_) => {
-			// Try to authenticate as a NS user
-			match ns {
-				Some(ns) => {
-					match verify_ns_creds(ds, ns, user, pass).await {
-						Ok(u) => Ok(((&u, Level::Namespace(ns.to_owned())).into(), u)),
-						Err(_) => {
-							// Try to authenticate as a DB user
-							match db {
-								Some(db) => match verify_db_creds(ds, ns, db, user, pass).await {
-									Ok(u) => Ok((
-										(&u, Level::Database(ns.to_owned(), db.to_owned())).into(),
-										u,
-									)),
-									Err(_) => Err(Error::InvalidAuth),
-								},
-								None => Err(Error::InvalidAuth),
-							}
-						}
-					}
-				}
-				None => Err(Error::InvalidAuth),
-			}
-		}
-	}
-}
-
-async fn verify_root_creds(
+pub async fn verify_root_creds(
 	ds: &Datastore,
 	user: &str,
 	pass: &str,
@@ -438,14 +417,17 @@ async fn verify_root_creds(
 	// Create a new readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.get_root_user(user).await?;
+	let user = tx.get_root_user(user).await.map_err(|e| {
+		trace!("Error while authenticating to root: {e}");
+		Error::InvalidAuth
+	})?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Return the verified user object
 	Ok(user)
 }
 
-async fn verify_ns_creds(
+pub async fn verify_ns_creds(
 	ds: &Datastore,
 	ns: &str,
 	user: &str,
@@ -454,14 +436,17 @@ async fn verify_ns_creds(
 	// Create a new readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.get_ns_user(ns, user).await?;
+	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
+		trace!("Error while authenticating to namespace `{ns}`: {e}");
+		Error::InvalidAuth
+	})?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Return the verified user object
 	Ok(user)
 }
 
-async fn verify_db_creds(
+pub async fn verify_db_creds(
 	ds: &Datastore,
 	ns: &str,
 	db: &str,
@@ -471,7 +456,10 @@ async fn verify_db_creds(
 	// Create a new readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.get_db_user(ns, db, user).await?;
+	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
+		trace!("Error while authenticating to database `{ns}/{db}`: {e}");
+		Error::InvalidAuth
+	})?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Return the verified user object
@@ -509,7 +497,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", None, None).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, None);
@@ -536,7 +524,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", None, None).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, None);
@@ -559,7 +547,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "invalid").await;
+			let res = basic(&ds, &mut sess, "user", "invalid", None, None).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
@@ -579,7 +567,7 @@ mod tests {
 				ns: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", Some("test"), None).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -607,7 +595,7 @@ mod tests {
 				ns: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", Some("test"), None).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -630,7 +618,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "invalid").await;
+			let res = basic(&ds, &mut sess, "user", "invalid", Some("test"), None).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
@@ -651,7 +639,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", Some("test"), Some("test")).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -680,7 +668,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "pass").await;
+			let res = basic(&ds, &mut sess, "user", "pass", Some("test"), Some("test")).await;
 
 			assert!(res.is_ok(), "Failed to signin with ROOT user: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -703,7 +691,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = basic(&ds, &mut sess, "user", "invalid").await;
+			let res = basic(&ds, &mut sess, "user", "invalid", Some("test"), Some("test")).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
@@ -940,26 +928,19 @@ mod tests {
 		let ns = "N".to_string();
 		let db = "D".to_string();
 
-		// Reject empty username or password
+		// Reject invalid ROOT credentials
 		{
-			assert!(verify_creds(&ds, None, None, "", "").await.is_err());
-			assert!(verify_creds(&ds, None, None, "test", "").await.is_err());
-			assert!(verify_creds(&ds, None, None, "", "test").await.is_err());
-		}
-
-		// Reject invalid KV credentials
-		{
-			assert!(verify_creds(&ds, None, None, "test", "test").await.is_err());
+			assert!(verify_root_creds(&ds, "test", "test").await.is_err());
 		}
 
 		// Reject invalid NS credentials
 		{
-			assert!(verify_creds(&ds, Some(&ns), None, "test", "test").await.is_err());
+			assert!(verify_ns_creds(&ds, &ns, "test", "test").await.is_err());
 		}
 
 		// Reject invalid DB credentials
 		{
-			assert!(verify_creds(&ds, Some(&ns), Some(&db), "test", "test").await.is_err());
+			assert!(verify_db_creds(&ds, &ns, &db, "test", "test").await.is_err());
 		}
 	}
 
@@ -973,7 +954,7 @@ mod tests {
 		{
 			let sess = Session::owner();
 
-			let sql = "DEFINE USER kv ON ROOT PASSWORD 'kv'";
+			let sql = "DEFINE USER root ON ROOT PASSWORD 'root'";
 			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
@@ -983,85 +964,22 @@ mod tests {
 			ds.execute(sql, &sess, None).await.unwrap();
 		}
 
-		// Accept KV user
+		// Accept ROOT user
 		{
-			let res = verify_creds(&ds, None, None, "kv", "kv").await;
+			let res = verify_root_creds(&ds, "root", "root").await;
 			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Root);
-			assert_eq!(auth.id(), "kv");
 		}
 
 		// Accept NS user
 		{
-			let res = verify_creds(&ds, Some(&ns), None, "ns", "ns").await;
+			let res = verify_ns_creds(&ds, &ns, "ns", "ns").await;
 			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Namespace(ns.to_owned()));
-			assert_eq!(auth.id(), "ns");
 		}
 
 		// Accept DB user
 		{
-			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
+			let res = verify_db_creds(&ds, &ns, &db, "db", "db").await;
 			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Database(ns.to_owned(), db.to_owned()));
-			assert_eq!(auth.id(), "db");
-		}
-	}
-
-	#[tokio::test]
-	async fn test_verify_creds_chain() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let ns = "N".to_string();
-		let db = "D".to_string();
-
-		// Define users
-		{
-			let sess = Session::owner();
-
-			let sql = "DEFINE USER kv ON ROOT PASSWORD 'kv'";
-			ds.execute(sql, &sess, None).await.unwrap();
-
-			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(sql, &sess, None).await.unwrap();
-
-			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(sql, &sess, None).await.unwrap();
-		}
-
-		// Accept KV user even with NS and DB defined
-		{
-			let res = verify_creds(&ds, Some(&ns), Some(&db), "kv", "kv").await;
-			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Root);
-			assert_eq!(auth.id(), "kv");
-		}
-
-		// Accept NS user even with DB defined
-		{
-			let res = verify_creds(&ds, Some(&ns), Some(&db), "ns", "ns").await;
-			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Namespace(ns.to_owned()));
-			assert_eq!(auth.id(), "ns");
-		}
-
-		// Accept DB user
-		{
-			let res = verify_creds(&ds, Some(&ns), Some(&db), "db", "db").await;
-			assert!(res.is_ok());
-
-			let (auth, _) = res.unwrap();
-			assert_eq!(auth.level(), &Level::Database(ns.to_owned(), db.to_owned()));
-			assert_eq!(auth.id(), "db");
 		}
 	}
 }

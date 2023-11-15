@@ -6,7 +6,7 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
-use crate::api::opt::Endpoint;
+use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
@@ -107,12 +107,12 @@ pub(crate) fn router(
 			_ => None,
 		};
 
-		let endpoint = match address.url.scheme() {
-			"tikv" => address.url.as_str(),
+	        let endpoint = match EndpointKind::from(address.url.scheme()) {
+			EndpointKind::TiKv => address.url.as_str(),
 			_ => &address.path,
 		};
 
-		let kvs = match Datastore::new(endpoint).await {
+	        let kvs = match Datastore::new(endpoint).await {
 			Ok(kvs) => {
 				if let Err(error) = kvs.bootstrap().await {
 					let _ = conn_tx.into_send_async(Err(error.into())).await;

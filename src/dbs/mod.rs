@@ -261,7 +261,7 @@ mod tests {
 	use std::str::FromStr;
 
 	use surrealdb::dbs::Session;
-	use surrealdb::iam::verify::verify_creds;
+	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
@@ -286,7 +286,7 @@ mod tests {
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
 		);
-		verify_creds(&ds, None, None, creds.username, creds.password).await.unwrap();
+		verify_root_creds(&ds, creds.username, creds.password).await.unwrap();
 
 		// Do not setup the initial root user if there are root users:
 		// Test the scenario by making sure the custom password doesn't change.

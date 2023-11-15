@@ -220,7 +220,7 @@ mod cli_integration {
 			let exported = common::tmp_file("exported.surql");
 			let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
 
-			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run export: {args}"));
+			common::run(&args).output().expect("failed to run export");
 			exported
 		};
 

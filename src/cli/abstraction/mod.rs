@@ -1,4 +1,5 @@
 use clap::Args;
+use surrealdb::opt::auth::CredentialsLevel;
 
 #[derive(Args, Debug)]
 pub(crate) struct AuthArguments {
@@ -20,6 +21,12 @@ pub(crate) struct AuthArguments {
 		requires = "username"
 	)]
 	pub(crate) password: Option<String>,
+	#[arg(
+		help = "Authentication level to use when connecting. It uses the values from --namespace and --database to determine the level."
+	)]
+	#[arg(env = "SURREAL_AUTH_LEVEL", long = "auth-level", default_value = "root")]
+	#[arg(value_parser = super::validator::parser::creds_level::CredentialsLevelParser::new())]
+	pub(crate) auth_level: CredentialsLevel,
 }
 
 #[derive(Args, Debug)]
@@ -33,11 +40,11 @@ pub struct DatabaseSelectionArguments {
 }
 
 #[derive(Args, Debug)]
-pub struct DatabaseSelectionOptionalArguments {
-	#[arg(help = "The namespace selected for the operation")]
+pub struct LevelSelectionArguments {
+	#[arg(help = "The selected namespace")]
 	#[arg(env = "SURREAL_NAMESPACE", long = "namespace", visible_alias = "ns")]
 	pub(crate) namespace: Option<String>,
-	#[arg(help = "The database selected for the operation")]
+	#[arg(help = "The selected database")]
 	#[arg(
 		env = "SURREAL_DATABASE",
 		long = "database",
