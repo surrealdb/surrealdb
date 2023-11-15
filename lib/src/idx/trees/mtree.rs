@@ -518,18 +518,6 @@ impl MTree {
 		}
 	}
 
-	#[cfg(debug_assertions)]
-	fn check_internal_node(info: &str, node: &InternalNode) -> Result<(), Error> {
-		let mut node_ids = HashSet::new();
-		for r in node.values() {
-			if !node_ids.insert(r.node) {
-				debug!("InternalNode: {} - Duplicate node id: {} - {:?}", info, r.node, node);
-				return Err(Error::Unreachable);
-			}
-		}
-		Ok(())
-	}
-
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
@@ -574,16 +562,12 @@ impl MTree {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					let max_dist = self.compute_internal_max_distance(&node);
-					#[cfg(debug_assertions)]
-					Self::check_internal_node("if (N U P will fit into N)", &node)?;
 					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)?;
 					Ok(InsertionResult::CoveringRadius(max_dist))
 				} else {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					// Split(N U P)
-					#[cfg(debug_assertions)]
-					Self::check_internal_node("Split(N U P)", &node)?;
 					let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node)?;
 					Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 				}
@@ -1004,8 +988,6 @@ impl MTree {
 		}
 		// Return max(On E N) { parentDistance(On) + r(On)}
 		let max_dist = self.compute_internal_max_distance(&n_node);
-		#[cfg(debug_assertions)]
-		Self::check_internal_node("Return max(On E N) { parentDistance(On) + r(On)}", &n_node)?;
 		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)?;
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
