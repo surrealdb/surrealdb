@@ -647,7 +647,7 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
-			let mut q = syn::parse("ANALYZER test TOKENIZERS blank;").unwrap();
+			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 				panic!()
 			};

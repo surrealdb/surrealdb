@@ -12,7 +12,11 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 fn not_nan(i: &str) -> IResult<&str, Number> {
-	let (i, v) = recognize_float(i)?;
+	let (i, v) = match recognize_float(i) {
+		Ok(x) => x,
+		Err(Err::Failure(x)) | Err(Err::Error(x)) => return Err(Err::Error(x)),
+		Err(x) => return Err(x),
+	};
 	let (i, suffix) = suffix(i)?;
 	let (i, _) = ending(i)?;
 	let number = match suffix {
