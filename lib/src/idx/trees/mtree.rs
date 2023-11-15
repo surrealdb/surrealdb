@@ -211,28 +211,39 @@ impl KnnResultBuilder {
 		let pr = PriorityResult(dist);
 		match self.priority_list.entry(pr) {
 			Entry::Vacant(e) => {
+				self.docs |= docs;
 				e.insert(docs.clone());
 			}
 			Entry::Occupied(mut e) => {
-				let d = e.get_mut();
-				for doc in docs {
-					d.insert(doc);
-				}
+				*e.get_mut() |= docs;
+				self.docs |= docs;
 			}
 		}
+
+		#[cfg(debug_assertions)]
+		debug!("KnnResult add - docs: {} - total: {}", docs.len(), self.docs.len());
+
 		// Do possible eviction
 		let docs_len = self.docs.len();
 		if docs_len > self.knn {
 			if let Some((_, d)) = self.priority_list.last_key_value() {
 				if docs_len - d.len() >= self.knn {
-					self.priority_list.pop_last();
+					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
+						self.docs -= evicted_docs;
+					}
 				}
 			}
 		}
 	}
 
-	fn build(self, #[cfg(debug_assertions)] visited_nodes: usize) -> KnnResult {
+	fn build(self, #[cfg(debug_assertions)] visited_nodes: HashSet<NodeId>) -> KnnResult {
 		let mut objects = VecDeque::with_capacity(self.knn as usize);
+		#[cfg(debug_assertions)]
+		debug!(
+			"self.priority_list.len: {} - self.docs.len: {}",
+			self.priority_list.len(),
+			self.docs.len()
+		);
 		let mut left = self.knn;
 		for (_, docs) in self.priority_list {
 			let dl = docs.len();
@@ -263,7 +274,7 @@ pub struct KnnResult {
 	docs: VecDeque<DocId>,
 	#[cfg(debug_assertions)]
 	#[allow(dead_code)]
-	visited_nodes: usize,
+	visited_nodes: HashSet<NodeId>,
 }
 
 // https://en.wikipedia.org/wiki/M-tree
@@ -301,29 +312,35 @@ impl MTree {
 			queue.push(PriorityNode(0.0, root_id));
 		}
 		#[cfg(debug_assertions)]
-		let mut visited_nodes = 0;
+		let mut visited_nodes = HashSet::new();
 		while let Some(current) = queue.pop() {
 			#[cfg(debug_assertions)]
 			{
-				visited_nodes += 1;
+				debug!("Visit node id: {} - dist: {}", current.1, current.0);
+				if !visited_nodes.insert(current.1) {
+					return Err(Error::Unreachable);
+				}
 			}
 			let node = store.get_node(tx, current.1).await?;
 			match node.n {
 				MTreeNode::Leaf(ref n) => {
+					#[cfg(debug_assertions)]
+					debug!("Leaf found - id: {} - len: {}", node.id, n.len(),);
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v)?;
-						#[cfg(debug_assertions)]
-						debug!("Leaf found: {} - Obj: {:?} - Docs: {:?}", node.id, o, p.docs);
 						if res.check_add(d) {
 							res.add(d, &p.docs);
 						}
 					}
 				}
 				MTreeNode::Internal(ref n) => {
+					#[cfg(debug_assertions)]
+					debug!("Internal found - id: {} - {:?}", node.id, n);
 					for (o, p) in n {
 						let d = self.calculate_distance(o.as_ref(), v)?;
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
+							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
 							queue.push(PriorityNode(min_dist, p.node));
 						}
 					}
@@ -356,6 +373,7 @@ impl MTree {
 	fn new_node_id(&mut self) -> NodeId {
 		let new_node_id = self.state.next_node_id;
 		self.state.next_node_id += 1;
+		self.updated = true;
 		new_node_id
 	}
 
@@ -500,6 +518,18 @@ impl MTree {
 		}
 	}
 
+	#[cfg(debug_assertions)]
+	fn check_internal_node(info: &str, node: &InternalNode) -> Result<(), Error> {
+		let mut node_ids = HashSet::new();
+		for r in node.values() {
+			if !node_ids.insert(r.node) {
+				debug!("InternalNode: {} - Duplicate node id: {} - {:?}", info, r.node, node);
+				return Err(Error::Unreachable);
+			}
+		}
+		Ok(())
+	}
+
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
@@ -512,7 +542,7 @@ impl MTree {
 		object: SharedVector,
 		id: DocId,
 	) -> Result<InsertionResult, Error> {
-		// Choose `best` substree entry ObestSubstree from N;
+		// Choose `best` subtree entry ObestSubstree from N;
 		let (best_entry_obj, mut best_entry) = self.find_closest(&node, &object)?;
 		let best_node = store.get_node(tx, best_entry.node).await?;
 		// Insert(Oi, child(ObestSubstree), ObestSubtree);
@@ -545,13 +575,15 @@ impl MTree {
 					node.insert(o2, p2);
 					let max_dist = self.compute_internal_max_distance(&node);
 					#[cfg(debug_assertions)]
-					debug!("NODE: {} - MAX_DIST: {:?}", node_id, max_dist);
+					Self::check_internal_node("if (N U P will fit into N)", &node)?;
 					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)?;
 					Ok(InsertionResult::CoveringRadius(max_dist))
 				} else {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					// Split(N U P)
+					#[cfg(debug_assertions)]
+					Self::check_internal_node("Split(N U P)", &node)?;
 					let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node)?;
 					Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 				}
@@ -711,6 +743,11 @@ impl MTree {
 			radius: r2,
 			parent_dist: 0.0,
 		};
+
+		#[cfg(debug_assertions)]
+		if p1.node == p2.node {
+			return Err(Error::Unreachable);
+		}
 		Ok((o1, p1, o2, p2))
 	}
 
@@ -967,6 +1004,8 @@ impl MTree {
 		}
 		// Return max(On E N) { parentDistance(On) + r(On)}
 		let max_dist = self.compute_internal_max_distance(&n_node);
+		#[cfg(debug_assertions)]
+		Self::check_internal_node("Return max(On E N) { parentDistance(On) + r(On)}", &n_node)?;
 		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)?;
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
@@ -1031,6 +1070,7 @@ impl MTree {
 			}
 			return Ok(true);
 		}
+
 		store.set_node(p, p_updated)?;
 		Ok(false)
 	}
@@ -1573,7 +1613,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.docs, vec![]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 0);
+			assert_eq!(res.visited_nodes.len(), 0);
 		}
 		// Insert single element
 		{
@@ -1595,7 +1635,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.docs, vec![1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 1);
+			assert_eq!(res.visited_nodes.len(), 1);
 			check_tree_properties(&mut tx, &mut s, &t).await.check(1, 1, Some(1), Some(1), 1, 1);
 		}
 
@@ -1614,7 +1654,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec1, 10).await.unwrap();
 			check_knn(&res.docs, vec![1, 2]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 1);
+			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
 			check_leaf(&mut tx, &mut s, 0, |m| {
 				assert_eq!(m.len(), 2);
@@ -1631,7 +1671,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
 			check_knn(&res.docs, vec![2, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 1);
+			assert_eq!(res.visited_nodes.len(), 1);
 		}
 
 		// insert new doc to existing vector
@@ -1648,7 +1688,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec2, 10).await.unwrap();
 			check_knn(&res.docs, vec![2, 3, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 1);
+			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
 			check_leaf(&mut tx, &mut s, 0, |m| {
 				assert_eq!(m.len(), 2);
@@ -1674,7 +1714,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec3, 10).await.unwrap();
 			check_knn(&res.docs, vec![3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 1);
+			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
 			check_leaf(&mut tx, &mut s, 0, |m| {
 				assert_eq!(m.len(), 3);
@@ -1701,7 +1741,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec4, 10).await.unwrap();
 			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 3);
+			assert_eq!(res.visited_nodes.len(), 3);
 			assert_eq!(t.state.root, Some(2));
 			check_internal(&mut tx, &mut s, 2, |m| {
 				assert_eq!(m.len(), 2);
@@ -1739,7 +1779,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec6, 10).await.unwrap();
 			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 3);
+			assert_eq!(res.visited_nodes.len(), 3);
 			assert_eq!(t.state.root, Some(2));
 			check_internal(&mut tx, &mut s, 2, |m| {
 				assert_eq!(m.len(), 2);
@@ -1915,7 +1955,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec8, 20).await.unwrap();
 			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 7);
+			assert_eq!(res.visited_nodes.len(), 7);
 		}
 		// vec4 knn(2)
 		{
@@ -1924,7 +1964,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec4, 2).await.unwrap();
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 7);
+			assert_eq!(res.visited_nodes.len(), 7);
 		}
 
 		// vec10 knn(2)
@@ -1934,7 +1974,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut s, &vec10, 2).await.unwrap();
 			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes, 7);
+			assert_eq!(res.visited_nodes.len(), 7);
 		}
 	}
 
@@ -2249,6 +2289,7 @@ mod tests {
 		t: &MTree,
 	) -> CheckedProperties {
 		debug!("CheckTreeProperties");
+		let mut node_ids = HashSet::new();
 		let mut checks = CheckedProperties::default();
 		let mut nodes: VecDeque<(NodeId, f64, Option<Arc<Vector>>, usize)> = VecDeque::new();
 		if let Some(root_id) = t.state.root {
@@ -2256,6 +2297,7 @@ mod tests {
 		}
 		let mut leaf_objects = HashSet::new();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
+			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;
 			if depth > checks.max_depth {
 				checks.max_depth = depth;
