@@ -39,7 +39,7 @@ use crate::sql::regex::{regex, Regex};
 use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
-use crate::sql::thing::{thing, Thing};
+use crate::sql::thing::{thing, thing_raw, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
 use crate::sql::{builtin, operator, Query};
 use async_recursion::async_recursion;
@@ -2814,7 +2814,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			into(mock),
 			into(edges),
 			into(range),
-			into(thing),
+			into(thing_raw),
 			into(strand),
 			into(idiom::path),
 		)),
@@ -2850,7 +2850,7 @@ pub fn select_start(i: &str) -> IResult<&str, Value> {
 			into(mock),
 			into(edges),
 			into(range),
-			into(thing),
+			into(thing_raw),
 			into(table),
 			into(strand),
 		)),
