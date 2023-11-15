@@ -12,18 +12,18 @@ use surrealdb::headers::VERSION;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 mod accept;
-mod sur_auth_db;
-mod sur_auth_ns;
-mod sur_db;
-mod sur_id;
-mod sur_ns;
+mod auth_db;
+mod auth_ns;
+mod db;
+mod id;
+mod ns;
 
 pub use accept::Accept;
-pub use sur_auth_db::SurrealAuthDatabase;
-pub use sur_auth_ns::SurrealAuthNamespace;
-pub use sur_db::{SurrealDatabase, SurrealDatabaseLegacy};
-pub use sur_id::{SurrealId, SurrealIdLegacy};
-pub use sur_ns::{SurrealNamespace, SurrealNamespaceLegacy};
+pub use auth_db::SurrealAuthDatabase;
+pub use auth_ns::SurrealAuthNamespace;
+pub use db::{SurrealDatabase, SurrealDatabaseLegacy};
+pub use id::{SurrealId, SurrealIdLegacy};
+pub use ns::{SurrealNamespace, SurrealNamespaceLegacy};
 
 pub fn add_version_header() -> SetResponseHeaderLayer<HeaderValue> {
 	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
