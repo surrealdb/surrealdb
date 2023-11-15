@@ -1,7 +1,6 @@
 use super::super::{
 	comment::shouldbespace,
-	literal::timeout,
-	part::{cond, data, output},
+	part::{cond, data, output, timeout},
 	value::whats,
 	IResult,
 };

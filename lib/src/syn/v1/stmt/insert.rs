@@ -1,10 +1,10 @@
 use super::super::{
 	comment::shouldbespace,
 	error::{expected, ExplainResultExt},
-	literal::{param, table, timeout},
+	literal::{param, table},
 	part::{
 		data::{single, update, values},
-		output,
+		output, timeout,
 	},
 	value::value,
 	IResult,

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::{
 	block::block,
 	builtin,
@@ -15,8 +13,8 @@ use super::{
 	function::{builtin_function, defined_function, model},
 	idiom::{self, reparse_idiom_start},
 	literal::{
-		datetime::datetime, duration::duration, geometry::geometry, mock::mock, number, param,
-		range::range, regex, strand::strand, table, uuid,
+		datetime::datetime, duration::duration, number, param, range::range, regex, strand::strand,
+		table, uuid,
 	},
 	operator,
 	part::edges,
@@ -34,6 +32,13 @@ use nom::{
 	sequence::{delimited, terminated},
 	Err,
 };
+use std::collections::BTreeMap;
+
+mod geometry;
+mod mock;
+
+pub use geometry::geometry;
+pub use mock::mock;
 
 pub fn values(i: &str) -> IResult<&str, Values> {
 	let (i, v) = separated_list1(commas, value)(i)?;

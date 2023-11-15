@@ -17,16 +17,12 @@ pub mod algorithm;
 pub mod datetime;
 pub mod duration;
 pub mod filter;
-pub mod geometry;
 pub mod language;
-pub mod mock;
 pub mod number;
-pub mod object;
 pub mod range;
 pub mod regex;
 pub mod scoring;
 pub mod strand;
-pub mod timeout;
 pub mod tokenizer;
 pub mod uuid;
 
@@ -39,7 +35,6 @@ pub use self::range::range;
 pub use self::regex::regex;
 pub use self::scoring::scoring;
 pub use self::strand::strand;
-pub use self::timeout::timeout;
 pub use self::uuid::uuid;
 
 const BRACKET_L: char = '⟨';

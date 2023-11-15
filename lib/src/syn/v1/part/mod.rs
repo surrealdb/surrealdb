@@ -29,6 +29,7 @@ pub mod index;
 pub mod permission;
 pub mod split;
 pub mod start;
+pub mod timeout;
 pub mod view;
 pub mod with;
 
@@ -36,6 +37,7 @@ pub use data::data;
 pub use field::{field, fields};
 pub use split::split;
 pub use start::start;
+pub use timeout::timeout;
 pub use view::view;
 pub use with::with;
 

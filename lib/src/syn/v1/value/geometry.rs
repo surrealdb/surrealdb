@@ -1,5 +1,3 @@
-use crate::sql::Geometry;
-
 use super::super::{
 	comment::mightbespace,
 	common::{
@@ -8,7 +6,7 @@ use super::super::{
 	},
 	depth, IResult,
 };
-
+use crate::sql::Geometry;
 use geo::{LineString, Point, Polygon};
 use nom::{
 	branch::alt,

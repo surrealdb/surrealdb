@@ -1,8 +1,8 @@
 use super::super::{
 	comment::{mightbespace, shouldbespace},
 	error::expected,
-	literal::{param, table, timeout},
-	part::{data, output},
+	literal::{param, table},
+	part::{data, output, timeout},
 	subquery::subquery,
 	thing::thing,
 	value::array,

@@ -2,9 +2,10 @@ use super::super::{
 	comment::shouldbespace,
 	ending,
 	error::{expect_tag_no_case, expected},
-	literal::timeout,
 	omit::omit,
-	part::{cond, explain, fetch, fields, group, limit, order, split, start, version, with},
+	part::{
+		cond, explain, fetch, fields, group, limit, order, split, start, timeout, version, with,
+	},
 	special::{check_group_by_fields, check_order_by_fields, check_split_on_fields},
 	value::selects,
 	IResult,
