@@ -47,7 +47,7 @@ impl Connection for Any {
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.endpoint.scheme()) {
+			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
 					#[cfg(feature = "kv-fdb")]
 					{
