@@ -20,9 +20,20 @@ struct DanceClass {
 }
 
 // Student table schema
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Student {
+	id: Thing,
+	name: String,
+	classes: Vec<Thing>,
+	created_at: Datetime,
+}
+
+// Student model with full class details
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+struct StudentClasses {
 	id: Thing,
 	name: String,
 	classes: Vec<DanceClass>,
@@ -45,7 +56,7 @@ async fn main() -> surrealdb::Result<()> {
 	db.use_ns("namespace").use_db("database").await?;
 
 	// Create a dance class and store the result
-	let classes = db
+	let classes: Vec<DanceClass> = db
 		.create(DANCE)
 		.content(DanceClass {
 			id: Thing::from((DANCE, Id::rand())),
@@ -60,9 +71,9 @@ async fn main() -> surrealdb::Result<()> {
 	// a `sql::Value` instead and ignore it.
 	db.create(Resource::from(STUDENT))
 		.content(Student {
-			classes,
 			id: Thing::from((STUDENT, Id::rand())),
 			name: "Jane Doe".to_owned(),
+			classes: classes.into_iter().map(|class| class.id).collect(),
 			created_at: Datetime::default(),
 		})
 		.await?;
@@ -74,7 +85,7 @@ async fn main() -> surrealdb::Result<()> {
 	let mut results = db.query(sql).await?;
 
 	// Extract the first query statement result and deserialise it as a vector of students
-	let students: Vec<Student> = results.take(0)?;
+	let students: Vec<StudentClasses> = results.take(0)?;
 
 	// Use the result as you see fit. In this case we are simply pretty printing it.
 	dbg!(students);
