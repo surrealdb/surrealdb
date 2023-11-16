@@ -152,7 +152,7 @@ jobs:
           
           # Kill any potential previous instance of the server. The runner may be reused.
           pkill -9 surreal || true
-          ./target/release/surreal start 2>&1 >surrealdb.log &
+          ./target/release/surreal start rocksdb://bench-ws-$(date +%s) 2>&1 >surrealdb.log &
 
           set +e
           echo "Waiting for surreal to be ready..."
@@ -161,6 +161,11 @@ jobs:
             ./target/release/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
             tries=$((tries + 1))
           done
+          echo "#####"
+          echo "SurrealDB server failed to start!"
+          echo "#####"
+          cat surrealdb.log
+          exit 1
 
       - name: Run benchmark
         env:
