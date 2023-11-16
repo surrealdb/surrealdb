@@ -81,9 +81,9 @@ pub async fn init(
 
 		debug!("Signing in to the database engine with {:?}", auth_level);
 		match auth_level {
-			CredentialsLevel::Root => client.signin(creds.for_root()?).await?,
-			CredentialsLevel::Namespace => client.signin(creds.for_namespace()?).await?,
-			CredentialsLevel::Database => client.signin(creds.for_database()?).await?,
+			CredentialsLevel::Root => client.signin(creds.root()?).await?,
+			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
+			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 			// Clap shouldn't allow any other credentials level
 			_ => unreachable!("Invalid auth level"),
 		};

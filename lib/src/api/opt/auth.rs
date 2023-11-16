@@ -81,14 +81,14 @@ impl<'a> CredentialsBuilder<'a> {
 		self
 	}
 
-	pub fn for_root(self) -> Result<Root<'a>, Error> {
+	pub fn root(self) -> Result<Root<'a>, Error> {
 		Ok(Root {
 			username: self.username.ok_or(Error::NoUsername)?,
 			password: self.password.ok_or(Error::NoPassword)?,
 		})
 	}
 
-	pub fn for_namespace(self) -> Result<Namespace<'a>, Error> {
+	pub fn namespace(self) -> Result<Namespace<'a>, Error> {
 		Ok(Namespace {
 			username: self.username.ok_or(Error::NoUsername)?,
 			password: self.password.ok_or(Error::NoPassword)?,
@@ -96,7 +96,7 @@ impl<'a> CredentialsBuilder<'a> {
 		})
 	}
 
-	pub fn for_database(self) -> Result<Database<'a>, Error> {
+	pub fn database(self) -> Result<Database<'a>, Error> {
 		Ok(Database {
 			username: self.username.ok_or(Error::NoUsername)?,
 			password: self.password.ok_or(Error::NoPassword)?,
@@ -105,7 +105,7 @@ impl<'a> CredentialsBuilder<'a> {
 		})
 	}
 
-	pub fn for_scope<P>(self, params: P) -> Result<Scope<'a, P>, Error> {
+	pub fn scope<P>(self, params: P) -> Result<Scope<'a, P>, Error> {
 		Ok(Scope {
 			namespace: self.namespace.ok_or(Error::NoNamespace)?,
 			database: self.database.ok_or(Error::NoDatabase)?,

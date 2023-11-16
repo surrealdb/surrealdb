@@ -169,15 +169,15 @@ fn req_with_creds(
 
 	let req = match auth_level {
 		CredentialsLevel::Root => {
-			let creds = builder.for_root()?;
+			let creds = builder.root()?;
 			req.basic_auth(creds.username, Some(creds.password))
 		}
 		CredentialsLevel::Namespace => {
-			let creds = builder.for_namespace()?;
+			let creds = builder.namespace()?;
 			req.header(&AUTH_NS, creds.namespace).basic_auth(creds.username, Some(creds.password))
 		}
 		CredentialsLevel::Database => {
-			let creds = builder.for_database()?;
+			let creds = builder.database()?;
 			req.header(&AUTH_NS, creds.namespace)
 				.header(&AUTH_DB, creds.database)
 				.basic_auth(creds.username, Some(creds.password))
