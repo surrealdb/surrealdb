@@ -4,7 +4,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use surrealdb::headers::AUTH_NS;
 
-/// Typed header implementation for the `Sur-Auth-Ns` header.
+/// Typed header implementation for the `surreal-auth-ns` header.
 /// It's used to specify the namespace to use for the basic authentication.
 pub struct SurrealAuthNamespace(String);
 

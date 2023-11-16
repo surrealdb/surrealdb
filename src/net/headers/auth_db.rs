@@ -4,7 +4,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use surrealdb::headers::AUTH_DB;
 
-/// Typed header implementation for the `Sur-Auth-Db` header.
+/// Typed header implementation for the `surreal-auth-db` header.
 /// It's used to specify the database to use for the basic authentication.
 pub struct SurrealAuthDatabase(String);
 
