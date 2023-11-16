@@ -56,28 +56,28 @@ pub struct CredentialsBuilder<'a> {
 
 impl<'a> CredentialsBuilder<'a> {
 	// Builder methods
-	pub fn with_username(mut self, username: Option<&'a str>) -> Self {
-		self.username = username;
+	pub fn with_username(mut self, username: impl Into<Option<&'a str>>) -> Self {
+		self.username = username.into();
 		self
 	}
 
-	pub fn with_password(mut self, password: Option<&'a str>) -> Self {
-		self.password = password;
+	pub fn with_password(mut self, password: impl Into<Option<&'a str>>) -> Self {
+		self.password = password.into();
 		self
 	}
 
-	pub fn with_namespace(mut self, namespace: Option<&'a str>) -> Self {
-		self.namespace = namespace;
+	pub fn with_namespace(mut self, namespace: impl Into<Option<&'a str>>) -> Self {
+		self.namespace = namespace.into();
 		self
 	}
 
-	pub fn with_database(mut self, database: Option<&'a str>) -> Self {
-		self.database = database;
+	pub fn with_database(mut self, database: impl Into<Option<&'a str>>) -> Self {
+		self.database = database.into();
 		self
 	}
 
-	pub fn with_scope(mut self, scope: Option<&'a str>) -> Self {
-		self.scope = scope;
+	pub fn with_scope(mut self, scope: impl Into<Option<&'a str>>) -> Self {
+		self.scope = scope.into();
 		self
 	}
 

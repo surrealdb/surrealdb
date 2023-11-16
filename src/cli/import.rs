@@ -53,8 +53,8 @@ pub async fn init(
 		let creds = CredentialsBuilder::default()
 			.with_username(username.as_deref())
 			.with_password(password.as_deref())
-			.with_namespace(Some(&namespace))
-			.with_database(Some(&database));
+			.with_namespace(namespace.as_str())
+			.with_database(database.as_str());
 
 		let client = connect(endpoint).await?;
 
