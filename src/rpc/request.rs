@@ -5,6 +5,7 @@ use once_cell::sync::Lazy;
 use surrealdb::sql::Part;
 
 use super::response::{Failure, OutputFormat};
+use crate::schema::Schema;
 
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);
@@ -40,7 +41,27 @@ pub async fn parse_request(msg: Message) -> Result<Request, Failure> {
 			// Parse the SurrealQL object
 			match surrealdb::sql::value(val) {
 				// The SurrealQL message parsed ok
-				Ok(v) => (v, val.len()),
+				Ok(v) => match v.to_owned() {
+					Value::Object(obj) => match obj.get("$schema") {
+						Some(Value::Strand(s)) => match s.as_str() {
+							"https://surrealdb.com/schema/typed-surrealql-v1.json" => {
+								let json = serde_json::from_str(val)
+									.or_else(|_| Err(Failure::PARSE_ERROR))?;
+								if !Schema::TypedSurrealQLV1.is_valid(&json) {
+									return Err(Failure::PARSE_ERROR);
+								}
+
+								let v = Schema::TypedSurrealQLV1.decode(
+									obj.get("value").ok_or(Failure::PARSE_ERROR)?.to_owned(),
+								)?;
+								(v, val.len())
+							}
+							_ => (v, val.len()),
+						},
+						_ => (v, val.len()),
+					},
+					_ => (v, val.len()),
+				},
 				// The SurrealQL message failed to parse
 				_ => return Err(Failure::PARSE_ERROR),
 			}
