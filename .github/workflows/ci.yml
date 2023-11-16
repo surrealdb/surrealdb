@@ -496,9 +496,11 @@ jobs:
           sudo apt-get -y update
 
       - name: Install TiUP
+        timeout-minutes: 10
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          ~/.tiup/bin/tiup -v
+          while ! ~/.tiup/bin/tiup -v; do
+            curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          done
 
       - name: Install cargo-make
         run: cargo install --debug cargo-make
