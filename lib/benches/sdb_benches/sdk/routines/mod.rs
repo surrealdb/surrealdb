@@ -26,24 +26,25 @@ pub(super) fn bench_routine<R>(
 ) where
 	R: Routine,
 {
-	// Setup
-	routine.setup(db, num_ops.clone());
-
-	// Run the runtime and return the duration for each operation
+	// Run the runtime and return the duration, accounting for the number of operations on each run
 	b.iter_custom(|iters| {
 		let num_ops = num_ops.clone();
 
-		let now = std::time::Instant::now();
+		// Total time spent running the actual benchmark run for all iterations
+		let mut total = std::time::Duration::from_secs(0);
 		for _ in 0..iters {
-			let num_ops = num_ops.clone();
+			// Setup
+			routine.setup(db, num_ops.clone());
 
 			// Run and time the routine
+			let now = std::time::Instant::now();
 			routine.run(db, num_ops.clone());
+			total += now.elapsed();
+
+			// Cleanup the database
+			routine.cleanup(db, num_ops);
 		}
 
-		now.elapsed().div_f32(num_ops as f32)
+		total.div_f32(num_ops as f32)
 	});
-
-	// Cleanup the database
-	routine.cleanup(db, num_ops);
 }
