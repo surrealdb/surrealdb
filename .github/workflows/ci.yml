@@ -496,13 +496,11 @@ jobs:
           sudo apt-get -y update
 
       - name: Install TiUP
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 5
-          command: |
+        timeout-minutes: 10
+        run: |
+          while ! ~/.tiup/bin/tiup -v; do
             curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-            ~/.tiup/bin/tiup -v
+          done
 
       - name: Install cargo-make
         run: cargo install --debug cargo-make
