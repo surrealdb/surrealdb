@@ -205,6 +205,47 @@ jobs:
             target/${{ matrix.arch }}/release/${{ matrix.file }}.txt
             target/${{ matrix.arch }}/release/${{ matrix.file }}.exe
 
+  crate:
+    name: Publish surrealdb-nightly to crates.io
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          # Install release-plz
+          cargo install --force --version 0.3.30 release-plz
+
+          # Change `surrealdb` crate name to `surrealdb-nightly`
+          git apply .patches/surrealdb-nightly.patch
+
+          # Get a timestamp of the last commit
+          timestamp=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
+
+          # Get the short commit
+          shortRev=$(git rev-parse --short HEAD)
+
+          # Update the version to a nightly one
+          # This sets the nightly version to something like `1.20231117130416.72772367`
+          sed -i -E "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${timestamp}.${shortRev}\"#" lib/Cargo.toml
+
+          # Configure release-plz
+          cp -v .patches/release-nightly-plz.toml release-plz.toml
+
+          # Publish cargo crate
+          /home/runner/.cargo/bin/release-plz release
+
   docker:
     name: Build and publish Docker image
     needs: [build]
