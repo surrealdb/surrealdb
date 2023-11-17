@@ -251,7 +251,7 @@ jobs:
           cargo install --force --version 0.3.30 release-plz
 
           # Publish cargo crate
-          /home/runner/.cargo/bin/release-plz release --dry-run --allow-dirty
+          /home/runner/.cargo/bin/release-plz release --dry-run
 
   docker:
     if: false
