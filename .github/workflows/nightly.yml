@@ -247,6 +247,12 @@ jobs:
           # Configure release-plz
           cp -v .patches/release-nightly-plz.toml release-plz.toml
 
+          ls -l
+
+          git status
+          git branch
+          git show
+
           # Install release-plz
           cargo install --force --version 0.3.30 release-plz
 
