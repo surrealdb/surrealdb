@@ -7,7 +7,7 @@ mod http_integration {
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
-	use surrealdb::headers::{DB, NS};
+	use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, NS};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -50,6 +50,143 @@ mod http_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
 			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
+		}
+
+		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS))
+                                .body(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER} ON DATABASE PASSWORD '{PASS}' ROLES OWNER",
+                                )).send().await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Request with ROOT level access to access ROOT, returns 200 and succeeds
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR ROOT").send().await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"namespaces":"#), "body: {}", body);
+		}
+
+		// Request with ROOT level access to access NS, returns 200 and succeeds
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR NS").send().await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"databases":"#), "body: {}", body);
+		}
+
+		// Request with ROOT level access to access DB, returns 200 and succeeds
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR DB").send().await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
+		}
+
+		// Request with NS level access to access ROOT, returns 200 but fails
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR ROOT")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(
+				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+				"body: {}",
+				body
+			);
+		}
+
+		// Request with NS level access to access NS, returns 200 and succeeds
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR NS")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"databases":"#), "body: {}", body);
+		}
+
+		// Request with NS level access to access DB, returns 200 and succeeds
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
+		}
+
+		// Request with DB level access to access ROOT, returns 200 but fails
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.header(&AUTH_DB, "D")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR ROOT")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(
+				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+				"body: {}",
+				body
+			);
+		}
+
+		// Request with DB level access to access NS, returns 200 but fails
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.header(&AUTH_DB, "D")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR NS")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(
+				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+				"body: {}",
+				body
+			);
+		}
+
+		// Request with DB level access to access DB, returns 200 and succeeds
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, "N")
+				.header(&AUTH_DB, "D")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
 		}
 
 		Ok(())
