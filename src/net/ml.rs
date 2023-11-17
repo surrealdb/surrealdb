@@ -16,7 +16,7 @@ use serde_json::from_slice;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use surrealdb::dbs::Session;
-use surrealdb::sql::{Part, Value};
+// use surrealdb::sql::{Part, Value};
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::TransactionType::{Write, Read};
 use surrealdb::kvs::LockType::Optimistic;
@@ -35,7 +35,7 @@ const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 pub(super) fn router<S, B>() -> Router<S, B>
 where
 	B: HttpBody + Send + 'static,
-	B::Data: Send,
+	B::Data: Send + Into<Bytes>,
 	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
@@ -66,7 +66,10 @@ async fn import(
         let chunk = chunk.unwrap();
         buffer.extend_from_slice(&chunk);
     }
-	let file = SurMlFile::from_bytes(buffer).unwrap();
+	let file = match SurMlFile::from_bytes(buffer) {
+		Ok(file) => file,
+		Err(err) => return Err(output::json::<String>(&err.to_string()))
+	};
 
 	// define the key and value to be inserted
 	let id = format!("{}-{}", file.header.name.to_string(), file.header.version.to_string());

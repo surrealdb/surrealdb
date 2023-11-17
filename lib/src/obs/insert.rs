@@ -33,7 +33,7 @@ pub enum InsertStatus {
 /// 
 /// # Returns
 /// * `String` - The hash of the file
-fn hash_file(data: &Vec<u8>) -> String {
+pub fn hash_file(data: &Vec<u8>) -> String {
     let mut hasher = Sha1::new();
     hasher.update(data);
     let result = hasher.finalize();
