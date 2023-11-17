@@ -242,7 +242,7 @@ jobs:
           shortRev=$(git rev-parse --short HEAD)
 
           # Update the description
-          sed -i "s#^description = `".*"`#description = \"A nightly release of the `surrealdb` crate based on commit `${shortRev}`\"#" lib/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A nightly release of the surrealdb crate based on commit ${shortRev}\"#" lib/Cargo.toml
 
           # Configure release-plz
           cp -v .patches/release-nightly-plz.toml release-plz.toml
