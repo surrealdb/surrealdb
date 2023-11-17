@@ -1539,7 +1539,7 @@ impl VersionedSerdeState for MState {}
 mod tests {
 	use rand::prelude::{SliceRandom, StdRng};
 	use rand::SeedableRng;
-	use std::collections::{BTreeMap, HashSet, VecDeque};
+	use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 	use std::sync::Arc;
 
 	use test_log::test;
@@ -1547,7 +1547,7 @@ mod tests {
 
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{
-		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties,
+		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties, PriorityNode,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -1964,9 +1964,22 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 
+		let mut sorted = BTreeSet::new();
+		let mut first: Option<Vector> = None;
+
 		// Insert
 		for (doc_id, obj) in &collection {
 			{
+				// We collect every result in a BTreeSet where the doc are sorted
+				// per distance with the first object of the collection.
+				if let Some(f) = &first {
+					let dist = f.euclidean_distance(obj).unwrap();
+					sorted.insert(PriorityNode(dist, *doc_id));
+				} else {
+					first = Some(obj.clone());
+					sorted.insert(PriorityNode(0.0, *doc_id));
+				}
+
 				let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
 				let mut s = s.lock().await;
 				t.insert(&mut tx, &mut s, obj.clone(), *doc_id).await.unwrap();
@@ -1979,7 +1992,7 @@ mod tests {
 			}
 		}
 
-		// Find
+		// Find every doc / objects
 		{
 			let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
 			let mut s = s.lock().await;
@@ -2006,6 +2019,17 @@ mod tests {
 						res.docs.len(),
 						collection.len(),
 					)
+				}
+			}
+
+			{
+				// Find 10 knn from the first
+				if let Some(f) = &first {
+					let res = t.knn_search(&mut tx, &mut s, f, 10).await.unwrap();
+					let mut i = sorted.iter();
+					for r in res.docs {
+						assert_eq!(r, i.next().unwrap().1);
+					}
 				}
 			}
 		}
