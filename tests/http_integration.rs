@@ -68,8 +68,8 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR ROOT").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"namespaces":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
 		}
 
 		// Request with ROOT level access to access NS, returns 200 and succeeds
@@ -77,8 +77,8 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR NS").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"databases":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
 		}
 
 		// Request with ROOT level access to access DB, returns 200 and succeeds
@@ -86,8 +86,8 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR DB").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
 		}
 
 		// Request with NS level access to access ROOT, returns 200 but fails
@@ -100,9 +100,11 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(
-				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(
+				body[0]["result"].as_str(),
+				Some("IAM error: Not enough permissions to perform this action"),
 				"body: {}",
 				body
 			);
@@ -118,8 +120,8 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"databases":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
 		}
 
 		// Request with NS level access to access DB, returns 200 and succeeds
@@ -132,8 +134,8 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
 		}
 
 		// Request with DB level access to access ROOT, returns 200 but fails
@@ -147,9 +149,11 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(
-				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(
+				body[0]["result"].as_str(),
+				Some("IAM error: Not enough permissions to perform this action"),
 				"body: {}",
 				body
 			);
@@ -166,9 +170,11 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(
-				body.contains(r#"[{"result":"IAM error: Not enough permissions"#),
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(
+				body[0]["result"].as_str(),
+				Some("IAM error: Not enough permissions to perform this action"),
 				"body: {}",
 				body
 			);
@@ -185,8 +191,20 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":{"analyzers":"#), "body: {}", body);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+		}
+
+		// Request with DB level access missing NS level header, returns 401
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_DB, "D")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401);
 		}
 
 		Ok(())
