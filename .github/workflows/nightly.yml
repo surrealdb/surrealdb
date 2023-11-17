@@ -241,7 +241,7 @@ jobs:
 
           # Update the version to a nightly one
           # This sets the nightly version to something like `1.20231117130416.72772367`
-          sed -i -E "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${timestamp}.${shortRev}\"#" lib/Cargo.toml
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${timestamp}.${shortRev}\"#" lib/Cargo.toml
 
           # Configure release-plz
           cp -v .patches/release-nightly-plz.toml release-plz.toml
