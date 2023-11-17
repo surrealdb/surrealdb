@@ -252,6 +252,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add release-plz.toml
           git commit -am 'Prepare nightly release'
+          git checkout -b nightly
 
           # Install release-plz
           cargo install --force --version 0.3.30 release-plz
