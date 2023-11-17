@@ -227,24 +227,28 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
         run: |
-          # Install release-plz
-          cargo install --force --version 0.3.30 release-plz
-
           # Change `surrealdb` crate name to `surrealdb-nightly`
           git apply .patches/surrealdb-nightly.patch
 
-          # Get a timestamp of the last commit
-          timestamp=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
+          # Get the date and time of the last commit
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
+
+          # Update the version to a nightly one
+          # This sets the nightly version to something like `1.20231117.130416`
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.${time}\"#" lib/Cargo.toml
 
           # Get the short commit
           shortRev=$(git rev-parse --short HEAD)
 
-          # Update the version to a nightly one
-          # This sets the nightly version to something like `1.20231117130416.72772367`
-          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${timestamp}.${shortRev}\"#" lib/Cargo.toml
+          # Update the description
+          sed -i "s#^description = `".*"`#description = \"A nightly release of the `surrealdb` crate based on commit `${shortRev}`\"#" lib/Cargo.toml
 
           # Configure release-plz
           cp -v .patches/release-nightly-plz.toml release-plz.toml
+
+          # Install release-plz
+          cargo install --force --version 0.3.30 release-plz
 
           # Publish cargo crate
           /home/runner/.cargo/bin/release-plz release
