@@ -103,8 +103,7 @@ mod http_integration {
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
 			assert_eq!(
-				body[0]["result"].as_str(),
-				Some("IAM error: Not enough permissions to perform this action"),
+				body[0]["result"], "IAM error: Not enough permissions to perform this action",
 				"body: {}",
 				body
 			);
@@ -152,8 +151,7 @@ mod http_integration {
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
 			assert_eq!(
-				body[0]["result"].as_str(),
-				Some("IAM error: Not enough permissions to perform this action"),
+				body[0]["result"], "IAM error: Not enough permissions to perform this action",
 				"body: {}",
 				body
 			);
@@ -173,8 +171,7 @@ mod http_integration {
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
 			assert_eq!(
-				body[0]["result"].as_str(),
-				Some("IAM error: Not enough permissions to perform this action"),
+				body[0]["result"], "IAM error: Not enough permissions to perform this action",
 				"body: {}",
 				body
 			);
