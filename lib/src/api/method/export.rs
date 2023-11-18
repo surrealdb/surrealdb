@@ -61,7 +61,7 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let (tx, rx) = crate::channel::new(1);
+			let (tx, rx) = crate::channel::bounded(1);
 			let mut conn = Client::new(Method::Export);
 			let ExportDestination::Memory = self.target else {
 				unreachable!();

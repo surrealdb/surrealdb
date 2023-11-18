@@ -274,9 +274,10 @@ pub async fn ws_recv_all_msgs(
 	timeout: Duration,
 ) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
 	let mut res = Vec::new();
+	let deadline = time::Instant::now() + timeout;
 	loop {
 		tokio::select! {
-			_ = time::sleep(timeout) => {
+			_ = time::sleep_until(deadline) => {
 				debug!("Waited for {:?} and received {} messages", timeout, res.len());
 				if res.len() != expected {
 					return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
