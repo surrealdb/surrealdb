@@ -15,12 +15,6 @@ use std::collections::{HashMap, HashSet};
 mod filter;
 mod tokenizer;
 
-pub(crate) struct Analyzers {}
-
-impl Analyzers {
-	pub(crate) const LIKE: &'static str = "like";
-}
-
 pub(super) struct Analyzer {
 	t: Option<Vec<SqlTokenizer>>,
 	f: Option<Vec<Filter>>,
@@ -176,10 +170,16 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
-	use crate::sql::statements::define::analyzer;
+	use crate::{
+		sql::{statements::DefineStatement, Statement},
+		syn,
+	};
 
 	pub(super) fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
-		let (_, az) = analyzer(def).unwrap();
+		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
+		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
+			panic!()
+		};
 		let a: Analyzer = az.into();
 
 		let tokens = a.analyze(input.to_string()).unwrap();

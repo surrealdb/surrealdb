@@ -1,29 +1,15 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::sql::base::Base;
-use crate::sql::changefeed::{changefeed, ChangeFeed};
-use crate::sql::comment::shouldbespace;
-use crate::sql::ending;
-use crate::sql::error::expected;
-use crate::sql::error::IResult;
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::ident::{ident, Ident};
-use crate::sql::permission::{permissions, Permissions};
-use crate::sql::statements::UpdateStatement;
-use crate::sql::strand::{strand, Strand};
-use crate::sql::value::{Value, Values};
-use crate::sql::view::{view, View};
+use crate::iam::{Action, ResourceKind};
+use crate::sql::{
+	changefeed::ChangeFeed,
+	fmt::{is_pretty, pretty_indent},
+	statements::UpdateStatement,
+	Base, Ident, Permissions, Strand, Value, Values, View,
+};
 use derive::Store;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::multi::many0;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -139,133 +125,5 @@ impl Display for DefineTableStatement {
 			write!(f, "{}", self.permissions)?;
 		}
 		Ok(())
-	}
-}
-
-pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
-	let (i, _) = tag_no_case("TABLE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(ident)(i)?;
-	let (i, opts) = many0(table_opts)(i)?;
-	let (i, _) = expected(
-		"DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
-		ending::query,
-	)(i)?;
-	// Create the base statement
-	let mut res = DefineTableStatement {
-		name,
-		..Default::default()
-	};
-	// Assign any defined options
-	for opt in opts {
-		match opt {
-			DefineTableOption::Drop => {
-				res.drop = true;
-			}
-			DefineTableOption::Schemafull => {
-				res.full = true;
-			}
-			DefineTableOption::Schemaless => {
-				res.full = false;
-			}
-			DefineTableOption::View(v) => {
-				res.view = Some(v);
-			}
-			DefineTableOption::Comment(v) => {
-				res.comment = Some(v);
-			}
-			DefineTableOption::ChangeFeed(v) => {
-				res.changefeed = Some(v);
-			}
-			DefineTableOption::Permissions(v) => {
-				res.permissions = v;
-			}
-		}
-	}
-	// Return the statement
-	Ok((i, res))
-}
-
-enum DefineTableOption {
-	Drop,
-	View(View),
-	Schemaless,
-	Schemafull,
-	Comment(Strand),
-	Permissions(Permissions),
-	ChangeFeed(ChangeFeed),
-}
-
-fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((
-		table_drop,
-		table_view,
-		table_comment,
-		table_schemaless,
-		table_schemafull,
-		table_permissions,
-		table_changefeed,
-	))(i)
-}
-
-fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("DROP")(i)?;
-	Ok((i, DefineTableOption::Drop))
-}
-
-fn table_changefeed(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = changefeed(i)?;
-	Ok((i, DefineTableOption::ChangeFeed(v)))
-}
-
-fn table_view(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = view(i)?;
-	Ok((i, DefineTableOption::View(v)))
-}
-
-fn table_schemaless(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("SCHEMALESS")(i)?;
-	Ok((i, DefineTableOption::Schemaless))
-}
-
-fn table_schemafull(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = alt((tag_no_case("SCHEMAFULL"), tag_no_case("SCHEMAFUL")))(i)?;
-	Ok((i, DefineTableOption::Schemafull))
-}
-
-fn table_comment(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("COMMENT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = strand(i)?;
-	Ok((i, DefineTableOption::Comment(v)))
-}
-
-fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permissions(i)?;
-	Ok((i, DefineTableOption::Permissions(v)))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn define_table_with_changefeed() {
-		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h";
-		let res = table(sql);
-		let out = res.unwrap().1;
-		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
-
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
-		assert_eq!(out, deserialized);
 	}
 }

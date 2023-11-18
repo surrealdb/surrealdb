@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::parser::idiom;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
@@ -35,7 +35,7 @@ pub async fn field(
 	match (opt, txn) {
 		(Some(opt), Some(txn)) => {
 			// Parse the string as an Idiom
-			let idi = idiom(&val)?;
+			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
 				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
@@ -60,7 +60,7 @@ pub async fn fields(
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
-				let idi = idiom(&v)?;
+				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
 					true => args.push(idi.compute(ctx, opt, txn, doc).await?),

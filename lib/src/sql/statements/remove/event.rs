@@ -1,19 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::base::Base;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::expect_tag_no_case;
-use crate::sql::error::IResult;
-use crate::sql::ident::{ident, Ident};
-use crate::sql::value::Value;
+use crate::sql::{Base, Ident, Value};
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::combinator::opt;
-use nom::sequence::tuple;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -54,22 +44,4 @@ impl Display for RemoveEventStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
 	}
-}
-
-pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
-	let (i, _) = tag_no_case("EVENT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(ident)(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = expect_tag_no_case("ON")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = cut(ident)(i)?;
-	Ok((
-		i,
-		RemoveEventStatement {
-			name,
-			what,
-		},
-	))
 }

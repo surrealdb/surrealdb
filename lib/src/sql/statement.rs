@@ -2,49 +2,25 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
-use crate::sql::common::colons;
-use crate::sql::error::IResult;
-use crate::sql::fmt::Fmt;
-use crate::sql::fmt::Pretty;
-use crate::sql::statements::analyze::{analyze, AnalyzeStatement};
-use crate::sql::statements::begin::{begin, BeginStatement};
-use crate::sql::statements::cancel::{cancel, CancelStatement};
-use crate::sql::statements::commit::{commit, CommitStatement};
-use crate::sql::statements::create::{create, CreateStatement};
-use crate::sql::statements::define::{define, DefineStatement};
-use crate::sql::statements::delete::{delete, DeleteStatement};
-use crate::sql::statements::foreach::{foreach, ForeachStatement};
-use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
-use crate::sql::statements::info::{info, InfoStatement};
-use crate::sql::statements::insert::{insert, InsertStatement};
-use crate::sql::statements::kill::{kill, KillStatement};
-use crate::sql::statements::live::{live, LiveStatement};
-use crate::sql::statements::option::{option, OptionStatement};
-use crate::sql::statements::output::{output, OutputStatement};
-use crate::sql::statements::r#break::{r#break, BreakStatement};
-use crate::sql::statements::r#continue::{r#continue, ContinueStatement};
-use crate::sql::statements::r#use::{r#use, UseStatement};
-use crate::sql::statements::relate::{relate, RelateStatement};
-use crate::sql::statements::remove::{remove, RemoveStatement};
-use crate::sql::statements::select::{select, SelectStatement};
-use crate::sql::statements::set::{set, SetStatement};
-use crate::sql::statements::show::{show, ShowStatement};
-use crate::sql::statements::sleep::{sleep, SleepStatement};
-use crate::sql::statements::throw::{throw, ThrowStatement};
-use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::value::{value, Value};
+use crate::sql::{
+	fmt::{Fmt, Pretty},
+	statements::{
+		AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
+		ContinueStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
+		IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement,
+		OptionStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
+		SetStatement, ShowStatement, SleepStatement, ThrowStatement, UpdateStatement, UseStatement,
+	},
+	value::Value,
+};
 use derive::Store;
-use nom::branch::alt;
-use nom::combinator::map;
-use nom::multi::many0;
-use nom::multi::separated_list1;
-use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
-use std::time::Duration;
+use std::{
+	fmt::{self, Display, Formatter, Write},
+	ops::Deref,
+	time::Duration,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -72,12 +48,6 @@ impl Display for Statements {
 			f,
 		)
 	}
-}
-
-pub fn statements(i: &str) -> IResult<&str, Statements> {
-	let (i, v) = separated_list1(colons, statement)(i)?;
-	let (i, _) = many0(colons)(i)?;
-	Ok((i, Statements(v)))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -227,91 +197,5 @@ impl Display for Statement {
 			Self::Update(v) => write!(Pretty::from(f), "{v}"),
 			Self::Use(v) => write!(Pretty::from(f), "{v}"),
 		}
-	}
-}
-
-pub fn statement(i: &str) -> IResult<&str, Statement> {
-	delimited(
-		mightbespace,
-		alt((
-			alt((
-				map(analyze, Statement::Analyze),
-				map(begin, Statement::Begin),
-				map(r#break, Statement::Break),
-				map(cancel, Statement::Cancel),
-				map(commit, Statement::Commit),
-				map(r#continue, Statement::Continue),
-				map(create, Statement::Create),
-				map(define, Statement::Define),
-				map(delete, Statement::Delete),
-				map(foreach, Statement::Foreach),
-				map(ifelse, Statement::Ifelse),
-				map(info, Statement::Info),
-				map(insert, Statement::Insert),
-			)),
-			alt((
-				map(kill, Statement::Kill),
-				map(live, Statement::Live),
-				map(option, Statement::Option),
-				map(output, Statement::Output),
-				map(relate, Statement::Relate),
-				map(remove, Statement::Remove),
-				map(select, Statement::Select),
-				map(set, Statement::Set),
-				map(show, Statement::Show),
-				map(sleep, Statement::Sleep),
-				map(throw, Statement::Throw),
-				map(update, Statement::Update),
-				map(r#use, Statement::Use),
-			)),
-			map(value, Statement::Value),
-		)),
-		mightbespace,
-	)(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn single_statement() {
-		let sql = "CREATE test";
-		let res = statement(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CREATE test", format!("{}", out))
-	}
-
-	#[test]
-	fn multiple_statements() {
-		let sql = "CREATE test; CREATE temp;";
-		let res = statements(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
-	}
-
-	#[test]
-	fn multiple_statements_semicolons() {
-		let sql = "CREATE test;;;CREATE temp;;;";
-		let res = statements(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CREATE test;\nCREATE temp;", format!("{}", out))
-	}
-
-	#[test]
-	fn show_table_changes() {
-		let sql = "SHOW CHANGES FOR TABLE test SINCE 123456";
-		let res = statement(sql);
-		let out = res.unwrap().1;
-		assert_eq!("SHOW CHANGES FOR TABLE test SINCE 123456", format!("{}", out))
-	}
-
-	#[test]
-	fn show_database_changes() {
-		let sql = "SHOW CHANGES FOR DATABASE SINCE 123456";
-		let res = statement(sql);
-		let out = res.unwrap().1;
-		assert_eq!("SHOW CHANGES FOR DATABASE SINCE 123456", format!("{}", out))
 	}
 }

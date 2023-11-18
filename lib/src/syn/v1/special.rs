@@ -1,10 +1,5 @@
-use crate::sql::error::ParseError;
-use crate::sql::field::{Field, Fields};
-use crate::sql::group::Groups;
-use crate::sql::order::Orders;
-use crate::sql::split::Splits;
-use crate::sql::value::Value;
-use crate::sql::Idiom;
+use super::ParseError;
+use crate::sql::{Field, Fields, Groups, Idiom, Orders, Splits, Value};
 use nom::Err;
 use nom::Err::Failure;
 

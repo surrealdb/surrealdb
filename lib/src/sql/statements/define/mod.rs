@@ -12,32 +12,27 @@ mod table;
 mod token;
 mod user;
 
-pub use analyzer::{analyzer, DefineAnalyzerStatement};
-pub use database::{database, DefineDatabaseStatement};
-pub use event::{event, DefineEventStatement};
-pub use field::{field, DefineFieldStatement};
-pub use function::{function, DefineFunctionStatement};
-pub use index::{index, DefineIndexStatement};
+pub use analyzer::DefineAnalyzerStatement;
+pub use database::DefineDatabaseStatement;
+pub use event::DefineEventStatement;
+pub use field::DefineFieldStatement;
+pub use function::DefineFunctionStatement;
+pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
-pub use namespace::{namespace, DefineNamespaceStatement};
-use nom::bytes::complete::tag_no_case;
-pub use param::{param, DefineParamStatement};
-pub use scope::{scope, DefineScopeStatement};
-pub use table::{table, DefineTableStatement};
-pub use token::{token, DefineTokenStatement};
-pub use user::{user, DefineUserStatement};
+pub use namespace::DefineNamespaceStatement;
+pub use param::DefineParamStatement;
+pub use scope::DefineScopeStatement;
+pub use table::DefineTableStatement;
+pub use token::DefineTokenStatement;
+pub use user::DefineUserStatement;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use derive::Store;
-use nom::branch::alt;
-use nom::combinator::map;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -109,25 +104,6 @@ impl Display for DefineStatement {
 			Self::MlModel(v) => Display::fmt(v, f),
 		}
 	}
-}
-
-pub fn define(i: &str) -> IResult<&str, DefineStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	alt((
-		map(namespace, DefineStatement::Namespace),
-		map(database, DefineStatement::Database),
-		map(function, DefineStatement::Function),
-		map(user, DefineStatement::User),
-		map(token, DefineStatement::Token),
-		map(scope, DefineStatement::Scope),
-		map(param, DefineStatement::Param),
-		map(table, DefineStatement::Table),
-		map(event, DefineStatement::Event),
-		map(field, DefineStatement::Field),
-		map(index, DefineStatement::Index),
-		map(analyzer, DefineStatement::Analyzer),
-	))(i)
 }
 
 #[cfg(test)]

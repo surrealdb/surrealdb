@@ -1,9 +1,4 @@
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::field::{fields, Fields};
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::{cut, map, value};
+use crate::sql::field::Fields;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -36,35 +31,5 @@ impl Display for Output {
 			Self::Before => f.write_str("BEFORE"),
 			Self::Fields(v) => Display::fmt(v, f),
 		}
-	}
-}
-
-pub fn output(i: &str) -> IResult<&str, Output> {
-	let (i, _) = tag_no_case("RETURN")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, v) = alt((
-			value(Output::None, tag_no_case("NONE")),
-			value(Output::Null, tag_no_case("NULL")),
-			value(Output::Diff, tag_no_case("DIFF")),
-			value(Output::After, tag_no_case("AFTER")),
-			value(Output::Before, tag_no_case("BEFORE")),
-			map(fields, Output::Fields),
-		))(i)?;
-		Ok((i, v))
-	})(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn output_statement() {
-		let sql = "RETURN field, other.field";
-		let res = output(sql);
-		let out = res.unwrap().1;
-		assert_eq!("RETURN field, other.field", format!("{}", out));
 	}
 }
