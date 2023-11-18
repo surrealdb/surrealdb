@@ -57,7 +57,9 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for creating the signup record
-					let sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					sess.ip = session.ip.clone();
+					sess.or = session.or.clone();
 					// Compute the value with the params
 					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
