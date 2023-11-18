@@ -245,6 +245,8 @@ jobs:
           cp -v .patches/release-nightly-plz.toml release-plz.toml
 
           # Commit changes
+          # We are not going to push these changes. We do this because
+          # some git commands `release-plz` runs do not work in detached state.
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add release-plz.toml
