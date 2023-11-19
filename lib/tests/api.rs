@@ -94,12 +94,6 @@ mod api_integration {
 			drop(permit);
 		}
 
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
-		}
-
 		include!("api/mod.rs");
 		include!("api/live.rs");
 	}
@@ -127,12 +121,6 @@ mod api_integration {
 			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			drop(permit);
-		}
-
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		}
 
 		include!("api/mod.rs");
@@ -273,14 +261,6 @@ mod api_integration {
 			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("file://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("file:///tmp/{path}.db")).await.unwrap();
-		}
-
 		include!("api/mod.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
@@ -314,14 +294,6 @@ mod api_integration {
 			surrealdb::engine::any::connect(format!("rocksdb://{path}")).await.unwrap();
 			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}")).await.unwrap();
 			tokio::fs::remove_dir_all(path).await.unwrap();
-		}
-
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("rocksdb://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}.db")).await.unwrap();
 		}
 
 		include!("api/mod.rs");
