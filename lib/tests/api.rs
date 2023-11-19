@@ -331,14 +331,6 @@ mod api_integration {
 			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			let path = Ulid::new();
-			surrealdb::engine::any::connect(format!("speedb://{path}.db")).await.unwrap();
-			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}.db")).await.unwrap();
-		}
-
 		include!("api/mod.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
@@ -370,12 +362,6 @@ mod api_integration {
 			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
 			drop(permit);
-		}
-
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
 		}
 
 		include!("api/mod.rs");
