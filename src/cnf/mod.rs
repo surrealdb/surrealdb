@@ -29,6 +29,24 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 #[cfg(feature = "has-storage")]
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
+/// Set the maximum WebSocket frame size to 16mb
+#[cfg(feature = "has-storage")]
+pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
+	let default = 64 << 20;
+	std::env::var("WEBSOCKET_MAX_FRAME_SIZE")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
+/// Set the maximum WebSocket frame size to 256mb
+#[cfg(feature = "has-storage")]
+pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
+	let default = 256 << 20;
+	std::env::var("WEBSOCKET_MAX_MESSAGE_SIZE")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
 /// How many concurrent tasks can be handled in a WebSocket
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {

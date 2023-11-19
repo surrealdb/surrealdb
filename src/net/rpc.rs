@@ -1,3 +1,4 @@
+use crate::cnf;
 use crate::rpc::connection::Connection;
 use axum::routing::get;
 use axum::Extension;
@@ -27,9 +28,9 @@ async fn handler(
 ) -> impl IntoResponse {
 	ws
 		// Set the maximum frame size to 16mb
-		.max_frame_size(64 << 20)
+		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
 		// Set the maximum message size to 256mb
-		.max_message_size(256 << 20)
+		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Set the potential WebSocket protocol formats
 		.protocols(["surrealql-binary", "json", "cbor", "messagepack"])
 		// Handle the WebSocket upgrade and process messages
