@@ -7,6 +7,7 @@ use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::Endpoint;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -17,9 +18,12 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
+use futures::future::Either;
+use futures::stream::poll_fn;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -27,6 +31,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::task::Poll;
 use std::time::Duration;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
@@ -57,9 +62,12 @@ impl Connection for Db {
 
 			conn_rx.into_recv_async().await??;
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
+
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
+					features,
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -101,6 +109,10 @@ pub(crate) fn router(
 
 		let kvs = match Datastore::new(&address.path).await {
 			Ok(kvs) => {
+				if let Err(error) = kvs.bootstrap().await {
+					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					return;
+				}
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
 					if let Err(error) = kvs.setup_initial_creds(root).await {
@@ -117,32 +129,68 @@ pub(crate) fn router(
 			}
 		};
 
-		let kvs = kvs
-			.with_strict_mode(address.config.strict)
-			.with_query_timeout(address.config.query_timeout)
-			.with_transaction_timeout(address.config.transaction_timeout);
-
-		let kvs = match address.config.notifications {
+		let kvs = match address.config.capabilities.allows_live_query_notifications() {
 			true => kvs.with_notifications(),
 			false => kvs,
 		};
 
+		let kvs = kvs
+			.with_strict_mode(address.config.strict)
+			.with_query_timeout(address.config.query_timeout)
+			.with_transaction_timeout(address.config.transaction_timeout)
+			.with_capabilities(address.config.capabilities);
+
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
-		let mut stream = route_rx.into_stream();
-		let mut session = Session::default();
+		let mut live_queries = HashMap::new();
+		let mut session = Session::default().with_rt(true);
 
 		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
 
-		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, &kvs, &mut session, &mut vars).await {
-				Ok(value) => {
-					let _ = route.response.into_send_async(Ok(value)).await;
+		let mut notifications = kvs.notifications();
+		let notification_stream = poll_fn(move |cx| match &mut notifications {
+			Some(rx) => rx.poll_next_unpin(cx),
+			None => Poll::Ready(None),
+		});
+
+		let streams = (route_rx.stream().map(Either::Left), notification_stream.map(Either::Right));
+		let mut merged = streams.merge();
+
+		while let Some(either) = merged.next().await {
+			match either {
+				Either::Left(None) => break, // Received a shutdown signal
+				Either::Left(Some(route)) => {
+					match super::router(
+						route.request,
+						&kvs,
+						&mut session,
+						&mut vars,
+						&mut live_queries,
+					)
+					.await
+					{
+						Ok(value) => {
+							let _ = route.response.into_send_async(Ok(value)).await;
+						}
+						Err(error) => {
+							let _ = route.response.into_send_async(Err(error)).await;
+						}
+					}
 				}
-				Err(error) => {
-					let _ = route.response.into_send_async(Err(error)).await;
+				Either::Right(notification) => {
+					let id = notification.id;
+					if let Some(sender) = live_queries.get(&id) {
+						if sender.send(notification).await.is_err() {
+							live_queries.remove(&id);
+							if let Err(error) =
+								super::kill_live_query(&kvs, id, &session, vars.clone()).await
+							{
+								warn!("Failed to kill live query '{id}'; {error}");
+							}
+						}
+					}
 				}
 			}
 		}

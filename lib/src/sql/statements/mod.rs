@@ -25,6 +25,7 @@ pub(crate) mod throw;
 pub(crate) mod update;
 pub(crate) mod r#use;
 
+pub use self::analyze::AnalyzeStatement;
 pub use self::begin::BeginStatement;
 pub use self::cancel::CancelStatement;
 pub use self::commit::CommitStatement;
@@ -44,32 +45,21 @@ pub use self::r#use::UseStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;
+pub use self::show::ShowStatement;
+pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 
-pub use self::define::DefineAnalyzerStatement;
-pub use self::define::DefineDatabaseStatement;
-pub use self::define::DefineEventStatement;
-pub use self::define::DefineFieldStatement;
-pub use self::define::DefineFunctionStatement;
-pub use self::define::DefineIndexStatement;
-pub use self::define::DefineNamespaceStatement;
-pub use self::define::DefineParamStatement;
-pub use self::define::DefineScopeStatement;
-pub use self::define::DefineStatement;
-pub use self::define::DefineTableStatement;
-pub use self::define::DefineTokenStatement;
-pub use self::define::DefineUserStatement;
+pub use self::define::{
+	DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+	DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement,
+	DefineScopeStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
+	DefineUserStatement,
+};
 
-pub use self::remove::RemoveDatabaseStatement;
-pub use self::remove::RemoveEventStatement;
-pub use self::remove::RemoveFieldStatement;
-pub use self::remove::RemoveFunctionStatement;
-pub use self::remove::RemoveIndexStatement;
-pub use self::remove::RemoveNamespaceStatement;
-pub use self::remove::RemoveParamStatement;
-pub use self::remove::RemoveScopeStatement;
-pub use self::remove::RemoveStatement;
-pub use self::remove::RemoveTableStatement;
-pub use self::remove::RemoveTokenStatement;
-pub use self::remove::RemoveUserStatement;
+pub use self::remove::{
+	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveScopeStatement, RemoveStatement, RemoveTableStatement, RemoveTokenStatement,
+	RemoveUserStatement,
+};

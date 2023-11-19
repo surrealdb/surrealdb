@@ -8,6 +8,7 @@ mod http_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use test_log::test;
+	use ulid::Ulid;
 
 	use super::common::{self, PASS, USER};
 
@@ -438,6 +439,7 @@ mod http_integration {
 		headers.insert("NS", "N".parse()?);
 		headers.insert("DB", "D".parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
+
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -535,6 +537,36 @@ mod http_integration {
 				.upgrade()
 				.await;
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	#[cfg(feature = "http-compression")]
+	async fn sql_endpoint_with_compression() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", "N".parse()?);
+		headers.insert("DB", "D".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		headers.insert(header::ACCEPT_ENCODING, "gzip".parse()?);
+
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.gzip(false) // So that the content-encoding header is not removed by Reqwest
+			.default_headers(headers.clone())
+			.build()?;
+
+		// Check that the content is gzip encoded
+		{
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
+			assert_eq!(res.status(), 200);
+			assert_eq!(res.headers()["content-encoding"], "gzip");
 		}
 
 		Ok(())
@@ -839,7 +871,7 @@ mod http_integration {
 	#[test(tokio::test)]
 	async fn key_endpoint_modify_all() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let table_name = "table";
+		let table_name = Ulid::new().to_string();
 		let num_records = 10;
 		let url = &format!("http://{addr}/key/{table_name}");
 
@@ -853,7 +885,7 @@ mod http_integration {
 			.default_headers(headers)
 			.build()?;
 
-		seed_table(&client, &addr, table_name, num_records).await?;
+		seed_table(&client, &addr, &table_name, num_records).await?;
 
 		// Modify all records
 		{

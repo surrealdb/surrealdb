@@ -2,17 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::error::IResult;
-use crate::sql::id::{id, Id};
-use crate::sql::ident::ident_raw;
-use crate::sql::strand::no_nul_bytes;
-use crate::sql::value::Value;
-use nom::branch::alt;
-use nom::character::complete::char;
-use nom::combinator::map;
-use nom::combinator::opt;
-use nom::sequence::preceded;
-use nom::sequence::terminated;
+use crate::sql::{strand::no_nul_bytes, Id, Value};
+use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -42,8 +33,8 @@ impl FromStr for Range {
 impl TryFrom<&str> for Range {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match range(v) {
-			Ok((_, v)) => Ok(v),
+		match syn::range(v) {
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}
@@ -145,57 +136,5 @@ impl fmt::Display for Range {
 			Bound::Included(id) => write!(f, "..={id}"),
 		}?;
 		Ok(())
-	}
-}
-
-pub fn range(i: &str) -> IResult<&str, Range> {
-	let (i, tb) = ident_raw(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, beg) =
-		opt(alt((map(terminated(id, char('>')), Bound::Excluded), map(id, Bound::Included))))(i)?;
-	let (i, _) = char('.')(i)?;
-	let (i, _) = char('.')(i)?;
-	let (i, end) =
-		opt(alt((map(preceded(char('='), id), Bound::Included), map(id, Bound::Excluded))))(i)?;
-	Ok((
-		i,
-		Range {
-			tb,
-			beg: beg.unwrap_or(Bound::Unbounded),
-			end: end.unwrap_or(Bound::Unbounded),
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn range_int() {
-		let sql = "person:1..100";
-		let res = range(sql);
-		let out = res.unwrap().1;
-		assert_eq!(r#"person:1..100"#, format!("{}", out));
-	}
-
-	#[test]
-	fn range_array() {
-		let sql = "person:['USA', 10]..['USA', 100]";
-		let res = range(sql);
-		let out = res.unwrap().1;
-		assert_eq!("person:['USA', 10]..['USA', 100]", format!("{}", out));
-	}
-
-	#[test]
-	fn range_object() {
-		let sql = "person:{ country: 'USA', position: 10 }..{ country: 'USA', position: 100 }";
-		let res = range(sql);
-		let out = res.unwrap().1;
-		assert_eq!(
-			"person:{ country: 'USA', position: 10 }..{ country: 'USA', position: 100 }",
-			format!("{}", out)
-		);
 	}
 }

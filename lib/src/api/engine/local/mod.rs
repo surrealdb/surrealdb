@@ -41,20 +41,23 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::channel;
+use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
+use crate::sql::statements::KillStatement;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
+use crate::sql::Uuid;
 use crate::sql::Value;
+use channel::Sender;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
@@ -365,11 +368,7 @@ fn process(responses: Vec<Response>) -> Result<QueryResponse> {
 	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.result {
-			Ok(value) => match value {
-				Value::Array(Array(array)) => map.insert(index, Ok(array)),
-				Value::None | Value::Null => map.insert(index, Ok(vec![])),
-				value => map.insert(index, Ok(vec![value])),
-			},
+			Ok(value) => map.insert(index, Ok(value)),
 			Err(error) => map.insert(index, Err(error.into())),
 		};
 	}
@@ -378,22 +377,18 @@ fn process(responses: Vec<Response>) -> Result<QueryResponse> {
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 	if let Some(result) = process(responses)?.0.remove(&0) {
-		let mut vec = result?;
+		let value = result?;
 		match one {
-			true => match vec.pop() {
-				Some(Value::Array(Array(mut vec))) => {
+			true => match value {
+				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Some(Value::None | Value::Null) | None => {}
-				Some(value) => {
-					return Ok(value);
-				}
+				Value::None | Value::Null => {}
+				value => return Ok(value),
 			},
-			false => {
-				return Ok(Value::Array(Array(vec)));
-			}
+			false => return Ok(value),
 		}
 	}
 	match one {
@@ -439,11 +434,25 @@ where
 	})
 }
 
+async fn kill_live_query(
+	kvs: &Datastore,
+	id: Uuid,
+	session: &Session,
+	vars: BTreeMap<String, Value>,
+) -> Result<Value> {
+	let query = Query(Statements(vec![Statement::Kill(KillStatement {
+		id: id.into(),
+	})]));
+	let response = kvs.process(query, session, Some(vars)).await?;
+	take(true, response).await
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
+	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 
@@ -552,9 +561,9 @@ async fn router(
 		Method::Export => {
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			let (tx, rx) = channel::new(1);
+			let (tx, rx) = crate::channel::new(1);
 
-			match (param.file, param.sender) {
+			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {
 					let (mut writer, mut reader) = io::duplex(10_240);
 
@@ -668,27 +677,20 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Live => {
-			let table = match &mut params[..] {
-				[value] => mem::take(value),
-				_ => unreachable!(),
-			};
-			let mut vars = BTreeMap::new();
-			vars.insert("table".to_owned(), table);
-			let response = kvs
-				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars))
-				.await?;
-			let value = take(true, response).await?;
-			Ok(DbResponse::Other(value))
+			if let Some(sender) = param.notification_sender {
+				if let [Value::Uuid(id)] = &params[..1] {
+					live_queries.insert(*id, sender);
+				}
+			}
+			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Kill => {
-			let id = match &mut params[..] {
-				[value] => mem::take(value),
+			let id = match &params[..] {
+				[Value::Uuid(id)] => *id,
 				_ => unreachable!(),
 			};
-			let mut vars = BTreeMap::new();
-			vars.insert("id".to_owned(), id);
-			let response = kvs.execute("KILL type::string($id)", &*session, Some(vars)).await?;
-			let value = take(true, response).await?;
+			live_queries.remove(&id);
+			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}

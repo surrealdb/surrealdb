@@ -5,6 +5,7 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
+use foundationdb::options;
 use futures::TryStreamExt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -86,10 +87,20 @@ impl Datastore {
 		let _fdbnet = (*FDBNET).clone();
 
 		match foundationdb::Database::from_path(path) {
-			Ok(db) => Ok(Datastore {
-				db,
-				_fdbnet,
-			}),
+			Ok(db) => {
+				db.set_option(options::DatabaseOption::TransactionRetryLimit(5)).map_err(|e| {
+					Error::Ds(format!("Unable to set transaction retry limit: {}", e))
+				})?;
+				db.set_option(options::DatabaseOption::TransactionTimeout(5000))
+					.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
+				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(500)).map_err(
+					|e| Error::Ds(format!("Unable to set transaction max retry delay: {}", e)),
+				)?;
+				Ok(Datastore {
+					db,
+					_fdbnet,
+				})
+			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
@@ -320,7 +331,7 @@ impl Transaction {
 		}
 		let key: Vec<u8> = key.into();
 		if self.exi(key.clone().as_slice()).await? {
-			return Err(Error::TxKeyAlreadyExists(category));
+			return Err(Error::TxKeyAlreadyExistsCategory(category));
 		}
 		// Set the key
 		let key: &[u8] = &key[..];
@@ -517,5 +528,26 @@ impl Transaction {
 			}
 		}
 		Ok(res)
+	}
+
+	/// Delete a range of keys from the databases
+	pub(crate) async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		let begin: &[u8] = &rng.start.into();
+		let end: &[u8] = &rng.end.into();
+		let inner = self.inner.lock().await;
+		let inner = inner.as_ref().unwrap();
+		inner.clear_range(begin, end);
+		Ok(())
 	}
 }

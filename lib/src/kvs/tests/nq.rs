@@ -1,10 +1,9 @@
-use crate::sql::statements::live::live;
-
 #[tokio::test]
 #[serial]
 async fn archive_lv_for_node_archives() {
 	let node_id = Uuid::parse_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
-	let test = init(node_id).await.unwrap();
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
@@ -19,7 +18,7 @@ async fn archive_lv_for_node_archives() {
 	let key = crate::key::node::lq::new(node_id, lv_id.0, namespace, database);
 	tx.putc(key, table, None).await.unwrap();
 
-	let (_, mut stm) = live(format!("LIVE SELECT * FROM {}", table).as_str()).unwrap();
+	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table.into()), None, None);
 	stm.id = lv_id.clone();
 	tx.putc_tblq(namespace, database, table, stm, None).await.unwrap();
 

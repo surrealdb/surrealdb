@@ -15,7 +15,6 @@ use surrealdb::kvs::Transaction;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
-use tokio::time::sleep;
 
 #[tokio::test]
 #[serial]
@@ -187,7 +186,7 @@ async fn a_valid_notification(
 	tx: &mut Transaction,
 	args: ValidNotificationState,
 ) -> Result<ValidNotificationState, Error> {
-	let now = tx.clock();
+	let now = tx.clock().await;
 	let default_node_id =
 		Uuid::from(uuid::Uuid::parse_str("123e9d92-c975-4daf-8080-3082e83cfa9b").unwrap());
 	let default_lq_id =
@@ -202,17 +201,17 @@ async fn a_valid_notification(
 		..args
 	};
 	let mut live_stm = LiveStatement::default();
-	live_stm.id = entry.live_query_id.clone().unwrap().into();
-	live_stm.node = entry.node_id.clone().unwrap().into();
+	live_stm.id = entry.live_query_id.unwrap();
+	live_stm.node = entry.node_id.unwrap();
 
 	// Create heartbeat
-	tx.set_hb(entry.timestamp.clone().unwrap().into(), entry.node_id.clone().unwrap().0).await?;
+	tx.set_hb(entry.timestamp.unwrap().into(), entry.node_id.unwrap().0).await?;
 	// Create cluster node entry
-	tx.set_nd(entry.node_id.clone().unwrap().0).await?;
+	tx.set_nd(entry.node_id.unwrap().0).await?;
 	// Create node live query registration
 	tx.putc_ndlq(
-		entry.node_id.clone().unwrap().0,
-		entry.live_query_id.clone().unwrap().0,
+		entry.node_id.unwrap().0,
+		entry.live_query_id.unwrap().0,
 		&entry.namespace,
 		&entry.database,
 		&entry.table,

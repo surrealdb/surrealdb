@@ -288,11 +288,6 @@ jobs:
         run: |
           sudo apt-get -y update
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        with:
-          version: "7.1.30"
-
       - name: Install cargo-make
         run: cargo install --debug cargo-make
 
@@ -330,11 +325,6 @@ jobs:
         run: |
           sudo apt-get -y update
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        with:
-          version: "7.1.30"
-
       - name: Install cargo-make
         run: cargo install --debug cargo-make
 
@@ -371,11 +361,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        with:
-          version: "7.1.30"
 
       - name: Install cargo-make
         run: cargo install --debug cargo-make
@@ -511,9 +496,11 @@ jobs:
           sudo apt-get -y update
 
       - name: Install TiUP
+        timeout-minutes: 10
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          ~/.tiup/bin/tiup -v
+          while ! ~/.tiup/bin/tiup -v; do
+            curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          done
 
       - name: Install cargo-make
         run: cargo install --debug cargo-make

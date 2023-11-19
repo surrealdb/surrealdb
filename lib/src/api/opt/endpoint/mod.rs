@@ -26,8 +26,10 @@ use super::Config;
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
-	pub(crate) url: Url,
-	pub(crate) path: String,
+	#[doc(hidden)]
+	pub url: Url,
+	#[doc(hidden)]
+	pub path: String,
 	pub(crate) config: Config,
 }
 

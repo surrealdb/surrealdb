@@ -1,4 +1,3 @@
-use crate::sql::common::val_u8;
 use nom::character::is_digit;
 use std::borrow::Cow;
 
@@ -76,7 +75,7 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 	// Loop over each character
 	for x in s.bytes() {
 		// Check if character is allowed
-		if !val_u8(x) {
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 	}
@@ -91,7 +90,7 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 	// Loop over each character
 	for x in s.bytes() {
 		// Check if character is allowed
-		if !val_u8(x) {
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 		// Check if character is non-numeric

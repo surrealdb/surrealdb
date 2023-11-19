@@ -1,9 +1,8 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::object::Object;
-use crate::sql::strand::Strand;
-use crate::sql::value::Value;
-use crate::sql::{json, Bytes};
+use crate::sql::{Bytes, Object, Strand, Value};
+use crate::syn;
+
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, RequestBuilder, Response};
 use url::Url;
@@ -26,7 +25,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
 					let txt = res.text().await?;
-					let val = json(&txt)?;
+					let val = syn::json(&txt)?;
 					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {

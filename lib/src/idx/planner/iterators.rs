@@ -8,7 +8,6 @@ use crate::key::index::Index;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing, Value};
-use roaring::RoaringTreemap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -16,10 +15,11 @@ use tokio::sync::RwLock;
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
+	IndexUnion(IndexUnionThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	Matches(MatchesThingIterator),
-	Knn(KnnThingIterator),
+	Knn(DocIdsIterator),
 }
 
 impl ThingIterator {
@@ -33,6 +33,7 @@ impl ThingIterator {
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
+			ThingIterator::IndexUnion(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
 		}
@@ -45,13 +46,32 @@ pub(crate) struct IndexEqualThingIterator {
 }
 
 impl IndexEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Array) -> Result<Self, Error> {
-		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, v);
-		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, v);
-		Ok(Self {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Self {
+		let a = Array::from(v.clone());
+		let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+		let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+		Self {
 			beg,
 			end,
-		})
+		}
+	}
+
+	async fn next_scan(
+		txn: &Transaction,
+		beg: &mut Vec<u8>,
+		end: &[u8],
+		limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		let min = beg.clone();
+		let max = end.to_owned();
+		let res = txn.lock().await.scan(min..max, limit).await?;
+		if let Some((key, _)) = res.last() {
+			let mut key = key.clone();
+			key.push(0x00);
+			*beg = key;
+		}
+		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
+		Ok(res)
 	}
 
 	async fn next_batch(
@@ -59,15 +79,7 @@ impl IndexEqualThingIterator {
 		txn: &Transaction,
 		limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
-		let min = self.beg.clone();
-		let max = self.end.clone();
-		let res = txn.lock().await.scan(min..max, limit).await?;
-		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
-			self.beg.push(0x00);
-		}
-		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
-		Ok(res)
+		Self::next_scan(txn, &mut self.beg, &self.end, limit).await
 	}
 }
 
@@ -179,16 +191,57 @@ impl IndexRangeThingIterator {
 	}
 }
 
+pub(crate) struct IndexUnionThingIterator {
+	values: VecDeque<(Vec<u8>, Vec<u8>)>,
+	current: Option<(Vec<u8>, Vec<u8>)>,
+}
+
+impl IndexUnionThingIterator {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
+		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
+			a.0.iter()
+				.map(|v| {
+					let a = Array::from(v.clone());
+					let beg = Index::prefix_ids_beg(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+					let end = Index::prefix_ids_end(opt.ns(), opt.db(), &ix.what, &ix.name, &a);
+					(beg, end)
+				})
+				.collect();
+		let current = values.pop_front();
+		Self {
+			values,
+			current,
+		}
+	}
+
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<Vec<(Thing, DocId)>, Error> {
+		while let Some(r) = &mut self.current {
+			let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
+			if !res.is_empty() {
+				return Ok(res);
+			}
+			self.current = self.values.pop_front();
+		}
+		Ok(vec![])
+	}
+}
+
 pub(crate) struct UniqueEqualThingIterator {
 	key: Option<Key>,
 }
 
 impl UniqueEqualThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Result<Self, Error> {
-		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, a, None).into();
-		Ok(Self {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, v: &Value) -> Self {
+		let a = Array::from(v.to_owned());
+		let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &a, None).into();
+		Self {
 			key: Some(key),
-		})
+		}
 	}
 
 	async fn next_batch(&mut self, txn: &Transaction) -> Result<Vec<(Thing, DocId)>, Error> {
@@ -314,21 +367,16 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) struct KnnThingIterator {
+pub(crate) struct DocIdsIterator {
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<RoaringTreemap>,
-	current: Option<RoaringTreemap>,
-	skip: RoaringTreemap,
+	res: VecDeque<DocId>,
 }
 
-impl KnnThingIterator {
-	pub(super) fn new(doc_ids: Arc<RwLock<DocIds>>, mut res: VecDeque<RoaringTreemap>) -> Self {
-		let current = res.pop_front();
+impl DocIdsIterator {
+	pub(super) fn new(doc_ids: Arc<RwLock<DocIds>>, res: VecDeque<DocId>) -> Self {
 		Self {
 			doc_ids,
 			res,
-			current,
-			skip: RoaringTreemap::new(),
 		}
 	}
 	async fn next_batch(
@@ -338,25 +386,16 @@ impl KnnThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let mut res = vec![];
 		let mut tx = txn.lock().await;
-		while self.current.is_some() && limit > 0 {
-			if let Some(docs) = &mut self.current {
-				if let Some(doc_id) = docs.iter().next() {
-					docs.remove(doc_id);
-					if self.skip.insert(doc_id) {
-						if let Some(doc_key) =
-							self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
-						{
-							res.push((doc_key.into(), doc_id));
-							limit -= 1;
-						}
-					}
-					if docs.is_empty() {
-						self.current = None;
-					}
+		while limit > 0 {
+			if let Some(doc_id) = self.res.pop_front() {
+				if let Some(doc_key) =
+					self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
+				{
+					res.push((doc_key.into(), doc_id));
+					limit -= 1;
 				}
-			}
-			if self.current.is_none() {
-				self.current = self.res.pop_front();
+			} else {
+				break;
 			}
 		}
 		Ok(res)

@@ -71,7 +71,7 @@ impl<'js> FromJs<'js> for Value {
 					let borrow = v.borrow();
 					let v: &classes::duration::Duration = &borrow;
 					return match &v.value {
-						Some(v) => Ok(v.clone().into()),
+						Some(v) => Ok((*v).into()),
 						None => Ok(Value::None),
 					};
 				}
@@ -81,7 +81,7 @@ impl<'js> FromJs<'js> for Value {
 					let borrow = v.borrow();
 					let v: &classes::uuid::Uuid = &borrow;
 					return match &v.value {
-						Some(v) => Ok(v.clone().into()),
+						Some(v) => Ok((*v).into()),
 						None => Ok(Value::None),
 					};
 				}

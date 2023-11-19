@@ -86,7 +86,7 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::test::Parse;
+	use crate::syn::test::Parse;
 
 	#[tokio::test]
 	async fn patch_add_simple() {

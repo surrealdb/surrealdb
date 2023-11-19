@@ -1,31 +1,23 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
-use crate::dbs::node::Timestamp;
-use crate::dbs::Attach;
-use crate::dbs::Capabilities;
-use crate::dbs::Executor;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Response;
-use crate::dbs::Session;
-use crate::dbs::Variables;
+use crate::dbs::{
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
+};
 use crate::err::Error;
-use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
 use crate::key::root::hb::Hb;
+use crate::kvs::clock::SizedClock;
+#[allow(unused_imports)]
+use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
-use crate::sql;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Base;
-use crate::sql::Value;
-use crate::sql::{Query, Uuid};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::Oracle;
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use futures::Future;
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -33,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -110,6 +103,8 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	clock: Arc<RwLock<SizedClock>>,
 }
 
 /// We always want to be circulating the live query information
@@ -193,15 +188,37 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		Self::new_full_impl(path, None).await
+	}
+
+	#[allow(dead_code)]
+	#[cfg(test)]
+	pub async fn new_full(
+		path: &str,
+		clock_override: Option<Arc<RwLock<SizedClock>>>,
+	) -> Result<Datastore, Error> {
+		Self::new_full_impl(path, clock_override).await
+	}
+
+	#[allow(dead_code)]
+	async fn new_full_impl(
+		path: &str,
+		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
+	) -> Result<Datastore, Error> {
+		let default_clock: Arc<RwLock<SizedClock>> =
+			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
-		let inner = match path {
+		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store in {}", path);
-					v
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -214,8 +231,11 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store at {}", path);
-					v
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -229,7 +249,10 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
-					v
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -243,7 +266,10 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
-					v
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-speedb"))]
                 return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -257,7 +283,10 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
-					v
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -271,7 +300,10 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
-					v
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -285,17 +317,22 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
-					v
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
+				// use clock_override and default_clock to remove warning when no kv is enabled.
+				let _ = (clock_override, default_clock);
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		};
+		}?;
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
 			id: Uuid::new_v4(),
@@ -307,6 +344,7 @@ impl Datastore {
 			notification_channel: None,
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
+			clock,
 		})
 	}
 
@@ -404,6 +442,10 @@ impl Datastore {
 	// completely failed. It may have partially completed. It certainly has side-effects
 	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
 	// ability.
+	// NOTE: If you get rust mutex deadlocks, check your transactions around this method.
+	// This should be called before any transactions are made in release mode
+	// In tests, it should be outside any other transaction - in isolation.
+	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		// First we clear unreachable state that could exist by upgrading from
 		// previous beta versions
@@ -421,8 +463,7 @@ impl Datastore {
 
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		let now = tx.clock();
-		let archived = match self.register_remove_and_archive(&mut tx, &self.id, now).await {
+		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
 			Ok(archived) => {
 				tx.commit().await?;
 				archived
@@ -480,12 +521,12 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		timestamp: Timestamp,
 	) -> Result<Vec<BootstrapOperationResult>, Error> {
 		trace!("Registering node {}", node_id);
-		self.register_membership(tx, node_id, &timestamp).await?;
+		let timestamp = tx.clock().await;
+		self.register_membership(tx, node_id, timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
-		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
+		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
 		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
 		trace!("Archiving dead nodes: {:?}", dead);
 		self.archive_dead_lqs(tx, &dead, node_id).await
@@ -496,10 +537,10 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		timestamp: &Timestamp,
+		timestamp: Timestamp,
 	) -> Result<(), Error> {
 		tx.set_nd(node_id.0).await?;
-		tx.set_hb(timestamp.clone(), node_id.0).await?;
+		tx.set_hb(timestamp, node_id.0).await?;
 		Ok(())
 	}
 
@@ -511,6 +552,7 @@ impl Datastore {
 		ts: &Timestamp,
 	) -> Result<Vec<Uuid>, Error> {
 		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
+		trace!("Found {} expired heartbeats", hbs.len());
 		let mut nodes = vec![];
 		for hb in hbs {
 			trace!("Deleting node {}", &hb.nd);
@@ -542,7 +584,7 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
 						Ok(lq) => lq,
 						Err(e) => {
 							error!("Error archiving lqs during bootstrap phase: {:?}", e);
@@ -563,7 +605,7 @@ impl Datastore {
 		tx: &mut Transaction,
 		archived: Vec<LqValue>,
 	) -> Result<(), Error> {
-		trace!("Gone into removing archived");
+		trace!("Gone into removing archived: {:?}", archived.len());
 		for lq in archived {
 			// Delete the cluster key, used for finding LQ associated with a node
 			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
@@ -591,7 +633,13 @@ impl Datastore {
 		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
-			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
+			match unreachable_nodes.remove(&hb.nd.to_string()) {
+				None => {
+					// Didnt exist in cluster and should be deleted
+					tx.del_hb(hb.hb, hb.nd).await?;
+				}
+				Some(_) => {}
+			}
 		}
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
@@ -694,7 +742,7 @@ impl Datastore {
 				continue;
 			}
 			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			let archived_lvs = lv.clone().archive(this_node_id);
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
 			ret.push((lq, None));
 		}
@@ -742,6 +790,24 @@ impl Datastore {
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn save_timestamp_for_versionstamp_impl(
+		&self,
+		ts: u64,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -760,8 +826,26 @@ impl Datastore {
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn garbage_collect_stale_change_feeds_impl(
+		&self,
+		ts: u64,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
-		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
+		cf::gc_all_at(tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -771,8 +855,8 @@ impl Datastore {
 	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		let timestamp = tx.clock();
-		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
+		let timestamp = tx.clock().await;
+		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
 		tx.commit().await
 	}
 
@@ -864,6 +948,7 @@ impl Datastore {
 			cache: super::cache::Cache::default(),
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
+			clock: self.clock.clone(),
 		})
 	}
 
@@ -891,7 +976,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = sql::parse(txt)?;
+		let ast = syn::parse(txt)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1126,6 +1211,11 @@ impl Datastore {
 	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
+	}
+
+	#[allow(dead_code)]
+	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
+		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
 	}
 
 	/// Performs a full database export as SQL

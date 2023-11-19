@@ -1,10 +1,10 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::key::error::KeyCategory;
-use crate::sql::error::RenderedError as RenderedParserError;
 use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
@@ -79,8 +79,9 @@ pub enum Error {
 	TxConditionNotMet,
 
 	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExists(KeyCategory),
+	#[error("The key being inserted already exists")]
+	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
+	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
 	#[error("Record id or key is too large")]
@@ -547,6 +548,10 @@ pub enum Error {
 	#[error("Cannot perform division with '{0}' and '{1}'")]
 	TryDiv(String, String),
 
+	/// Cannot perform remainder
+	#[error("Cannot perform remainder with '{0}' and '{1}'")]
+	TryRem(String, String),
+
 	/// Cannot perform power
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),
@@ -587,8 +592,8 @@ pub enum Error {
 	#[error("Index is corrupted")]
 	CorruptedIndex,
 
-	/// The query planner did not find an index able to support the match @@ operator on a given expression
-	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
 	},
@@ -709,6 +714,10 @@ pub enum Error {
 	/// Auth was expected to be set but was unknown
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
+
+	/// The key being inserted in the transaction already exists
+	#[error("The key being inserted already exists: {0}")]
+	TxKeyAlreadyExistsCategory(KeyCategory),
 }
 
 impl From<Error> for String {
@@ -734,7 +743,7 @@ impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
 			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -747,7 +756,7 @@ impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
 			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
@@ -760,7 +769,7 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExists(crate::key::error::KeyCategory::Unknown)
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
 			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,

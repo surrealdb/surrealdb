@@ -66,6 +66,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -80,6 +81,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -94,6 +96,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -109,6 +112,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-speedb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -124,6 +128,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -169,19 +174,18 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						let url = address.url.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						let maybe_connector = address.config.tls_config.map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
+
 						let config = WebSocketConfig {
-							max_send_queue: match capacity {
-								0 => None,
-								capacity => Some(capacity),
-							},
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
-							accept_unmasked_frames: false,
+							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
+							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
 							&url,

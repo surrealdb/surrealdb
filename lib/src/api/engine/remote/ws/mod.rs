@@ -12,9 +12,9 @@ use crate::api::err::Error;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Notification;
 use crate::dbs::Status;
 use crate::opt::IntoEndpoint;
-use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
 use serde::Deserialize;
@@ -83,6 +83,7 @@ pub(crate) struct Failure {
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
+	Live(Notification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;
@@ -115,11 +116,7 @@ impl DbResponse {
 				results
 					.into_iter()
 					.map(|response| match response.status {
-						Status::Ok => match response.result {
-							Value::Array(Array(values)) => Ok(values),
-							Value::None | Value::Null => Ok(vec![]),
-							value => Ok(vec![value]),
-						},
+						Status::Ok => Ok(response.result),
 						Status::Err => match response.result {
 							Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
 							message => Err(Error::Query(message.to_string()).into()),
@@ -128,6 +125,8 @@ impl DbResponse {
 					.enumerate()
 					.collect(),
 			))),
+			// Live notifications don't call this method
+			Data::Live(..) => unreachable!(),
 		}
 	}
 }

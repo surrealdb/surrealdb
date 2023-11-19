@@ -293,7 +293,7 @@ impl Transaction {
 		// Set the key if empty
 		match inner.get_opt(&key, &self.ro)? {
 			None => inner.put(key, val)?,
-			_ => return Err(Error::TxKeyAlreadyExists(category)),
+			_ => return Err(Error::TxKeyAlreadyExistsCategory(category)),
 		};
 		// Return result
 		Ok(())

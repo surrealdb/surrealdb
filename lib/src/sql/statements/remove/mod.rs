@@ -11,31 +11,25 @@ mod table;
 mod token;
 mod user;
 
-pub use analyzer::{analyzer, RemoveAnalyzerStatement};
-pub use database::{database, RemoveDatabaseStatement};
-pub use event::{event, RemoveEventStatement};
-pub use field::{field, RemoveFieldStatement};
-pub use function::{function, RemoveFunctionStatement};
-pub use index::{index, RemoveIndexStatement};
-pub use namespace::{namespace, RemoveNamespaceStatement};
-use nom::bytes::complete::tag_no_case;
-pub use param::{param, RemoveParamStatement};
-pub use scope::{scope, RemoveScopeStatement};
-pub use table::{table, RemoveTableStatement};
-pub use token::{token, RemoveTokenStatement};
-pub use user::{user, RemoveUserStatement};
+pub use analyzer::RemoveAnalyzerStatement;
+pub use database::RemoveDatabaseStatement;
+pub use event::RemoveEventStatement;
+pub use field::RemoveFieldStatement;
+pub use function::RemoveFunctionStatement;
+pub use index::RemoveIndexStatement;
+pub use namespace::RemoveNamespaceStatement;
+pub use param::RemoveParamStatement;
+pub use scope::RemoveScopeStatement;
+pub use table::RemoveTableStatement;
+pub use token::RemoveTokenStatement;
+pub use user::RemoveUserStatement;
 
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::value::Value;
+use crate::sql::Value;
 use derive::Store;
-use nom::branch::alt;
-use nom::combinator::map;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -103,40 +97,5 @@ impl Display for RemoveStatement {
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::User(v) => Display::fmt(v, f),
 		}
-	}
-}
-
-pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	alt((
-		map(namespace, RemoveStatement::Namespace),
-		map(database, RemoveStatement::Database),
-		map(function, RemoveStatement::Function),
-		map(token, RemoveStatement::Token),
-		map(scope, RemoveStatement::Scope),
-		map(param, RemoveStatement::Param),
-		map(table, RemoveStatement::Table),
-		map(event, RemoveStatement::Event),
-		map(field, RemoveStatement::Field),
-		map(index, RemoveStatement::Index),
-		map(analyzer, RemoveStatement::Analyzer),
-		map(user, RemoveStatement::User),
-	))(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::Ident;
-
-	#[test]
-	fn check_remove_serialize() {
-		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
-			name: Ident::from("test"),
-		});
-		let enc: Vec<u8> = stm.try_into().unwrap();
-		assert_eq!(9, enc.len());
 	}
 }
