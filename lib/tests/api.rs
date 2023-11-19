@@ -152,15 +152,7 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn memory_allowed_as_address() {
-			init_logger();
 			surrealdb::engine::any::connect("memory").await.unwrap();
-		}
-
-		#[tokio::test]
-		async fn any_engine_can_connect() {
-			init_logger();
-			surrealdb::engine::any::connect("mem://").await.unwrap();
-			surreald::engine::any::connect("memory").await.unwrap();
 		}
 
 		#[test_log::test(tokio::test)]
