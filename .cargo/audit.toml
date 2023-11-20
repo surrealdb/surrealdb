@@ -1,5 +1,0 @@
-[advisories]
-ignore = [
-	# Acknowledged in: https://github.com/surrealdb/surrealdb/pull/3005
-	"RUSTSEC-2021-0127"
-]

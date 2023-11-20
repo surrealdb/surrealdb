@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
+use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -64,17 +65,32 @@ pub fn repeat((val, num): (String, usize)) -> Result<Value, Error> {
 	Ok(val.repeat(num).into())
 }
 
-pub fn replace((val, old, new): (String, String, String)) -> Result<Value, Error> {
-	if new.len() > old.len() {
-		let increase = new.len() - old.len();
-		limit(
-			"string::replace",
-			val.len().saturating_add(val.matches(&old).count().saturating_mul(increase)),
-		)?;
-	}
-	Ok(val.replace(&old, &new).into())
+pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
+	Ok(regex.0.is_match(&val).into())
 }
 
+pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
+	match old_or_regexp {
+		Value::Strand(old) => {
+			if new.len() > old.len() {
+				let increase = new.len() - old.len();
+				limit(
+					"string::replace",
+					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+				)?;
+			}
+			Ok(val.replace(&old.0, &new).into())
+		}
+		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		_ => Err(Error::InvalidArguments {
+			name: "string::replace".to_string(),
+			message: format!(
+				"Argument 2 was the wrong type. Expected a string but found {}",
+				old_or_regexp
+			),
+		}),
+	}
+}
 pub fn reverse((string,): (String,)) -> Result<Value, Error> {
 	Ok(string.chars().rev().collect::<String>().into())
 }
@@ -180,6 +196,7 @@ pub mod is {
 	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
 		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
 	}
+
 	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
 		Ok(addr::parse_domain_name(arg.as_str()).is_ok().into())
 	}
@@ -245,7 +262,7 @@ pub mod similarity {
 
 #[cfg(test)]
 mod tests {
-	use super::{contains, slice};
+	use super::{contains, matches, replace, slice};
 	use crate::sql::Value;
 
 	#[test]
@@ -286,6 +303,41 @@ mod tests {
 		test("abcde", "cbcd", false);
 		test("好世界", "世", true);
 		test("好世界", "你好", false);
+	}
+
+	#[test]
+	fn string_replace() {
+		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
+			assert_eq!(
+				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
+				Value::from(expected),
+				"replace({},{},{})",
+				base,
+				pattern,
+				replacement
+			);
+		}
+
+		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
+		test("foo bar", "bar".into(), "foo", "foo foo");
+	}
+
+	#[test]
+	fn string_matches() {
+		fn test(base: &str, regex: &str, expected: bool) {
+			assert_eq!(
+				matches((base.to_string(), regex.parse().unwrap())).unwrap(),
+				Value::from(expected),
+				"matches({},{})",
+				base,
+				regex
+			);
+		}
+
+		test("bar", "foo", false);
+		test("", "foo", false);
+		test("foo bar", "foo", true);
+		test("foo bar", "bar", true);
 	}
 
 	#[test]

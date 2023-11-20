@@ -91,6 +91,10 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 	parse_impl(input, literal::duration)
 }
 
+pub fn path_like(input: &str) -> Result<Value, Error> {
+	parse_impl(input, value::path_like)
+}
+
 pub fn range(input: &str) -> Result<Range, Error> {
 	parse_impl(input, literal::range)
 }
