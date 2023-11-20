@@ -1,23 +1,2 @@
 [advisories]
-ignore = [
-    # From: https://github.com/tokio-rs/tracing/commit/deb71f7583099ee14f96f3f593a637eee96b00e0
-    # Unmaintained advisory for the `net2` crate.
-    #
-    # We ignore this, because `net2` is a transitive dependency of older
-    # versions of `mio`, which we depend on via `tokio` 0.1. `tokio` 0.1 won't
-    # be updated, so as long as `tracing-futures` supports tokio 0.1, we can't
-    # really get rid of the `net2` dependency.
-    #
-    # So, just ignore the warning. It only effects users who are using
-    # compatibility features for *other* unmaintained libraries, anyway.
-    #
-    # TODO: when `tracing-futures` drops support for `tokio` 0.1, we can remove
-    # the `ignore` for this warning, as we will no longer pull `net2`.
-    "RUSTSEC-2020-0016",
-
-    # The following issues are related to the issue explained above.
-    "RUSTSEC-2021-0124", # Data race in `tokio@0.1.22`
-    "RUSTSEC-2023-0045", # `tokio@0.1.22` depends on `memoffset@0.5.6`, unsound
-    "RUSTSEC-2020-0070", # `tokio@0.1.22` depends on `lock_api@0.3.4`, unsound
-    "RUSTSEC-2022-0041", # `tokio@0.1.22` depends on `crossbeam-utils@0.7.2`, unsound
-]
+ignore = []
