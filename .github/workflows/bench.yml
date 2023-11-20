@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get -qq -y update
           sudo apt-get -qq -y install clang curl
-          cargo install --quiet critcmp cargo-make
+          cargo install --quiet --locked critcmp cargo-make
 
       - name: Checkout changes
         uses: actions/checkout@v3
@@ -136,7 +136,7 @@ jobs:
         run: |
           sudo apt-get -qq -y update
           sudo apt-get -qq -y install clang curl
-          cargo install --quiet critcmp cargo-make
+          cargo install --quiet --locked critcmp cargo-make
 
       # Install FoundationDB if needed
       - name: Setup FoundationDB

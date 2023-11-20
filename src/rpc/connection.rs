@@ -28,8 +28,8 @@ use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use tracing::Span;
-use tracing_futures::Instrument;
 use uuid::Uuid;
 
 pub struct Connection {
