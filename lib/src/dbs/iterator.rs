@@ -29,6 +29,7 @@ pub(crate) enum Iterable {
 	Thing(Thing),
 	Range(Range),
 	Edges(Edges),
+	Defer(Thing),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
 	Index(Table, IteratorRef),
@@ -140,7 +141,14 @@ impl Iterator {
 					}
 				}
 				// Add the record to the iterator
-				self.ingest(Iterable::Thing(v));
+				match stm {
+					Statement::Create(_) => {
+						self.ingest(Iterable::Defer(v));
+					}
+					_ => {
+						self.ingest(Iterable::Thing(v));
+					}
+				};
 			}
 			Value::Mock(v) => {
 				// Check if there is a data clause

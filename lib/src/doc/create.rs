@@ -13,8 +13,6 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Check if exists
-		self.exist(ctx, opt, txn, stm).await?;
 		// Alter record data
 		self.alter(ctx, opt, txn, stm).await?;
 		// Merge fields data
@@ -25,10 +23,10 @@ impl<'a> Document<'a> {
 		self.clean(ctx, opt, txn, stm).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
-		// Store index data
-		self.index(ctx, opt, txn, stm).await?;
 		// Store record data
 		self.store(ctx, opt, txn, stm).await?;
+		// Store index data
+		self.index(ctx, opt, txn, stm).await?;
 		// Run table queries
 		self.table(ctx, opt, txn, stm).await?;
 		// Run lives queries
