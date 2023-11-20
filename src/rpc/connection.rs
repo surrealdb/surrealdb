@@ -299,7 +299,7 @@ impl Connection {
 	/// Handle individual WebSocket messages
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let mut out_fmt = { rpc.read().await.format };
+		let mut out_fmt = rpc.read().await.format;
 		// Prepare Span and Otel context
 		let span = span_for_request(&rpc.read().await.ws_id);
 		// Acquire concurrent request rate limiter
