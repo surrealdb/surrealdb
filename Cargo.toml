@@ -68,7 +68,6 @@ tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
 tracing = "0.1"
-tracing-futures = { version = "0.2.5" }
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 urlencoding = "2.1.3"

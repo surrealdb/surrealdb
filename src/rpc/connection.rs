@@ -8,7 +8,7 @@ use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::Span;
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use surrealdb::dbs::Session;
 use tokio::task::JoinSet;
