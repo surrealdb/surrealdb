@@ -3,10 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
-use crate::sql::comment::mightbespace;
-use crate::sql::error::IResult;
-use crate::sql::operator::{self, Operator};
-use crate::sql::value::{single, Value};
+use crate::sql::operator::Operator;
+use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -211,119 +209,5 @@ impl fmt::Display for Expression {
 				r,
 			} => write!(f, "{l} {o} {r}"),
 		}
-	}
-}
-
-pub fn unary(i: &str) -> IResult<&str, Expression> {
-	let (i, o) = operator::unary(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = single(i)?;
-	Ok((
-		i,
-		Expression::Unary {
-			o,
-			v,
-		},
-	))
-}
-
-#[cfg(test)]
-pub fn binary(i: &str) -> IResult<&str, Expression> {
-	let (i, l) = single(i)?;
-	let (i, o) = operator::binary(i)?;
-	// Make sure to dive if the query is a right-deep binary tree.
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, r) = crate::sql::value::value(i)?;
-	let v = match r {
-		Value::Expression(r) => r.augment(l, o),
-		_ => Expression::new(l, o, r),
-	};
-	Ok((i, v))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn expression_statement() {
-		let sql = "true AND false";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("true AND false", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_left_opened() {
-		let sql = "3 * 3 * 3 = 27";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_left_closed() {
-		let sql = "(3 * 3 * 3) = 27";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("(3 * 3 * 3) = 27", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_right_opened() {
-		let sql = "27 = 3 * 3 * 3";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_right_closed() {
-		let sql = "27 = (3 * 3 * 3)";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("27 = (3 * 3 * 3)", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_both_opened() {
-		let sql = "3 * 3 * 3 = 3 * 3 * 3";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_both_closed() {
-		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("(3 * 3 * 3) = (3 * 3 * 3)", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_unary() {
-		let sql = "-a";
-		let res = unary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
-	}
-
-	#[test]
-	fn expression_with_unary() {
-		let sql = "-(5) + 5";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
 	}
 }

@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::idiom::Idiom;
-use crate::sql::query::{query, Query};
+use crate::sql::query::Query;
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -71,67 +71,6 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 			// There was an error when parsing the query
 			Err(e) => Err(Error::InvalidQuery(e.render_on(input))),
 		},
-	}
-}
-
-pub(crate) mod depth {
-	use crate::cnf::MAX_COMPUTATION_DEPTH;
-	use crate::sql::ParseError;
-	use nom::Err;
-	use std::cell::Cell;
-	use std::thread::panicking;
-
-	thread_local! {
-		/// How many recursion levels deep parsing is currently.
-		static DEPTH: Cell<u8> = Cell::default();
-	}
-
-	/// Scale down `MAX_COMPUTATION_DEPTH` for parsing because:
-	///  - Only a few intermediate parsers, collectively sufficient to limit depth, call dive.
-	///  - Some of the depth budget during execution is for futures, graph traversal, and
-	///    other operations that don't exist during parsing.
-	///  - The parser currently runs in exponential time, so a lower limit guards against
-	///    CPU-intensive, time-consuming parsing.
-	const DEPTH_PER_DIVE: u8 = 4;
-
-	/// Call when starting the parser to reset the recursion depth.
-	#[inline(never)]
-	pub(super) fn reset() {
-		DEPTH.with(|cell| {
-			debug_assert_eq!(cell.get(), 0, "previous parsing stopped abruptly");
-			cell.set(0)
-		});
-	}
-
-	/// Call at least once in recursive parsing code paths to limit recursion depth.
-	#[inline(never)]
-	#[must_use = "must store and implicitly drop when returning"]
-	pub(crate) fn dive<I>(position: I) -> Result<Diving, Err<crate::sql::ParseError<I>>> {
-		DEPTH.with(|cell| {
-			let depth = cell.get().saturating_add(DEPTH_PER_DIVE);
-			if depth <= *MAX_COMPUTATION_DEPTH {
-				cell.replace(depth);
-				Ok(Diving)
-			} else {
-				Err(Err::Failure(ParseError::ExcessiveDepth(position)))
-			}
-		})
-	}
-
-	#[must_use]
-	#[non_exhaustive]
-	pub(crate) struct Diving;
-
-	impl Drop for Diving {
-		fn drop(&mut self) {
-			DEPTH.with(|cell| {
-				if let Some(depth) = cell.get().checked_sub(DEPTH_PER_DIVE) {
-					cell.replace(depth);
-				} else {
-					debug_assert!(panicking());
-				}
-			});
-		}
 	}
 }
 

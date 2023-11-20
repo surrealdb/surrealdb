@@ -2,15 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
-use crate::sql::error::IResult;
-use crate::sql::idiom::Idiom;
-use crate::sql::kind::{kind, Kind};
-use crate::sql::value::{single, Value};
+use crate::sql::{Idiom, Kind, Value};
 use async_recursion::async_recursion;
-use nom::character::complete::char;
-use nom::combinator::cut;
-use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -55,36 +48,5 @@ impl Cast {
 impl fmt::Display for Cast {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<{}> {}", self.0, self.1)
-	}
-}
-
-pub fn cast(i: &str) -> IResult<&str, Cast> {
-	let (i, k) = delimited(char('<'), cut(kind), char('>'))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = cut(single)(i)?;
-	Ok((i, Cast(k, v)))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn cast_int() {
-		let sql = "<int>1.2345";
-		let res = cast(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<int> 1.2345f", format!("{}", out));
-		assert_eq!(out, Cast(Kind::Int, 1.2345.into()));
-	}
-
-	#[test]
-	fn cast_string() {
-		let sql = "<string>1.2345";
-		let res = cast(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<string> 1.2345f", format!("{}", out));
-		assert_eq!(out, Cast(Kind::String, 1.2345.into()));
 	}
 }

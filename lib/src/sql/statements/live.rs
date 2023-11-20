@@ -1,27 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
-use crate::sql::comment::shouldbespace;
-use crate::sql::cond::{cond, Cond};
-use crate::sql::error::expect_tag_no_case;
-use crate::sql::error::IResult;
-use crate::sql::fetch::{fetch, Fetchs};
-use crate::sql::field::{fields, Fields};
-use crate::sql::param::param;
-use crate::sql::table::table;
-use crate::sql::value::Value;
-use crate::sql::Uuid;
+use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::combinator::into;
-use nom::combinator::map;
-use nom::combinator::opt;
-use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -56,6 +39,24 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
+	/// Creates a live statement from parts that can be set during a query.
+	pub(crate) fn from_source_parts(
+		expr: Fields,
+		what: Value,
+		cond: Option<Cond>,
+		fetch: Option<Fetchs>,
+	) -> Self {
+		LiveStatement {
+			id: Uuid::new_v4(),
+			node: Uuid::new_v4(),
+			expr,
+			what,
+			cond,
+			fetch,
+			..Default::default()
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -122,32 +123,4 @@ impl fmt::Display for LiveStatement {
 		}
 		Ok(())
 	}
-}
-
-pub fn live(i: &str) -> IResult<&str, LiveStatement> {
-	let (i, _) = tag_no_case("LIVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("SELECT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	cut(|i| {
-		let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = expect_tag_no_case("FROM")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, what) = alt((into(param), into(table)))(i)?;
-		let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-		let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-		Ok((
-			i,
-			LiveStatement {
-				id: Uuid::new_v4(),
-				node: Uuid::new_v4(),
-				expr,
-				what,
-				cond,
-				fetch,
-				..Default::default()
-			},
-		))
-	})(i)
 }

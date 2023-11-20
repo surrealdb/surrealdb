@@ -1,6 +1,7 @@
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::permission::Permission;
+use crate::sql::{
+	fmt::{is_pretty, pretty_indent},
+	Permission,
+};
 use async_recursion::async_recursion;
 use derive::Store;
 use revision::revisioned;

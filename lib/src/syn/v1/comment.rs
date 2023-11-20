@@ -1,13 +1,10 @@
-use crate::sql::error::IResult;
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::bytes::complete::take_until;
-use nom::character::complete::char;
-use nom::character::complete::multispace0;
-use nom::character::complete::multispace1;
-use nom::character::complete::not_line_ending;
-use nom::multi::many0;
-use nom::multi::many1;
+use super::IResult;
+use nom::{
+	branch::alt,
+	bytes::complete::{tag, take_until},
+	character::complete::{char, multispace0, multispace1, not_line_ending},
+	multi::{many0, many1},
+};
 
 pub fn mightbespace(i: &str) -> IResult<&str, ()> {
 	let (i, _) = many0(alt((comment, space)))(i)?;

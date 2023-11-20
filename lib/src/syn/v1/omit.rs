@@ -1,8 +1,6 @@
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::idiom::{locals as idioms, Idioms};
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
+use super::{comment::shouldbespace, error::IResult, idiom::locals as idioms};
+use crate::sql::Idioms;
+use nom::{bytes::complete::tag_no_case, combinator::cut};
 
 pub fn omit(i: &str) -> IResult<&str, Idioms> {
 	let (i, _) = tag_no_case("OMIT")(i)?;

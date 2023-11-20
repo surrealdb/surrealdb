@@ -1,19 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::base::Base;
-use crate::sql::comment::{mightbespace, shouldbespace};
-use crate::sql::error::IResult;
-use crate::sql::ident;
-use crate::sql::ident::Ident;
-use crate::sql::value::Value;
+use crate::sql::{Base, Ident, Value};
 use derive::Store;
-use nom::bytes::complete::tag;
-use nom::bytes::complete::tag_no_case;
-use nom::character::complete::char;
-use nom::combinator::opt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -50,38 +40,5 @@ impl Display for RemoveFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Bypass ident display since we don't want backticks arround the ident.
 		write!(f, "REMOVE FUNCTION fn::{}", self.name.0)
-	}
-}
-
-pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
-	let (i, _) = tag_no_case("FUNCTION")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag("fn::")(i)?;
-	let (i, name) = ident::multi(i)?;
-	let (i, _) = opt(|i| {
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('(')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(')')(i)?;
-		Ok((i, ()))
-	})(i)?;
-	Ok((
-		i,
-		RemoveFunctionStatement {
-			name,
-		},
-	))
-}
-
-#[cfg(test)]
-mod test {
-	use super::super::remove;
-
-	#[test]
-	fn remove_long_function() {
-		let sql = "REMOVE FUNCTION fn::foo::bar::baz::bac";
-		let res = remove(sql);
-		let out = res.unwrap().1;
-		assert_eq!("REMOVE FUNCTION fn::foo::bar::baz::bac", format!("{}", out))
 	}
 }

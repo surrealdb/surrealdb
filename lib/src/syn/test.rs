@@ -1,10 +1,7 @@
-use crate::sql::array::{array, Array};
-use crate::sql::expression::{binary, Expression};
-use crate::sql::idiom::{idiom, Idiom};
-use crate::sql::param::{param, Param};
-use crate::sql::script::{script, Script};
-use crate::sql::thing::{thing, Thing};
-use crate::sql::value::{value, Value};
+pub(crate) use super::v1::builtin::builtin_name;
+use crate::sql::{Array, Expression, Idiom, Param, Script, Thing, Value};
+
+use super::v1::test::*;
 
 pub trait Parse<T> {
 	fn parse(val: &str) -> T;
@@ -48,6 +45,6 @@ impl Parse<Self> for Thing {
 
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
-		binary(val).unwrap().1
+		expression(val).unwrap().1
 	}
 }

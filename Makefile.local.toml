@@ -68,7 +68,7 @@ args = ["clean"]
 [tasks.bench]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting"]
+args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting", "--", "${@}"]
 
 # Run
 [tasks.run]

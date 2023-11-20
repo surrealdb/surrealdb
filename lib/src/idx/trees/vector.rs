@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::sql::index::VectorType;
 use crate::sql::Number;
+use distances::vectors::{cosine, euclidean, hamming, manhattan, minkowski_p};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -163,90 +164,36 @@ impl Vector {
 	pub(super) fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::euclidean", self, other)?;
 		match (self, other) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt())
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f32>().sqrt() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i64>() as f64).sqrt())
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i32>() as f64).sqrt())
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i16>() as f64).sqrt())
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i8>() as f64).sqrt())
-			}
-			_ => Err(Error::Unreachable),
-		}
-	}
-
-	fn magnitude_squared(&self) -> f64 {
-		match self {
-			Vector::F64(v) => v.iter().map(|a| a.powi(2)).sum::<f64>(),
-			Vector::F32(v) => v.iter().map(|a| a.powi(2)).sum::<f32>() as f64,
-			Vector::I64(v) => v.iter().map(|a| a.pow(2)).sum::<i64>() as f64,
-			Vector::I32(v) => v.iter().map(|a| a.pow(2)).sum::<i32>() as f64,
-			Vector::I16(v) => v.iter().map(|a| a.pow(2)).sum::<i16>() as f64,
-			Vector::I8(v) => v.iter().map(|a| a.pow(2)).sum::<i8>() as f64,
-		}
-	}
-
-	fn dot(a: &Self, b: &Self) -> Result<f64, Error> {
-		match (a, b) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum())
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<f32>() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i64>() as f64)
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i32>() as f64)
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i16>() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i8>() as f64)
-			}
+			(Vector::F64(a), Vector::F64(b)) => Ok(euclidean(a, b)),
+			(Vector::F32(a), Vector::F32(b)) => Ok(euclidean(a, b)),
+			(Vector::I64(a), Vector::I64(b)) => Ok(euclidean(a, b)),
+			(Vector::I32(a), Vector::I32(b)) => Ok(euclidean(a, b)),
+			(Vector::I16(a), Vector::I16(b)) => Ok(euclidean(a, b)),
+			(Vector::I8(a), Vector::I8(b)) => Ok(euclidean(a, b)),
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(super) fn cosine_similarity(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::similarity::cosine", self, other)?;
-		let d = Self::dot(self, other)?;
-		Ok(d / (self.magnitude_squared() * other.magnitude_squared()))
+		match (self, other) {
+			(Vector::F64(a), Vector::F64(b)) => Ok(cosine(a, b)),
+			(Vector::F32(a), Vector::F32(b)) => Ok(cosine(a, b)),
+			(Vector::I64(a), Vector::I64(b)) => Ok(cosine(a, b)),
+			(Vector::I32(a), Vector::I32(b)) => Ok(cosine(a, b)),
+			(Vector::I16(a), Vector::I16(b)) => Ok(cosine(a, b)),
+			(Vector::I8(a), Vector::I8(b)) => Ok(cosine(a, b)),
+			_ => Err(Error::Unreachable),
+		}
 	}
 
 	pub(super) fn hamming_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::hamming", self, other)?;
 		match (self, other) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
+			(Vector::I64(a), Vector::I64(b)) => Ok(hamming::<_, u64>(a, b) as f64),
+			(Vector::I32(a), Vector::I32(b)) => Ok(hamming::<_, u64>(a, b) as f64),
+			(Vector::I16(a), Vector::I16(b)) => Ok(hamming::<_, u64>(a, b) as f64),
+			(Vector::I8(a), Vector::I8(b)) => Ok(hamming::<_, u64>(a, b) as f64),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -254,62 +201,25 @@ impl Vector {
 	pub(super) fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::manhattan", self, other)?;
 		match (self, other) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum())
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<f32>() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i64>() as f64)
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i32>() as f64)
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i16>() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i8>() as f64)
-			}
+			(Vector::F64(a), Vector::F64(b)) => Ok(manhattan(a, b)),
+			(Vector::F32(a), Vector::F32(b)) => Ok(manhattan(a, b) as f64),
+			(Vector::I64(a), Vector::I64(b)) => Ok(manhattan(a, b) as f64),
+			(Vector::I32(a), Vector::I32(b)) => Ok(manhattan(a, b) as f64),
+			(Vector::I16(a), Vector::I16(b)) => Ok(manhattan(a, b) as f64),
+			(Vector::I8(a), Vector::I8(b)) => Ok(manhattan(a, b) as f64),
 			_ => Err(Error::Unreachable),
 		}
 	}
 	pub(super) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::minkowski", self, other)?;
-		let dist = match (self, other) {
-			(Vector::F64(a), Vector::F64(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().powf(order.to_float()))
-				.sum::<f64>(),
-			(Vector::F32(a), Vector::F32(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().powf(order.to_float() as f32))
-				.sum::<f32>() as f64,
-			(Vector::I64(a), Vector::I64(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i64>() as f64,
-			(Vector::I32(a), Vector::I32(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i32>() as f64,
-			(Vector::I16(a), Vector::I16(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i16>() as f64,
-			(Vector::I8(a), Vector::I8(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i8>() as f64,
-			_ => return Err(Error::Unreachable),
-		};
-		Ok(dist.powf(1.0 / order.to_float()))
+		match (self, other) {
+			(Vector::F64(a), Vector::F64(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			(Vector::F32(a), Vector::F32(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			(Vector::I64(a), Vector::I64(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			(Vector::I32(a), Vector::I32(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			(Vector::I16(a), Vector::I16(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			(Vector::I8(a), Vector::I8(b)) => Ok(minkowski_p(order.to_int() as i32)(a, b)),
+			_ => Err(Error::Unreachable),
+		}
 	}
 }
