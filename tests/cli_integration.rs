@@ -246,12 +246,11 @@ mod cli_integration {
 		// Commands with credentials for different auth levels
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
-		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
 		info!("* Create users with identical credentials at ROOT, NS and DB levels");
 		{
 			let args = format!("sql --conn http://{addr} --db D5 --ns N5 {creds}");
-			let output = common::run(&args)
+			let _ = common::run(&args)
 				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
