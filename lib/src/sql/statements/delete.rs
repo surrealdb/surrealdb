@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Cond, Output, Timeout, Value, Values};
+use crate::sql::{Cond, Limit, Output, Timeout, Value, Values};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ pub struct DeleteStatement {
 	pub only: bool,
 	pub what: Values,
 	pub cond: Option<Cond>,
+	pub limit: Option<Limit>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
@@ -76,6 +77,9 @@ impl fmt::Display for DeleteStatement {
 		}
 		write!(f, " {}", self.what)?;
 		if let Some(ref v) = self.cond {
+			write!(f, " {v}")?
+		}
+		if let Some(ref v) = self.limit {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {

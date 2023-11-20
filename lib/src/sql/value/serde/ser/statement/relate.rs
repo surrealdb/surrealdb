@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::statements::RelateStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Data;
+use crate::sql::Limit;
 use crate::sql::Output;
 use crate::sql::Timeout;
 use crate::sql::Value;
@@ -44,6 +45,7 @@ pub struct SerializeRelateStatement {
 	with: Option<Value>,
 	uniq: Option<bool>,
 	data: Option<Data>,
+	limit: Option<Limit>,
 	output: Option<Output>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
@@ -76,6 +78,9 @@ impl serde::ser::SerializeStruct for SerializeRelateStatement {
 			"data" => {
 				self.data = value.serialize(ser::data::opt::Serializer.wrap())?;
 			}
+			"limit" => {
+				self.limit = value.serialize(ser::limit::opt::Serializer.wrap())?;
+			}
 			"output" => {
 				self.output = value.serialize(ser::output::opt::Serializer.wrap())?;
 			}
@@ -103,6 +108,7 @@ impl serde::ser::SerializeStruct for SerializeRelateStatement {
 					uniq,
 					parallel,
 					data: self.data,
+					limit: self.limit,
 					output: self.output,
 					timeout: self.timeout,
 				})
@@ -127,6 +133,16 @@ mod tests {
 	fn with_data() {
 		let stmt = RelateStatement {
 			data: Some(Default::default()),
+			..Default::default()
+		};
+		let value: RelateStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
+
+	#[test]
+	fn with_limit() {
+		let stmt = RelateStatement {
+			limit: Some(Default::default()),
 			..Default::default()
 		};
 		let value: RelateStatement = stmt.serialize(Serializer.wrap()).unwrap();

@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
+use crate::sql::Limit;
 use crate::sql::Output;
 use crate::sql::Timeout;
 use crate::sql::Values;
@@ -41,6 +42,7 @@ pub struct SerializeDeleteStatement {
 	only: Option<bool>,
 	what: Option<Values>,
 	cond: Option<Cond>,
+	limit: Option<Limit>,
 	output: Option<Output>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
@@ -63,6 +65,9 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 			}
 			"cond" => {
 				self.cond = value.serialize(ser::cond::opt::Serializer.wrap())?;
+			}
+			"limit" => {
+				self.limit = value.serialize(ser::limit::opt::Serializer.wrap())?;
 			}
 			"output" => {
 				self.output = value.serialize(ser::output::opt::Serializer.wrap())?;
@@ -87,6 +92,7 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 				what,
 				parallel,
 				cond: self.cond,
+				limit: self.limit,
 				output: self.output,
 				timeout: self.timeout,
 			}),
@@ -110,6 +116,16 @@ mod tests {
 	fn with_cond() {
 		let stmt = DeleteStatement {
 			cond: Some(Default::default()),
+			..Default::default()
+		};
+		let value: DeleteStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
+
+	#[test]
+	fn with_limit() {
+		let stmt = DeleteStatement {
+			limit: Some(Default::default()),
 			..Default::default()
 		};
 		let value: DeleteStatement = stmt.serialize(Serializer.wrap()).unwrap();

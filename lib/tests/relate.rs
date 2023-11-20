@@ -105,3 +105,35 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn relate_limit_one() -> Result<(), Error> {
+	let sql = "
+		LET $test = create |test:2|;
+		RELATE $test->edge->$test LIMIT 1;
+		SELECT count() FROM edge GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("NULL");
+	assert_eq!(tmp, val);
+	//
+	// We don't know the ID, just skip and check count with select statement.
+	res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

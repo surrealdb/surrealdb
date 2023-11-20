@@ -681,3 +681,56 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn update_limit_one() -> Result<(), Error> {
+	let sql = "
+		CREATE test:1, test:2;
+		UPDATE test SET something = true LIMIT 1;
+		SELECT * FROM test;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: test:1,
+			},
+			{
+				id: test:2,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: test:1,
+				something: true,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: test:1,
+				something: true,
+			},
+			{
+				id: test:2,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

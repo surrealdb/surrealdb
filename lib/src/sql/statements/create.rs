@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Data, Output, Timeout, Value, Values};
+use crate::sql::{Data, Limit, Output, Timeout, Value, Values};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ pub struct CreateStatement {
 	pub only: bool,
 	pub what: Values,
 	pub data: Option<Data>,
+	pub limit: Option<Limit>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
@@ -76,6 +77,9 @@ impl fmt::Display for CreateStatement {
 		}
 		write!(f, " {}", self.what)?;
 		if let Some(ref v) = self.data {
+			write!(f, " {v}")?
+		}
+		if let Some(ref v) = self.limit {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
