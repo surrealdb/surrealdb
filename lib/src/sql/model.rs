@@ -23,7 +23,7 @@ use crate::obs::insert::hash_file;
 use object_store::ObjectStore;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::{Write, Read};
-use crate::error::Db::Thrown;
+use crate::error::{Db::QueryNotExecuted, Db::Thrown};
 
 use crate::{
 	ctx::Context,
@@ -104,17 +104,10 @@ impl Model {
 
 		// get the value from the key value store to get the hash
 		// Get the datastore reference
-		let ds = Datastore::new("file://ml_cache.db").await?;
+		// let ds = Datastore::new("file://ml_cache.db").await?;
+		println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
 
-		// let sql = "CREATE type::thing($table, $id) CONTENT { hash: $hash }";
-		// let vars = map! {
-		// 	// for now we are merely putting the model into a table called ML
-		// 	String::from("table") => Value::from("ML"),
-		// 	String::from("id") => Value::from(format!("{}-{}", self.name, self.version)),
-		// 	String::from("hash") => data_value,
-		// };
-
-		match self.args[0] {
+		match &self.args[0] {
 			// performing a buffered compute => would be good to extract this into it's own function but can't import Object
 			Value::Object(values) => {
 				let mut map = HashMap::new();
@@ -124,8 +117,8 @@ impl Model {
 							map.insert(key.to_string(), Self::unpack_number(number));
 						},
 						_ => {
-							// return Thrown(format!("not a number for {} field", key))
-							panic!("not a number for {} field", key);
+							return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
+							// panic!("not a number for {} field", key);
 						}
 					}
 				}
@@ -142,7 +135,7 @@ impl Model {
 				let compute_unit = ModelComputation {
 					surml_file: &mut file,
 				};
-				let outcome = compute_unit.buffered_compute(&mut map)?;
+				let outcome = compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))?;
 				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
 			},
 			// performing a raw compute  
@@ -168,26 +161,15 @@ impl Model {
 				// get the local file bytes from the object storage
 				let file_bytes = get_local_file(response).await.unwrap();
 				let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
-				// let local_storage = get_object_storage();
-				// let mut surml_file = match local_storage.get(&Path::from("test_one.surml")).await.unwrap().payload {
-				// 	GetResultPayload::File(mut file, path) => {
-				// 		let mut data = vec![];
-				// 		file.read_to_end(&mut data).unwrap();
-				// 		SurMlFile::from_bytes(data).unwrap()
-				// 	},
-				// 	_ => {
-				// 		panic!("not a file");
-				// 	}
-				// };
 				let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
 				let compute_unit = ModelComputation {
 					surml_file: &mut surml_file,
 				};
-				let outcome = compute_unit.raw_compute(tensor, None)?;
+				let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
 				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
 			},
 			_ => {
-				return Err("args need to be either a number or an object or a vector of numbers".to_string());
+				return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
 			}
 		}
 		// offer the raw compute and buffered copmute
