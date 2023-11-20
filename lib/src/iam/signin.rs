@@ -1,6 +1,6 @@
 use super::verify::verify_creds;
 use super::{Actor, Level};
-use crate::cnf::SERVER_NAME;
+use crate::cnf::{SERVER_NAME, INSECURE_FORWARD_SCOPE_ERRORS};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
@@ -11,6 +11,7 @@ use crate::sql::Value;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
+
 
 pub async fn signin(
 	kvs: &Datastore,
@@ -173,6 +174,7 @@ pub async fn sc(
 						},
 						Err(e) => match e {
 							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
 							_ => Err(Error::SigninQueryFailed),
 						},
 					}
