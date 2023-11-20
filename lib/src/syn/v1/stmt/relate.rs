@@ -2,7 +2,7 @@ use super::super::{
 	comment::{mightbespace, shouldbespace},
 	error::expected,
 	literal::{param, table},
-	part::{data, output, timeout},
+	part::{data, limit, output, timeout},
 	subquery::subquery,
 	thing::thing,
 	value::array,
@@ -23,6 +23,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	let (i, path) = relate_oi(i)?;
 	let (i, uniq) = opt(preceded(shouldbespace, tag_no_case("UNIQUE")))(i)?;
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
+	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
@@ -35,6 +36,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 			with: path.2,
 			uniq: uniq.is_some(),
 			data,
+			limit,
 			output,
 			timeout,
 			parallel: parallel.is_some(),
