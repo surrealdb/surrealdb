@@ -27,7 +27,7 @@ async fn handler(
 	Extension(req_id): Extension<RequestId>,
 ) -> impl IntoResponse {
 	ws
-		// Set the maximum frame size to 16mb
+		// Set the maximum frame size
 		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
 		// Set the maximum message size to 256mb
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
