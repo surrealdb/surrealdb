@@ -1,10 +1,10 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::key::error::KeyCategory;
-use crate::sql::error::RenderedError as RenderedParserError;
 use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;

@@ -1,6 +1,6 @@
 use super::verify::verify_creds;
 use super::{Actor, Level};
-use crate::cnf::SERVER_NAME;
+use crate::cnf::{INSECURE_FORWARD_SCOPE_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
@@ -116,7 +116,9 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for finding the signin record
-					let sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					sess.ip = session.ip.clone();
+					sess.or = session.or.clone();
 					// Compute the value with the params
 					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
@@ -171,6 +173,7 @@ pub async fn sc(
 						},
 						Err(e) => match e {
 							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
 							_ => Err(Error::SigninQueryFailed),
 						},
 					}

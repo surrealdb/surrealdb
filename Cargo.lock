@@ -1741,6 +1741,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "distances"
+version = "1.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e326dfe6005e22948261065eec25180c39787702a73db3a3e63d4b8bee5604d"
+dependencies = [
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "dmp"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5283,6 +5292,7 @@ dependencies = [
  "chrono",
  "criterion",
  "deunicode",
+ "distances",
  "dmp",
  "echodb",
  "env_logger",

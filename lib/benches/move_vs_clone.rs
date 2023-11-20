@@ -37,11 +37,11 @@ fn bench_move_vs_clone(c: &mut Criterion) {
 	group.measurement_time(Duration::from_secs(10));
 
 	group.bench_function("move", |b| {
-		b.iter(|| bench_move());
+		b.iter(bench_move);
 	});
 
 	group.bench_function("clone", |b| {
-		b.iter(|| bench_clone());
+		b.iter(bench_clone);
 	});
 
 	group.finish();

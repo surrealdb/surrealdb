@@ -2,24 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::error::IResult;
-use crate::sql::escape::escape_rid;
-use crate::sql::id::{id, Gen, Id};
-use crate::sql::ident::ident_raw;
-use crate::sql::strand::Strand;
-use crate::sql::value::Value;
+use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
+use crate::syn;
 use derive::Store;
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::character::complete::char;
-use nom::combinator::value;
-use nom::sequence::delimited;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-
-use super::error::expected;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
@@ -85,8 +74,8 @@ impl TryFrom<Strand> for Thing {
 impl TryFrom<&str> for Thing {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match thing_raw(v) {
-			Ok((_, v)) => Ok(v),
+		match syn::thing_raw(v) {
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}
@@ -118,137 +107,5 @@ impl Thing {
 			tb: self.tb.clone(),
 			id: self.id.compute(ctx, opt, txn, doc).await?,
 		}))
-	}
-}
-
-pub fn thing(i: &str) -> IResult<&str, Thing> {
-	expected("a thing", alt((thing_raw, thing_single, thing_double)))(i)
-}
-
-fn thing_single(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\''), thing_raw, char('\''))(i)
-}
-
-fn thing_double(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\"'), thing_raw, char('\"'))(i)
-}
-
-fn thing_raw(i: &str) -> IResult<&str, Thing> {
-	let (i, t) = ident_raw(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, v) = alt((
-		value(Id::Generate(Gen::Rand), tag("rand()")),
-		value(Id::Generate(Gen::Ulid), tag("ulid()")),
-		value(Id::Generate(Gen::Uuid), tag("uuid()")),
-		id,
-	))(i)?;
-	Ok((
-		i,
-		Thing {
-			tb: t,
-			id: v,
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::array::Array;
-	use crate::sql::object::Object;
-	use crate::sql::value::Value;
-
-	#[test]
-	fn thing_normal() {
-		let sql = "test:id";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer() {
-		let sql = "test:001";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:1", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(1),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_quoted_backtick() {
-		let sql = "`test`:`id`";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_quoted_brackets() {
-		let sql = "⟨test⟩:⟨id⟩";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_object() {
-		let sql = "test:{ location: 'GBR', year: 2022 }";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::Object(Object::from(map! {
-					"location".to_string() => Value::from("GBR"),
-					"year".to_string() => Value::from(2022),
-				})),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_array() {
-		let sql = "test:['GBR', 2022]";
-		let res = thing(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test:['GBR', 2022]", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
-			}
-		);
 	}
 }

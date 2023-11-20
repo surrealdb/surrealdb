@@ -2,18 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::block::{block, Block};
-use crate::sql::comment::mightbespace;
-use crate::sql::common::{closechevron, openchevron};
-use crate::sql::error::IResult;
+use crate::sql::block::Block;
 use crate::sql::value::Value;
-use nom::bytes::complete::tag;
-use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::util::expect_delimited;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
@@ -48,30 +41,5 @@ impl Future {
 impl fmt::Display for Future {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<future> {}", self.0)
-	}
-}
-
-pub fn future(i: &str) -> IResult<&str, Future> {
-	let (i, _) = expect_delimited(openchevron, tag("future"), closechevron)(i)?;
-	cut(|i| {
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = block(i)?;
-		Ok((i, Future(v)))
-	})(i)
-}
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::expression::Expression;
-	use crate::sql::test::Parse;
-
-	#[test]
-	fn future_expression() {
-		let sql = "<future> { 5 + 10 }";
-		let res = future(sql);
-		let out = res.unwrap().1;
-		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
-		assert_eq!(out, Future(Block::from(Value::from(Expression::parse("5 + 10")))));
 	}
 }

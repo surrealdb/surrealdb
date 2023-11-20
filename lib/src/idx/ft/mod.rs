@@ -489,9 +489,9 @@ mod tests {
 	use crate::kvs::{Datastore, LockType::*};
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
-	use crate::sql::statements::define::analyzer;
-	use crate::sql::statements::DefineAnalyzerStatement;
-	use crate::sql::{Thing, Value};
+	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
+	use crate::sql::{Statement, Thing, Value};
+	use crate::syn;
 	use futures::lock::Mutex;
 	use std::collections::HashMap;
 	use std::sync::Arc;
@@ -575,7 +575,10 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
 
 		let btree_order = 5;
 
@@ -689,7 +692,10 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
-			let (_, az) = analyzer("ANALYZER test TOKENIZERS blank;").unwrap();
+			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+				panic!()
+			};
 
 			let doc1: Thing = ("t", "doc1").into();
 			let doc2: Thing = ("t", "doc2").into();

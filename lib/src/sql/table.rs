@@ -1,19 +1,9 @@
-use crate::sql::common::commas;
-use crate::sql::error::IResult;
-use crate::sql::escape::escape_ident;
-use crate::sql::fmt::Fmt;
-use crate::sql::id::Id;
-use crate::sql::ident::{ident_raw, Ident};
-use crate::sql::strand::no_nul_bytes;
-use crate::sql::thing::Thing;
-use nom::multi::separated_list1;
+use crate::sql::{escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
-use super::error::expected;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 
@@ -38,11 +28,6 @@ impl Display for Tables {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
-}
-
-pub fn tables(i: &str) -> IResult<&str, Tables> {
-	let (i, v) = separated_list1(commas, table)(i)?;
-	Ok((i, Tables(v)))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -87,43 +72,5 @@ impl Table {
 impl Display for Table {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_ident(&self.0), f)
-	}
-}
-
-pub fn table(i: &str) -> IResult<&str, Table> {
-	let (i, v) = expected("a table name", ident_raw)(i)?;
-	Ok((i, Table(v)))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn table_normal() {
-		let sql = "test";
-		let res = table(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table(String::from("test")));
-	}
-
-	#[test]
-	fn table_quoted_backtick() {
-		let sql = "`test`";
-		let res = table(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table(String::from("test")));
-	}
-
-	#[test]
-	fn table_quoted_brackets() {
-		let sql = "⟨test⟩";
-		let res = table(sql);
-		let out = res.unwrap().1;
-		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table(String::from("test")));
 	}
 }

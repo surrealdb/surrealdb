@@ -8,8 +8,8 @@ use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::value::path_like;
 use crate::sql::Value;
+use crate::syn::path_like;
 use async_recursion::async_recursion;
 use filter::Filter;
 use std::collections::hash_map::Entry;
@@ -17,12 +17,6 @@ use std::collections::{HashMap, HashSet};
 
 mod filter;
 mod tokenizer;
-
-pub(crate) struct Analyzers {}
-
-impl Analyzers {
-	pub(crate) const LIKE: &'static str = "like";
-}
 
 pub(crate) struct Analyzer {
 	function: Option<String>,
@@ -201,9 +195,9 @@ impl Analyzer {
 		mut input: String,
 	) -> Result<Tokens, Error> {
 		if let Some(function_name) = &self.function {
-			let fns = format!("fn::{function_name}(\"{input}\");");
+			let fns = format!("fn::{function_name}(\"{input}\")");
 			match path_like(&fns) {
-				Ok((_, func_value)) => {
+				Ok(func_value) => {
 					let val = func_value.compute(ctx, opt, txn, None).await?;
 					if let Value::Strand(val) = val {
 						input = val.0;
@@ -249,7 +243,10 @@ mod tests {
 	use crate::ctx::Context;
 	use crate::dbs::{Options, Transaction};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::statements::define::analyzer;
+	use crate::{
+		sql::{statements::DefineStatement, Statement},
+		syn,
+	};
 	use futures::lock::Mutex;
 	use std::sync::Arc;
 
@@ -258,7 +255,10 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
 		let txn: Transaction = Arc::new(Mutex::new(tx));
 
-		let (_, az) = analyzer(def).unwrap();
+		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
+		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
+			panic!()
+		};
 		let a: Analyzer = az.into();
 
 		let tokens = a

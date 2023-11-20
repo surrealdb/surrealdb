@@ -5,6 +5,7 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
+use foundationdb::options;
 use futures::TryStreamExt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -86,10 +87,20 @@ impl Datastore {
 		let _fdbnet = (*FDBNET).clone();
 
 		match foundationdb::Database::from_path(path) {
-			Ok(db) => Ok(Datastore {
-				db,
-				_fdbnet,
-			}),
+			Ok(db) => {
+				db.set_option(options::DatabaseOption::TransactionRetryLimit(5)).map_err(|e| {
+					Error::Ds(format!("Unable to set transaction retry limit: {}", e))
+				})?;
+				db.set_option(options::DatabaseOption::TransactionTimeout(5000))
+					.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
+				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(500)).map_err(
+					|e| Error::Ds(format!("Unable to set transaction max retry delay: {}", e)),
+				)?;
+				Ok(Datastore {
+					db,
+					_fdbnet,
+				})
+			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}

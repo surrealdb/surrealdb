@@ -207,34 +207,60 @@ command = "cargo"
 args = ["build", "--locked", "--no-default-features", "--features", "storage-mem"]
 
 #
-# Benchmarks
+# Benchmarks - Common
 #
-[tasks.bench-run-baseline]
+[tasks.ci-bench]
 category = "CI - BENCHMARK"
 command = "cargo"
-args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "--", "--save-baseline", "baseline"]
+args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "${@}"]
 
-[tasks.bench-save-baseline]
-category = "CI - BENCHMARK"
-script = "cp -r target/criterion /tmp/criterion"
+#
+# Benchmarks - SDB - Per Target
+#
+[env]
+BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER_THREADS"] } }
+BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
+BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
+BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
+BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-fdb-7_1", condition = { env_not_set = ["BENCH_FEATURES"] } }
 
-[tasks.bench-restore-baseline]
-category = "CI - BENCHMARK"
-script = "mkdir -p target && cp -r /tmp/criterion target/criterion"
-
-[tasks.bench-baseline]
-category = "CI - BENCHMARK"
-run_task = { name = ["bench-run-baseline", "bench-save-baseline"] }
-
-[tasks.bench-run-changes]
-category = "CI - BENCHMARK"
+[tasks.bench-target]
+private = true
+category = "CI - BENCHMARK - SurrealDB Target"
 command = "cargo"
-args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "--", "--save-baseline", "changes"]
+args = ["bench", "--package", "surrealdb", "--bench", "sdb", "--no-default-features", "--features", "${BENCH_FEATURES}", "${@}"]
 
-[tasks.bench-changes]
-category = "CI - BENCHMARK"
-run_task = { name = ["bench-restore-baseline", "bench-run-changes"] }
+[tasks.bench-lib-mem]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-mem" }
+run_task = { name = ["bench-target"] }
 
-[tasks.bench-compare]
-category = "CI - BENCHMARK"
-script = "critcmp baseline changes | tee benchmark_results"
+[tasks.bench-lib-rocksdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-lib-fdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-fdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-mem]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-rocksdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-fdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-fdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-ws]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
+run_task = { name = ["bench-target"] }
