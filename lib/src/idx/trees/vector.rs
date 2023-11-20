@@ -24,7 +24,7 @@ pub enum Vector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub(super) type SharedVector = Arc<Vector>;
+pub(crate) type SharedVector = Arc<Vector>;
 
 impl Hash for Vector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
