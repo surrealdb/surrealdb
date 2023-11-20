@@ -205,6 +205,60 @@ jobs:
             target/${{ matrix.arch }}/release/${{ matrix.file }}.txt
             target/${{ matrix.arch }}/release/${{ matrix.file }}.exe
 
+  crate:
+    name: Publish surrealdb-nightly to crates.io
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          # Change `surrealdb` crate name to `surrealdb-nightly`
+          git apply .patches/surrealdb-nightly.patch
+
+          # Get the date and time of the last commit
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
+
+          # Update the version to a nightly one
+          # This sets the nightly version to something like `1.20231117.130416`
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.${time}\"#" lib/Cargo.toml
+
+          # Get the short commit
+          shortRev=$(git rev-parse --short HEAD)
+
+          # Update the description
+          sed -i "s#^description = \".*\"#description = \"A nightly release of the surrealdb crate based on commit ${shortRev}\"#" lib/Cargo.toml
+
+          # Configure release-plz
+          cp -v .patches/release-nightly-plz.toml release-plz.toml
+
+          # Commit changes
+          # We are not going to push these changes. We do this because
+          # some git commands `release-plz` runs do not work in detached state.
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add release-plz.toml
+          git commit -am 'Prepare nightly release'
+          git checkout -b nightly
+
+          # Install release-plz
+          cargo install --force --version 0.3.30 release-plz
+
+          # Publish cargo crate
+          /home/runner/.cargo/bin/release-plz release
+
   docker:
     name: Build and publish Docker image
     needs: [build]

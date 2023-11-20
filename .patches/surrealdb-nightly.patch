@@ -1,0 +1,82 @@
+commit 1dcd4e78a3c3e7d9cc73f421080106cfa9aef8a8
+Author: Rushmore Mushambi <rushmore@surrealdb.com>
+Date:   Fri Nov 17 12:06:02 2023 +0200
+
+    Rename surrealdb crate to surrealdb-nightly
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 55b05199..1bcaab5d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,13 +9,13 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+ [features]
+ # Public features
+ default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+-storage-mem = ["surrealdb/kv-mem", "has-storage"]
+-storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
+-storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
+-storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
+-storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
+-scripting = ["surrealdb/scripting"]
+-http = ["surrealdb/http"]
++storage-mem = ["surrealdb-nightly/kv-mem", "has-storage"]
++storage-rocksdb = ["surrealdb-nightly/kv-rocksdb", "has-storage"]
++storage-speedb = ["surrealdb-nightly/kv-speedb", "has-storage"]
++storage-tikv = ["surrealdb-nightly/kv-tikv", "has-storage"]
++storage-fdb = ["surrealdb-nightly/kv-fdb-7_1", "has-storage"]
++scripting = ["surrealdb-nightly/scripting"]
++http = ["surrealdb-nightly/http"]
+ http-compression = []
+ # Private features
+ has-storage = []
+@@ -60,7 +60,7 @@ serde = { version = "1.0.183", features = ["derive"] }
+ serde_cbor = "0.11.2"
+ serde_json = "1.0.104"
+ serde_pack = { version = "1.1.2", package = "rmp-serde" }
+-surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
++surrealdb-nightly = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
+ tempfile = "3.7.1"
+ thiserror = "1.0.44"
+ tokio = { version = "1.31.0", features = ["macros", "signal"] }
+diff --git a/lib/Cargo.toml b/lib/Cargo.toml
+index 6bbdeb53..da9c7530 100644
+--- a/lib/Cargo.toml
++++ b/lib/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "surrealdb"
++name = "surrealdb-nightly"
+ publish = true
+ edition = "2021"
+ version = "1.0.0"
+@@ -143,6 +143,7 @@ uuid = { version = "1.4.1", features = ["serde", "v4", "v7"] }
+ 
+ [lib]
+ bench = false
++name = "surrealdb"
+ 
+ [[bench]]
+ name = "executor"
+diff --git a/lib/examples/actix/Cargo.toml b/lib/examples/actix/Cargo.toml
+index 8287a2f1..001e79e4 100644
+--- a/lib/examples/actix/Cargo.toml
++++ b/lib/examples/actix/Cargo.toml
+@@ -8,5 +8,5 @@ publish = false
+ actix-web = { version = "4.3.1", features = ["macros"] }
+ once_cell = "1.18.0"
+ serde = { version = "1.0.183", features = ["derive"] }
+-surrealdb = { path = "../.." }
++surrealdb-nightly = { path = "../.." }
+ thiserror = "1.0.44"
+diff --git a/lib/examples/axum/Cargo.toml b/lib/examples/axum/Cargo.toml
+index 75aaf04f..7a72847c 100644
+--- a/lib/examples/axum/Cargo.toml
++++ b/lib/examples/axum/Cargo.toml
+@@ -7,6 +7,6 @@ publish = false
+ [dependencies]
+ axum = "0.6.20"
+ serde = { version = "1.0.183", features = ["derive"] }
+-surrealdb = { path = "../.." }
++surrealdb-nightly = { path = "../.." }
+ thiserror = "1.0.44"
+ tokio = { version = "1.31.0", features = ["macros", "rt-multi-thread"] }
