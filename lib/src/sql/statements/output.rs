@@ -2,14 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::fetch::{fetch, Fetchs};
-use crate::sql::value::{value, Value};
+use crate::sql::fetch::Fetchs;
+use crate::sql::value::Value;
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -56,33 +51,5 @@ impl fmt::Display for OutputStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
-	}
-}
-
-pub fn output(i: &str) -> IResult<&str, OutputStatement> {
-	let (i, _) = tag_no_case("RETURN")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = value(i)?;
-	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;
-	Ok((
-		i,
-		OutputStatement {
-			what,
-			fetch,
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn output_statement() {
-		let sql = "RETURN $param";
-		let res = output(sql);
-		let out = res.unwrap().1;
-		assert_eq!("RETURN $param", format!("{}", out));
 	}
 }

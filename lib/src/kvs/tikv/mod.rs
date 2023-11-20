@@ -292,7 +292,7 @@ impl Transaction {
 		// Set the key if empty
 		match self.inner.key_exists(key.clone()).await? {
 			false => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxKeyAlreadyExists(category)),
+			_ => return Err(Error::TxKeyAlreadyExistsCategory(category)),
 		};
 		// Return result
 		Ok(())
@@ -394,5 +394,32 @@ impl Transaction {
 		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
 		// Return result
 		Ok(res)
+	}
+	/// Delete a range of keys from the databases
+	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		// Scan the keys
+		let res = self.inner.scan_keys(rng, limit).await?;
+		// Delete all the keys
+		for key in res {
+			self.inner.delete(key).await?;
+		}
+		// Return result
+		Ok(())
 	}
 }

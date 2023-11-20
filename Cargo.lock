@@ -1425,6 +1425,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio 1.32.0",
  "walkdir",
 ]
 
@@ -1737,6 +1738,15 @@ dependencies = [
  "libc",
  "redox_users",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "distances"
+version = "1.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e326dfe6005e22948261065eec25180c39787702a73db3a3e63d4b8bee5604d"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -5302,6 +5312,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "ulid",
  "urlencoding",
  "uuid",
  "wiremock",
@@ -5325,6 +5336,7 @@ dependencies = [
  "chrono",
  "criterion",
  "deunicode",
+ "distances",
  "dmp",
  "echodb",
  "env_logger",
@@ -6296,9 +6308,9 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 
 [[package]]
 name = "ulid"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13a3aaa69b04e5b66cc27309710a569ea23593612387d67daaf102e73aa974fd"
+checksum = "7e37c4b6cbcc59a8dcd09a6429fbc7890286bcbb79215cea7b38a3c4c0921d93"
 dependencies = [
  "rand 0.8.5",
  "serde",

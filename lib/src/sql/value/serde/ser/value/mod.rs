@@ -704,7 +704,7 @@ mod tests {
 	#[test]
 	fn uuid() {
 		let uuid = Uuid::default();
-		let value = to_value(&uuid).unwrap();
+		let value = to_value(uuid).unwrap();
 		let expected = Value::Uuid(uuid);
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());

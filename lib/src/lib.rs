@@ -114,6 +114,8 @@ mod exe;
 mod fnc;
 mod vs;
 
+pub mod sql;
+
 #[doc(hidden)]
 pub mod cnf;
 #[doc(hidden)]
@@ -132,9 +134,6 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[doc(hidden)]
-pub mod sql;
-#[cfg(feature = "experimental_parser")]
 #[doc(hidden)]
 pub mod syn;
 
@@ -167,6 +166,39 @@ pub mod channel {
 pub mod error {
 	pub use crate::api::err::Error as Api;
 	pub use crate::err::Error as Db;
+}
+
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
+}
+
+impl From<dbs::Action> for Action {
+	fn from(action: dbs::Action) -> Self {
+		match action {
+			dbs::Action::Create => Self::Create,
+			dbs::Action::Update => Self::Update,
+			dbs::Action::Delete => Self::Delete,
+		}
+	}
+}
+
+/// A live query notification
+///
+/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// the action is create or update.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub struct Notification<R> {
+	pub action: Action,
+	pub data: R,
 }
 
 /// An error originating from the SurrealDB client library

@@ -1,22 +1,5 @@
 use crate::kvs::clock::SizedClock;
-
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-fdb"
-))]
 use std::sync::Arc;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-fdb"
-))]
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -33,14 +16,8 @@ pub(crate) enum Kvs {
 	Fdb,
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-fdb"
-))]
+// This type is unsused when no store is enabled.
+#[allow(dead_code)]
 type ClockType = Arc<RwLock<SizedClock>>;
 
 #[cfg(feature = "kv-mem")]

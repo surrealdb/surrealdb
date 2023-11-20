@@ -49,7 +49,8 @@ mod cli_integration {
 
 		info!("* Create a record");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
 			assert_eq!(
 				common::run(&args).input("CREATE thing:one;\n").output(),
 				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
@@ -81,10 +82,11 @@ mod cli_integration {
 
 		info!("* Query from the import (pretty-printed this time)");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D2 --pretty");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D2 --pretty --hide-welcome");
 			assert_eq!(
 				common::run(&args).input("SELECT * FROM thing;\n").output(),
-				Ok("[\n\t[\n\t\t{\n\t\t\tid: thing:one\n\t\t}\n\t]\n]\n\n".to_owned()),
+				Ok("-- Query 1\n[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
 				"failed to send sql: {args}"
 			);
 		}
@@ -316,7 +318,8 @@ mod cli_integration {
 
 		info!("* Define a table");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
 			assert_eq!(
 				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
 				Ok("[NONE]\n\n".to_owned()),
@@ -326,7 +329,8 @@ mod cli_integration {
 
 		info!("* Create a record");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
 			assert_eq!(
 				common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
 				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
@@ -336,7 +340,8 @@ mod cli_integration {
 
 		info!("* Show changes");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
 			assert_eq!(
 				common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
@@ -351,7 +356,8 @@ mod cli_integration {
 
 		info!("* Show changes after GC");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N --db D --multi");
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
 			assert_eq!(
 				common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")

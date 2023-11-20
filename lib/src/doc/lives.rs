@@ -6,6 +6,7 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::paths::META;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
@@ -26,12 +27,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
-			// Clone the sending channel
-			let chn = chn.clone();
 			// Loop through all index statements
 			for lv in self.lv(opt, txn).await?.iter() {
 				// Create a new statement
@@ -103,11 +100,20 @@ impl<'a> Document<'a> {
 				if stm.is_delete() {
 					// Send a DELETE notification
 					if opt.id()? == lv.node.0 {
-						let thing = (*rid).clone();
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Delete,
-							result: Value::Thing(thing),
+							result: {
+								// Ensure futures are run
+								let lqopt: &Options = &lqopt.new_with_futures(true);
+								// Output the full document before any changes were applied
+								let mut value =
+									doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+								// Remove metadata fields on output
+								value.del(&lqctx, lqopt, txn, &*META).await?;
+								// Output result
+								value
+							},
 						})
 						.await?;
 					} else {
@@ -117,7 +123,7 @@ impl<'a> Document<'a> {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Create,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
@@ -129,7 +135,7 @@ impl<'a> Document<'a> {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
 						chn.send(Notification {
-							id: lv.id.clone(),
+							id: lv.id,
 							action: Action::Update,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})

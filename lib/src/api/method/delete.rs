@@ -34,7 +34,7 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async {
 				let param = match range {
-					Some(range) => resource?.with_range(range)?,
+					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Delete);

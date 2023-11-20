@@ -1,21 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Iterator;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::data::{data, Data};
-use crate::sql::error::IResult;
-use crate::sql::output::{output, Output};
-use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{whats, Value, Values};
+use crate::sql::{Data, Output, Timeout, Value, Values};
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::combinator::opt;
-use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -100,44 +88,5 @@ impl fmt::Display for CreateStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
-	}
-}
-
-pub fn create(i: &str) -> IResult<&str, CreateStatement> {
-	let (i, _) = tag_no_case("CREATE")(i)?;
-	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = whats(i)?;
-	let (i, (data, output, timeout, parallel)) = cut(|i| {
-		let (i, data) = opt(preceded(shouldbespace, data))(i)?;
-		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((i, (data, output, timeout, parallel)))
-	})(i)?;
-	Ok((
-		i,
-		CreateStatement {
-			only: only.is_some(),
-			what,
-			data,
-			output,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn create_statement() {
-		let sql = "CREATE test";
-		let res = create(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CREATE test", format!("{}", out))
 	}
 }

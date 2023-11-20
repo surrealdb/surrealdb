@@ -1,15 +1,15 @@
 //! The full type definitions for the SurrealQL query language
 
+#[doc(hidden)]
+pub mod index;
+
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;
 pub(crate) mod block;
-pub(crate) mod builtin;
 pub(crate) mod bytes;
 pub(crate) mod cast;
 pub(crate) mod changefeed;
-pub(crate) mod comment;
-pub(crate) mod common;
 pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;
@@ -17,8 +17,6 @@ pub(crate) mod datetime;
 pub(crate) mod dir;
 pub(crate) mod duration;
 pub(crate) mod edges;
-pub(crate) mod ending;
-pub(crate) mod error;
 pub(crate) mod escape;
 pub(crate) mod explain;
 pub(crate) mod expression;
@@ -34,7 +32,6 @@ pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
-pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
@@ -42,13 +39,11 @@ pub(crate) mod mock;
 pub(crate) mod model;
 pub(crate) mod number;
 pub(crate) mod object;
-pub(crate) mod omit;
 pub(crate) mod operation;
 pub(crate) mod operator;
 pub(crate) mod order;
 pub(crate) mod output;
 pub(crate) mod param;
-pub(crate) mod parser;
 pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
@@ -57,7 +52,6 @@ pub(crate) mod range;
 pub(crate) mod regex;
 pub(crate) mod scoring;
 pub(crate) mod script;
-pub(crate) mod special;
 pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod statement;
@@ -67,21 +61,14 @@ pub(crate) mod table;
 pub(crate) mod thing;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
-pub(crate) mod util;
 pub(crate) mod uuid;
 pub(crate) mod value;
 pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
 
-#[cfg(test)]
-pub(crate) mod test;
-
-pub mod depth;
 pub mod serde;
 pub mod statements;
-
-pub use self::parser::*;
 
 pub use self::algorithm::Algorithm;
 pub use self::array::Array;
@@ -89,6 +76,7 @@ pub use self::base::Base;
 pub use self::block::Block;
 pub use self::bytes::Bytes;
 pub use self::cast::Cast;
+pub use self::changefeed::ChangeFeed;
 pub use self::cond::Cond;
 pub use self::constant::Constant;
 pub use self::data::Data;
@@ -96,7 +84,6 @@ pub use self::datetime::Datetime;
 pub use self::dir::Dir;
 pub use self::duration::Duration;
 pub use self::edges::Edges;
-pub use self::error::ParseError;
 pub use self::explain::Explain;
 pub use self::expression::Expression;
 pub use self::fetch::Fetch;
@@ -117,6 +104,7 @@ pub use self::index::Index;
 pub use self::kind::Kind;
 pub use self::limit::Limit;
 pub use self::mock::Mock;
+pub use self::model::Model;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
@@ -144,11 +132,19 @@ pub use self::table::Table;
 pub use self::table::Tables;
 pub use self::thing::Thing;
 pub use self::timeout::Timeout;
+pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
+pub use self::value::serde::to_value;
 pub use self::value::Value;
 pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 
-pub use self::value::serde::to_value;
+// module reexporting parsing function to prevent a breaking change.
+#[doc(hidden)]
+mod parser {
+	pub use crate::syn::*;
+}
+
+pub use self::parser::{idiom, json, parse, subquery, thing, value};

@@ -13,7 +13,6 @@ mod export;
 mod health;
 mod import;
 mod invalidate;
-mod kill;
 mod live;
 mod merge;
 mod patch;
@@ -47,10 +46,8 @@ pub use export::Export;
 pub use health::Health;
 pub use import::Import;
 pub use invalidate::Invalidate;
-#[doc(hidden)] // Not supported yet
-pub use kill::Kill;
-#[doc(hidden)] // Not supported yet
 pub use live::Live;
+pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
@@ -76,7 +73,6 @@ use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::sql::to_value;
-use crate::sql::Uuid;
 use crate::sql::Value;
 use serde::Serialize;
 use std::marker::PhantomData;
@@ -631,6 +627,8 @@ where
 	/// # Examples
 	///
 	/// ```no_run
+	/// # use futures::StreamExt;
+	/// # use surrealdb::opt::Resource;
 	/// # #[derive(serde::Deserialize)]
 	/// # struct Person;
 	/// #
@@ -644,8 +642,21 @@ where
 	/// // Select all records from a table
 	/// let people: Vec<Person> = db.select("person").await?;
 	///
+	/// // Select a range of records from a table
+	/// let people: Vec<Person> = db.select("person").range("jane".."john").await?;
+	///
 	/// // Select a specific record from a table
 	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
+	///
+	/// // To listen for updates as they happen on a record, a range of records
+	/// // or entire table use a live query. This is done by simply calling `.live()`
+	/// // after this method. That gives you a stream of notifications you can listen on.
+	/// # let resource = Resource::from("person");
+	/// let mut stream = db.select(resource).live().await?;
+	///
+	/// while let Some(notification) = stream.next().await {
+	///     // Use the notification
+	/// }
 	/// #
 	/// # Ok(())
 	/// # }
@@ -938,22 +949,6 @@ where
 	pub fn health(&self) -> Health<C> {
 		Health {
 			router: self.router.extract(),
-		}
-	}
-
-	#[doc(hidden)] // Not supported yet
-	pub fn kill(&self, query_id: Uuid) -> Kill<C> {
-		Kill {
-			router: self.router.extract(),
-			query_id,
-		}
-	}
-
-	#[doc(hidden)] // Not supported yet
-	pub fn live(&self, table_name: impl Into<String>) -> Live<C> {
-		Live {
-			router: self.router.extract(),
-			table_name: table_name.into(),
 		}
 	}
 

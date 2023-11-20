@@ -1,15 +1,7 @@
-use crate::api::err::Error;
-use crate::api::Result;
-use crate::sql;
-use crate::sql::Array;
-use crate::sql::Edges;
-use crate::sql::Id;
-use crate::sql::Object;
-use crate::sql::Table;
-use crate::sql::Thing;
-use crate::sql::Value;
-use std::ops;
-use std::ops::Bound;
+use crate::api::{err::Error, Result};
+use crate::sql::{self, Array, Edges, Id, Object, Table, Thing, Value};
+use crate::syn;
+use std::ops::{self, Bound};
 
 /// A database resource
 #[derive(Debug)]
@@ -27,14 +19,13 @@ pub enum Resource {
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<Id>) -> Result<Value> {
+	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Range> {
 		match self {
 			Resource::Table(Table(table)) => Ok(sql::Range {
 				tb: table,
 				beg: range.start,
 				end: range.end,
-			}
-			.into()),
+			}),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),
@@ -49,9 +40,21 @@ impl From<Table> for Resource {
 	}
 }
 
+impl From<&Table> for Resource {
+	fn from(table: &Table) -> Self {
+		Self::Table(table.clone())
+	}
+}
+
 impl From<Thing> for Resource {
 	fn from(thing: Thing) -> Self {
 		Self::RecordId(thing)
+	}
+}
+
+impl From<&Thing> for Resource {
+	fn from(thing: &Thing) -> Self {
+		Self::RecordId(thing.clone())
 	}
 }
 
@@ -61,9 +64,21 @@ impl From<Object> for Resource {
 	}
 }
 
+impl From<&Object> for Resource {
+	fn from(object: &Object) -> Self {
+		Self::Object(object.clone())
+	}
+}
+
 impl From<Array> for Resource {
 	fn from(array: Array) -> Self {
 		Self::Array(array)
+	}
+}
+
+impl From<&Array> for Resource {
+	fn from(array: &Array) -> Self {
+		Self::Array(array.clone())
 	}
 }
 
@@ -73,9 +88,15 @@ impl From<Edges> for Resource {
 	}
 }
 
+impl From<&Edges> for Resource {
+	fn from(edges: &Edges) -> Self {
+		Self::Edges(edges.clone())
+	}
+}
+
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		match sql::thing(s) {
+		match syn::thing(s) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}
@@ -90,7 +111,7 @@ impl From<&String> for Resource {
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		match sql::thing(s.as_str()) {
+		match syn::thing(s.as_str()) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}

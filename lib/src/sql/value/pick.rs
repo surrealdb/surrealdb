@@ -53,8 +53,8 @@ mod tests {
 	use super::*;
 	use crate::sql::id::Id;
 	use crate::sql::idiom::Idiom;
-	use crate::sql::test::Parse;
 	use crate::sql::thing::Thing;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn pick_none() {

@@ -16,10 +16,10 @@ storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
 storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
+http-compression = []
 experimental_parser = ["surrealdb/experimental_parser"]
 # Private features
 has-storage = []
-
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
@@ -89,6 +89,7 @@ test-log = { version = "0.2.12", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.18.0" }
 tonic = "0.8.3"
+ulid = "1.1.0"
 wiremock = "0.5.19"
 
 [package.metadata.deb]

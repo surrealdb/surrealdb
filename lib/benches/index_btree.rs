@@ -1,13 +1,13 @@
-use criterion::async_executor::FuturesExecutor;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
+use std::fmt::Debug;
 use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
-
+use tokio::runtime::Runtime;
 macro_rules! get_key_value {
 	($idx:expr) => {{
 		(format!("{}", $idx).into(), ($idx * 10) as Payload)
@@ -23,12 +23,12 @@ fn bench_index_btree(c: &mut Criterion) {
 	group.measurement_time(Duration::from_secs(30));
 
 	group.bench_function("trees-insertion-fst", |b| {
-		b.to_async(FuturesExecutor)
+		b.to_async(Runtime::new().unwrap())
 			.iter(|| bench::<_, FstKeys>(samples_len, |i| get_key_value!(samples[i])))
 	});
 
 	group.bench_function("trees-insertion-trie", |b| {
-		b.to_async(FuturesExecutor)
+		b.to_async(Runtime::new().unwrap())
 			.iter(|| bench::<_, TrieKeys>(samples_len, |i| get_key_value!(samples[i])))
 	});
 
@@ -50,7 +50,7 @@ fn setup() -> (usize, Vec<usize>) {
 async fn bench<F, BK>(samples_size: usize, sample_provider: F)
 where
 	F: Fn(usize) -> (Key, Payload),
-	BK: BKeys + Default,
+	BK: BKeys + Default + Debug,
 {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();

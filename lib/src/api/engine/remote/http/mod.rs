@@ -494,7 +494,7 @@ async fn router(
 				.headers(headers.clone())
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
-			let value = export(request, (param.file, param.sender)).await?;
+			let value = export(request, (param.file, param.bytes_sender)).await?;
 			Ok(DbResponse::Other(value))
 		}
 		#[cfg(not(target_arch = "wasm32"))]

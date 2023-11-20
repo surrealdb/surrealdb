@@ -1,5 +1,12 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
-pub mod lexer;
-pub mod parser;
-pub mod token;
+pub mod common;
+pub mod error;
+
+pub mod v1;
+pub use v1::{
+	datetime, datetime_raw, duration, idiom, json, parse, range, subquery, thing, thing_raw, value,
+};
+
+#[cfg(test)]
+pub mod test;

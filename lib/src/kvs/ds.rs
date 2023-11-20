@@ -1,32 +1,23 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
-use crate::dbs::node::Timestamp;
-use crate::dbs::Attach;
-use crate::dbs::Capabilities;
-use crate::dbs::Executor;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Response;
-use crate::dbs::Session;
-use crate::dbs::Variables;
+use crate::dbs::{
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
+};
 use crate::err::Error;
-use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
 use crate::key::root::hb::Hb;
-use crate::kvs::clock::{SizedClock, SystemClock};
+use crate::kvs::clock::SizedClock;
+#[allow(unused_imports)]
+use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
-use crate::sql;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Base;
-use crate::sql::Value;
-use crate::sql::{Query, Uuid};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::Oracle;
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use futures::Future;
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -212,7 +203,7 @@ impl Datastore {
 	#[allow(dead_code)]
 	async fn new_full_impl(
 		path: &str,
-		clock_override: Option<Arc<RwLock<SizedClock>>>,
+		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
 		let default_clock: Arc<RwLock<SizedClock>> =
 			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
@@ -235,6 +226,8 @@ impl Datastore {
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store in {}", path);
 					Ok((v, clock))
@@ -250,6 +243,8 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					info!("Started kvs store at {}", path);
 					Ok((v, clock))
@@ -266,6 +261,8 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -281,6 +278,8 @@ impl Datastore {
 					let s = s.trim_start_matches("speedb:");
 					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -296,6 +295,8 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					info!("Started kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -311,6 +312,8 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					info!("Connected to kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -326,6 +329,8 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					info!("Connected to kvs store at {}", path);
+					let default_clock =
+						Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
@@ -334,6 +339,8 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
+				// use clock_override and default_clock to remove warning when no kv is enabled.
+				let _ = default_clock;
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -589,7 +596,7 @@ impl Datastore {
 			for lq in node_lqs {
 				trace!("Archiving query {:?}", &lq);
 				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, this_node_id.clone()).await {
+					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
 						Ok(lq) => lq,
 						Err(e) => {
 							error!("Error archiving lqs during bootstrap phase: {:?}", e);
@@ -638,7 +645,13 @@ impl Datastore {
 		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
-			unreachable_nodes.remove(&hb.nd.to_string()).unwrap();
+			match unreachable_nodes.remove(&hb.nd.to_string()) {
+				None => {
+					// Didnt exist in cluster and should be deleted
+					tx.del_hb(hb.hb, hb.nd).await?;
+				}
+				Some(_) => {}
+			}
 		}
 		// Remove unreachable nodes
 		for (_, cl) in unreachable_nodes {
@@ -741,7 +754,7 @@ impl Datastore {
 				continue;
 			}
 			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id.clone());
+			let archived_lvs = lv.clone().archive(this_node_id);
 			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
 			ret.push((lq, None));
 		}
@@ -789,6 +802,24 @@ impl Datastore {
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
 	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn save_timestamp_for_versionstamp_impl(
+		&self,
+		ts: u64,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -807,8 +838,26 @@ impl Datastore {
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
+			return match tx.cancel().await {
+				Ok(_) => {
+					Err(e)
+				}
+				Err(txe) => {
+					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+				}
+			};
+		}
+		Ok(())
+	}
+
+	async fn garbage_collect_stale_change_feeds_impl(
+		&self,
+		ts: u64,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
 		// TODO Make gc batch size/limit configurable?
-		crate::cf::gc_all_at(&mut tx, ts, Some(100)).await?;
+		cf::gc_all_at(tx, ts, Some(100)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -819,7 +868,7 @@ impl Datastore {
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock().await;
-		self.heartbeat_full(&mut tx, timestamp, self.id.clone()).await?;
+		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
 		tx.commit().await
 	}
 
@@ -939,7 +988,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = sql::parse(txt)?;
+		let ast = syn::parse(txt)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}

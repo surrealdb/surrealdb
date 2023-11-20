@@ -1,16 +1,10 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::iam::token::Claims;
-use crate::iam::Auth;
-use crate::iam::{Actor, Level, Role};
+use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::json;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Algorithm;
-use crate::sql::Value;
-use argon2::Argon2;
-use argon2::PasswordHash;
-use argon2::PasswordVerifier;
+use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
+use crate::syn;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use base64_lib::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -155,7 +149,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let id = match id {
-				Some(id) => crate::sql::thing(&id)?.into(),
+				Some(id) => syn::thing(&id)?.into(),
 				None => Value::None,
 			};
 			// Get the scope token
@@ -191,7 +185,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let id = crate::sql::thing(&id)?;
+			let id = syn::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
 			let cf = config(Algorithm::Hs512, de.code)?;
@@ -383,7 +377,7 @@ pub fn parse(value: &str) -> Result<Value, Error> {
 	// Convert the decoded data to a string
 	let value = str::from_utf8(&value).map_err(|_| Error::InvalidAuth)?;
 	// Parse the token data into SurrealQL
-	json(value).map_err(|_| Error::InvalidAuth)
+	syn::json(value).map_err(|_| Error::InvalidAuth)
 }
 
 pub async fn verify_creds(

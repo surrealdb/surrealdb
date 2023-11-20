@@ -1,8 +1,6 @@
 use crate::err::Error;
-use crate::sql;
-use crate::sql::value::serde::ser;
-use crate::sql::Id;
-use crate::sql::Thing;
+use crate::sql::{value::serde::ser, Id, Thing};
+use crate::syn;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -25,7 +23,7 @@ impl ser::Serializer for Serializer {
 	const EXPECTED: &'static str = "a struct `Thing`";
 
 	fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
-		sql::thing(value)
+		syn::thing(value)
 	}
 
 	#[inline]

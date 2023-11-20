@@ -3,20 +3,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::array::{array, Array};
-use crate::sql::error::IResult;
-use crate::sql::escape::escape_rid;
-use crate::sql::ident::ident_raw;
-use crate::sql::number::integer;
-use crate::sql::number::Number;
-use crate::sql::object::{object, Object};
-use crate::sql::strand::Strand;
-use crate::sql::thing::Thing;
-use crate::sql::uuid::Uuid;
-use crate::sql::value::Value;
+use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
 use nanoid::nanoid;
-use nom::branch::alt;
-use nom::combinator::map;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -211,65 +199,5 @@ impl Id {
 				Gen::Uuid => Ok(Self::uuid()),
 			},
 		}
-	}
-}
-
-pub fn id(i: &str) -> IResult<&str, Id> {
-	alt((
-		map(integer, Id::Number),
-		map(ident_raw, Id::String),
-		map(object, Id::Object),
-		map(array, Id::Array),
-	))(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn id_int() {
-		let sql = "001";
-		let res = id(sql);
-		let out = res.unwrap().1;
-		assert_eq!(Id::from(1), out);
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn id_number() {
-		let sql = "100";
-		let res = id(sql);
-		let out = res.unwrap().1;
-		assert_eq!(Id::from(100), out);
-		assert_eq!("100", format!("{}", out));
-	}
-
-	#[test]
-	fn id_string() {
-		let sql = "test";
-		let res = id(sql);
-		let out = res.unwrap().1;
-		assert_eq!(Id::from("test"), out);
-		assert_eq!("test", format!("{}", out));
-	}
-
-	#[test]
-	fn id_numeric() {
-		let sql = "⟨100⟩";
-		let res = id(sql);
-		let out = res.unwrap().1;
-		assert_eq!(Id::from("100"), out);
-		assert_eq!("⟨100⟩", format!("{}", out));
-	}
-
-	#[test]
-	fn id_either() {
-		let sql = "100test";
-		let res = id(sql);
-		let out = res.unwrap().1;
-		assert_eq!(Id::from("100test"), out);
-		assert_eq!("100test", format!("{}", out));
 	}
 }
