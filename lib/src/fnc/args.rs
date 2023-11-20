@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Strand, Thing};
+use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Regex, Strand, Thing};
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
 pub trait FromArg: Sized {
@@ -10,6 +10,12 @@ pub trait FromArg: Sized {
 impl FromArg for Value {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg)
+	}
+}
+
+impl FromArg for Regex {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_regex()
 	}
 }
 

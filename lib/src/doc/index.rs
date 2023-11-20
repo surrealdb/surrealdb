@@ -7,11 +7,11 @@ use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
+use crate::key;
 use crate::sql::array::Array;
 use crate::sql::index::{Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
-use crate::{key, kvs};
 
 impl<'a> Document<'a> {
 	pub async fn index(
@@ -45,18 +45,15 @@ impl<'a> Document<'a> {
 
 			// Update the index entries
 			if opt.force || o != n {
-				// Claim transaction
-				let mut run = txn.lock().await;
-
 				// Store all the variable and parameters required by the index operation
 				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 
 				// Index operation dispatching
 				match &ix.index {
-					Index::Uniq => ic.index_unique(&mut run).await?,
-					Index::Idx => ic.index_non_unique(&mut run).await?,
-					Index::Search(p) => ic.index_full_text(&mut run, p).await?,
-					Index::MTree(p) => ic.index_mtree(&mut run, p).await?,
+					Index::Uniq => ic.index_unique(txn).await?,
+					Index::Idx => ic.index_non_unique(txn).await?,
+					Index::Search(p) => ic.index_full_text(ctx, txn, p).await?,
+					Index::MTree(p) => ic.index_mtree(txn, p).await?,
 				};
 			}
 		}
@@ -257,7 +254,8 @@ impl<'a> IndexOperation<'a> {
 		)
 	}
 
-	async fn index_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
+	async fn index_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
+		let mut run = txn.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -288,7 +286,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, run: &mut kvs::Transaction) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
+		let mut run = txn.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -330,35 +329,34 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_full_text(
 		&mut self,
-		run: &mut kvs::Transaction,
+		ctx: &Context<'_>,
+		txn: &Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let az = run.get_db_analyzer(self.opt.ns(), self.opt.db(), p.az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, p, TreeStoreType::Write).await?;
+
+		let mut ft = FtIndex::new(self.opt, txn, &p.az, ikb, p, TreeStoreType::Write).await?;
+
 		if let Some(n) = self.n.take() {
-			ft.index_document(run, self.rid, n).await?;
+			ft.index_document(ctx, self.opt, txn, self.rid, n).await?;
 		} else {
-			ft.remove_document(run, self.rid).await?;
+			ft.remove_document(txn, self.rid).await?;
 		}
-		ft.finish(run).await
+		ft.finish(txn).await
 	}
 
-	async fn index_mtree(
-		&mut self,
-		run: &mut kvs::Transaction,
-		p: &MTreeParams,
-	) -> Result<(), Error> {
+	async fn index_mtree(&mut self, txn: &Transaction, p: &MTreeParams) -> Result<(), Error> {
+		let mut tx = txn.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let mut mt = MTreeIndex::new(run, ikb, p, TreeStoreType::Write).await?;
+		let mut mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			mt.remove_document(run, self.rid, o).await?;
+			mt.remove_document(&mut tx, self.rid, o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			mt.index_document(run, self.rid, n).await?;
+			mt.index_document(&mut tx, self.rid, n).await?;
 		}
-		mt.finish(run).await
+		mt.finish(&mut tx).await
 	}
 }

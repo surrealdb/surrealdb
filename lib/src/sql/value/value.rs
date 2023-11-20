@@ -1394,6 +1394,21 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `Regex`
+	pub(crate) fn coerce_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Allow any Regex value
+			Value::Regex(v) => Ok(v),
+			// Allow any string value
+			Value::Strand(v) => Ok(v.as_str().parse()?),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "regex".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `String`
 	pub(crate) fn coerce_to_string(self) -> Result<String, Error> {
 		match self {

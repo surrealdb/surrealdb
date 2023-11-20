@@ -37,10 +37,10 @@ impl AnalyzeStatement {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
 				// Read the index
-				let ix = run
+				let ix = txn
+					.lock()
+					.await
 					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
 					.await?;
 				let ikb = IndexKeyBase::new(opt, &ix);
@@ -48,15 +48,15 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
 						let ft =
-							FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Traversal).await?;
-						ft.statistics(&mut run).await?.into()
+							FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Traversal)
+								.await?;
+						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {
-						let mt =
-							MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Traversal).await?;
-						mt.statistics(&mut run).await?.into()
+						let mut tx = txn.lock().await;
+						let mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Traversal).await?;
+						mt.statistics(&mut tx).await?.into()
 					}
 					_ => {
 						return Err(Error::FeatureNotYetImplemented {

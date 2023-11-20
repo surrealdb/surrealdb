@@ -1146,39 +1146,44 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 
 #[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
-	let sql = "
+	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
+        DEFINE FUNCTION fn::stripHtml($html: string) {
+            RETURN string::replace($html, /<[^>]*>/, "");
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
 		INFO FOR DB;
-	";
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..4 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
 			tokens: {},
-			functions: {},
+			functions: {
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); }"
+			},
 			params: {},
 			scopes: {},
 			tables: {},
 			users: {},
-		}",
+		}"#,
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 

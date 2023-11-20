@@ -110,7 +110,7 @@ impl<'a> Document<'a> {
 			}
 		}
 		// Remove metadata fields on output
-		out.del(ctx, opt, txn, &*META).await?;
+		out.cut(&*META);
 		// Output result
 		Ok(out)
 	}

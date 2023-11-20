@@ -93,6 +93,7 @@ impl<'a> Processor<'a> {
 			match iterable {
 				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
+				Iterable::Defer(v) => self.process_defer(ctx, opt, txn, stm, v).await?,
 				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
@@ -151,6 +152,28 @@ impl<'a> Processor<'a> {
 			rid: Some(v),
 			doc_id: None,
 			val,
+		};
+		self.process(ctx, opt, txn, stm, pro).await?;
+		// Everything ok
+		Ok(())
+	}
+
+	async fn process_defer(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		v: Thing,
+	) -> Result<(), Error> {
+		// Check that the table exists
+		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		// Process the document record
+		let pro = Processed {
+			ir: None,
+			rid: Some(v),
+			doc_id: None,
+			val: Operable::Value(Value::None),
 		};
 		self.process(ctx, opt, txn, stm, pro).await?;
 		// Everything ok

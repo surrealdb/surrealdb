@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-rocksdb")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::error::KeyCategory;
 use crate::kvs::Check;
@@ -7,7 +9,10 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use futures::lock::Mutex;
-use rocksdb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
+use rocksdb::{
+	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
+	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -68,17 +73,57 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+		// Configure custom options
+		let mut opts = Options::default();
+		// Ensure we use fdatasync
+		opts.set_use_fsync(false);
+		// Only use warning log level
+		opts.set_log_level(LogLevel::Warn);
+		// Create database if missing
+		opts.create_if_missing(true);
+		// Create column families if missing
+		opts.create_missing_column_families(true);
+		// Set the datastore compaction style
+		opts.set_compaction_style(DBCompactionStyle::Level);
+		// Increase the background thread count
+		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
+		// Set the maximum number of write buffers
+		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
+		// Set the amount of data to build up in memory
+		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
+		// Set the target file size for compaction
+		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
+		// Set minimum number of write buffers to merge
+		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		// Use separate write thread queues
+		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
+		// Enable separation of keys and values
+		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
+		// Store 4KB values separate from keys
+		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set specific compression levels
+		opts.set_compression_per_level(&[
+			DBCompressionType::None,
+			DBCompressionType::None,
+			DBCompressionType::Lz4hc,
+			DBCompressionType::Lz4hc,
+			DBCompressionType::Lz4hc,
+		]);
+		// Create the datastore
 		Ok(Datastore {
-			db: Arc::pin(OptimisticTransactionDB::open_default(path)?),
+			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
 		})
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
-		// Activate the snapshot options
+		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
+		// Set the write options
+		let mut wo = WriteOptions::default();
+		wo.set_sync(false);
 		// Create a new transaction
-		let inner = self.db.transaction_opt(&WriteOptions::default(), &to);
+		let inner = self.db.transaction_opt(&wo, &to);
 		// The database reference must always outlive
 		// the transaction. If it doesn't then this
 		// is undefined behaviour. This unsafe block
@@ -93,6 +138,8 @@ impl Datastore {
 		};
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_async_io(true);
+		ro.fill_cache(true);
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
