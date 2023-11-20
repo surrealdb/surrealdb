@@ -8,8 +8,6 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::idx::trees::store::TreeStoreType;
-#[cfg(debug_assertions)]
-use crate::key::debug;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
@@ -290,10 +288,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -544,7 +542,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -651,14 +649,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(
-			"Scan {:?} - {:?}",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -794,7 +788,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
