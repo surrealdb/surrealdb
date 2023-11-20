@@ -29,7 +29,7 @@ async fn handler(
 	ws
 		// Set the maximum frame size
 		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
-		// Set the maximum message size to 256mb
+		// Set the maximum message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Set the potential WebSocket protocol formats
 		.protocols(["surrealql-binary", "json", "cbor", "messagepack"])
