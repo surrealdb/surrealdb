@@ -1,5 +1,7 @@
-use crate::syn::lexer::{CharError, Lexer};
-use crate::syn::token::{t, Token};
+use crate::syn::v2::{
+	lexer::{CharError, Lexer},
+	token::{t, Token},
+};
 
 use super::Error;
 

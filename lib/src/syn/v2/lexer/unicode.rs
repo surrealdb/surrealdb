@@ -46,23 +46,23 @@ pub mod byte {
 }
 
 pub trait U8Ext {
-	fn is_identifier_start(self) -> bool;
+	fn is_identifier_start(&self) -> bool;
 
-	fn is_number_start(self) -> bool;
+	fn is_number_start(&self) -> bool;
 
-	fn is_identifier_continue(self) -> bool;
+	fn is_identifier_continue(&self) -> bool;
 }
 
 impl U8Ext for u8 {
-	fn is_identifier_start(self) -> bool {
+	fn is_identifier_start(&self) -> bool {
 		matches!(self, b'a'..=b'z' | b'A'..=b'Z' | b'_')
 	}
 
-	fn is_identifier_continue(self) -> bool {
+	fn is_identifier_continue(&self) -> bool {
 		matches!(self, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
 	}
 
-	fn is_number_start(self) -> bool {
+	fn is_number_start(&self) -> bool {
 		self.is_ascii_digit()
 	}
 }

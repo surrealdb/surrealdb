@@ -1,6 +1,6 @@
 use crate::{
 	sql,
-	syn::{
+	syn::v2::{
 		lexer::{Error as LexError, Lexer},
 		parser::mac::unexpected,
 		token::{t, Span, Token, TokenKind},

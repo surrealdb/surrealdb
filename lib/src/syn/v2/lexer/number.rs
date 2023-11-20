@@ -1,6 +1,6 @@
 use crate::sql::Number;
-use crate::syn::lexer::{unicode::U8Ext, Error as LexError, Lexer};
-use crate::syn::token::Token;
+use crate::syn::v2::lexer::{unicode::U8Ext, Error as LexError, Lexer};
+use crate::syn::v2::token::Token;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,8 +9,6 @@ pub enum Error {
 	InvalidSuffix,
 	#[error("expected atleast a single digit in the exponent")]
 	DigitExpectedExponent,
-	#[error("number overflows max allowed value")]
-	Overflow,
 }
 
 impl Lexer<'_> {

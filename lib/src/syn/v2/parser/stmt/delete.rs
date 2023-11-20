@@ -1,6 +1,6 @@
 use crate::{
 	sql::{statements::DeleteStatement, Values},
-	syn::{
+	syn::v2::{
 		parser::{ParseResult, Parser},
 		token::t,
 	},

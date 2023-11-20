@@ -1,10 +1,12 @@
+use std::ops::Bound;
+
 use crate::{
 	sql::{
-		Array, Dir, Duration, Id, Ident, Idiom, Mock, Param, Part, Strand, Subquery, Table, Thing,
+		Array, Dir, Id, Ident, Idiom, Mock, Param, Part, Range, Strand, Subquery, Table, Thing,
 		Value,
 	},
-	syn::{
-		parser::mac::{expected, to_do},
+	syn::v2::{
+		parser::mac::{expected, to_do, unexpected},
 		token::{t, Span, TokenKind},
 	},
 };
@@ -61,7 +63,7 @@ impl Parser<'_> {
 			_ => {
 				let table = self.parse_token_value::<Table>()?;
 				if self.peek_kind() == t!(":") {
-					return self.parse_thing_from_ident(table.0).map(Value::Thing);
+					return self.parse_thing_or_range(table.0);
 				}
 				Ok(Value::Table(table))
 			}
@@ -91,7 +93,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Duration => {
 				let index = u32::from(token.data_index.unwrap());
-				let duration = Duration(self.lexer.durations[index as usize]);
+				let duration = self.lexer.durations[index as usize];
 				Value::Duration(duration)
 			}
 			TokenKind::Number => {
@@ -140,7 +142,7 @@ impl Parser<'_> {
 			_ => {
 				let name: Ident = self.from_token(token)?;
 				if self.peek_kind() == t!(":") {
-					return self.parse_thing_from_ident(name.0).map(Value::Thing);
+					return self.parse_thing_or_range(name.0);
 				}
 
 				if self.table_as_field {
@@ -204,6 +206,60 @@ impl Parser<'_> {
 		}
 	}
 
+	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
+		expected!(self, ":");
+		let exclusive = self.eat(t!(">"));
+		let id = self.parse_id()?;
+		if self.eat(t!("..")) {
+			let inclusive = self.eat(t!("="));
+			let end = self.parse_id()?;
+			Ok(Value::Range(Box::new(Range {
+				tb: ident,
+				beg: if exclusive {
+					Bound::Excluded(id)
+				} else {
+					Bound::Included(id)
+				},
+				end: if inclusive {
+					Bound::Included(end)
+				} else {
+					Bound::Excluded(end)
+				},
+			})))
+		} else {
+			if exclusive {
+				unexpected!(self, self.peek_kind(), "the range operator '..'")
+			}
+			Ok(Value::Thing(Thing {
+				tb: ident,
+				id,
+			}))
+		}
+	}
+
+	pub fn parse_range(&mut self) -> ParseResult<Range> {
+		let tb = self.parse_token_value::<Ident>()?.0;
+		expected!(self, ":");
+		let exclusive = self.eat(t!(">"));
+		let id = self.parse_id()?;
+		expected!(self, "..");
+		let inclusive = self.eat(t!("="));
+		let end = self.parse_id()?;
+		Ok(Range {
+			tb,
+			beg: if exclusive {
+				Bound::Excluded(id)
+			} else {
+				Bound::Included(id)
+			},
+			end: if inclusive {
+				Bound::Included(end)
+			} else {
+				Bound::Excluded(end)
+			},
+		})
+	}
+
 	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
 		let ident = self.parse_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ident)
@@ -211,31 +267,35 @@ impl Parser<'_> {
 
 	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
 		expected!(self, ":");
-		let id = match self.peek_kind() {
-			t!("{") => {
-				let start = self.pop_peek().span;
-				let object = self.parse_object(start)?;
-				Id::Object(object)
-			}
-			t!("[") => {
-				let start = self.pop_peek().span;
-				let array = self.parse_array(start)?;
-				Id::Array(array)
-			}
-			// TODO: negative numbers.
-			TokenKind::Number => {
-				let number = self.parse_token_value::<u64>()?;
-				Id::Number(number as i64)
-			}
-			_ => {
-				let ident = self.parse_token_value::<Ident>()?.0;
-				Id::String(ident)
-			}
-		};
+		let id = self.parse_id()?;
 		Ok(Thing {
 			tb: ident,
 			id,
 		})
+	}
+
+	pub fn parse_id(&mut self) -> ParseResult<Id> {
+		match self.peek_kind() {
+			t!("{") => {
+				let start = self.pop_peek().span;
+				let object = self.parse_object(start)?;
+				Ok(Id::Object(object))
+			}
+			t!("[") => {
+				let start = self.pop_peek().span;
+				let array = self.parse_array(start)?;
+				Ok(Id::Array(array))
+			}
+			// TODO: negative numbers.
+			TokenKind::Number => {
+				let number = self.parse_token_value::<u64>()?;
+				Ok(Id::Number(number as i64))
+			}
+			_ => {
+				let ident = self.parse_token_value::<Ident>()?.0;
+				Ok(Id::String(ident))
+			}
+		}
 	}
 
 	pub fn parse_full_subquery(&mut self) -> ParseResult<Subquery> {

@@ -1,11 +1,9 @@
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
-
 use crate::{
 	sql::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
-		index::{Distance, MTreeParams, SearchParams},
+		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
@@ -29,8 +27,9 @@ use crate::{
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::parser::mac::test_parse,
+	syn::v2::parser::mac::test_parse,
 };
+use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
 #[test]
 pub fn parse_analyze() {
@@ -435,7 +434,8 @@ fn parse_define_index() {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
-				doc_ids_order: 7
+				doc_ids_order: 7,
+				vector_type: VectorType::F64,
 			}),
 			comment: None
 		}))

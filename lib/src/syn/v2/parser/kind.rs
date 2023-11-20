@@ -1,6 +1,6 @@
 use crate::{
 	sql::Kind,
-	syn::{
+	syn::v2::{
 		parser::mac::expected,
 		token::{t, Span, TokenKind},
 	},

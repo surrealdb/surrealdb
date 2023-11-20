@@ -1,7 +1,7 @@
 use unicase::UniCase;
 
-use crate::syn::lexer::{keywords::KEYWORDS, Error, Lexer};
-use crate::syn::token::{Token, TokenKind};
+use crate::syn::v2::lexer::{keywords::KEYWORDS, Error, Lexer};
+use crate::syn::v2::token::{Token, TokenKind};
 
 use super::unicode::{chars, U8Ext};
 

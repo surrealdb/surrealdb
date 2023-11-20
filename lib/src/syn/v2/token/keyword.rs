@@ -17,7 +17,7 @@ macro_rules! keyword {
 
 		macro_rules! keyword_t {
 			$(($value) => {
-				$crate::syn::token::Keyword::$name
+				$crate::syn::v2::token::Keyword::$name
 			};)*
 		}
 	};

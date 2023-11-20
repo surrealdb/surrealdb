@@ -1,6 +1,6 @@
 use crate::{
 	sql::{language::Language, Algorithm},
-	syn::token::{DistanceKind, GeometryName, Keyword, TokenKind},
+	syn::v2::token::{DistanceKind, GeometryName, Keyword, TokenKind},
 };
 use phf::phf_map;
 use unicase::UniCase;
@@ -265,7 +265,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("COSINE") => TokenKind::Distance(DistanceKind::Cosine),
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
-	UniCase::ascii("MAHALANOBIS") => TokenKind::Distance(DistanceKind::Mahalanobis),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 
 	// Geometry

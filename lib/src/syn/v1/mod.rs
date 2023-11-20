@@ -96,10 +96,6 @@ pub fn range(input: &str) -> Result<Range, Error> {
 }
 
 pub fn thing(input: &str) -> Result<Thing, Error> {
-	parse_impl(input, thing::thing)
-}
-
-pub fn thing_raw(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, thing::thing_raw)
 }
 

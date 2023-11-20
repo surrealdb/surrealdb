@@ -4,7 +4,7 @@ use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param, Uuid};
-use crate::syn::token::{t, TokenKind};
+use crate::syn::v2::token::{t, TokenKind};
 use crate::{
 	sql::{
 		statements::{
@@ -14,7 +14,7 @@ use crate::{
 		},
 		Expression, Operator, Statement, Statements, Value,
 	},
-	syn::parser::mac::unexpected,
+	syn::v2::parser::mac::unexpected,
 };
 
 use super::{mac::expected, ParseResult, Parser};

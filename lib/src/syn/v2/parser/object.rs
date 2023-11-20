@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
 	sql::{Block, Object, Value},
-	syn::{
+	syn::v2::{
 		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
 		token::{t, Span, TokenKind},
 	},

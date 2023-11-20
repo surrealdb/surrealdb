@@ -1,6 +1,6 @@
 use crate::{
 	sql::statements::IfelseStatement,
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

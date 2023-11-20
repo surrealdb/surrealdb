@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
 	sql::Datetime,
-	syn::token::{DataIndex, Token, TokenKind},
+	syn::v2::token::{DataIndex, Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
@@ -55,13 +55,18 @@ pub enum Error {
 }
 
 impl<'a> Lexer<'a> {
-	pub fn lex_date_time(&mut self, double: bool) -> Token {
-		match self.lex_date_time_err(double) {
-			Ok(x) => x,
+	pub fn lex_datetime(&mut self, double: bool) -> Token {
+		match self.lex_datetime_err(double) {
+			Ok(x) => {
+				let id: u32 = self.datetime.len().try_into().unwrap();
+				self.datetime.push(x);
+				self.finish_token(TokenKind::DateTime, Some(DataIndex::from(id)))
+			}
 			Err(e) => self.invalid_token(LexError::DateTime(e)),
 		}
 	}
-	pub fn lex_date_time_err(&mut self, double: bool) -> Result<Token, Error> {
+
+	pub fn lex_datetime_raw_err(&mut self) -> Result<Datetime, Error> {
 		let negative = match self.reader.peek() {
 			Some(b'+') => {
 				self.reader.next();
@@ -74,7 +79,7 @@ impl<'a> Lexer<'a> {
 			_ => false,
 		};
 
-		let mut year = self.lex_date_time_part(4, 0..=9999).map_err(Error::Year)? as i16;
+		let mut year = self.lex_datetime_part(4, 0..=9999).map_err(Error::Year)? as i16;
 		if negative {
 			year = -year;
 		}
@@ -83,28 +88,28 @@ impl<'a> Lexer<'a> {
 			return Err(Error::MissingSeparator(b'-'));
 		}
 
-		let month = self.lex_date_time_part(2, 1..=12).map_err(Error::Month)?;
+		let month = self.lex_datetime_part(2, 1..=12).map_err(Error::Month)?;
 		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
 		}
 
-		let day = self.lex_date_time_part(2, 1..=31).map_err(Error::Day)?;
+		let day = self.lex_datetime_part(2, 1..=31).map_err(Error::Day)?;
 		if !self.eat(b'T') {
 			return Err(Error::MissingSeparator(b'T'));
 		}
 
-		let hour = self.lex_date_time_part(2, 0..=24).map_err(Error::Hour)?;
+		let hour = self.lex_datetime_part(2, 0..=24).map_err(Error::Hour)?;
 		if !self.eat(b':') {
 			return Err(Error::MissingSeparator(b':'));
 		}
 
-		let minutes = self.lex_date_time_part(2, 0..=59).map_err(Error::Minute)?;
+		let minutes = self.lex_datetime_part(2, 0..=59).map_err(Error::Minute)?;
 
 		if !self.eat(b':') {
 			return Err(Error::MissingSeparator(b':'));
 		}
 
-		let seconds = self.lex_date_time_part(2, 0..=59).map_err(Error::Second)?;
+		let seconds = self.lex_datetime_part(2, 0..=59).map_err(Error::Second)?;
 
 		// nano seconds
 		let nano = if let Some(b'.') = self.reader.peek() {
@@ -148,12 +153,12 @@ impl<'a> Lexer<'a> {
 			Some(x @ (b'-' | b'+')) => {
 				self.reader.next();
 				let negative = x == b'-';
-				let hour = self.lex_date_time_part(2, 0..=24).map_err(Error::TimeZoneHour)? as i32;
+				let hour = self.lex_datetime_part(2, 0..=24).map_err(Error::TimeZoneHour)? as i32;
 				let Some(b':') = self.reader.next() else {
 					return Err(Error::MissingSeparator(b':'));
 				};
 				let minute =
-					self.lex_date_time_part(2, 0..=59).map_err(Error::TimeZoneMinute)? as i32;
+					self.lex_datetime_part(2, 0..=59).map_err(Error::TimeZoneMinute)? as i32;
 				let time = hour * 3600 + minute * 60;
 				if negative {
 					Some(-time)
@@ -163,16 +168,6 @@ impl<'a> Lexer<'a> {
 			}
 			_ => return Err(Error::MissingTimeZone),
 		};
-
-		let end_char = if double {
-			b'"'
-		} else {
-			b'\''
-		};
-
-		if !self.eat(end_char) {
-			return Err(Error::ExpectedEnd);
-		}
 
 		// calculate the given datetime from individual parts.
 		let Some(date) = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32) else {
@@ -203,17 +198,30 @@ impl<'a> Lexer<'a> {
 			.unwrap()
 			.with_timezone(&Utc);
 
-		let id = self.datetime.len() as u32;
-		let id = DataIndex::from(id);
-		self.datetime.push(Datetime(datetime));
-		Ok(self.finish_token(TokenKind::DateTime, Some(id)))
+		Ok(Datetime(datetime))
+	}
+
+	pub fn lex_datetime_err(&mut self, double: bool) -> Result<Datetime, Error> {
+		let datetime = self.lex_datetime_raw_err()?;
+
+		let end_char = if double {
+			b'"'
+		} else {
+			b'\''
+		};
+
+		if !self.eat(end_char) {
+			return Err(Error::ExpectedEnd);
+		}
+
+		Ok(datetime)
 	}
 
 	/// Lexes a digit part of date time.
 	///
 	/// This function eats an amount of digits and then checks if the valeu the digits represent
 	/// is within the given range.
-	pub fn lex_date_time_part(
+	pub fn lex_datetime_part(
 		&mut self,
 		mut amount: u8,
 		range: RangeInclusive<u16>,

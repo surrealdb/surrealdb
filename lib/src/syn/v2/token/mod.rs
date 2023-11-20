@@ -197,7 +197,6 @@ pub enum DistanceKind {
 	Manhattan,
 	Cosine,
 	Hamming,
-	Mahalanobis,
 	Minkowski,
 }
 
@@ -208,7 +207,6 @@ impl DistanceKind {
 			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Cosine => "COSINE",
 			DistanceKind::Hamming => "HAMMING",
-			DistanceKind::Mahalanobis => "MAHALANOBIS",
 			DistanceKind::Minkowski => "MINKOWSKI",
 		}
 	}

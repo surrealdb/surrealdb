@@ -1,6 +1,6 @@
 use crate::{
-	sql::{Datetime, Number, Regex, Uuid},
-	syn::token::{DataIndex, Span, Token, TokenKind},
+	sql::{Datetime, Duration, Number, Regex, Uuid},
+	syn::v2::token::{DataIndex, Span, Token, TokenKind},
 };
 
 mod byte;
@@ -19,7 +19,6 @@ mod test;
 mod uuid;
 
 pub use reader::{BytesReader, CharError};
-use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -189,7 +188,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	// Returns the span for the current token being lexed.
-	fn current_span(&self) -> Span {
+	pub fn current_span(&self) -> Span {
 		// We make sure that the source is no longer then u32::MAX so this can't overflow.
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - self.last_offset;
@@ -278,6 +277,24 @@ impl<'a> Lexer<'a> {
 			true
 		} else {
 			false
+		}
+	}
+
+	pub fn lex_only_datetime(&mut self) -> Result<Datetime, Error> {
+		self.lex_datetime_raw_err().map_err(Error::DateTime)
+	}
+
+	pub fn lex_only_duration(&mut self) -> Result<Duration, Error> {
+		match self.reader.next() {
+			Some(b'0'..=b'9') => {
+				while let Some(b'0'..=b'9') = self.reader.peek() {}
+				self.lex_duration_err().map_err(Error::Duration)
+			}
+			Some(x) => {
+				let char = self.reader.convert_to_char(x)?;
+				Err(Error::UnexpectedCharacter(char))
+			}
+			None => Err(Error::UnexpectedEof),
 		}
 	}
 }

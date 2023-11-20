@@ -1,3 +1,8 @@
+#[cfg(feature = "experimental_parser")]
+use super::v2::token::Span;
+#[cfg(feature = "experimental_parser")]
+use std::ops::Range;
+
 /// A human readable location inside a string.
 ///
 /// Locations are 1 indexed, the first character on the first line being on line 1 column 1.
@@ -40,6 +45,7 @@ impl Location {
 	#[cfg(feature = "experimental_parser")]
 	pub fn of_span_start(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
+
 		let offset = span.offset as usize;
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;

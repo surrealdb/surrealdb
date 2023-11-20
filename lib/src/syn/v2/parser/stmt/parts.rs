@@ -5,7 +5,7 @@ use crate::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Group,
 		Groups, Ident, Operator, Output, Permission, Permissions, Tables, Timeout, View,
 	},
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
@@ -309,7 +309,6 @@ impl Parser<'_> {
 				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Cosine => Distance::Cosine,
 				DistanceKind::Hamming => Distance::Hamming,
-				DistanceKind::Mahalanobis => Distance::Mahalanobis,
 				DistanceKind::Minkowski => {
 					let distance = self.parse_token_value()?;
 					Distance::Minkowski(distance)

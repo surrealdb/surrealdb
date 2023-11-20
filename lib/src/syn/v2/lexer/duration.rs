@@ -1,11 +1,12 @@
-use std::time::Duration;
+use std::time::Duration as StdDuration;
 use thiserror::Error;
 
 use crate::{
 	sql::duration::{
-		SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
+		Duration, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
+		SECONDS_PER_YEAR,
 	},
-	syn::token::{Token, TokenKind},
+	syn::v2::token::{DataIndex, Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
@@ -21,7 +22,11 @@ pub enum Error {
 impl<'a> Lexer<'a> {
 	pub fn lex_duration(&mut self) -> Token {
 		match self.lex_duration_err() {
-			Ok(x) => x,
+			Ok(x) => {
+				let data_index = DataIndex::from(u32::try_from(self.durations.len()).unwrap());
+				self.durations.push(x);
+				self.finish_token(TokenKind::Duration, Some(data_index))
+			}
 			Err(e) => self.invalid_token(LexError::Duration(e)),
 		}
 	}
@@ -31,8 +36,8 @@ impl<'a> Lexer<'a> {
 	/// Should only be called from lexing a number.
 	///
 	/// Expects any number but at least one numeric characters be pushed into scratch.
-	pub fn lex_duration_err(&mut self) -> Result<Token, Error> {
-		let mut duration = Duration::ZERO;
+	pub fn lex_duration_err(&mut self) -> Result<Duration, Error> {
+		let mut duration = StdDuration::ZERO;
 
 		let mut current_value = 0u64;
 		// use the existing eat span to generate the current value.
@@ -60,9 +65,9 @@ impl<'a> Lexer<'a> {
 					};
 
 					if x == b'n' {
-						Duration::from_nanos(current_value)
+						StdDuration::from_nanos(current_value)
 					} else {
-						Duration::from_micros(current_value)
+						StdDuration::from_micros(current_value)
 					}
 				}
 				// Starting byte of 'µ'
@@ -78,7 +83,7 @@ impl<'a> Lexer<'a> {
 						return Err(Error::InvalidSuffix);
 					}
 
-					Duration::from_micros(current_value)
+					StdDuration::from_micros(current_value)
 				}
 				b'm' => {
 					self.reader.next();
@@ -86,12 +91,12 @@ impl<'a> Lexer<'a> {
 					let is_milli = self.eat(b's');
 
 					if is_milli {
-						Duration::from_millis(current_value)
+						StdDuration::from_millis(current_value)
 					} else {
 						let Some(number) = current_value.checked_mul(SECONDS_PER_MINUTE) else {
 							return Err(Error::Overflow);
 						};
-						Duration::from_secs(number)
+						StdDuration::from_secs(number)
 					}
 				}
 				x @ (b's' | b'h' | b'd' | b'w' | b'y') => {
@@ -99,16 +104,18 @@ impl<'a> Lexer<'a> {
 					// second, hour, day, week or year.
 
 					let new_duration = match x {
-						b's' => Some(Duration::from_secs(current_value)),
+						b's' => Some(StdDuration::from_secs(current_value)),
 						b'h' => {
-							current_value.checked_mul(SECONDS_PER_HOUR).map(Duration::from_secs)
+							current_value.checked_mul(SECONDS_PER_HOUR).map(StdDuration::from_secs)
 						}
-						b'd' => current_value.checked_mul(SECONDS_PER_DAY).map(Duration::from_secs),
+						b'd' => {
+							current_value.checked_mul(SECONDS_PER_DAY).map(StdDuration::from_secs)
+						}
 						b'w' => {
-							current_value.checked_mul(SECONDS_PER_WEEK).map(Duration::from_secs)
+							current_value.checked_mul(SECONDS_PER_WEEK).map(StdDuration::from_secs)
 						}
 						b'y' => {
-							current_value.checked_mul(SECONDS_PER_YEAR).map(Duration::from_secs)
+							current_value.checked_mul(SECONDS_PER_YEAR).map(StdDuration::from_secs)
 						}
 						_ => unreachable!(),
 					};
@@ -131,13 +138,7 @@ impl<'a> Lexer<'a> {
 				// suffix is invalid.
 				Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => return Err(Error::InvalidSuffix),
 				Some(b'0'..=b'9') => {} // Duration continues.
-				_ => {
-					// Duration done.
-					let index = (self.durations.len() as u32).into();
-					self.durations.push(duration);
-					self.scratch.clear();
-					return Ok(self.finish_token(TokenKind::Duration, Some(index)));
-				}
+				_ => return Ok(Duration(duration)),
 			}
 
 			current_value = 0;

@@ -17,7 +17,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
+default = ["protocol-ws", "rustls", "experimental_parser"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
@@ -118,7 +118,7 @@ trice = "0.3.1"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.4.0"
 phf = { version = "0.11.2", features = ["macros", "unicase"], optional=true }
-unicase = { version = "2.7.0", optional=true }
+unicase = { version = "2.7.0", optional = true }
 
 [dev-dependencies]
 criterion = { version="0.4", features= ["async_tokio"] }

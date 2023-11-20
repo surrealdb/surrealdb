@@ -1,7 +1,10 @@
-use crate::{
-	sql::error::{Location, RenderedError, Snippet},
-	syn::lexer::Error as LexError,
-	syn::token::{Span, TokenKind},
+use crate::syn::{
+	common::Location,
+	error::{RenderedError, Snippet},
+	v2::{
+		lexer::Error as LexError,
+		token::{Span, TokenKind},
+	},
 };
 
 #[derive(Debug)]

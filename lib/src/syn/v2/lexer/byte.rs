@@ -1,10 +1,9 @@
-use crate::syn::token::{t, Token};
-use crate::syn::{
+use crate::syn::v2::{
 	lexer::{
 		unicode::{byte, chars},
 		Error, Lexer,
 	},
-	token::TokenKind,
+	token::{t, Token, TokenKind},
 };
 
 impl<'a> Lexer<'a> {
@@ -318,11 +317,11 @@ impl<'a> Lexer<'a> {
 				match self.reader.peek() {
 					Some(b'"') => {
 						self.reader.next();
-						return self.lex_date_time(true);
+						return self.lex_datetime(true);
 					}
 					Some(b'\'') => {
 						self.reader.next();
-						return self.lex_date_time(false);
+						return self.lex_datetime(false);
 					}
 					_ => {}
 				}

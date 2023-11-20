@@ -2,17 +2,17 @@
 macro_rules! unexpected {
 	($parser:expr, $found:expr, $expected:expr) => {
 		match $found {
-			$crate::syn::token::TokenKind::Invalid => {
+			$crate::syn::v2::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+				return Err($crate::syn::v2::parser::ParseError::new(
+					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
 					$parser.last_span(),
 				));
 			}
-			$crate::syn::token::TokenKind::Eof => {
+			$crate::syn::v2::token::TokenKind::Eof => {
 				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+				return Err($crate::syn::v2::parser::ParseError::new(
+					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					},
 					$parser.last_span(),
@@ -20,8 +20,8 @@ macro_rules! unexpected {
 			}
 			x => {
 				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::Unexpected {
+				return Err($crate::syn::v2::parser::ParseError::new(
+					$crate::syn::v2::parser::ParseErrorKind::Unexpected {
 						found: x,
 						expected,
 					},
@@ -38,27 +38,27 @@ macro_rules! expected {
 		let token = $parser.next();
 		match token.kind {
 			t!($kind) => token,
-			$crate::syn::parser::TokenKind::Invalid => {
+			$crate::syn::v2::parser::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+				return Err($crate::syn::v2::parser::ParseError::new(
+					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
 					$parser.last_span(),
 				));
 			}
 			x => {
 				let expected = $kind;
-				let kind = if let $crate::syn::token::TokenKind::Eof = x {
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+				let kind = if let $crate::syn::v2::token::TokenKind::Eof = x {
+					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					}
 				} else {
-					$crate::syn::parser::ParseErrorKind::Unexpected {
+					$crate::syn::v2::parser::ParseErrorKind::Unexpected {
 						found: x,
 						expected,
 					}
 				};
 
-				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
+				return Err($crate::syn::v2::parser::ParseError::new(kind, $parser.last_span()));
 			}
 		}
 	}};
@@ -67,8 +67,8 @@ macro_rules! expected {
 /// A macro for indicating a path in the parser which is not yet implemented.
 macro_rules! to_do {
 	($parser:expr) => {
-		return Err($crate::syn::parser::ParseError::new(
-			$crate::syn::parser::ParseErrorKind::Todo,
+		return Err($crate::syn::v2::parser::ParseError::new(
+			$crate::syn::v2::parser::ParseErrorKind::Todo,
 			$parser.last_span(),
 		))
 	};
@@ -77,7 +77,7 @@ macro_rules! to_do {
 #[cfg(test)]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
-		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
+		let mut parser = $crate::syn::v2::parser::Parser::new($t.as_bytes());
 		parser.$func($($($e),*)*)
 	}};
 }

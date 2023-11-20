@@ -1,6 +1,6 @@
 use crate::{
 	sql::{statements::InsertStatement, Data, Ident, Param, Value},
-	syn::{
+	syn::v2::{
 		parser::{mac::expected, ParseResult, Parser},
 		token::t,
 	},

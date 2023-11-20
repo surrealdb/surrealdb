@@ -3,7 +3,7 @@ use crate::{
 		language::Language, Datetime, Dir, Duration, Ident, Number, Param, Regex, Strand, Table,
 		Uuid,
 	},
-	syn::{
+	syn::v2::{
 		parser::mac::{to_do, unexpected},
 		token::{t, Token, TokenKind},
 	},
@@ -273,7 +273,7 @@ impl TokenValue for Duration {
 		};
 		let index = u32::from(token.data_index.unwrap());
 		let duration = parser.lexer.durations[index as usize];
-		Ok(Duration(duration))
+		Ok(duration)
 	}
 }
 

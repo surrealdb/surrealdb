@@ -3,7 +3,7 @@ use crate::{
 		statements::SelectStatement, Explain, Ident, Idioms, Limit, Order, Orders, Split, Splits,
 		Start, Values, Version, With,
 	},
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

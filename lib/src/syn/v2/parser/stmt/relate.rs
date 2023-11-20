@@ -1,6 +1,6 @@
 use crate::{
 	sql::{statements::RelateStatement, Subquery, Value},
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
@@ -74,7 +74,8 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let res = self.parse_inner_subquery(Some(span)).map(|x| Value::Subquery(Box::new(x)))?;
+				let res =
+					self.parse_inner_subquery(Some(span)).map(|x| Value::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
 			_ => self.parse_thing().map(Value::Thing),

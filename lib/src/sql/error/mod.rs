@@ -14,7 +14,7 @@ mod render;
 pub use render::*;
 
 #[cfg(feature = "experimental_parser")]
-use crate::syn::token::Span;
+use crate::syn::v2::token::Span;
 #[cfg(feature = "experimental_parser")]
 use std::ops::Range;
 

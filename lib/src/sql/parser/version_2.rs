@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::{subquery::Subquery, Idiom, Query, Thing, Value};
-use crate::syn::parser::Parser;
+use crate::syn::v2::parser::Parser;
 
 pub fn parse(input: &str) -> Result<Query, Error> {
 	let mut parser = Parser::new(input.as_bytes());

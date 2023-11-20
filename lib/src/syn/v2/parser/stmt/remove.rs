@@ -8,7 +8,7 @@ use crate::{
 		},
 		Param,
 	},
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

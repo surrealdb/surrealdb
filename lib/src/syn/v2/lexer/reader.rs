@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::syn::token::Span;
+use crate::syn::v2::token::Span;
 use std::{fmt, marker::PhantomData, ptr::NonNull};
 
 #[derive(Error, Debug)]
@@ -152,6 +152,13 @@ impl<'a> BytesReader<'a> {
 		}
 
 		Ok(byte & CONTINUE_BYTE_MASK)
+	}
+
+	pub fn convert_to_char(&mut self, start: u8) -> Result<char, CharError> {
+		if start.is_ascii() {
+			return Ok(start as char);
+		}
+		self.complete_char(start)
 	}
 
 	pub fn complete_char(&mut self, start: u8) -> Result<char, CharError> {

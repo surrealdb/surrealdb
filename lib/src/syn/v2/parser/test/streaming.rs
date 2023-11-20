@@ -1,11 +1,9 @@
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
-
 use crate::{
 	sql::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
-		index::{Distance, MTreeParams, SearchParams},
+		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
@@ -25,8 +23,9 @@ use crate::{
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::parser::{Parser, PartialResult},
+	syn::v2::parser::{Parser, PartialResult},
 };
+use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
 static SOURCE: &str = r#"
 	ANALYZE INDEX a on b;
@@ -307,6 +306,7 @@ fn statements() -> Vec<Statement> {
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
+				vector_type: VectorType::F64,
 			}),
 			comment: None,
 		})),

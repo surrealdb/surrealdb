@@ -1,8 +1,7 @@
 use crate::{
-	idx::ft::analyzer::Analyzers,
 	sql::{
 		filter::Filter,
-		index::Distance,
+		index::{Distance, VectorType},
 		statements::{
 			DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
 			DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
@@ -12,7 +11,7 @@ use crate::{
 		tokenizer::Tokenizer,
 		Ident, Idioms, Index, Param, Scoring, Strand, Values,
 	},
-	syn::{
+	syn::v2::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
@@ -474,7 +473,7 @@ impl Parser<'_> {
 					let hl = self.eat(t!("HIGHLIGHTS"));
 
 					res.index = Index::Search(crate::sql::index::SearchParams {
-						az: analyzer.unwrap_or_else(|| Ident::from(Analyzers::LIKE)),
+						az: analyzer.unwrap_or_else(|| Ident::from("like")),
 						sc: scoring,
 						hl,
 						doc_ids_order,
@@ -505,6 +504,7 @@ impl Parser<'_> {
 						distance,
 						capacity,
 						doc_ids_order,
+						vector_type: VectorType::F64,
 					})
 				}
 				t!("COMMENT") => {

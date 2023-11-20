@@ -1,9 +1,9 @@
 //! This module defines the pratt parser for operators.
 
 use crate::sql::{Cast, Expression, Operator, Value};
-use crate::syn::parser::mac::expected;
-use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{t, TokenKind};
+use crate::syn::v2::parser::mac::expected;
+use crate::syn::v2::parser::{ParseResult, Parser};
+use crate::syn::v2::token::{t, TokenKind};
 
 use super::mac::unexpected;
 

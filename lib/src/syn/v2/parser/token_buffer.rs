@@ -1,4 +1,4 @@
-use crate::syn::token::Token;
+use crate::syn::v2::token::Token;
 
 pub struct TokenBuffer<const S: usize> {
 	buffer: [Token; S],

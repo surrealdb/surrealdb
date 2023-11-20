@@ -47,7 +47,9 @@ impl Expression {
 			r,
 		}
 	}
+
 	/// Augment an existing expression
+	#[cfg(not(feature = "experimental_parser"))]
 	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
 		match &mut self {
 			Self::Binary {

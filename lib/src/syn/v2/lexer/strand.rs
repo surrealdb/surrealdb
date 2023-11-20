@@ -1,6 +1,6 @@
 //! Lexing of strand like characters.
 
-use crate::syn::token::{Token, TokenKind};
+use crate::syn::v2::token::{Token, TokenKind};
 
 use super::{unicode::chars, Error, Lexer};
 

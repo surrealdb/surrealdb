@@ -1,6 +1,6 @@
 use crate::{
 	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
-	syn::{
+	syn::v2::{
 		parser::mac::to_do,
 		token::{t, Span, TokenKind},
 	},
