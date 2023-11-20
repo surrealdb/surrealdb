@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::Instrument;
 use tracing::Span;
-use tracing_futures::Instrument;
 
 use surrealdb::dbs::Session;
 use tokio::task::JoinSet;
