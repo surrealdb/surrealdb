@@ -190,6 +190,10 @@ impl<'a> Statement<'a> {
 	pub fn limit(&self) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
+			Statement::Update(v) => v.limit.as_ref(),
+			Statement::Delete(v) => v.limit.as_ref(),
+			Statement::Relate(v) => v.limit.as_ref(),
+			Statement::Create(v) => v.limit.as_ref(),
 			_ => None,
 		}
 	}
