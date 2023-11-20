@@ -8,5 +8,7 @@ pub use v1::{
 	datetime, datetime_raw, duration, idiom, json, parse, range, subquery, thing, thing_raw, value,
 };
 
+mod v2;
+
 #[cfg(test)]
 pub mod test;
