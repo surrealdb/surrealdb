@@ -132,14 +132,8 @@ impl Id {
 		Self::String(Ulid::new().to_string())
 	}
 	/// Generate a new random UUID
-	#[cfg(uuid_unstable)]
 	pub fn uuid() -> Self {
 		Self::String(Uuid::new_v7().to_raw())
-	}
-	/// Generate a new random UUID
-	#[cfg(not(uuid_unstable))]
-	pub fn uuid() -> Self {
-		Self::String(Uuid::new_v4().to_raw())
 	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {

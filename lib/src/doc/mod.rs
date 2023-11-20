@@ -28,7 +28,6 @@ mod edges; // Attempts to store the edge data for this document
 mod empty; // Checks whether the specified document actually exists
 mod erase; // Removes all content and field data for this document
 mod event; // Processes any table events relevant for this document
-mod exist; // Checks whether the specified document actually exists
 mod field; // Processes any schema-defined fields for this document
 mod index; // Attempts to store the index data for this document
 mod lives; // Processes any live queries relevant for this document

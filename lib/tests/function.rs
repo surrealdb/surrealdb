@@ -5,6 +5,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{Number, Value};
+use test_log::test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = new_ds().await?;
@@ -3297,6 +3298,120 @@ async fn function_string_ends_with() -> Result<(), Error> {
 	Ok(())
 }
 
+#[test(tokio::test)]
+async fn function_search_analyzer() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::stripHtml($html: string) {
+            RETURN string::replace($html, /<[^>]*>/, "");
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['This', 'is', 'a', 'sample', 'of', 'HTML']");
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::unsupportedFunction() {
+            RETURN 1;
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedFunction TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	match res.remove(0).result {
+		Err(Error::InvalidArguments {
+			name,
+			message,
+		}) => {
+			assert_eq!(&name, "fn::unsupportedFunction");
+			assert_eq!(&message, "The function expects 0 arguments.");
+		}
+		_ => panic!("Should have fail!"),
+	}
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
+            RETURN 1;
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedReturnedType TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	match res.remove(0).result {
+		Err(Error::InvalidFunction {
+			name,
+			message,
+		}) => {
+			assert_eq!(&name, "unsupportedReturnedType");
+			assert_eq!(&message, "The function should return a string.");
+		}
+		r => panic!("Unexpected result: {:?}", r),
+	}
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	match res.remove(0).result {
+		Err(Error::FcNotFound {
+			value,
+		}) => {
+			assert_eq!(&value, "doesNotExist");
+		}
+		r => panic!("Unexpected result: {:?}", r),
+	}
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_parse_is_alphanum() -> Result<(), Error> {
 	let sql = r#"
@@ -3661,6 +3776,49 @@ async fn function_string_lowercase() -> Result<(), Error> {
 	let val = Value::from("this is a test");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+// "<[^>]*>" , ""
+
+#[tokio::test]
+async fn function_string_replace_with_regex() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::replace('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>', /<[^>]*>/, "");
+		RETURN string::replace('<p>This one is already <strong>compiled!<strong></p>', /<[^>]*>/, "");
+"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This is a sample string with HTML tags.");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This one is already compiled!");
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_matches() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::matches("foo", /foo/);
+		RETURN string::matches("bar", /foo/);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
 	Ok(())
 }
 

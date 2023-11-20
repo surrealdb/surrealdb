@@ -41,7 +41,7 @@ pub static RPC_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
-	vec![KeyValue::new("rpc.system", "jsonrpc"), KeyValue::new("rpc.service", "surrealdb")]
+	vec![KeyValue::new("rpc.service", "surrealdb")]
 }
 
 /// Registers the callback that increases the number of active RPC connections.

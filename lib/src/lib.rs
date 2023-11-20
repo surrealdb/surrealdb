@@ -157,7 +157,8 @@ pub use api::Surreal;
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use channel::bounded as new;
+	pub use channel::bounded;
+	pub use channel::unbounded;
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }

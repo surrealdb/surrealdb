@@ -561,7 +561,7 @@ async fn router(
 		Method::Export => {
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			let (tx, rx) = crate::channel::new(1);
+			let (tx, rx) = crate::channel::bounded(1);
 
 			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {

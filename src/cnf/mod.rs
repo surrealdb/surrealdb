@@ -25,13 +25,36 @@ pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
 #[cfg(feature = "has-storage")]
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
-/// How many concurrent tasks can be handled in a WebSocket
-#[cfg(feature = "has-storage")]
-pub const MAX_CONCURRENT_CALLS: usize = 24;
-
 /// Specifies the frequency with which ping messages should be sent to the client
 #[cfg(feature = "has-storage")]
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
+
+/// Set the maximum WebSocket frame size to 16mb
+#[cfg(feature = "has-storage")]
+pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
+	let default = 16 << 20;
+	std::env::var("SURREAL_WEBSOCKET_MAX_FRAME_SIZE")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
+/// Set the maximum WebSocket frame size to 128mb
+#[cfg(feature = "has-storage")]
+pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
+	let default = 128 << 20;
+	std::env::var("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
+/// How many concurrent tasks can be handled in a WebSocket
+#[cfg(feature = "has-storage")]
+pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
+	let default = 24;
+	std::env::var("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
 
 /// The version identifier of this build
 pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {

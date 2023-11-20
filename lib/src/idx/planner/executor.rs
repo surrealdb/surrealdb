@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
@@ -58,12 +59,12 @@ impl IteratorEntry {
 }
 impl QueryExecutor {
 	pub(super) async fn new(
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
 	) -> Result<Self, Error> {
-		let mut run = txn.lock().await;
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
@@ -80,15 +81,15 @@ impl QueryExecutor {
 						let mut ft_entry = None;
 						if let Some(ft) = ft_map.get(&ix_ref) {
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(&mut run, ft, io).await?;
+								ft_entry = FtEntry::new(ctx, opt, txn, ft, io).await?;
 							}
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
-							let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
 							let ft =
-								FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
+								FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Read)
+									.await?;
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(&mut run, &ft, io).await?;
+								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
 							}
 							ft_map.insert(ix_ref, ft);
 						}
@@ -105,13 +106,14 @@ impl QueryExecutor {
 					}
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
+							let mut tx = txn.lock().await;
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut run, mt, a.clone(), *k).await?
+								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let mt =
-									MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Read).await?;
-								let entry = MtEntry::new(&mut run, &mt, a.clone(), *k).await?;
+									MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Read).await?;
+								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry
 							};
@@ -437,13 +439,16 @@ struct Inner {
 
 impl FtEntry {
 	async fn new(
-		tx: &mut kvs::Transaction,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
-			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
+			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let mut tx = txn.lock().await;
+			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
