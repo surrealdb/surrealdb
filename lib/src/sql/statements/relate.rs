@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct RelateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
@@ -18,6 +18,7 @@ pub struct RelateStatement {
 	pub with: Value,
 	pub uniq: bool,
 	pub data: Option<Data>,
+	#[revision(start = 3)]
 	pub limit: Option<Limit>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
