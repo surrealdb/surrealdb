@@ -1,4 +1,4 @@
-use crate::cnf::{SERVER_NAME, INSECURE_FORWARD_SCOPE_ERRORS};
+use crate::cnf::{INSECURE_FORWARD_SCOPE_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
