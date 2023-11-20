@@ -48,7 +48,7 @@ pub enum Distance {
 	#[default]
 	Euclidean,
 	Manhattan,
-	Cosine,
+	Angular,
 	Hamming,
 	Minkowski(Number),
 }
@@ -58,7 +58,7 @@ impl Display for Distance {
 		match self {
 			Self::Euclidean => f.write_str("EUCLIDEAN"),
 			Self::Manhattan => f.write_str("MANHATTAN"),
-			Self::Cosine => f.write_str("COSINE"),
+			Self::Angular => f.write_str("ANGULAR"),
 			Self::Hamming => f.write_str("HAMMING"),
 			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
 		}
@@ -74,7 +74,6 @@ pub enum VectorType {
 	I64,
 	I32,
 	I16,
-	I8,
 }
 
 impl Display for VectorType {
@@ -85,7 +84,6 @@ impl Display for VectorType {
 			Self::I64 => f.write_str("I64"),
 			Self::I32 => f.write_str("I32"),
 			Self::I16 => f.write_str("I16"),
-			Self::I8 => f.write_str("I8"),
 		}
 	}
 }

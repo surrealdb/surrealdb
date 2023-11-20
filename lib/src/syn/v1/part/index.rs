@@ -118,7 +118,6 @@ pub fn vector_type(i: &str) -> IResult<&str, VectorType> {
 		map(tag_no_case("I64"), |_| VectorType::I64),
 		map(tag_no_case("I32"), |_| VectorType::I32),
 		map(tag_no_case("I16"), |_| VectorType::I16),
-		map(tag_no_case("I8"), |_| VectorType::I8),
 	))(i)
 }
 
