@@ -228,7 +228,8 @@ jobs:
         shell: bash
         run: |
           # Replace the crate name
-          sed -i "0,/surrealdb/s/surrealdb/surrealdb-nightly/" lib/Cargo.toml
+          # We are just going to replace the first occurance of surrealdb
+          sed -i "0,/surrealdb/s//surrealdb-nightly/" lib/Cargo.toml
 
           # Get the date and time of the last commit
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
@@ -249,7 +250,6 @@ jobs:
           # some git commands `release-plz` runs do not work in detached state.
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add release-plz.toml
           git commit -am 'Prepare nightly release'
           git checkout -b nightly
 
