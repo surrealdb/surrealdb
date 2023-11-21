@@ -20,10 +20,10 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		let ns: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
-		let db: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
-		headers.insert("NS", ns.clone());
-		headers.insert("DB", db.clone());
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -96,7 +96,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_NS, &ns)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR ROOT")
 				.send()
@@ -115,7 +115,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_NS, &ns)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR NS")
 				.send()
@@ -129,7 +129,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_NS, &ns)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
@@ -143,8 +143,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
-				.header(&AUTH_DB, db.clone())
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR ROOT")
 				.send()
@@ -163,8 +163,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
-				.header(&AUTH_DB, db.clone())
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR NS")
 				.send()
@@ -183,8 +183,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, ns.clone())
-				.header(&AUTH_DB, db.clone())
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
@@ -198,7 +198,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_DB, db.clone())
+				.header(&AUTH_DB, &db)
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
@@ -216,10 +216,10 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		let ns: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
-		let db: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
-		headers.insert("NS", ns.clone());
-		headers.insert("DB", db.clone());
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
