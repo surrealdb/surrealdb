@@ -93,85 +93,86 @@ impl Model {
 	/// This function computes the result of an ML model from the args passed from the SQL statement.
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn compute(
-	// pub(crate) async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 		_doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
+		return Ok(Value::Number(Number::Float(45.6)))
 
 		// get the value from the key value store to get the hash
 		// Get the datastore reference
 		// let ds = Datastore::new("file://ml_cache.db").await?;
-		println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
+		// println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
 
-		match &self.args[0] {
-			// performing a buffered compute => would be good to extract this into it's own function but can't import Object
-			Value::Object(values) => {
-				let mut map = HashMap::new();
-				for key in values.keys() {
-					match values.get(key).unwrap() {
-						Value::Number(number) => {
-							map.insert(key.to_string(), Self::unpack_number(number));
-						},
-						_ => {
-							return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
-							// panic!("not a number for {} field", key);
-						}
-					}
-				}
-				let response: String;
-				{
-					let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-					let id = format!("{}-{}", self.name, self.version);
-					response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
-				}
-				// get the local file bytes from the object storage
-				let file_bytes = get_local_file(response).await.unwrap();
-				let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
-				let compute_unit = ModelComputation {
-					surml_file: &mut file,
-				};
-				let outcome = compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))?;
-				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-			},
-			// performing a raw compute  
-			Value::Number(_) => {
-				let mut buffer = Vec::new();
-				for i in self.args.iter() {
-					match i {
-						Value::Number(number) => {
-							buffer.push(Self::unpack_number(number));
-						},
-						_ => {
-							println!("Not a number");
-						}
-					}
-				}
-				let response: String;
-				{
-					let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-					let id = format!("{}-{}", self.name, self.version);
-					response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
-				}
-				// get the local file bytes from the object storage
-				let file_bytes = get_local_file(response).await.unwrap();
-				let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
-				let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
-				let compute_unit = ModelComputation {
-					surml_file: &mut surml_file,
-				};
-				let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
-				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-			},
-			_ => {
-				return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
-			}
-		}
+		// match &self.args[0] {
+		// 	// performing a buffered compute => would be good to extract this into it's own function but can't import Object
+		// 	Value::Object(values) => {
+		// 		let mut map = HashMap::new();
+		// 		for key in values.keys() {
+		// 			match values.get(key).unwrap() {
+		// 				Value::Number(number) => {
+		// 					map.insert(key.to_string(), Self::unpack_number(number));
+		// 				},
+		// 				_ => {
+		// 					return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
+		// 					// panic!("not a number for {} field", key);
+		// 				}
+		// 			}
+		// 		}
+		// 		let response: String;
+		// 		{
+		// 			let ds = Datastore::new("file://ml_cache.db").await.unwrap();
+		// 			let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+		// 			let id = format!("{}-{}", self.name, self.version);
+		// 			response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
+		// 		}
+		// 		// get the local file bytes from the object storage
+		// 		let file_bytes = get_local_file(response).await.unwrap();
+		// 		let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
+		// 		let compute_unit = ModelComputation {
+		// 			surml_file: &mut file,
+		// 		};
+		// 		let outcome = compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))?;
+		// 		return Ok(Value::Number(Number::Float(outcome[0] as f64)))
+		// 	},
+		// 	// performing a raw compute  
+		// 	Value::Number(_) => {
+		// 		let mut buffer = Vec::new();
+		// 		for i in self.args.iter() {
+		// 			match i {
+		// 				Value::Number(number) => {
+		// 					buffer.push(Self::unpack_number(number));
+		// 				},
+		// 				_ => {
+		// 					println!("Not a number");
+		// 				}
+		// 			}
+		// 		}
+		// 		let response: String;
+		// 		{
+		// 			let ds = Datastore::new("file://ml_cache.db").await.unwrap();
+		// 			let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+		// 			let id = format!("{}-{}", self.name, self.version);
+		// 			response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
+		// 		}
+		// 		// get the local file bytes from the object storage
+		// 		let file_bytes = get_local_file(response).await.unwrap();
+		// 		let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
+		// 		let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
+		// 		let compute_unit = ModelComputation {
+		// 			surml_file: &mut surml_file,
+		// 		};
+		// 		let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
+		// 		return Ok(Value::Number(Number::Float(outcome[0] as f64)))
+		// 	},
+		// 	_ => {
+		// 		return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
+		// 	}
+		// }
 		// offer the raw compute and buffered copmute
 		// array/object otherwise an error
 		// key which involved the {name}{version}{hash}
