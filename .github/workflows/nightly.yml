@@ -236,8 +236,9 @@ jobs:
           time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
 
           # Update the version to a nightly one
-          # This sets the nightly version to something like `1.20231117.130416`
-          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.${time}\"#" lib/Cargo.toml
+          # This sets the nightly version to something like `1.20231117.1130416`
+          # The 1 at the beginning of the patch number is just so it never starts with zero
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
 
           # Get the short commit
           shortRev=$(git rev-parse --short HEAD)
