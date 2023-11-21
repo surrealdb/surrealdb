@@ -177,6 +177,10 @@ pub mod is {
 		Ok(matches!(arg, Value::Geometry(Geometry::Line(_))).into())
 	}
 
+	pub fn none((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_none().into())
+	}
+
 	pub fn null((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_null().into())
 	}
