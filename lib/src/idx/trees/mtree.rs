@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
-use std::f64::consts::PI;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -228,6 +227,7 @@ impl KnnResultBuilder {
 
 		#[cfg(debug_assertions)]
 		debug!("KnnResult add - dist: {} - docs: {:?} - total: {}", dist, docs, self.docs.len());
+		debug!("{:?}", self.priority_list);
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
@@ -243,24 +243,20 @@ impl KnnResultBuilder {
 	}
 
 	fn build(self, #[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>) -> KnnResult {
-		let mut objects = VecDeque::with_capacity(self.knn as usize);
+		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
 		#[cfg(debug_assertions)]
-		debug!(
-			"self.priority_list.len: {} - self.docs.len: {}",
-			self.priority_list.len(),
-			self.docs.len()
-		);
+		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
 		for (_, docs) in self.priority_list {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.iter().take(left as usize) {
-					objects.push_back(doc_id);
+					sorted_docs.push_back(doc_id);
 				}
 				break;
 			}
 			for doc_id in docs {
-				objects.push_back(doc_id);
+				sorted_docs.push_back(doc_id);
 			}
 			left -= dl;
 			// We don't expect anymore result, we can leave
@@ -268,8 +264,9 @@ impl KnnResultBuilder {
 				break;
 			}
 		}
+		debug!("sorted_docs: {:?}", sorted_docs);
 		KnnResult {
-			docs: objects,
+			docs: sorted_docs,
 			#[cfg(debug_assertions)]
 			visited_nodes,
 		}
@@ -335,6 +332,8 @@ impl MTree {
 					for (o, p) in n {
 						let d = self.calculate_distance(o, v)?;
 						if res.check_add(d) {
+							#[cfg(debug_assertions)]
+							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
 							res.add(d, &p.docs);
 						}
 					}
@@ -821,13 +820,8 @@ impl MTree {
 		let dist = match &self.distance {
 			Distance::Euclidean => v1.euclidean_distance(v2)?,
 			Distance::Manhattan => v1.manhattan_distance(v2)?,
-			Distance::Angular => {
-				let c = v1.cosine_similarity(v2)?;
-				debug!("COSINE({v1:?},{v2:?}) = {c}");
-				c.acos() / PI
-			}
-			Distance::Hamming => v1.hamming_distance(v2)?,
 			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
+			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
 		};
 		if dist.is_finite() {
 			Ok(dist)
@@ -1272,7 +1266,7 @@ struct PriorityNode(f64, NodeId);
 
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {
-		return self.0 == other.0 && self.1 == other.1;
+		self.0 == other.0 && self.1 == other.1
 	}
 }
 
@@ -1280,11 +1274,7 @@ impl Eq for PriorityNode {}
 
 impl PartialOrd<Self> for PriorityNode {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		let cmp = cmp_f64(&self.0, &other.0);
-		if cmp != Ordering::Equal {
-			return Some(cmp);
-		}
-		self.1.partial_cmp(&other.1)
+		Some(self.cmp(other))
 	}
 }
 
@@ -1298,10 +1288,22 @@ impl Ord for PriorityNode {
 	}
 }
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(Debug)]
 struct PriorityResult(f64);
 
 impl Eq for PriorityResult {}
+
+impl PartialEq<Self> for PriorityResult {
+	fn eq(&self, other: &Self) -> bool {
+		self.0 == other.0
+	}
+}
+
+impl PartialOrd<Self> for PriorityResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
 
 impl Ord for PriorityResult {
 	fn cmp(&self, other: &Self) -> Ordering {
@@ -1315,11 +1317,12 @@ fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
 	}
 	if f1.is_nan() {
 		if f2.is_nan() {
-			return Ordering::Equal;
+			Ordering::Equal
+		} else {
+			Ordering::Less
 		}
-		return Ordering::Less;
 	} else {
-		return Ordering::Greater;
+		Ordering::Greater
 	}
 }
 
@@ -2176,7 +2179,8 @@ mod tests {
 			for doc in res.docs {
 				let o = map.get(&doc).unwrap();
 				let d = t.calculate_distance(obj, o)?;
-				assert!(d >= dist, "d: {} - dist: {} - {:?} - {:?}", d, dist, obj, o);
+				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
+				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
 			}
 		}
@@ -2191,7 +2195,7 @@ mod tests {
 		check_full: bool,
 		check_delete: bool,
 	) -> Result<(), Error> {
-		for distance in [Distance::Angular /*Distance::Cosine,Distance::Hamming */] {
+		for distance in [Distance::Euclidean, Distance::Manhattan] {
 			for capacity in capacities {
 				info!(
 					"Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
@@ -2243,8 +2247,8 @@ mod tests {
 		) -> TestCollection {
 			info!("New unique collection: {collection_size}");
 			let mut collection = vec![];
-			for doc_id in 1..=collection_size as DocId {
-				collection.push((doc_id, new_vec(doc_id as i64, vector_type, dimension)));
+			for doc_id in 0..collection_size as DocId {
+				collection.push((doc_id, new_vec((doc_id + 1) as i64, vector_type, dimension)));
 			}
 			TestCollection::Unique(collection)
 		}
@@ -2273,15 +2277,14 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
-		for vt in [
-			/*VectorType::F64, VectorType::F32,*/
-			VectorType::I64, /*,VectorType::I32, VectorType::I16,*/
-		] {
-			for i in 3..4 {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for i in 0..30 {
 				test_mtree_collection(
-					&[3],
+					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 4),
+					TestCollection::new_unique(i, vt, 2),
 					true,
 					true,
 					true,
@@ -2333,7 +2336,7 @@ mod tests {
 				info!("test_mtree_random_xs {}", i);
 				// 10, 40
 				test_mtree_collection(
-					&[3],
+					&[3, 40],
 					vt,
 					TestCollection::new_random(i, vt, 1),
 					true,
@@ -2376,31 +2379,6 @@ mod tests {
 			.await?;
 		}
 		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn test_invalid_vector_distance() -> Result<(), Error> {
-		let ds = Datastore::new("memory").await?;
-		let mut t = MTree::new(MState::new(3), Distance::Angular);
-		let collection = TestCollection::new_unique(10, VectorType::F32, 2);
-		insert_collection_batch(&ds, &mut t, &collection).await?;
-
-		let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
-		let mut s = s.lock().await;
-		let o1 = Vector::F32(vec![0.0, 0.0]);
-		let r = t.insert(&mut tx, &mut s, o1.clone(), 2).await;
-		if let Err(Error::InvalidVectorDistance {
-			left,
-			dist,
-			..
-		}) = r
-		{
-			assert_eq!(dist, f64::NAN);
-			assert_eq!(left.as_ref(), &o1);
-			Ok(())
-		} else {
-			panic!("Unexpected result: {:?}", r);
-		}
 	}
 
 	fn check_leaf_vec(

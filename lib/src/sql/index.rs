@@ -48,7 +48,6 @@ pub enum Distance {
 	#[default]
 	Euclidean,
 	Manhattan,
-	Angular,
 	Hamming,
 	Minkowski(Number),
 }
@@ -58,7 +57,6 @@ impl Display for Distance {
 		match self {
 			Self::Euclidean => f.write_str("EUCLIDEAN"),
 			Self::Manhattan => f.write_str("MANHATTAN"),
-			Self::Angular => f.write_str("ANGULAR"),
 			Self::Hamming => f.write_str("HAMMING"),
 			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
 		}

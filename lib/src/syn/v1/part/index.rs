@@ -87,16 +87,13 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 	})(i)
 }
 
-pub fn distance(i: &str) -> IResult<&str, Distance> {
+pub fn mtree_distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("DIST")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
 		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
-		map(tag_no_case("COSINE"), |_| Distance::Manhattan),
-		map(tag_no_case("HAMMING"), |_| Distance::Manhattan),
-		map(tag_no_case("MAHALANOBIS"), |_| Distance::Manhattan),
 		minkowski,
 	))(i)
 }
@@ -142,7 +139,7 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = shouldbespace(i)?;
 	cut(|i| {
 		let (i, dimension) = dimension(i)?;
-		let (i, distance) = opt(distance)(i)?;
+		let (i, distance) = opt(mtree_distance)(i)?;
 		let (i, vector_type) = opt(vector_type)(i)?;
 		let (i, capacity) = opt(capacity)(i)?;
 		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;

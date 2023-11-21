@@ -3,6 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
+use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
@@ -219,7 +220,7 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("Error: Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
 	InvalidVectorDistance {
 		left: SharedVector,
 		right: SharedVector,
@@ -374,6 +375,9 @@ pub enum Error {
 	IxNotFound {
 		value: String,
 	},
+
+	#[error("Unsupported distance: {0}")]
+	UnsupportedDistance(Distance),
 
 	/// The requested root user does not exist
 	#[error("The root user '{value}' does not exist")]
