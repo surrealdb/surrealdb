@@ -274,10 +274,12 @@ mod cli_integration {
 		// Commands with credentials for different auth levels
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
 
 		info!("* Create users with identical credentials at ROOT, NS and DB levels");
 		{
-			let args = format!("sql --conn http://{addr} --db D5 --ns N5 {creds}");
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} {creds}");
 			let _ = common::run(&args)
 				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
@@ -289,9 +291,9 @@ mod cli_integration {
 		info!("* Pass root auth level and access root info");
 		{
 			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level root {creds}");
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR ROOT;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -303,9 +305,9 @@ mod cli_integration {
 		info!("* Pass root auth level and access namespace info");
 		{
 			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level root {creds}");
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR NS;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -317,9 +319,9 @@ mod cli_integration {
 		info!("* Pass root auth level and access database info");
 		{
 			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level root {creds}");
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR DB;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -330,10 +332,11 @@ mod cli_integration {
 
 		info!("* Pass namespace auth level and access root info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level namespace {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR ROOT;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -344,10 +347,11 @@ mod cli_integration {
 
 		info!("* Pass namespace auth level and access namespace info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level namespace {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR NS;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -358,10 +362,11 @@ mod cli_integration {
 
 		info!("* Pass namespace auth level and access database info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level namespace {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR DB;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -372,10 +377,11 @@ mod cli_integration {
 
 		info!("* Pass database auth level and access root info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level database {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR ROOT;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -386,10 +392,11 @@ mod cli_integration {
 
 		info!("* Pass database auth level and access namespace info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level database {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR NS;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -400,10 +407,11 @@ mod cli_integration {
 
 		info!("* Pass database auth level and access database info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db D5 --ns N5 --auth-level database {creds}");
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; INFO FOR DB;\n")
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -415,7 +423,9 @@ mod cli_integration {
 		info!("* Pass namespace auth level without specifying namespace");
 		{
 			let args = format!("sql --conn http://{addr} --auth-level database {creds}");
-			let output = common::run(&args).input("USE NS N5 DB D5; INFO FOR NS;\n").output();
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output();
 			assert!(
 				output
 					.clone()
@@ -428,8 +438,10 @@ mod cli_integration {
 
 		info!("* Pass database auth level without specifying database");
 		{
-			let args = format!("sql --conn http://{addr} --ns N5 --auth-level database {creds}");
-			let output = common::run(&args).input("USE NS N5 DB D5; INFO FOR DB;\n").output();
+			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output();
 			assert!(
 				output
 					.clone()

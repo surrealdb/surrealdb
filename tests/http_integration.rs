@@ -7,7 +7,7 @@ mod http_integration {
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
-	use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, NS};
+	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -20,8 +20,10 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		let ns: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
+		let db: reqwest::header::HeaderValue = Ulid::new().to_string().parse()?;
+		headers.insert("NS", ns.clone());
+		headers.insert("DB", db.clone());
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -94,7 +96,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
+				.header(&AUTH_NS, ns.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR ROOT")
 				.send()
@@ -113,7 +115,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
+				.header(&AUTH_NS, ns.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR NS")
 				.send()
@@ -127,7 +129,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
+				.header(&AUTH_NS, ns.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
@@ -141,8 +143,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
-				.header(&AUTH_DB, "D")
+				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_DB, db.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR ROOT")
 				.send()
@@ -161,8 +163,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
-				.header(&AUTH_DB, "D")
+				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_DB, db.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR NS")
 				.send()
@@ -181,8 +183,8 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_NS, "N")
-				.header(&AUTH_DB, "D")
+				.header(&AUTH_NS, ns.clone())
+				.header(&AUTH_DB, db.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
@@ -196,7 +198,7 @@ mod http_integration {
 		{
 			let res = client
 				.post(url)
-				.header(&AUTH_DB, "D")
+				.header(&AUTH_DB, db.clone())
 				.basic_auth(USER, Some(PASS))
 				.body("INFO FOR DB")
 				.send()
