@@ -2,6 +2,7 @@ name: Nightly release
 
 on:
   workflow_dispatch:
+  pull_request:
   schedule:
     - cron: '0 0 * * *'
 
@@ -12,6 +13,7 @@ defaults:
 jobs:
 
   test:
+    if: false
     name: Test
     runs-on: ubuntu-latest-16-cores
     steps:
@@ -70,6 +72,7 @@ jobs:
           retention-days: 5
 
   lint:
+    if: false
     name: Lint
     runs-on: ubuntu-latest-16-cores
     steps:
@@ -104,6 +107,7 @@ jobs:
         run: cargo make ci-clippy
 
   build:
+    if: false
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
     strategy:
@@ -207,7 +211,6 @@ jobs:
 
   crate:
     name: Publish surrealdb-nightly to crates.io
-    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
 
@@ -254,9 +257,10 @@ jobs:
           cargo install --force --locked --version 0.3.30 release-plz
 
           # Publish cargo crate
-          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml
+          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml --dry-run
 
   docker:
+    if: false
     name: Build and publish Docker image
     needs: [build]
     runs-on: ubuntu-latest
@@ -337,6 +341,7 @@ jobs:
           tags: surrealdb/surrealdb:${{ env.VERSION }}
 
   publish:
+    if: false
     name: Publish binaries for ${{ matrix.arch }}
     needs: [docker]
     strategy:
@@ -387,6 +392,7 @@ jobs:
           aws s3 cp --cache-control 'no-store' ${{ matrix.file }}.txt s3://download.surrealdb.com/nightly/
 
   package-macos:
+    if: false
     name: Package macOS universal binary
     needs: [publish]
     runs-on: macos-latest
@@ -422,6 +428,7 @@ jobs:
           aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/nightly/
 
   deploy:
+    if: false
     name: Deploy
     needs: [publish, package-macos]
     runs-on: ubuntu-latest
