@@ -228,7 +228,7 @@ jobs:
         shell: bash
         run: |
           # Replace the crate name
-          sed -i "0,name = \"surrealdb\"#s#name = \"surrealdb\"#name = \"surrealdb-nightly\"#" lib/Cargo.toml
+          sed -i "0,#name = \"surrealdb\"#s#name = \"surrealdb\"#name = \"surrealdb-nightly\"#" lib/Cargo.toml
 
           # Get the date and time of the last commit
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
