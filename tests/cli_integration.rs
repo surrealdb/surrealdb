@@ -272,7 +272,7 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn with_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
