@@ -141,10 +141,14 @@ impl From<&str> for EndpointKind {
 }
 
 impl EndpointKind {
-	pub fn is_local(&self) -> bool {
-		!matches!(
+	pub fn is_remote(&self) -> bool {
+		matches!(
 			self,
 			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
 		)
+	}
+
+	pub fn is_local(&self) -> bool {
+		!self.is_remote()
 	}
 }
