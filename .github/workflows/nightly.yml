@@ -258,7 +258,7 @@ jobs:
           cargo install --force --locked --version 0.3.30 release-plz
 
           # Publish cargo crate
-          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml --dry-run
+          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml
 
   docker:
     if: false
