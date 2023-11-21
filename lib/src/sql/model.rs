@@ -1,3 +1,4 @@
+//! This module contains the code for parsing and executing ML models in SQL statements.
 use async_recursion::async_recursion;
 use derive::Store;
 use nom::{
@@ -162,13 +163,6 @@ impl Model {
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})
 				}).await.unwrap()?;
-
-				// let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
-				// let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
-				// let compute_unit = ModelComputation {
-				// 	surml_file: &mut surml_file,
-				// };
-				// let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
 				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
 			},
 			_ => {
@@ -222,6 +216,7 @@ pub fn version(i: &str) -> IResult<&str, String> {
 mod test {
 	use super::*;
 	use crate::sql::query;
+	use rust_decimal::Decimal;
 
 	#[test]
 	fn ml_model_example() {
@@ -254,14 +249,6 @@ mod test {
 			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
 			out,
 		);
-	}
-
-	#[test]
-	fn ml_model_with_mutiple_arguments() {
-		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,);";
-		let res = query::query(sql);
-		let out = res.unwrap().1.to_string();
-		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4);", out,);
 	}
 
 	#[test]

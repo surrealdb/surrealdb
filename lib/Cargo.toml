@@ -121,8 +121,6 @@ object_store = "0.7.1"
 hex = "0.4.3"
 
 surrealml-core = "0.0.1"
-# surrealml = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
-# surrealml_utils = { git = "https://github.com/surrealdb/surrealml.git", branch = "onnx-integration", optional = true}
 ndarray = "0.15.6"
 
 [dev-dependencies]

@@ -1,6 +1,4 @@
 //! This file defines the endpoints for the ML API for uploading models and performing inference on the models for either raw tensors or buffered computes.
-use crate::dbs::DB;
-use crate::err::Error;
 use crate::net::output;
 use axum::extract::{DefaultBodyLimit, BodyStream};
 use axum::response::IntoResponse;
@@ -16,7 +14,6 @@ use serde_json::from_slice;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use surrealdb::dbs::Session;
-// use surrealdb::sql::{Part, Value};
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::TransactionType::{Write, Read};
 use surrealdb::kvs::LockType::Optimistic;
@@ -46,19 +43,11 @@ where
 		.route_layer(DefaultBodyLimit::disable())
 }
 
-/// The body for the import endpoint.
-///
-/// # Fields
-/// * `file` - The file containing all the information to store a model.
-#[derive(Deserialize)]
-struct Body {
-	pub file: Vec<u8>,
-}
 
 /// This endpoint allows the user to import the model into the database.
 async fn import(
-	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	Extension(_session): Extension<Session>,
+	_maybe_output: Option<TypedHeader<Accept>>,
 	mut stream: BodyStream
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	let mut buffer = Vec::new();
@@ -86,7 +75,7 @@ async fn import(
 	let ds = Datastore::new("file://ml_cache.db").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(id.clone(), file_hash).await.unwrap();
-	let outcome = tx.commit().await.unwrap();
+	let _ = tx.commit().await.unwrap();
 	Ok(output::json(&output::simplify(id)))
 }
 
@@ -105,15 +94,15 @@ pub struct RawComputeBody {
 
 /// This endpoint allows the user to compute the model with the given input of a raw tensor.
 async fn raw_compute(
-	Extension(session): Extension<Session>,
+	Extension(_session): Extension<Session>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// get the body
 	let body: RawComputeBody = from_slice(&body.to_vec()).expect("Failed to deserialize");
 	let response: String;
 	{
-		let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let ds = Datastore::new("file://ml_cache.db").await.map_err(|e| output::json::<String>(&e.to_string()))?;
+		let mut tx = ds.transaction(Read, Optimistic).await.map_err(|e| output::json::<String>(&e.to_string()))?;
 		response = String::from_utf8(tx.get(body.id).await.unwrap().unwrap()).unwrap();
 	}
 	// get the local file bytes from the object storage
@@ -152,7 +141,7 @@ pub struct BufferedComputeBody {
 
 /// This endpoint allows the user to compute the model with the given input of a buffered compute.
 async fn buffered_compute(
-	Extension(session): Extension<Session>,
+	Extension(_session): Extension<Session>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	let mut body: BufferedComputeBody = from_slice(&body.to_vec()).expect("Failed to deserialize");
