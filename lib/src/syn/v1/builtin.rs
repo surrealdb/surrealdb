@@ -444,6 +444,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 				geometry => { fn },
 				int => { fn },
 				line => { fn },
+				none => { fn },
 				null => { fn },
 				multiline => { fn },
 				multipoint => { fn },

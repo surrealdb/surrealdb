@@ -9,6 +9,7 @@ mod cli_integration {
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
+	use ulid::Ulid;
 
 	use super::common::{self, StartServerArguments, PASS, USER};
 
@@ -46,11 +47,14 @@ mod cli_integration {
 		.await
 		.unwrap();
 		let creds = ""; // Anonymous user
+		let ns = Ulid::new();
+		let db = Ulid::new();
 
 		info!("* Create a record");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args).input("CREATE thing:one;\n").output(),
 				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
@@ -60,7 +64,7 @@ mod cli_integration {
 
 		info!("* Export to stdout");
 		{
-			let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
+			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
 			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
@@ -69,21 +73,26 @@ mod cli_integration {
 		info!("* Export to file");
 		let exported = {
 			let exported = common::tmp_file("exported.surql");
-			let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
+			let args =
+				format!("export --conn http://{addr} {creds} --ns {ns} --db {db} {exported}");
 			common::run(&args).output().expect("failed to run file export: {args}");
 			exported
 		};
 
+		let db2 = Ulid::new();
+
 		info!("* Import the exported file");
 		{
-			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {exported}");
+			let args =
+				format!("import --conn http://{addr} {creds} --ns {ns} --db {db2} {exported}");
 			common::run(&args).output().expect("failed to run import: {args}");
 		}
 
 		info!("* Query from the import (pretty-printed this time)");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D2 --pretty --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args).input("SELECT * FROM thing;\n").output(),
 				Ok("-- Query 1\n[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
@@ -103,7 +112,10 @@ mod cli_integration {
 
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");
 		{
-			let args = format!("sql --conn ws://{addr} {creds} --ns N3 --db D3 --multi --pretty");
+			let args = format!(
+				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
+				throwaway = Ulid::new()
+			);
 			let output = common::run(&args)
 				.input(
 					"CREATE thing:success; \
@@ -126,7 +138,10 @@ mod cli_integration {
 
 		info!("* Multi-statement (and multi-line) transaction including error(s) over WS");
 		{
-			let args = format!("sql --conn ws://{addr} {creds} --ns N4 --db D4 --multi --pretty");
+			let args = format!(
+				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
+				throwaway = Ulid::new()
+			);
 			let output = common::run(&args)
 				.input(
 					"BEGIN; \
@@ -152,7 +167,10 @@ mod cli_integration {
 		{
 			let args = format!("sql --conn http://{addr} {creds}");
 			let output = common::run(&args)
-				.input("USE NS N5 DB D5; CREATE thing:one;\n")
+				.input(&format!(
+					"USE NS {throwaway} DB {throwaway}; CREATE thing:one;\n",
+					throwaway = Ulid::new()
+				))
 				.output()
 				.expect("neither ns nor db");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");
@@ -160,9 +178,10 @@ mod cli_integration {
 
 		info!("* Pass only ns");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns N5");
+			let throwaway = Ulid::new();
+			let args = format!("sql --conn http://{addr} {creds} --ns {throwaway}");
 			let output = common::run(&args)
-				.input("USE DB D5; SELECT * FROM thing:one;\n")
+				.input("USE DB {throwaway}; SELECT * FROM thing:one;\n")
 				.output()
 				.expect("only ns");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");
@@ -170,7 +189,10 @@ mod cli_integration {
 
 		info!("* Pass only db and expect an error");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --db D5");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --db {throwaway}",
+				throwaway = Ulid::new()
+			);
 			common::run(&args).output().expect_err("only db");
 		}
 	}
@@ -218,7 +240,10 @@ mod cli_integration {
 		info!("* Root user can do exports");
 		let exported = {
 			let exported = common::tmp_file("exported.surql");
-			let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
+			let args = format!(
+				"export --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				throwaway = Ulid::new()
+			);
 
 			common::run(&args).output().expect("failed to run export");
 			exported
@@ -226,7 +251,10 @@ mod cli_integration {
 
 		info!("* Root user can do imports");
 		{
-			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {exported}");
+			let args = format!(
+				"import --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				throwaway = Ulid::new()
+			);
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
@@ -438,7 +466,10 @@ mod cli_integration {
 
 		info!("* Can't do exports");
 		{
-			let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
+			let args = format!(
+				"export --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} -",
+				throwaway = Ulid::new()
+			);
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
@@ -451,7 +482,10 @@ mod cli_integration {
 		{
 			let tmp_file = common::tmp_file("exported.surql");
 			File::create(&tmp_file).expect("failed to create tmp file");
-			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
+			let args = format!(
+				"import --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {tmp_file}",
+				throwaway = Ulid::new()
+			);
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
@@ -488,10 +522,14 @@ mod cli_integration {
 		.unwrap();
 		let creds = ""; // Anonymous user
 
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
 		info!("* Define a table");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
 				Ok("[NONE]\n\n".to_owned()),
@@ -501,8 +539,9 @@ mod cli_integration {
 
 		info!("* Create a record");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
 				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
@@ -512,8 +551,9 @@ mod cli_integration {
 
 		info!("* Show changes");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
@@ -528,8 +568,9 @@ mod cli_integration {
 
 		info!("* Show changes after GC");
 		{
-			let args =
-				format!("sql --conn http://{addr} {creds} --ns N --db D --multi --hide-welcome");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
 			assert_eq!(
 				common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
@@ -692,7 +733,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -719,7 +763,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -746,7 +793,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -766,7 +816,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -785,7 +838,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -808,7 +864,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
@@ -824,7 +883,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} -u root -p root --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN http::get('https://surrealdb.com');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -844,7 +906,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -861,7 +926,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
@@ -881,7 +949,10 @@ mod cli_integration {
 			.await
 			.unwrap();
 
-			let cmd = format!("sql --conn ws://{addr} --ns N --db D --multi");
+			let cmd = format!(
+				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
 
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
