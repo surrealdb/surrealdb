@@ -9,21 +9,15 @@ use nom::{
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-// use std::io::Read;
 use rust_decimal::prelude::ToPrimitive;
 
 use std::collections::HashMap;
-use object_store::path::Path;
-use object_store::GetResultPayload;
 use surrealml_core::execution::compute::ModelComputation;
 use surrealml_core::storage::surml_file::SurMlFile;
 use crate::kvs::Datastore;
-use crate::obs::get_object_storage;
-use crate::obs::insert::hash_file;
-use object_store::ObjectStore;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::{Write, Read};
-use crate::error::{Db::QueryNotExecuted, Db::Thrown};
+use crate::kvs::TransactionType::Read;
+use crate::error::Db::Thrown;
 
 use crate::{
 	ctx::Context,
@@ -100,83 +94,87 @@ impl Model {
 		_txn: &Transaction,
 		_doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
-		return Ok(Value::Number(Number::Float(45.6)))
+		match &self.args[0] {
+			// performing a buffered compute
+			Value::Object(values) => {
+				let mut map = HashMap::new();
+				for key in values.keys() {
+					match values.get(key).unwrap() {
+						Value::Number(number) => {
+							map.insert(key.to_string(), Self::unpack_number(number));
+						},
+						_ => {
+							return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
+						}
+					}
+				}
+				// load the file hash from the Datastore
+				let response: String;
+				{
+					let ds = Datastore::new("file://ml_cache.db").await.unwrap();
+					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+					let id = format!("{}-{}", self.name, self.version);
+					response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
+				}
+				// get the local file bytes from the object storage
+				let file_bytes = get_local_file(response).await.unwrap();
+				
+				// run the compute in a blocking task
+				let outcome = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))
+				}).await.unwrap()?;
+				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
+			},
+			// performing a raw compute  
+			Value::Number(_) => {
+				let mut buffer = Vec::new();
+				for i in self.args.iter() {
+					match i {
+						Value::Number(number) => {
+							buffer.push(Self::unpack_number(number));
+						},
+						_ => {
+							println!("Not a number");
+						}
+					}
+				}
+				// load the file hash from the Datastore
+				let response: String;
+				{
+					let ds = Datastore::new("file://ml_cache.db").await.unwrap();
+					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+					let id = format!("{}-{}", self.name, self.version);
+					response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
+				}
+				// get the local file bytes from the object storage
+				let file_bytes = get_local_file(response).await.unwrap();
+				let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
 
-		// get the value from the key value store to get the hash
-		// Get the datastore reference
-		// let ds = Datastore::new("file://ml_cache.db").await?;
-		// println!("\n\n\n\nargs: {:?}\n\n\n\n", self.args);
+				// run the compute in a blocking task
+				let outcome = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})
+				}).await.unwrap()?;
 
-		// match &self.args[0] {
-		// 	// performing a buffered compute => would be good to extract this into it's own function but can't import Object
-		// 	Value::Object(values) => {
-		// 		let mut map = HashMap::new();
-		// 		for key in values.keys() {
-		// 			match values.get(key).unwrap() {
-		// 				Value::Number(number) => {
-		// 					map.insert(key.to_string(), Self::unpack_number(number));
-		// 				},
-		// 				_ => {
-		// 					return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
-		// 					// panic!("not a number for {} field", key);
-		// 				}
-		// 			}
-		// 		}
-		// 		let response: String;
-		// 		{
-		// 			let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-		// 			let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-		// 			let id = format!("{}-{}", self.name, self.version);
-		// 			response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
-		// 		}
-		// 		// get the local file bytes from the object storage
-		// 		let file_bytes = get_local_file(response).await.unwrap();
-		// 		let mut file = SurMlFile::from_bytes(file_bytes).unwrap();
-		// 		let compute_unit = ModelComputation {
-		// 			surml_file: &mut file,
-		// 		};
-		// 		let outcome = compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))?;
-		// 		return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-		// 	},
-		// 	// performing a raw compute  
-		// 	Value::Number(_) => {
-		// 		let mut buffer = Vec::new();
-		// 		for i in self.args.iter() {
-		// 			match i {
-		// 				Value::Number(number) => {
-		// 					buffer.push(Self::unpack_number(number));
-		// 				},
-		// 				_ => {
-		// 					println!("Not a number");
-		// 				}
-		// 			}
-		// 		}
-		// 		let response: String;
-		// 		{
-		// 			let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-		// 			let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-		// 			let id = format!("{}-{}", self.name, self.version);
-		// 			response = String::from_utf8(tx.get(id).await.unwrap().unwrap()).unwrap();
-		// 		}
-		// 		// get the local file bytes from the object storage
-		// 		let file_bytes = get_local_file(response).await.unwrap();
-		// 		let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
-		// 		let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
-		// 		let compute_unit = ModelComputation {
-		// 			surml_file: &mut surml_file,
-		// 		};
-		// 		let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
-		// 		return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-		// 	},
-		// 	_ => {
-		// 		return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
-		// 	}
-		// }
-		// offer the raw compute and buffered copmute
-		// array/object otherwise an error
-		// key which involved the {name}{version}{hash}
-		// Err(Error::Unimplemented("ML model evaluation not yet implemented".to_string()))
+				// let mut surml_file = SurMlFile::from_bytes(file_bytes).unwrap();
+				// let tensor = ndarray::arr1::<f32>(&buffer.as_slice()).into_dyn();
+				// let compute_unit = ModelComputation {
+				// 	surml_file: &mut surml_file,
+				// };
+				// let outcome = compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})?;
+				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
+			},
+			_ => {
+				return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
+			}
+		}
 	}
 }
 
