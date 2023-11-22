@@ -125,6 +125,7 @@ pub async fn basic(
 	}
 }
 
+# TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
 pub async fn basic_legacy(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -500,6 +501,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	}
 }
 
+# TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
 pub async fn verify_creds_legacy(
 	ds: &Datastore,
 	ns: Option<&String>,
