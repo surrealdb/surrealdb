@@ -208,14 +208,14 @@ where
 		while let Some(node_id) = next_node.take() {
 			let current = store.get_node(tx, node_id).await?;
 			if let Some(payload) = current.n.keys().get(searched_key) {
-				store.set_node(current, false)?;
+				store.set_node(current, false).await?;
 				return Ok(Some(payload));
 			}
 			if let BTreeNode::Internal(keys, children) = &current.n {
 				let child_idx = keys.get_child_idx(searched_key);
 				next_node.replace(children[child_idx]);
 			}
-			store.set_node(current, false)?;
+			store.set_node(current, false).await?;
 		}
 		Ok(None)
 	}
@@ -241,7 +241,7 @@ where
 			} else {
 				// The root node has place, let's insert the value
 				let root_id = root.id;
-				store.set_node(root, false)?;
+				store.set_node(root, false).await?;
 				self.insert_non_full(tx, store, root_id, key, payload).await?;
 			}
 		} else {
@@ -249,7 +249,7 @@ where
 			let new_root_id = self.state.new_node_id();
 			let new_root_node =
 				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
-			store.set_node(new_root_node, true)?;
+			store.set_node(new_root_node, true).await?;
 			self.state.set_root(Some(new_root_id));
 		}
 		Ok(())
@@ -270,12 +270,12 @@ where
 			match &mut node.n {
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
-					store.set_node(node, true)?;
+					store.set_node(node, true).await?;
 				}
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
-						store.set_node(node, true)?;
+						store.set_node(node, true).await?;
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
@@ -289,8 +289,8 @@ where
 						}
 					} else {
 						let child_id = child.id;
-						store.set_node(node, false)?;
-						store.set_node(child, false)?;
+						store.set_node(node, false).await?;
+						store.set_node(child, false).await?;
 						child_id
 					};
 					next_node_id.replace(next_id);
@@ -324,12 +324,12 @@ where
 		// Save the mutated split child with half the (lower) keys
 		let left_node_id = child_node.id;
 		let left_node = store.new_node(left_node_id, left_node)?;
-		store.set_node(left_node, true)?;
+		store.set_node(left_node, true).await?;
 		// Save the new child with half the (upper) keys
 		let right_node = store.new_node(right_node_id, right_node)?;
-		store.set_node(right_node, true)?;
+		store.set_node(right_node, true).await?;
 		// Save the parent node
-		store.set_node(parent_node, true)?;
+		store.set_node(parent_node, true).await?;
 		Ok(SplitResult {
 			left_node_id,
 			right_node_id,
@@ -382,16 +382,16 @@ where
 							keys.remove(&key_to_delete);
 							if keys.len() == 0 {
 								// The node is empty, we can delete it
-								store.remove_node(node.id, node.key)?;
+								store.remove_node(node.id, node.key).await?;
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
 								}
 							} else {
-								store.set_node(node, true)?;
+								store.set_node(node, true).await?;
 							}
 						} else {
-							store.set_node(node, false)?;
+							store.set_node(node, false).await?;
 						}
 					}
 					BTreeNode::Internal(keys, children) => {
@@ -410,7 +410,7 @@ where
 								)
 								.await?,
 							);
-							store.set_node(node, true)?;
+							store.set_node(node, true).await?;
 						} else {
 							// CLRS: 3
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
@@ -430,12 +430,10 @@ where
 										return Err(Error::Unreachable);
 									}
 								}
-								store.remove_node(node_id, node.key)?;
+								store.remove_node(node_id, node.key).await?;
 								self.state.set_root(Some(next_stored_node));
-							} else if node_update {
-								store.set_node(node, true)?;
 							} else {
-								store.set_node(node, false)?;
+								store.set_node(node, node_update).await?;
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
 						}
@@ -462,7 +460,7 @@ where
 			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, true)?;
+				store.set_node(left_node, true).await?;
 				return Ok((false, key_prim, left_id));
 			}
 		}
@@ -475,8 +473,8 @@ where
 			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, false)?;
-				store.set_node(right_node, true)?;
+				store.set_node(left_node, false).await?;
+				store.set_node(right_node, true).await?;
 				return Ok((false, key_prim, right_id));
 			}
 		}
@@ -485,8 +483,8 @@ where
 		// Merge children
 		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
 		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
-		store.set_node(left_node, true)?;
-		store.remove_node(right_id, right_node.key)?;
+		store.set_node(left_node, true).await?;
+		store.remove_node(right_id, right_node.key).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
@@ -568,7 +566,7 @@ where
 			}
 		}
 
-		store.set_node(child_stored_node, false)?;
+		store.set_node(child_stored_node, false).await?;
 		Ok((false, true, key_to_delete, child_id))
 	}
 
@@ -590,8 +588,8 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(child_stored_node, true)?;
-					store.set_node(right_child_stored_node, true)?;
+					store.set_node(child_stored_node, true).await?;
+					store.set_node(right_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -618,8 +616,8 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(child_stored_node, true)?;
-					store.set_node(left_child_stored_node, true)?;
+					store.set_node(child_stored_node, true).await?;
+					store.set_node(left_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -644,8 +642,8 @@ where
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
 				left_child.n.append(descending_key, descending_payload, right_child.n)?;
-				store.set_node(left_child, true)?;
-				store.remove_node(right_child.id, right_child.key)?;
+				store.set_node(left_child, true).await?;
+				store.remove_node(right_child.id, right_child.key).await?;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
 		}
@@ -677,7 +675,7 @@ where
 					node_queue.push_front((*child_id, depth));
 				}
 			};
-			store.set_node(stored, false)?;
+			store.set_node(stored, false).await?;
 		}
 		Ok(stats)
 	}
@@ -695,7 +693,7 @@ mod tests {
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeNodeStore, Payload,
 	};
 	use crate::idx::trees::store::{
-		NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
+		InMemoryProvider, NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 	};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
@@ -756,7 +754,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_sequential_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let mut t = BTree::new(BState::new(5));
 		let ds = Datastore::new("memory").await.unwrap();
@@ -781,7 +781,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_sequential_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let mut t = BTree::new(BState::new(6));
 		let ds = Datastore::new("memory").await.unwrap();
@@ -807,7 +809,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_random_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -831,7 +835,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_random_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -855,7 +861,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -881,7 +889,9 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_large_order_sequential_insertions() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -911,11 +921,14 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> BStatistics
+	async fn test_btree_read_world_insertions<BK>(
+		default_minimum_degree: u32,
+		in_mem: &InMemoryProvider<BTreeNode<BK>>,
+	) -> BStatistics
 	where
 		BK: BKeys + Debug,
 	{
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -938,7 +951,8 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(4).await;
+		let in_mem = InMemoryProvider::new();
+		let s = test_btree_read_world_insertions::<FstKeys>(4, &in_mem).await;
 		assert_eq!(
 			s,
 			BStatistics {
@@ -952,7 +966,8 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(100).await;
+		let in_mem = InMemoryProvider::new();
+		let s = test_btree_read_world_insertions::<FstKeys>(100, &in_mem).await;
 		assert_eq!(
 			s,
 			BStatistics {
@@ -966,7 +981,8 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(6).await;
+		let in_mem = InMemoryProvider::new();
+		let s = test_btree_read_world_insertions::<TrieKeys>(6, &in_mem).await;
 		assert_eq!(
 			s,
 			BStatistics {
@@ -980,7 +996,8 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(100).await;
+		let in_mem = InMemoryProvider::new();
+		let s = test_btree_read_world_insertions::<TrieKeys>(100, &in_mem).await;
 		assert_eq!(
 			s,
 			BStatistics {
@@ -1023,7 +1040,9 @@ mod tests {
 	#[test(tokio::test)]
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn clrs_insertion_test() {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+		let in_mem = InMemoryProvider::new();
+		let s =
+			TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, &in_mem).await;
 		let mut s = s.lock().await;
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
@@ -1110,14 +1129,17 @@ mod tests {
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn test_btree_clrs_deletion_test<BK>(mut t: BTree<BK>)
-	where
+	async fn test_btree_clrs_deletion_test<BK>(
+		mut t: BTree<BK>,
+		in_mem: &InMemoryProvider<BTreeNode<BK>>,
+	) where
 		BK: BKeys + Debug,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+			let s =
+				TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, in_mem).await;
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1129,7 +1151,9 @@ mod tests {
 
 		{
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
-				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+				let s =
+					TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, in_mem)
+						.await;
 				let mut s = s.lock().await;
 				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 				debug!("Delete {}", key);
@@ -1205,19 +1229,23 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_clrs_deletion_test() {
+		let in_mem = InMemoryProvider::new();
 		let t = BTree::<TrieKeys>::new(BState::new(3));
-		test_btree_clrs_deletion_test(t).await
+		test_btree_clrs_deletion_test(t, &in_mem).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_clrs_deletion_test() {
+		let in_mem = InMemoryProvider::new();
 		let t = BTree::<FstKeys>::new(BState::new(3));
-		test_btree_clrs_deletion_test(t).await
+		test_btree_clrs_deletion_test(t, &in_mem).await
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn test_btree_fill_and_empty<BK>(mut t: BTree<BK>)
-	where
+	async fn test_btree_fill_and_empty<BK>(
+		mut t: BTree<BK>,
+		in_mem: &InMemoryProvider<BTreeNode<BK>>,
+	) where
 		BK: BKeys + Debug,
 	{
 		let ds = Datastore::new("memory").await.unwrap();
@@ -1225,7 +1253,8 @@ mod tests {
 		let mut expected_keys = HashMap::new();
 
 		{
-			let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+			let s =
+				TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, in_mem).await;
 			let mut s = s.lock().await;
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 			for (key, payload) in CLRS_EXAMPLE {
@@ -1247,7 +1276,9 @@ mod tests {
 			debug!("Delete {}", key);
 			{
 				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
+				let s =
+					TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20, in_mem)
+						.await;
 				let mut s = s.lock().await;
 				t.delete(&mut tx, &mut s, key.into()).await.unwrap();
 				print_tree::<BK>(&mut tx, &t).await;
@@ -1260,7 +1291,9 @@ mod tests {
 
 			{
 				let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-				let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20);
+				let s =
+					TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20, in_mem)
+						.await;
 				let mut s = s.lock().await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
@@ -1287,14 +1320,16 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_fill_and_empty() {
+		let in_mem = InMemoryProvider::new();
 		let t = BTree::<TrieKeys>::new(BState::new(3));
-		test_btree_fill_and_empty(t).await
+		test_btree_fill_and_empty(t, &in_mem).await
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_fill_and_empty() {
+		let in_mem = InMemoryProvider::new();
 		let t = BTree::<FstKeys>::new(BState::new(3));
-		test_btree_fill_and_empty(t).await
+		test_btree_fill_and_empty(t, &in_mem).await
 	}
 
 	/////////////

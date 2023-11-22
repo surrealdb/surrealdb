@@ -3,7 +3,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
-use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
@@ -20,6 +20,7 @@ pub(super) struct Postings {
 
 impl Postings {
 	pub(super) async fn new(
+		index_stores: &IndexStores,
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
@@ -31,8 +32,13 @@ impl Postings {
 		} else {
 			BState::new(order)
 		};
-		let store =
-			TreeNodeStore::new(TreeNodeProvider::Postings(index_key_base.clone()), store_type, 20);
+		let store = TreeNodeStore::new(
+			TreeNodeProvider::Postings(index_key_base.clone()),
+			store_type,
+			20,
+			index_stores.in_memory_btree_trie(),
+		)
+		.await;
 		Ok(Self {
 			state_key,
 			index_key_base,

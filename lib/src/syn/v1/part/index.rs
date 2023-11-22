@@ -7,7 +7,7 @@ use crate::sql::{
 	index::{Distance, MTreeParams, SearchParams, VectorType},
 	Ident, Index,
 };
-use nom::sequence::preceded;
+
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -139,7 +139,7 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("MTREE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	cut(|i| {
-		let (i, in_memory) = opt(preceded(shouldbespace, tag_no_case("MEMORY")))(i)?;
+		let (i, in_memory) = opt(tag_no_case("MEMORY"))(i)?;
 		let (i, dimension) = dimension(i)?;
 		let (i, distance) = opt(mtree_distance)(i)?;
 		let (i, vector_type) = opt(vector_type)(i)?;

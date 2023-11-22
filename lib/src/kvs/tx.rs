@@ -93,11 +93,8 @@ impl From<bool> for TransactionType {
 impl From<TreeStoreType> for TransactionType {
 	fn from(value: TreeStoreType) -> Self {
 		match value {
-			TreeStoreType::Write => TransactionType::Write,
-			TreeStoreType::Read => TransactionType::Read,
-			TreeStoreType::Traversal | TreeStoreType::MemoryWrite | TreeStoreType::MemoryRead => {
-				TransactionType::Read
-			}
+			TreeStoreType::Write | TreeStoreType::MemoryWrite => TransactionType::Write,
+			TreeStoreType::Read | TreeStoreType::MemoryRead => TransactionType::Read,
 		}
 	}
 }

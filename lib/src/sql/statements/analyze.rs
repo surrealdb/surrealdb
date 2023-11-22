@@ -28,7 +28,7 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
@@ -48,14 +48,19 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft =
-							FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Traversal)
-								.await?;
+						let ft = FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Read)
+							.await?;
 						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {
 						let mut tx = txn.lock().await;
-						let mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Traversal).await?;
+						let store = if p.in_memory {
+							TreeStoreType::MemoryRead
+						} else {
+							TreeStoreType::Read
+						};
+						let mt =
+							MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, store).await?;
 						mt.statistics(&mut tx).await?.into()
 					}
 					_ => {

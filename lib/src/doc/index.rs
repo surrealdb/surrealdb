@@ -348,7 +348,12 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(&mut self, txn: &Transaction, p: &MTreeParams) -> Result<(), Error> {
 		let mut tx = txn.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let mut mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Write).await?;
+		let store = if p.in_memory {
+			TreeStoreType::MemoryWrite
+		} else {
+			TreeStoreType::Write
+		};
+		let mut mt = MTreeIndex::new(&mut tx, ikb, p, store).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(&mut tx, self.rid, o).await?;

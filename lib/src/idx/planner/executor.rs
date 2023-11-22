@@ -110,9 +110,13 @@ impl QueryExecutor {
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
 								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
 							} else {
+								let store = if p.in_memory {
+									TreeStoreType::MemoryRead
+								} else {
+									TreeStoreType::Read
+								};
 								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt =
-									MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Read).await?;
+								let mt = MTreeIndex::new(&mut tx, ikb, p, store).await?;
 								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry

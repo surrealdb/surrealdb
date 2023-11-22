@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BStatistics, BTree, BTreeNodeStore};
-use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use revision::revisioned;
@@ -26,6 +26,7 @@ pub(crate) struct DocIds {
 
 impl DocIds {
 	pub(in crate::idx) async fn new(
+		ixs: IndexStores,
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
@@ -37,8 +38,13 @@ impl DocIds {
 		} else {
 			State::new(default_btree_order)
 		};
-		let store =
-			TreeNodeStore::new(TreeNodeProvider::DocIds(index_key_base.clone()), store_type, 20);
+		let store = TreeNodeStore::new(
+			TreeNodeProvider::DocIds(index_key_base.clone()),
+			store_type,
+			20,
+			ixs.in_memory_btree_trie(),
+		)
+		.await;
 		Ok(Self {
 			state_key,
 			index_key_base,

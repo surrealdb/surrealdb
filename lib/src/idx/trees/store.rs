@@ -1,7 +1,11 @@
 use crate::err::Error;
+use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+use crate::idx::trees::btree::BTreeNode;
+use crate::idx::trees::mtree::MTreeNode;
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
 use lru::LruCache;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroUsize;
@@ -14,7 +18,6 @@ pub type NodeId = u64;
 pub enum TreeStoreType {
 	Write,
 	Read,
-	Traversal,
 	MemoryRead,
 	MemoryWrite,
 }
@@ -27,8 +30,6 @@ where
 	Write(TreeWriteCache<N>),
 	/// Uses an LRU cache to keep in memory the last node read
 	Read(TreeReadCache<N>),
-	/// Read the nodes from the KV store without any cache
-	Traversal(TreeNodeProvider),
 	/// Nodes are stored in memory with a read guard lock
 	MemoryRead(TreeMemory<N>),
 	/// Nodes are stored in memory with a write guard lock
@@ -39,17 +40,21 @@ impl<N> TreeNodeStore<N>
 where
 	N: TreeNode + Debug,
 {
-	pub fn new(
+	pub async fn new(
 		keys: TreeNodeProvider,
 		store_type: TreeStoreType,
 		read_size: usize,
+		in_memory_provider: &InMemoryProvider<N>,
 	) -> Arc<Mutex<Self>> {
 		Arc::new(Mutex::new(match store_type {
 			TreeStoreType::Write => Self::Write(TreeWriteCache::new(keys)),
 			TreeStoreType::Read => Self::Read(TreeReadCache::new(keys, read_size)),
-			TreeStoreType::Traversal => Self::Traversal(keys),
-			TreeStoreType::MemoryRead => Self::MemoryRead(TreeMemory::new(keys)),
-			TreeStoreType::MemoryWrite => Self::MemoryWrite(TreeMemory::new(keys)),
+			TreeStoreType::MemoryRead => {
+				Self::MemoryRead(TreeMemory::new(in_memory_provider.get(keys).await))
+			}
+			TreeStoreType::MemoryWrite => {
+				Self::MemoryWrite(TreeMemory::new(in_memory_provider.get(keys).await))
+			}
 		}))
 	}
 
@@ -61,13 +66,16 @@ where
 		match self {
 			TreeNodeStore::Write(w) => w.get_node(tx, node_id).await,
 			TreeNodeStore::Read(r) => r.get_node(tx, node_id).await,
-			TreeNodeStore::Traversal(keys) => keys.load::<N>(tx, node_id).await,
-			TreeNodeStore::MemoryRead(t) => t.get_node(node_id),
-			TreeNodeStore::MemoryWrite(t) => t.get_node(node_id),
+			TreeNodeStore::MemoryRead(t) => t.get_node(node_id).await,
+			TreeNodeStore::MemoryWrite(t) => t.get_node(node_id).await,
 		}
 	}
 
-	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
+	pub(super) async fn set_node(
+		&mut self,
+		node: StoredNode<N>,
+		updated: bool,
+	) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.set_node(node, updated),
 			TreeNodeStore::Read(r) => {
@@ -77,15 +85,14 @@ where
 					r.set_node(node)
 				}
 			}
-			TreeNodeStore::Traversal(_) => Ok(()),
 			TreeNodeStore::MemoryRead(t) => {
 				if updated {
 					Err(Error::Unreachable)
 				} else {
-					t.set_node(node)
+					t.set_node(node).await
 				}
 			}
-			TreeNodeStore::MemoryWrite(t) => t.set_node(node),
+			TreeNodeStore::MemoryWrite(t) => t.set_node(node).await,
 		}
 	}
 
@@ -97,10 +104,14 @@ where
 		}
 	}
 
-	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
+	pub(super) async fn remove_node(
+		&mut self,
+		node_id: NodeId,
+		node_key: Key,
+	) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
-			TreeNodeStore::MemoryWrite(t) => t.remove_node(node_id),
+			TreeNodeStore::MemoryWrite(t) => t.remove_node(node_id).await,
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -109,7 +120,6 @@ where
 		match self {
 			TreeNodeStore::Write(w) => w.finish(tx).await,
 			TreeNodeStore::Read(r) => r.finish(),
-			TreeNodeStore::Traversal(_) => Ok(true),
 			TreeNodeStore::MemoryRead(t) => t.finish(),
 			TreeNodeStore::MemoryWrite(t) => t.finish(),
 		}
@@ -292,7 +302,7 @@ pub struct TreeMemory<N>
 where
 	N: TreeNode + Debug,
 {
-	nodes: TreeMemoryMap<N>,
+	nodes: Arc<Mutex<TreeMemoryMap<N>>>,
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
@@ -301,31 +311,30 @@ impl<N> TreeMemory<N>
 where
 	N: TreeNode + Debug,
 {
-	fn new(_keys: TreeNodeProvider) -> Self {
-		todo!()
-		// Self {
-		// 	nodes,
-		// 	#[cfg(debug_assertions)]
-		// 	out: HashSet::new(),
-		// }
+	fn new(nodes: Arc<Mutex<TreeMemoryMap<N>>>) -> Self {
+		Self {
+			nodes,
+			#[cfg(debug_assertions)]
+			out: HashSet::new(),
+		}
 	}
 
-	fn get_node(&mut self, node_id: NodeId) -> Result<StoredNode<N>, Error> {
+	async fn get_node(&mut self, node_id: NodeId) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("GET: {}", node_id);
 			self.out.insert(node_id);
 		}
-		self.nodes.remove(&node_id).ok_or(Error::Unreachable)
+		self.nodes.lock().await.remove(&node_id).ok_or(Error::Unreachable)
 	}
 
-	fn set_node(&mut self, node: StoredNode<N>) -> Result<(), Error> {
+	async fn set_node(&mut self, node: StoredNode<N>) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("SET: {} {:?}", node.id, node.n);
 			self.out.remove(&node.id);
 		}
-		self.nodes.insert(node.id, node);
+		self.nodes.lock().await.insert(node.id, node);
 		Ok(())
 	}
 
@@ -338,16 +347,17 @@ where
 		StoredNode::new(node, id, vec![], 0)
 	}
 
-	fn remove_node(&mut self, node_id: NodeId) -> Result<(), Error> {
+	async fn remove_node(&mut self, node_id: NodeId) -> Result<(), Error> {
+		let mut nodes = self.nodes.lock().await;
 		#[cfg(debug_assertions)]
 		{
 			debug!("REMOVE: {}", node_id);
-			if self.nodes.contains_key(&node_id) {
+			if nodes.contains_key(&node_id) {
 				return Err(Error::Unreachable);
 			}
 			self.out.remove(&node_id);
 		}
-		self.nodes.remove(&node_id);
+		nodes.remove(&node_id);
 		Ok(())
 	}
 
@@ -427,10 +437,72 @@ impl<N> StoredNode<N> {
 	}
 }
 
-pub trait TreeNode
-where
-	Self: Sized,
-{
-	fn try_from_val(val: Val) -> Result<Self, Error>;
+pub trait TreeNode {
+	fn try_from_val(val: Val) -> Result<Self, Error>
+	where
+		Self: Sized;
 	fn try_into_val(&mut self) -> Result<Val, Error>;
+}
+
+#[derive(Default)]
+pub struct InMemoryProvider<N>
+where
+	N: TreeNode + 'static,
+{
+	map: Arc<Mutex<HashMap<Key, Arc<Mutex<TreeMemoryMap<N>>>>>>,
+}
+
+impl<N> InMemoryProvider<N>
+where
+	N: TreeNode + 'static,
+{
+	pub(super) fn new() -> Self {
+		Self {
+			map: Arc::new(Mutex::new(HashMap::new())),
+		}
+	}
+
+	async fn get(&self, keys: TreeNodeProvider) -> Arc<Mutex<TreeMemoryMap<N>>> {
+		let mut m = self.map.lock().await;
+		match m.entry(keys.get_key(0)) {
+			Entry::Occupied(e) => e.get().clone(),
+			Entry::Vacant(e) => {
+				let t = Arc::new(Mutex::new(TreeMemoryMap::new()));
+				e.insert(t.clone());
+				t
+			}
+		}
+	}
+}
+
+#[derive(Clone)]
+pub(crate) struct IndexStores(Arc<Inner>);
+
+struct Inner {
+	in_memory_btree_fst: InMemoryProvider<BTreeNode<FstKeys>>,
+	in_memory_btree_trie: InMemoryProvider<BTreeNode<TrieKeys>>,
+	in_memory_mtree: InMemoryProvider<MTreeNode>,
+}
+impl Default for IndexStores {
+	fn default() -> Self {
+		Self(Arc::new(Inner {
+			in_memory_btree_fst: InMemoryProvider::new(),
+			in_memory_btree_trie: InMemoryProvider::new(),
+			in_memory_mtree: InMemoryProvider::new(),
+		}))
+	}
+}
+
+impl IndexStores {
+	pub(in crate::idx) fn in_memory_btree_fst(&self) -> &InMemoryProvider<BTreeNode<FstKeys>> {
+		&self.0.in_memory_btree_fst
+	}
+
+	pub(in crate::idx) fn in_memory_btree_trie(&self) -> &InMemoryProvider<BTreeNode<TrieKeys>> {
+		&self.0.in_memory_btree_trie
+	}
+
+	pub(in crate::idx) fn in_memory_mtree(&self) -> &InMemoryProvider<MTreeNode> {
+		&self.0.in_memory_mtree
+	}
 }

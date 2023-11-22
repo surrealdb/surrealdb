@@ -6,6 +6,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
+use crate::idx::trees::store::IndexStores;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -43,6 +44,8 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// Index stores
+	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 }
@@ -74,6 +77,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			index_stores: IndexStores::default(),
 			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
@@ -87,6 +91,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
+			index_stores: parent.index_stores.clone(),
 			capabilities: parent.capabilities.clone(),
 		}
 	}
@@ -146,6 +151,10 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
 		self.query_planner
+	}
+
+	pub(crate) fn get_index_stores(&self) -> IndexStores {
+		self.index_stores.clone()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

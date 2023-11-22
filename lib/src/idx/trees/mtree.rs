@@ -16,7 +16,7 @@ use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::{
-	NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
+	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
 };
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
@@ -35,13 +35,14 @@ pub(crate) struct MTreeIndex {
 
 impl MTreeIndex {
 	pub(crate) async fn new(
+		ixs: IndexStores,
 		tx: &mut Transaction,
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		st: TreeStoreType,
 	) -> Result<Self, Error> {
 		let doc_ids =
-			Arc::new(RwLock::new(DocIds::new(tx, ikb.clone(), p.doc_ids_order, st).await?));
+			Arc::new(RwLock::new(DocIds::new(ixs, ikb.clone(), p.doc_ids_order, st).await?));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = tx.get(state_key.clone()).await? {
 			MState::try_from_val(val)?
@@ -49,7 +50,13 @@ impl MTreeIndex {
 			MState::new(p.capacity)
 		};
 
-		let store = TreeNodeStore::new(TreeNodeProvider::Vector(ikb), st, 20);
+		let store = TreeNodeStore::new(
+			TreeNodeProvider::Vector(ikb),
+			st,
+			20,
+			index_stores.in_memory_mtree(),
+		)
+		.await;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
 			state_key,
@@ -351,7 +358,7 @@ impl MTree {
 					}
 				}
 			}
-			store.set_node(node, false)?;
+			store.set_node(node, false).await?;
 		}
 		Ok(res.build(
 			#[cfg(debug_assertions)]
@@ -402,15 +409,15 @@ impl MTree {
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
 				self.insert_at_node(tx, store, node, &None, obj, id).await?
 			{
-				self.create_new_internal_root(store, o1, p1, o2, p2)?;
+				self.create_new_internal_root(store, o1, p1, o2, p2).await?;
 			}
 		} else {
-			self.create_new_leaf_root(store, obj, id)?;
+			self.create_new_leaf_root(store, obj, id).await?;
 		}
 		Ok(())
 	}
 
-	fn create_new_leaf_root(
+	async fn create_new_leaf_root(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		obj: SharedVector,
@@ -421,12 +428,12 @@ impl MTree {
 		let mut objects = LeafMap::new();
 		objects.insert(obj, p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
-		store.set_node(new_root_node, true)?;
+		store.set_node(new_root_node, true).await?;
 		self.set_root(Some(new_root_id));
 		Ok(())
 	}
 
-	fn create_new_internal_root(
+	async fn create_new_internal_root(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		o1: SharedVector,
@@ -450,7 +457,7 @@ impl MTree {
 		entries.insert(o1, p1);
 		entries.insert(o2, p2);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Internal(entries))?;
-		store.set_node(new_root_node, true)?;
+		store.set_node(new_root_node, true).await?;
 		self.set_root(Some(new_root_id));
 
 		Ok(())
@@ -473,7 +480,7 @@ impl MTree {
 				MTreeNode::Leaf(ref mut n) => {
 					if let Some(p) = n.get_mut(object) {
 						p.docs.insert(id);
-						store.set_node(node, true)?;
+						store.set_node(node, true).await?;
 						return Ok(true);
 					}
 				}
@@ -486,7 +493,7 @@ impl MTree {
 					}
 				}
 			}
-			store.set_node(node, false)?;
+			store.set_node(node, false).await?;
 		}
 		Ok(false)
 	}
@@ -507,7 +514,7 @@ impl MTree {
 		match node.n {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
-				self.insert_node_leaf(store, node.id, node.key, n, parent_center, object, doc)
+				self.insert_node_leaf(store, node.id, node.key, n, parent_center, object, doc).await
 			}
 			// Else
 			MTreeNode::Internal(n) => {
@@ -571,21 +578,21 @@ impl MTree {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					let max_dist = self.compute_internal_max_distance(&node);
-					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)?;
+					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)
+						.await?;
 					Ok(InsertionResult::CoveringRadius(max_dist))
 				} else {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					// Split(N U P)
-					let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node)?;
+					let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node).await?;
 					Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 				}
 			}
 			InsertionResult::DocAdded => {
-				store.set_node(
-					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-					false,
-				)?;
+				store
+					.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), false)
+					.await?;
 				Ok(InsertionResult::DocAdded)
 			}
 			InsertionResult::CoveringRadius(covering_radius) => {
@@ -606,10 +613,12 @@ impl MTree {
 				let max_dist = self.compute_internal_max_distance(&node);
 				#[cfg(debug_assertions)]
 				debug!("NODE INTERNAL: {} - MAX_DIST: {:?}", node_id, max_dist);
-				store.set_node(
-					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-					updated,
-				)?;
+				store
+					.set_node(
+						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
+						updated,
+					)
+					.await?;
 				Ok(InsertionResult::CoveringRadius(max_dist))
 			}
 		}
@@ -639,7 +648,7 @@ impl MTree {
 	}
 
 	#[allow(clippy::too_many_arguments)]
-	fn insert_node_leaf(
+	async fn insert_node_leaf(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
@@ -652,10 +661,9 @@ impl MTree {
 		match node.entry(object) {
 			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(id);
-				store.set_node(
-					StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-					true,
-				)?;
+				store
+					.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
+					.await?;
 				return Ok(InsertionResult::DocAdded);
 			}
 			// Add Oi to N
@@ -674,12 +682,14 @@ impl MTree {
 			let max_dist = self.compute_leaf_max_distance(&node, parent_center)?;
 			#[cfg(debug_assertions)]
 			debug!("NODE LEAF: {} - MAX_DIST: {:?}", node_id, max_dist);
-			store.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)?;
+			store
+				.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
+				.await?;
 			Ok(InsertionResult::CoveringRadius(max_dist))
 		} else {
 			// Else
 			// Split (N)
-			let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node)?;
+			let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node).await?;
 			Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 		}
 	}
@@ -691,7 +701,7 @@ impl MTree {
 		self.updated = true;
 	}
 
-	fn split_node<N>(
+	async fn split_node<N>(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
@@ -723,9 +733,9 @@ impl MTree {
 
 		// Update the store/cache
 		let n = StoredNode::new(node1.into_mtree_node(), node_id, node_key, 0);
-		store.set_node(n, true)?;
+		store.set_node(n, true).await?;
 		let n = store.new_node(new_node_id, node2.into_mtree_node())?;
-		store.set_node(n, true)?;
+		store.set_node(n, true).await?;
 
 		// Update the split node
 		let p1 = RoutingProperties {
@@ -851,12 +861,12 @@ impl MTree {
 				match &sn.n {
 					MTreeNode::Internal(n) => match n.len() {
 						0 => {
-							store.remove_node(sn.id, sn.key)?;
+							store.remove_node(sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
 						1 => {
-							store.remove_node(sn.id, sn.key)?;
+							store.remove_node(sn.id, sn.key).await?;
 							let e = n.values().next().ok_or(Error::Unreachable)?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
@@ -865,13 +875,13 @@ impl MTree {
 					},
 					MTreeNode::Leaf(n) => {
 						if n.is_empty() {
-							store.remove_node(sn.id, sn.key)?;
+							store.remove_node(sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
 					}
 				}
-				store.set_node(sn, n_updated)?;
+				store.set_node(sn, n_updated).await?;
 			}
 		}
 		Ok(deleted)
@@ -1008,9 +1018,10 @@ impl MTree {
 			}
 		}
 		self.delete_node_internal_check_underflown(store, node_id, node_key, n_node, n_updated)
+			.await
 	}
 
-	fn delete_node_internal_check_underflown(
+	async fn delete_node_internal_check_underflown(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
@@ -1028,18 +1039,19 @@ impl MTree {
 		}
 		// Return max(On E N) { parentDistance(On) + r(On)}
 		let max_dist = self.compute_internal_max_distance(&n_node);
-		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)?;
+		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)
+			.await?;
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
-	fn set_stored_node(
+	async fn set_stored_node(
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
 		node_key: Key,
 		node: MTreeNode,
 		updated: bool,
 	) -> Result<(), Error> {
-		store.set_node(StoredNode::new(node, node_id, node_key, 0), updated)
+		store.set_node(StoredNode::new(node, node_id, node_key, 0), updated).await
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -1088,12 +1100,12 @@ impl MTree {
 					onn_obj,
 					p,
 					onn_child,
-				)?;
+				)
+				.await?;
 			}
 			return Ok(true);
 		}
-
-		store.set_node(p, p_updated)?;
+		store.set_node(p, p_updated).await?;
 		Ok(false)
 	}
 
@@ -1157,13 +1169,13 @@ impl MTree {
 				n_node.insert(onn_obj, onn_entry);
 			}
 		}
-		store.remove_node(p.id, p.key)?;
-		store.set_node(onn_child, true)?;
+		store.remove_node(p.id, p.key).await?;
+		store.set_node(onn_child, true).await?;
 		Ok(())
 	}
 
 	#[allow(clippy::too_many_arguments)]
-	fn delete_underflown_redistribute(
+	async fn delete_underflown_redistribute(
 		&mut self,
 		store: &mut MTreeNodeStore,
 		parent_center: &Option<SharedVector>,
@@ -1182,8 +1194,8 @@ impl MTree {
 		p.n.merge(onn_child.n)?;
 		// Split(S U P)
 		let (o1, mut e1, o2, mut e2) = match p.n {
-			MTreeNode::Internal(n) => self.split_node(store, p.id, p.key, n)?,
-			MTreeNode::Leaf(n) => self.split_node(store, p.id, p.key, n)?,
+			MTreeNode::Internal(n) => self.split_node(store, p.id, p.key, n).await?,
+			MTreeNode::Leaf(n) => self.split_node(store, p.id, p.key, n).await?,
 		};
 		if let Some(pc) = parent_center {
 			e1.parent_dist = self.calculate_distance(&o1, pc)?;
@@ -1195,7 +1207,7 @@ impl MTree {
 		// Add new child pointer entries to N;
 		n_node.insert(o1, e1);
 		n_node.insert(o2, e2);
-		store.remove_node(onn_child.id, onn_child.key)?;
+		store.remove_node(onn_child.id, onn_child.key).await?;
 		Ok(())
 	}
 
@@ -1229,7 +1241,7 @@ impl MTree {
 			}
 		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(sn, false)?;
+			store.set_node(sn, false).await?;
 			return Ok(DeletionResult::NotFound);
 		}
 		if entry_removed {
@@ -1243,11 +1255,11 @@ impl MTree {
 			// Return max(Ol E N) { parentDistance(Ol)};
 			let max_dist = self.compute_leaf_max_distance(&leaf_node, parent_center)?;
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(sn, true)?;
+			store.set_node(sn, true).await?;
 			Ok(DeletionResult::CoveringRadius(max_dist))
 		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(sn, true)?;
+			store.set_node(sn, true).await?;
 			Ok(DeletionResult::DocRemoved)
 		}
 	}
@@ -1605,7 +1617,9 @@ mod tests {
 	use crate::idx::trees::mtree::{
 		InternalMap, MState, MTree, MTreeNode, MTreeNodeStore, ObjectProperties,
 	};
-	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType};
+	use crate::idx::trees::store::{
+		NodeId, TreeNodeProvider, TreeNodeStore, TreeStoreType, IN_MEMORY_MTREE,
+	};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::*;
@@ -1617,7 +1631,7 @@ mod tests {
 		ds: &Datastore,
 		t: TreeStoreType,
 	) -> (Arc<Mutex<TreeNodeStore<MTreeNode>>>, Transaction) {
-		let s = TreeNodeStore::new(TreeNodeProvider::Debug, t, 20);
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, t, 20, &IN_MEMORY_MTREE).await;
 		let tx = ds.transaction(t.into(), Optimistic).await.unwrap();
 		(s, tx)
 	}
@@ -2418,7 +2432,7 @@ mod tests {
 	{
 		let n = s.get_node(tx, node_id).await.unwrap();
 		check_func(&n.n);
-		s.set_node(n, false).unwrap();
+		s.set_node(n, false).await.unwrap();
 	}
 
 	async fn check_leaf<F>(
@@ -2536,10 +2550,10 @@ mod tests {
 					node.n.len()
 				);
 			}
-			match node.n {
+			match &node.n {
 				MTreeNode::Internal(entries) => {
 					let next_depth = depth + 1;
-					for (o, p) in &entries {
+					for (o, p) in entries {
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, o)?;
 							assert_eq!(pd, p.parent_dist, "Incorrect parent distance");
@@ -2567,6 +2581,7 @@ mod tests {
 					}
 				}
 			}
+			s.set_node(node, false).await?;
 		}
 		Ok(checks)
 	}

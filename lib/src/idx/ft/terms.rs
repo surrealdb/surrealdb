@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
-use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use revision::revisioned;
@@ -23,6 +23,7 @@ pub(super) struct Terms {
 
 impl Terms {
 	pub(super) async fn new(
+		index_stores: &IndexStores,
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
@@ -34,8 +35,13 @@ impl Terms {
 		} else {
 			State::new(default_btree_order)
 		};
-		let store =
-			TreeNodeStore::new(TreeNodeProvider::Terms(index_key_base.clone()), store_type, 20);
+		let store = TreeNodeStore::new(
+			TreeNodeProvider::Terms(index_key_base.clone()),
+			store_type,
+			20,
+			index_stores.in_memory_btree_fst(),
+		)
+		.await;
 		Ok(Self {
 			state_key,
 			index_key_base,
