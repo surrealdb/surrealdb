@@ -51,6 +51,7 @@ pub(super) struct SerializeMTree {
 	vector_type: VectorType,
 	capacity: u16,
 	doc_ids_order: u32,
+	in_memory: bool,
 }
 impl serde::ser::SerializeStruct for SerializeMTree {
 	type Ok = MTreeParams;
@@ -76,6 +77,9 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			"doc_ids_order" => {
 				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
+			"in_memory" => {
+				self.in_memory = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `MTreeParams {{ {key} }}`")));
 			}
@@ -90,6 +94,7 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			vector_type: self.vector_type,
 			capacity: self.capacity,
 			doc_ids_order: self.doc_ids_order,
+			in_memory: self.in_memory,
 		})
 	}
 }
@@ -102,6 +107,7 @@ fn mtree_params() {
 		vector_type: Default::default(),
 		capacity: 2,
 		doc_ids_order: 3,
+		in_memory: true,
 	};
 	let serialized = params.serialize(Serializer.wrap()).unwrap();
 	assert_eq!(params, serialized);

@@ -95,7 +95,9 @@ impl From<TreeStoreType> for TransactionType {
 		match value {
 			TreeStoreType::Write => TransactionType::Write,
 			TreeStoreType::Read => TransactionType::Read,
-			TreeStoreType::Traversal => TransactionType::Read,
+			TreeStoreType::Traversal | TreeStoreType::MemoryWrite | TreeStoreType::MemoryRead => {
+				TransactionType::Read
+			}
 		}
 	}
 }

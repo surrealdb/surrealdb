@@ -2041,7 +2041,7 @@ mod tests {
 		let mut c = 0;
 		for (doc_id, obj) in collection.as_ref() {
 			{
-				let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryWrite).await;
 				let mut s = s.lock().await;
 				t.insert(&mut tx, &mut s, obj.as_ref().clone(), *doc_id).await?;
 				finish_operation(tx, s, true).await?;
@@ -2049,7 +2049,7 @@ mod tests {
 			}
 			c += 1;
 			{
-				let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+				let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryRead).await;
 				let mut s = s.lock().await;
 				let p = check_tree_properties(&mut tx, &mut s, &t).await?;
 				assert_eq!(p.doc_count, c);
@@ -2065,7 +2065,7 @@ mod tests {
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
 		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Write).await;
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryWrite).await;
 			let mut s = s.lock().await;
 			for (doc_id, obj) in collection.as_ref() {
 				t.insert(&mut tx, &mut s, obj.as_ref().clone(), *doc_id).await?;
@@ -2074,7 +2074,7 @@ mod tests {
 			finish_operation(tx, s, true).await?;
 		}
 		{
-			let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+			let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryRead).await;
 			let mut s = s.lock().await;
 			check_tree_properties(&mut tx, &mut s, &t).await?;
 		}
@@ -2089,7 +2089,7 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
-				let (s, mut tx) = new_operation(ds, TreeStoreType::Write).await;
+				let (s, mut tx) = new_operation(ds, TreeStoreType::MemoryWrite).await;
 				let mut s = s.lock().await;
 				assert!(
 					t.delete(&mut tx, &mut s, obj.as_ref().clone(), *doc_id).await?,
@@ -2100,19 +2100,19 @@ mod tests {
 				finish_operation(tx, s, true).await?;
 			}
 			{
-				let (s, mut tx) = new_operation(ds, TreeStoreType::Read).await;
+				let (s, mut tx) = new_operation(ds, TreeStoreType::MemoryRead).await;
 				let mut s = s.lock().await;
 				let res = t.knn_search(&mut tx, &mut s, obj, 1).await?;
 				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
-				let (s, mut tx) = new_operation(ds, TreeStoreType::Traversal).await;
+				let (s, mut tx) = new_operation(ds, TreeStoreType::MemoryRead).await;
 				let mut s = s.lock().await;
 				check_tree_properties(&mut tx, &mut s, &t).await?;
 			}
 		}
 
-		let (s, mut tx) = new_operation(&ds, TreeStoreType::Traversal).await;
+		let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryRead).await;
 		let mut s = s.lock().await;
 		check_tree_properties(&mut tx, &mut s, &t).await?.check(0, 0, None, None, 0, 0);
 		Ok(())
@@ -2123,7 +2123,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
-		let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
+		let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryRead).await;
 		let mut s = s.lock().await;
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
@@ -2162,7 +2162,7 @@ mod tests {
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 	) -> Result<(), Error> {
-		let (s, mut tx) = new_operation(&ds, TreeStoreType::Read).await;
+		let (s, mut tx) = new_operation(&ds, TreeStoreType::MemoryRead).await;
 		let mut s = s.lock().await;
 		for (_, obj) in map {
 			let res = t.knn_search(&mut tx, &mut s, obj, map.len()).await?;

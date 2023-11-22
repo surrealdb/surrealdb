@@ -33,13 +33,15 @@ pub struct SearchParams {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
+	#[revision(start = 2)]
+	pub in_memory: bool,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -15,6 +15,8 @@ pub enum TreeStoreType {
 	Write,
 	Read,
 	Traversal,
+	MemoryRead,
+	MemoryWrite,
 }
 
 pub enum TreeNodeStore<N>
@@ -27,6 +29,10 @@ where
 	Read(TreeReadCache<N>),
 	/// Read the nodes from the KV store without any cache
 	Traversal(TreeNodeProvider),
+	/// Nodes are stored in memory with a read guard lock
+	MemoryRead(TreeMemory<N>),
+	/// Nodes are stored in memory with a write guard lock
+	MemoryWrite(TreeMemory<N>),
 }
 
 impl<N> TreeNodeStore<N>
@@ -42,6 +48,8 @@ where
 			TreeStoreType::Write => Self::Write(TreeWriteCache::new(keys)),
 			TreeStoreType::Read => Self::Read(TreeReadCache::new(keys, read_size)),
 			TreeStoreType::Traversal => Self::Traversal(keys),
+			TreeStoreType::MemoryRead => Self::MemoryRead(TreeMemory::new(keys)),
+			TreeStoreType::MemoryWrite => Self::MemoryWrite(TreeMemory::new(keys)),
 		}))
 	}
 
@@ -54,6 +62,8 @@ where
 			TreeNodeStore::Write(w) => w.get_node(tx, node_id).await,
 			TreeNodeStore::Read(r) => r.get_node(tx, node_id).await,
 			TreeNodeStore::Traversal(keys) => keys.load::<N>(tx, node_id).await,
+			TreeNodeStore::MemoryRead(t) => t.get_node(node_id),
+			TreeNodeStore::MemoryWrite(t) => t.get_node(node_id),
 		}
 	}
 
@@ -64,17 +74,25 @@ where
 				if updated {
 					Err(Error::Unreachable)
 				} else {
-					r.set_node(node);
-					Ok(())
+					r.set_node(node)
 				}
 			}
 			TreeNodeStore::Traversal(_) => Ok(()),
+			TreeNodeStore::MemoryRead(t) => {
+				if updated {
+					Err(Error::Unreachable)
+				} else {
+					t.set_node(node)
+				}
+			}
+			TreeNodeStore::MemoryWrite(t) => t.set_node(node),
 		}
 	}
 
 	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
 			TreeNodeStore::Write(w) => Ok(w.new_node(id, node)),
+			TreeNodeStore::MemoryWrite(t) => Ok(t.new_node(id, node)),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -82,15 +100,18 @@ where
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
+			TreeNodeStore::MemoryWrite(t) => t.remove_node(node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
-		if let TreeNodeStore::Write(w) = self {
-			w.finish(tx).await
-		} else {
-			Err(Error::Unreachable)
+		match self {
+			TreeNodeStore::Write(w) => w.finish(tx).await,
+			TreeNodeStore::Read(r) => r.finish(),
+			TreeNodeStore::Traversal(_) => Ok(true),
+			TreeNodeStore::MemoryRead(t) => t.finish(),
+			TreeNodeStore::MemoryWrite(t) => t.finish(),
 		}
 	}
 }
@@ -160,12 +181,7 @@ where
 			debug!("NEW: {}", id);
 			self.out.insert(id);
 		}
-		StoredNode {
-			n: node,
-			id,
-			key: self.np.get_key(id),
-			size: 0,
-		}
+		StoredNode::new(node, id, self.np.get_key(id), 0)
 	}
 
 	fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
@@ -215,16 +231,20 @@ where
 {
 	keys: TreeNodeProvider,
 	nodes: LruCache<NodeId, StoredNode<N>>,
+	#[cfg(debug_assertions)]
+	out: HashSet<NodeId>,
 }
 
 impl<N> TreeReadCache<N>
 where
-	N: TreeNode,
+	N: TreeNode + Debug,
 {
 	fn new(keys: TreeNodeProvider, size: usize) -> Self {
 		Self {
 			keys,
 			nodes: LruCache::new(NonZeroUsize::new(size).unwrap()),
+			#[cfg(debug_assertions)]
+			out: HashSet::new(),
 		}
 	}
 
@@ -233,14 +253,113 @@ where
 		tx: &mut Transaction,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("GET: {}", node_id);
+			self.out.insert(node_id);
+		}
 		if let Some(n) = self.nodes.pop(&node_id) {
 			return Ok(n);
 		}
 		self.keys.load::<N>(tx, node_id).await
 	}
 
-	fn set_node(&mut self, node: StoredNode<N>) {
+	fn set_node(&mut self, node: StoredNode<N>) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("SET: {} {:?}", node.id, node.n);
+			self.out.remove(&node.id);
+		}
 		self.nodes.put(node.id, node);
+		Ok(())
+	}
+
+	fn finish(&mut self) -> Result<bool, Error> {
+		#[cfg(debug_assertions)]
+		{
+			if !self.out.is_empty() {
+				debug!("OUT: {:?}", self.out);
+				return Err(Error::Unreachable);
+			}
+		}
+		Ok(true)
+	}
+}
+
+pub(super) type TreeMemoryMap<N> = HashMap<NodeId, StoredNode<N>>;
+
+pub struct TreeMemory<N>
+where
+	N: TreeNode + Debug,
+{
+	nodes: TreeMemoryMap<N>,
+	#[cfg(debug_assertions)]
+	out: HashSet<NodeId>,
+}
+
+impl<N> TreeMemory<N>
+where
+	N: TreeNode + Debug,
+{
+	fn new(_keys: TreeNodeProvider) -> Self {
+		todo!()
+		// Self {
+		// 	nodes,
+		// 	#[cfg(debug_assertions)]
+		// 	out: HashSet::new(),
+		// }
+	}
+
+	fn get_node(&mut self, node_id: NodeId) -> Result<StoredNode<N>, Error> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("GET: {}", node_id);
+			self.out.insert(node_id);
+		}
+		self.nodes.remove(&node_id).ok_or(Error::Unreachable)
+	}
+
+	fn set_node(&mut self, node: StoredNode<N>) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("SET: {} {:?}", node.id, node.n);
+			self.out.remove(&node.id);
+		}
+		self.nodes.insert(node.id, node);
+		Ok(())
+	}
+
+	fn new_node(&mut self, id: NodeId, node: N) -> StoredNode<N> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("NEW: {}", id);
+			self.out.insert(id);
+		}
+		StoredNode::new(node, id, vec![], 0)
+	}
+
+	fn remove_node(&mut self, node_id: NodeId) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		{
+			debug!("REMOVE: {}", node_id);
+			if self.nodes.contains_key(&node_id) {
+				return Err(Error::Unreachable);
+			}
+			self.out.remove(&node_id);
+		}
+		self.nodes.remove(&node_id);
+		Ok(())
+	}
+
+	fn finish(&mut self) -> Result<bool, Error> {
+		#[cfg(debug_assertions)]
+		{
+			if !self.out.is_empty() {
+				debug!("OUT: {:?}", self.out);
+				return Err(Error::Unreachable);
+			}
+		}
+		Ok(true)
 	}
 }
 
@@ -274,12 +393,7 @@ impl TreeNodeProvider {
 		if let Some(val) = tx.get(key.clone()).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
-			Ok(StoredNode {
-				n: node,
-				id,
-				key,
-				size,
-			})
+			Ok(StoredNode::new(node, id, key, size))
 		} else {
 			Err(Error::CorruptedIndex)
 		}
