@@ -35,6 +35,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
+	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
 			EndpointKind::Unsupported(s) => Err(Error::Scheme(s).into()),
@@ -104,6 +105,7 @@ mod tests {
 }
 
 #[derive(Debug)]
+#[doc(hidden)]
 pub enum EndpointKind {
 	Http,
 	Https,
@@ -140,6 +142,7 @@ impl From<&str> for EndpointKind {
 	}
 }
 
+#[doc(hidden)]
 impl EndpointKind {
 	pub fn is_remote(&self) -> bool {
 		matches!(
