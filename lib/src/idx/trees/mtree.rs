@@ -2657,6 +2657,7 @@ mod tests {
 					}
 				}
 			}
+			s.set_node(node, false).await?;
 		}
 		Ok(checks)
 	}

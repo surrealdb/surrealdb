@@ -934,7 +934,7 @@ mod tests {
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
+	use crate::idx::trees::store::{InMemoryProvider, NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
