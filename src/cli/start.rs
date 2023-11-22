@@ -74,7 +74,8 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-        # TODO(gguillemas): Remove this arg once the legacy basic auth is deprecated in v2.0.0, because it will be enabled by default
+	// TODO(gguillemas): Remove this arg once the legacy basic auth is deprecated in v2.0.0
+	// Explicit level authentication will be enabled by default after the deprecation
 	#[arg(
 		help = "Require specifying the level at which to authenticate.",
 		help_heading = "Authentication"

@@ -210,7 +210,7 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
-        # TODO(gguillemas): Remove this test once the legacy basic auth is deprecated in v2.0.0
+	// TODO(gguillemas): Remove this test once the legacy basic auth is deprecated in v2.0.0
 	async fn basic_auth_legacy() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
