@@ -77,7 +77,7 @@ pub struct StartCommandArguments {
 	// TODO(gguillemas): Remove this arg once the legacy basic auth is deprecated in v2.0.0
 	// Explicit level authentication will be enabled by default after the deprecation
 	#[arg(
-		help = "Require specifying the level at which to authenticate.",
+		help = "Support specifying the level at which to authenticate",
 		help_heading = "Authentication"
 	)]
 	#[arg(env = "SURREAL_ENABLE_AUTH_LEVEL", long = "enable-auth-level")]
