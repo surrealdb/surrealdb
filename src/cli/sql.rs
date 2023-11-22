@@ -79,7 +79,11 @@ pub async fn init(
 
 		let client = connect(endpoint).await?;
 
-		debug!("Signing in to the database engine with {:?}", auth_level);
+		// TODO(gguillemas): Remove after the comma once level-based authentication is enabled by default in the server in v2.0.0
+		debug!(
+			"Signing in to the database engine at '{:?}' level, if supported by the server",
+			auth_level
+		);
 		match auth_level {
 			CredentialsLevel::Root => client.signin(creds.root()?).await?,
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
