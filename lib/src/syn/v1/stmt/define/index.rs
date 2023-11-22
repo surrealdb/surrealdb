@@ -215,6 +215,7 @@ mod tests {
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::MTree(MTreeParams {
+					in_memory: false,
 					dimension: 4,
 					vector_type: VectorType::F64,
 					distance: Distance::Euclidean,
