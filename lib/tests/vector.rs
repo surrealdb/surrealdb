@@ -104,7 +104,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 #[tokio::test]
 async fn index_embedding() -> Result<(), Error> {
 	let sql = r#"
-		DEFINE INDEX idx_mtree_embedding ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST COSINE;
+		DEFINE INDEX idx_mtree_embedding ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST MANHATTAN;
 		CREATE ONLY Document:1 CONTENT {
   			"items": [
   				{
