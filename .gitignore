@@ -6,6 +6,7 @@
 .DS_Store
 .AppleDouble
 .LSOverride
+localstore/
 
 # Thumbnail files
 ._*

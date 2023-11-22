@@ -136,6 +136,8 @@ pub mod key;
 pub mod kvs;
 #[doc(hidden)]
 pub mod syn;
+#[doc(hidden)]
+pub mod obs;
 
 #[doc(inline)]
 pub use api::engine;

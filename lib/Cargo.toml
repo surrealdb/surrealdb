@@ -117,6 +117,13 @@ trice = "0.3.1"
 ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.4.1"
 
+# ml integration ====================================
+object_store = "0.7.1"
+hex = "0.4.3"
+surrealml-core = "0.0.1"
+ndarray = "0.15.6"
+# ml integration ====================================
+
 [dev-dependencies]
 criterion = { version="0.5.1", features= ["async_tokio"] }
 env_logger = "0.10.0"
