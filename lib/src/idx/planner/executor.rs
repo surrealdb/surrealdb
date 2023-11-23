@@ -85,9 +85,16 @@ impl QueryExecutor {
 							}
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
-							let ft =
-								FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Read)
-									.await?;
+							let ft = FtIndex::new(
+								ctx,
+								opt,
+								txn,
+								p.az.as_str(),
+								ikb,
+								p,
+								TreeStoreType::Read,
+							)
+							.await?;
 							if ft_entry.is_none() {
 								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
 							}
@@ -116,7 +123,9 @@ impl QueryExecutor {
 									TreeStoreType::Read
 								};
 								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt = MTreeIndex::new(&mut tx, ikb, p, store).await?;
+								let mt =
+									MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, store)
+										.await?;
 								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry

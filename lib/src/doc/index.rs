@@ -53,7 +53,7 @@ impl<'a> Document<'a> {
 					Index::Uniq => ic.index_unique(txn).await?,
 					Index::Idx => ic.index_non_unique(txn).await?,
 					Index::Search(p) => ic.index_full_text(ctx, txn, p).await?,
-					Index::MTree(p) => ic.index_mtree(txn, p).await?,
+					Index::MTree(p) => ic.index_mtree(ctx, txn, p).await?,
 				};
 			}
 		}
@@ -335,7 +335,7 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 
-		let mut ft = FtIndex::new(self.opt, txn, &p.az, ikb, p, TreeStoreType::Write).await?;
+		let mut ft = FtIndex::new(ctx, self.opt, txn, &p.az, ikb, p, TreeStoreType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(ctx, self.opt, txn, self.rid, n).await?;
@@ -345,7 +345,12 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(txn).await
 	}
 
-	async fn index_mtree(&mut self, txn: &Transaction, p: &MTreeParams) -> Result<(), Error> {
+	async fn index_mtree(
+		&mut self,
+		ctx: &Context<'_>,
+		txn: &Transaction,
+		p: &MTreeParams,
+	) -> Result<(), Error> {
 		let mut tx = txn.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let store = if p.in_memory {
@@ -353,7 +358,7 @@ impl<'a> IndexOperation<'a> {
 		} else {
 			TreeStoreType::Write
 		};
-		let mut mt = MTreeIndex::new(&mut tx, ikb, p, store).await?;
+		let mut mt = MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, store).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(&mut tx, self.rid, o).await?;

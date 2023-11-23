@@ -90,6 +90,7 @@ once_cell = "1.18.0"
 path-clean = "1.0.1"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 pin-project-lite = "0.2.13"
+quick_cache = "0.4.0"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 regex = "1.10.2"

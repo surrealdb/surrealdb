@@ -15,9 +15,7 @@ use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::{
-	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
-};
+use crate::idx::trees::store::{IndexStores, NodeId, StoredNode, StoreProvider, TreeNode, TreeNodeProvider, TreeStore, TreeStoreType};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, Val};
@@ -28,9 +26,10 @@ pub(crate) struct MTreeIndex {
 	state_key: Key,
 	dim: usize,
 	vector_type: VectorType,
+	index_stores: IndexStores,
+	store_provider: StoreProvider,
 	doc_ids: Arc<RwLock<DocIds>>,
 	mtree: Arc<RwLock<MTree>>,
-	store: Arc<Mutex<MTreeNodeStore>>,
 }
 
 impl MTreeIndex {
@@ -39,32 +38,25 @@ impl MTreeIndex {
 		tx: &mut Transaction,
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
-		st: TreeStoreType,
+		st: StoreProvider,
 	) -> Result<Self, Error> {
 		let doc_ids =
-			Arc::new(RwLock::new(DocIds::new(ixs, ikb.clone(), p.doc_ids_order, st).await?));
+			Arc::new(RwLock::new(DocIds::new(ixs, tx, ikb.clone(), p.doc_ids_order, st).await?));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = tx.get(state_key.clone()).await? {
 			MState::try_from_val(val)?
 		} else {
 			MState::new(p.capacity)
 		};
-
-		let store = TreeNodeStore::new(
-			TreeNodeProvider::Vector(ikb),
-			st,
-			20,
-			index_stores.in_memory_mtree(),
-		)
-		.await;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
 			state_key,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
+			index_stores,
+			store_provider: st,
 			doc_ids,
 			mtree,
-			store,
 		})
 	}
 
@@ -78,7 +70,7 @@ impl MTreeIndex {
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 		// Index the values
-		let mut store = self.store.lock().await;
+		let mut store = self.index_stores.get_store_mtree()
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
@@ -310,7 +302,7 @@ impl MTree {
 	pub async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		v: &SharedVector,
 		k: usize,
 	) -> Result<KnnResult, Error> {
@@ -392,7 +384,7 @@ impl MTree {
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		obj: Vector,
 		id: DocId,
 	) -> Result<(), Error> {
@@ -419,7 +411,7 @@ impl MTree {
 
 	async fn create_new_leaf_root(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
@@ -435,7 +427,7 @@ impl MTree {
 
 	async fn create_new_internal_root(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		o1: SharedVector,
 		p1: RoutingProperties,
 		o2: SharedVector,
@@ -466,7 +458,7 @@ impl MTree {
 	async fn append(
 		&self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		object: &SharedVector,
 		id: DocId,
 	) -> Result<bool, Error> {
@@ -503,7 +495,7 @@ impl MTree {
 	async fn insert_at_node(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
@@ -537,7 +529,7 @@ impl MTree {
 	async fn insert_node_internal(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		mut node: InternalNode,
@@ -650,7 +642,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_leaf(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		mut node: LeafNode,
@@ -703,7 +695,7 @@ impl MTree {
 
 	async fn split_node<N>(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		mut node: N,
@@ -847,7 +839,7 @@ impl MTree {
 	async fn delete(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		object: Vector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
@@ -893,7 +885,7 @@ impl MTree {
 	async fn delete_at_node(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node: StoredNode<MTreeNode>,
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
@@ -940,7 +932,7 @@ impl MTree {
 	async fn delete_node_internal(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		mut n_node: InternalNode,
@@ -1023,7 +1015,7 @@ impl MTree {
 
 	async fn delete_node_internal_check_underflown(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		n_node: InternalNode,
@@ -1045,7 +1037,7 @@ impl MTree {
 	}
 
 	async fn set_stored_node(
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		node: MTreeNode,
@@ -1058,7 +1050,7 @@ impl MTree {
 	async fn deletion_underflown(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
@@ -1112,7 +1104,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_underflown_fit_into_child(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
 		p: StoredNode<MTreeNode>,
@@ -1177,7 +1169,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_underflown_redistribute(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
@@ -1214,7 +1206,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_leaf(
 		&mut self,
-		store: &mut MTreeNodeStore,
+		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		mut leaf_node: LeafNode,
@@ -1338,7 +1330,7 @@ fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
 	}
 }
 
-type MTreeNodeStore = TreeNodeStore<MTreeNode>;
+type MTreeStore = TreeStore<MTreeNode>;
 
 type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
 

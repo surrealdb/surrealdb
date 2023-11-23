@@ -1,14 +1,12 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BStatistics, BTree, BTreeNodeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::btree::{BStatistics, BTree, BTreeStore};
+use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub type DocId = u64;
 
@@ -18,7 +16,9 @@ pub(crate) struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
-	store: Arc<Mutex<BTreeNodeStore<TrieKeys>>>,
+	index_stores: IndexStores,
+	tree_node_provider: TreeNodeProvider,
+	store_provider: StoreProvider,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,
 	updated: bool,
@@ -26,11 +26,11 @@ pub(crate) struct DocIds {
 
 impl DocIds {
 	pub(in crate::idx) async fn new(
-		ixs: IndexStores,
+		index_stores: IndexStores,
 		tx: &mut Transaction,
+		store_provider: StoreProvider,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
-		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bd_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -38,18 +38,13 @@ impl DocIds {
 		} else {
 			State::new(default_btree_order)
 		};
-		let store = TreeNodeStore::new(
-			TreeNodeProvider::DocIds(index_key_base.clone()),
-			store_type,
-			20,
-			ixs.in_memory_btree_trie(),
-		)
-		.await;
 		Ok(Self {
 			state_key,
 			index_key_base,
 			btree: BTree::new(state.btree),
-			store,
+			index_stores,
+			tree_node_provider: TreeNodeProvider::DocIds(index_key_base.clone()),
+			store_provider,
 			available_ids: state.available_ids,
 			next_doc_id: state.next_doc_id,
 			updated: false,
@@ -78,7 +73,7 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		let mut store = self.store.lock().await;
+		let mut store = self.get_read_store().await;
 		self.btree.search(tx, &mut store, &doc_key).await
 	}
 
@@ -90,17 +85,28 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
 		{
-			let mut store = self.store.lock().await;
+			let mut store = self.get_read_store().await;
 			if let Some(doc_id) = self.btree.search(tx, &mut store, &doc_key).await? {
 				return Ok(Resolved::Existing(doc_id));
 			}
 		}
 		let doc_id = self.get_next_doc_id();
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
-		let mut store = self.store.lock().await;
+		let mut store = self.get_write_store().await;
 		self.btree.insert(tx, &mut store, doc_key, doc_id).await?;
 		self.updated = true;
 		Ok(Resolved::New(doc_id))
+	}
+
+	async fn get_store(&self, rights: StoreRights) -> BTreeStore<TrieKeys> {
+		self.index_stores
+			.get_store_btree_trie(
+				self.tree_node_provider.clone(),
+				self.store_provider,
+				rights,
+				20, //TODO Replace by env
+			)
+			.await
 	}
 
 	pub(in crate::idx) async fn remove_doc(
@@ -108,7 +114,7 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		let mut store = self.store.lock().await;
+		let mut store = self.get_store(StoreRights::Write).await;
 		if let Some(doc_id) = self.btree.delete(tx, &mut store, doc_key).await? {
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
 			if let Some(available_ids) = &mut self.available_ids {
@@ -142,13 +148,15 @@ impl DocIds {
 		&self,
 		tx: &mut Transaction,
 	) -> Result<BStatistics, Error> {
-		let mut store = self.store.lock().await;
+		let mut store = self.get_store(StoreRights::Read).await;
 		self.btree.statistics(tx, &mut store).await
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.lock().await.finish(tx).await?;
+		let mut store = self.get_store(StoreRights::Write).await;
+		let updated = store.await.finish(tx).await?;
 		if self.updated || updated {
+			// TODO: The state should be handled by the IndexStores too
 			let state = State {
 				btree: self.btree.get_state().clone(),
 				available_ids: self.available_ids.take(),
@@ -205,16 +213,19 @@ impl Resolved {
 #[cfg(test)]
 mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
-	use crate::idx::trees::store::TreeStoreType;
+	use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	const BTREE_ORDER: u32 = 7;
 
-	async fn get_doc_ids(ds: &Datastore, store_type: TreeStoreType) -> (Transaction, DocIds) {
+	async fn get_doc_ids(
+		ds: &Datastore,
+		ixs: IndexStores,
+		st: StoreProvider,
+	) -> (Transaction, DocIds) {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let d =
-			DocIds::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, store_type).await.unwrap();
+		let d = DocIds::new(ixs, &mut tx, st, IndexKeyBase::default(), BTREE_ORDER).await.unwrap();
 		(tx, d)
 	}
 
@@ -225,136 +236,160 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
-		let ds = Datastore::new("memory").await.unwrap();
+		for sp in [StoreProvider::Transaction, StoreProvider::Memory] {
+			let ds = Datastore::new("memory").await.unwrap();
+			let ixs = IndexStores::default();
 
-		// Resolve a first doc key
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
-			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
-			finish(tx, d).await;
-			assert_eq!(doc_id, Resolved::New(0));
-		}
+			// Resolve a first doc key
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
+				assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
+				assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
+				finish(tx, d).await;
+				assert_eq!(doc_id, Resolved::New(0));
+			}
 
-		// Resolve the same doc key
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
-			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
-			finish(tx, d).await;
-			assert_eq!(doc_id, Resolved::Existing(0));
-		}
+			// Resolve the same doc key
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
+				assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
+				assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
+				finish(tx, d).await;
+				assert_eq!(doc_id, Resolved::Existing(0));
+			}
 
-		// Resolve another single doc key
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			let doc_id = d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap();
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
-			assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
-			finish(tx, d).await;
-			assert_eq!(doc_id, Resolved::New(1));
-		}
+			// Resolve another single doc key
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				let doc_id = d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap();
+				assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
+				assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
+				finish(tx, d).await;
+				assert_eq!(doc_id, Resolved::New(1));
+			}
 
-		// Resolve another two existing doc keys and two new doc keys (interlaced)
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
-				Resolved::Existing(0)
-			);
-			assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(2));
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(),
-				Resolved::Existing(1)
-			);
-			assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(3));
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
-			finish(tx, d).await;
-		}
+			// Resolve another two existing doc keys and two new doc keys (interlaced)
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
+					Resolved::Existing(0)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(),
+					Resolved::New(2)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(),
+					Resolved::Existing(1)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(),
+					Resolved::New(3)
+				);
+				assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
+				finish(tx, d).await;
+			}
 
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
-				Resolved::Existing(0)
-			);
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(),
-				Resolved::Existing(1)
-			);
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(),
-				Resolved::Existing(2)
-			);
-			assert_eq!(
-				d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(),
-				Resolved::Existing(3)
-			);
-			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
-			assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
-			assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".into()));
-			assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".into()));
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
-			finish(tx, d).await;
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
+					Resolved::Existing(0)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(),
+					Resolved::Existing(1)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(),
+					Resolved::Existing(2)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(),
+					Resolved::Existing(3)
+				);
+				assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
+				assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
+				assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".into()));
+				assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".into()));
+				assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
+				finish(tx, d).await;
+			}
 		}
 	}
 
 	#[tokio::test]
 	async fn test_remove_doc() {
-		let ds = Datastore::new("memory").await.unwrap();
+		for sp in [StoreProvider::Transaction, StoreProvider::Memory] {
+			let ds = Datastore::new("memory").await.unwrap();
+			let ixs = IndexStores::default();
 
-		// Create two docs
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::New(0));
-			assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::New(1));
-			finish(tx, d).await;
-		}
+			// Create two docs
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
+					Resolved::New(0)
+				);
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(),
+					Resolved::New(1)
+				);
+				finish(tx, d).await;
+			}
 
-		// Remove doc 1
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
-			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), Some(0));
-			finish(tx, d).await;
-		}
+			// Remove doc 1
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
+				assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), Some(0));
+				finish(tx, d).await;
+			}
 
-		// Check 'Foo' has been removed
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
-			finish(tx, d).await;
-		}
+			// Check 'Foo' has been removed
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
+				finish(tx, d).await;
+			}
 
-		// Insert a new doc - should take the available id 1
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(0));
-			finish(tx, d).await;
-		}
+			// Insert a new doc - should take the available id 1
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(),
+					Resolved::New(0)
+				);
+				finish(tx, d).await;
+			}
 
-		// Remove doc 2
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
-			assert_eq!(d.remove_doc(&mut tx, "Bar".into()).await.unwrap(), Some(1));
-			finish(tx, d).await;
-		}
+			// Remove doc 2
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
+				assert_eq!(d.remove_doc(&mut tx, "Bar".into()).await.unwrap(), Some(1));
+				finish(tx, d).await;
+			}
 
-		// Check 'Bar' has been removed
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
-			finish(tx, d).await;
-		}
+			// Check 'Bar' has been removed
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
+				finish(tx, d).await;
+			}
 
-		// Insert a new doc - should take the available id 2
-		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TreeStoreType::Write).await;
-			assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(1));
-			finish(tx, d).await;
+			// Insert a new doc - should take the available id 2
+			{
+				let (mut tx, mut d) = get_doc_ids(&ds, ixs.clone(), sp).await;
+				assert_eq!(
+					d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(),
+					Resolved::New(1)
+				);
+				finish(tx, d).await;
+			}
 		}
 	}
 }

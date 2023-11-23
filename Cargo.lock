@@ -3750,6 +3750,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick_cache"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f69f8d22fa3f34f3083d9a4375c038732c7a7e964de1beb81c544da92dfc40b8"
+dependencies = [
+ "ahash 0.8.6",
+ "equivalent",
+ "hashbrown 0.14.2",
+ "parking_lot",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5041,6 +5053,7 @@ dependencies = [
  "pharos",
  "pin-project-lite",
  "pprof",
+ "quick_cache",
  "radix_trie",
  "rand 0.8.5",
  "regex",

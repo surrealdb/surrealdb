@@ -48,8 +48,9 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft = FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Read)
-							.await?;
+						let ft =
+							FtIndex::new(ctx, opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Read)
+								.await?;
 						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {

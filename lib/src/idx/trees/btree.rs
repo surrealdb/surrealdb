@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
+use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
@@ -10,10 +10,12 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
+use std::sync::Arc;
+
 pub type Payload = u64;
 
-type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
-pub(in crate::idx) type BTreeNodeStore<BK> = TreeNodeStore<BTreeNode<BK>>;
+type BStoredNode<BK> = Arc<StoredNode<BTreeNode<BK>>>;
+pub(in crate::idx) type BTreeStore<'a, BK> = TreeStore<'a, BTreeNode<BK>>;
 
 pub struct BTree<BK>
 where
@@ -155,10 +157,10 @@ where
 		}
 	}
 
-	fn append(&mut self, key: Key, payload: Payload, node: BTreeNode<BK>) -> Result<(), Error> {
+	fn append(&mut self, key: Key, payload: Payload, node: BStoredNode<BK>) -> Result<(), Error> {
 		match self {
 			BTreeNode::Internal(keys, children) => {
-				if let BTreeNode::Internal(append_keys, mut append_children) = node {
+				if let BTreeNode::Internal(append_keys, mut append_children) = &node.n {
 					keys.insert(key, payload);
 					keys.append(append_keys);
 					children.append(&mut append_children);
@@ -201,21 +203,19 @@ where
 	pub async fn search(
 		&self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
 			let current = store.get_node(tx, node_id).await?;
 			if let Some(payload) = current.n.keys().get(searched_key) {
-				store.set_node(current, false).await?;
 				return Ok(Some(payload));
 			}
 			if let BTreeNode::Internal(keys, children) = &current.n {
 				let child_idx = keys.get_child_idx(searched_key);
 				next_node.replace(children[child_idx]);
 			}
-			store.set_node(current, false).await?;
 		}
 		Ok(None)
 	}
@@ -223,7 +223,7 @@ where
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
 	) -> Result<(), Error> {
@@ -258,7 +258,7 @@ where
 	async fn insert_non_full(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		node_id: NodeId,
 		key: Key,
 		payload: Payload,
@@ -302,12 +302,12 @@ where
 
 	async fn split_child(
 		&mut self,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		mut parent_node: BStoredNode<BK>,
 		idx: usize,
 		child_node: BStoredNode<BK>,
 	) -> Result<SplitResult, Error> {
-		let (left_node, right_node, median_key, median_payload) = match child_node.n {
+		let (left_node, right_node, median_key, median_payload) = match &child_node.n {
 			BTreeNode::Internal(keys, children) => self.split_internal_node(keys, children)?,
 			BTreeNode::Leaf(keys) => self.split_leaf_node(keys)?,
 		};
@@ -340,9 +340,10 @@ where
 	fn split_internal_node(
 		&mut self,
 		keys: BK,
-		mut left_children: Vec<NodeId>,
+		left_children: &[NodeId],
 	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
 		let r = keys.split_keys()?;
+		let mut left_children = left_children.to_vec();
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = BTreeNode::Internal(r.left, left_children);
 		let right_node = BTreeNode::Internal(r.right, right_children);
@@ -362,7 +363,7 @@ where
 	pub(in crate::idx) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
 		let mut deleted_payload = None;
@@ -382,7 +383,7 @@ where
 							keys.remove(&key_to_delete);
 							if keys.len() == 0 {
 								// The node is empty, we can delete it
-								store.remove_node(node.id, node.key).await?;
+								store.remove_node(node).await?;
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
@@ -430,7 +431,7 @@ where
 										return Err(Error::Unreachable);
 									}
 								}
-								store.remove_node(node_id, node.key).await?;
+								store.remove_node(node).await?;
 								self.state.set_root(Some(next_stored_node));
 							} else {
 								store.set_node(node, node_update).await?;
@@ -447,7 +448,7 @@ where
 	async fn deleted_from_internal(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BTreeNode<BK>>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
@@ -482,9 +483,9 @@ where
 		// CLRS: 2c
 		// Merge children
 		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
-		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
+		left_node.n.append(key_to_delete.clone(), 0, right_node.clone())?;
 		store.set_node(left_node, true).await?;
-		store.remove_node(right_id, right_node.key).await?;
+		store.remove_node(right_node).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
@@ -493,7 +494,7 @@ where
 	async fn deleted_traversal(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
@@ -571,7 +572,7 @@ where
 	}
 
 	async fn delete_adjust_successor(
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
 		key_to_delete: Key,
@@ -599,7 +600,7 @@ where
 	}
 
 	async fn delete_adjust_predecessor(
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
 		key_to_delete: Key,
@@ -628,7 +629,7 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes(
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		child_idx: usize,
@@ -641,9 +642,9 @@ where
 			if let Some(descending_payload) = keys.remove(&descending_key) {
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
-				left_child.n.append(descending_key, descending_payload, right_child.n)?;
+				left_child.n.append(descending_key, descending_payload, right_child.clone())?;
 				store.set_node(left_child, true).await?;
-				store.remove_node(right_child.id, right_child.key).await?;
+				store.remove_node(right_child).await?;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
 		}
@@ -654,7 +655,7 @@ where
 	pub(in crate::idx) async fn statistics(
 		&self,
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
 		let mut node_queue = VecDeque::new();
@@ -689,12 +690,8 @@ where
 mod tests {
 	use crate::err::Error;
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeNodeStore, Payload,
-	};
-	use crate::idx::trees::store::{
-		InMemoryProvider, NodeId, TreeNode, TreeNodeProvider, TreeNodeStore, TreeStoreType,
-	};
+	use crate::idx::trees::btree::{BState, BStatistics, BStoredNode, BTree, BTreeNode, Payload};
+	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider, TreeStoreType};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
@@ -731,7 +728,7 @@ mod tests {
 
 	async fn insertions_test<F, BK>(
 		tx: &mut Transaction,
-		store: &mut BTreeNodeStore<BK>,
+		store: &mut BTreeStore<BK>,
 		t: &mut BTree<BK>,
 		samples_size: usize,
 		sample_provider: F,

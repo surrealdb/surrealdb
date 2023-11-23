@@ -153,8 +153,8 @@ impl<'a> Context<'a> {
 		self.query_planner
 	}
 
-	pub(crate) fn get_index_stores(&self) -> IndexStores {
-		self.index_stores.clone()
+	pub(crate) fn get_index_stores(&self) -> &IndexStores {
+		&self.index_stores
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

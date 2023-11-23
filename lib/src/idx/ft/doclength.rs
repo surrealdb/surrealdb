@@ -1,24 +1,23 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore, Payload};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNode, Payload};
+use crate::idx::trees::store::{IndexStores, TreeNodeProvider, TreeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
+	index_stores: IndexStores,
+	store: TreeStore<'_, BTreeNode<TrieKeys>>,
 	state_key: Key,
 	btree: BTree<TrieKeys>,
-	store: Arc<Mutex<BTreeNodeStore<TrieKeys>>>,
 }
 
 impl DocLengths {
 	pub(super) async fn new(
-		index_stores: &IndexStores,
+		index_stores: IndexStores,
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
@@ -30,17 +29,14 @@ impl DocLengths {
 		} else {
 			BState::new(default_btree_order)
 		};
-		let store = TreeNodeStore::new(
-			TreeNodeProvider::DocLengths(index_key_base),
-			store_type,
-			20,
-			index_stores.in_memory_btree_trie(),
-		)
-		.await;
+		let store = index_stores
+			.get_store_btree_trie(TreeNodeProvider::DocLengths(index_key_base), store_type, 20)
+			.await;
 		Ok(Self {
+			index_stores,
+			store,
 			state_key,
 			btree: BTree::new(state),
-			store,
 		})
 	}
 
@@ -87,7 +83,7 @@ impl DocLengths {
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::doclength::DocLengths;
-	use crate::idx::trees::store::TreeStoreType;
+	use crate::idx::trees::store::{IndexStores, TreeStoreType};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 
@@ -97,13 +93,15 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 
+		let ixs = IndexStores::default();
 		// Check empty state
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let l = DocLengths::new(
+			ixs.clone(),
 			&mut tx,
 			IndexKeyBase::default(),
 			BTREE_ORDER,
-			TreeStoreType::Traversal,
+			TreeStoreType::Read,
 		)
 		.await
 		.unwrap();
@@ -112,10 +110,15 @@ mod tests {
 		assert_eq!(dl, None);
 
 		// Set a doc length
-		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
-				.await
-				.unwrap();
+		let mut l = DocLengths::new(
+			ixs.clone(),
+			&mut tx,
+			IndexKeyBase::default(),
+			BTREE_ORDER,
+			TreeStoreType::Write,
+		)
+		.await
+		.unwrap();
 		l.set_doc_length(&mut tx, 99, 199).await.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
@@ -123,10 +126,15 @@ mod tests {
 		assert_eq!(dl, Some(199));
 
 		// Update doc length
-		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
-				.await
-				.unwrap();
+		let mut l = DocLengths::new(
+			ixs.clone(),
+			&mut tx,
+			IndexKeyBase::default(),
+			BTREE_ORDER,
+			TreeStoreType::Write,
+		)
+		.await
+		.unwrap();
 		l.set_doc_length(&mut tx, 99, 299).await.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
@@ -134,10 +142,15 @@ mod tests {
 		assert_eq!(dl, Some(299));
 
 		// Remove doc lengths
-		let mut l =
-			DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER, TreeStoreType::Write)
-				.await
-				.unwrap();
+		let mut l = DocLengths::new(
+			ixs.clone(),
+			&mut tx,
+			IndexKeyBase::default(),
+			BTREE_ORDER,
+			TreeStoreType::Write,
+		)
+		.await
+		.unwrap();
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));
 		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), None);
 		tx.commit().await.unwrap()
