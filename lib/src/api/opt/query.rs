@@ -1,4 +1,5 @@
 use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
+use crate::method::Stats;
 use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
 use crate::syn;
 use serde::de::DeserializeOwned;
@@ -175,6 +176,11 @@ where
 {
 	/// Extracts and deserializes a query result from a query response
 	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
+
+	/// Extracts the statistics from a query response
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&0).map(|x| x.0)
+	}
 }
 
 impl QueryResult<Value> for usize {
@@ -183,6 +189,10 @@ impl QueryResult<Value> for usize {
 			Some((_, result)) => Ok(result?),
 			None => Ok(Value::None),
 		}
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
 	}
 }
 
@@ -221,6 +231,10 @@ where
 		map.remove(&self);
 		result
 	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
+	}
 }
 
 impl QueryResult<Value> for (usize, &str) {
@@ -246,6 +260,10 @@ impl QueryResult<Value> for (usize, &str) {
 		};
 
 		Ok(response)
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
 	}
 }
 
@@ -299,6 +317,10 @@ where
 			_ => Ok(None),
 		}
 	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
+	}
 }
 
 impl<T> QueryResult<Vec<T>> for usize
@@ -316,6 +338,10 @@ where
 			}
 		};
 		from_value(vec.into()).map_err(Into::into)
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
 	}
 }
 
@@ -353,6 +379,10 @@ where
 			}
 		}
 		from_value(vec.into()).map_err(Into::into)
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
 	}
 }
 

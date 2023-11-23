@@ -22,7 +22,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
-use crate::method::query::Statistics;
+use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
 use crate::sql::Array;
@@ -173,9 +173,9 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			error,
 		}
 	})?;
-	let mut map = IndexMap::<usize, (Statistics, QueryResult)>::with_capacity(responses.len());
+	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
 	for (index, (lookup_time, status, value)) in responses.into_iter().enumerate() {
-		let stats = Statistics {
+		let stats = Stats {
 			lookup_time,
 		};
 		match status {

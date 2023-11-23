@@ -79,6 +79,18 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
+
+/// Query statistics
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Stats {
+	pub lookup_time: Duration,
+}
+
+/// Responses returned with statistics
+#[derive(Debug)]
+pub struct WithStats<T>(T);
 
 impl Method {
 	#[allow(dead_code)] // used by `ws` and `http`

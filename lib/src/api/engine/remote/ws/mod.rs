@@ -14,7 +14,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Status;
-use crate::method::query::Statistics;
+use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -116,7 +116,7 @@ impl DbResponse {
 				results
 					.into_iter()
 					.map(|response| {
-						let stats = Statistics {
+						let stats = Stats {
 							lookup_time: response.time,
 						};
 						let result = match response.status {
