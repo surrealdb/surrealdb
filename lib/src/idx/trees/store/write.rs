@@ -1,11 +1,11 @@
 use crate::err::Error;
 use crate::idx::trees::store::memory::TreeMemoryMap;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
-use crate::kvs::Transaction;
+use crate::kvs::{Key, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockWriteGuard};
+use tokio::sync::RwLockWriteGuard;
 
 pub(super) struct TreeTransactionWrite<N>
 where
@@ -14,7 +14,7 @@ where
 	np: TreeNodeProvider,
 	nodes: HashMap<NodeId, Arc<StoredNode<N>>>,
 	updated: HashSet<NodeId>,
-	removed: HashMap<NodeId, Arc<StoredNode<N>>>,
+	removed: HashMap<NodeId, Key>,
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
@@ -79,17 +79,17 @@ where
 		Arc::new(StoredNode::new(node, id, self.np.get_key(id), 0))
 	}
 
-	pub(super) fn remove_node(&mut self, node: Arc<StoredNode<N>>) -> Result<(), Error> {
+	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("REMOVE: {}", node_id);
-			if self.nodes.contains_key(&node.id) {
+			if self.nodes.contains_key(&node_id) {
 				return Err(Error::Unreachable);
 			}
-			self.out.remove(&node.id);
+			self.out.remove(&node_id);
 		}
-		self.updated.remove(&node.id);
-		self.removed.insert(node.id, node);
+		self.updated.remove(&node_id);
+		self.removed.insert(node_id, node_key);
 		Ok(())
 	}
 
@@ -120,51 +120,60 @@ where
 	}
 }
 
-pub(super) struct TreeMemoryWrite<'a, N>
-where
-	N: TreeNode + Debug,
-{
-	nodes: RwLockWriteGuard<'a, TreeMemoryMap<N>>,
+pub(super) struct TreeMemoryWrite {
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
 
-impl<N> TreeMemoryWrite<N>
-where
-	N: TreeNode + Debug,
-{
-	pub(super) async fn new(nodes: Arc<RwLock<TreeMemoryMap<N>>>) -> Self {
+impl TreeMemoryWrite {
+	pub(super) fn new() -> Self {
 		Self {
-			nodes: nodes.write().await,
 			#[cfg(debug_assertions)]
 			out: HashSet::new(),
 		}
 	}
 
-	pub(super) fn get_node(&mut self, node_id: NodeId) -> Result<Arc<StoredNode<N>>, Error> {
+	pub(super) fn get_node<N>(
+		&mut self,
+		nodes: &mut RwLockWriteGuard<TreeMemoryMap<N>>,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error>
+	where
+		N: TreeNode + Debug,
+	{
 		#[cfg(debug_assertions)]
 		{
 			debug!("GET: {}", node_id);
 			self.out.insert(node_id);
 		}
-		if let Some(n) = self.nodes.remove(&node_id) {
+		if let Some(n) = nodes.remove(&node_id) {
 			Ok(n)
 		} else {
 			Err(Error::Unreachable)
 		}
 	}
 
-	pub(super) fn set_node(&mut self, node: Arc<StoredNode<N>>) -> Result<(), Error> {
+	pub(super) fn set_node<N>(
+		&mut self,
+		nodes: &mut TreeMemoryMap<N>,
+		node: Arc<StoredNode<N>>,
+	) -> Result<(), Error>
+	where
+		N: TreeNode + Debug,
+	{
 		#[cfg(debug_assertions)]
 		{
 			debug!("SET: {} {:?}", node.id, node.n);
 			self.out.remove(&node.id);
 		}
-		self.nodes.lock().insert(node.id, node);
+		nodes.lock().insert(node.id, node);
 		Ok(())
 	}
 
-	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Arc<StoredNode<N>> {
+	pub(super) fn new_node<N>(&mut self, id: NodeId, node: N) -> Arc<StoredNode<N>>
+	where
+		N: TreeNode + Debug,
+	{
 		#[cfg(debug_assertions)]
 		{
 			debug!("NEW: {}", id);
@@ -173,16 +182,23 @@ where
 		Arc::new(StoredNode::new(node, id, vec![], 0))
 	}
 
-	pub(super) fn remove_node(&mut self, node_id: NodeId) -> Result<(), Error> {
+	pub(super) fn remove_node<N>(
+		&mut self,
+		nodes: &mut TreeMemoryMap<N>,
+		node_id: NodeId,
+	) -> Result<(), Error>
+	where
+		N: TreeNode + Debug,
+	{
 		#[cfg(debug_assertions)]
 		{
 			debug!("REMOVE: {}", node_id);
-			if self.nodes.contains_key(&node_id) {
+			if nodes.contains_key(&node_id) {
 				return Err(Error::Unreachable);
 			}
 			self.out.remove(&node_id);
 		}
-		self.nodes.remove(&node_id);
+		nodes.remove(&node_id);
 		Ok(())
 	}
 

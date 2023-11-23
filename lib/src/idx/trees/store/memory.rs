@@ -1,4 +1,3 @@
-use crate::err::Error;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::Key;
 use std::collections::hash_map::Entry;
@@ -7,7 +6,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-pub(super) type TreeMemoryMap<N> = HashMap<NodeId, Arc<StoredNode<N>>>;
+pub(in crate::idx) type TreeMemoryMap<N> = HashMap<NodeId, Arc<StoredNode<N>>>;
+pub(in crate::idx) type ShardedTreeMemoryMap<N> = Arc<RwLock<TreeMemoryMap<N>>>;
 
 #[derive(Default)]
 pub struct TreeMemoryProvider<N>
@@ -27,7 +27,7 @@ where
 		}
 	}
 
-	pub(super) async fn get(&self, keys: TreeNodeProvider) -> Arc<RwLock<TreeMemoryMap<N>>> {
+	pub(super) async fn get(&self, keys: &TreeNodeProvider) -> ShardedTreeMemoryMap<N> {
 		let mut m = self.map.lock().await;
 		match m.entry(keys.get_key(0)) {
 			Entry::Occupied(e) => e.get().clone(),
