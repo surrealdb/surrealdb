@@ -6,17 +6,6 @@ use quick_cache::sync::Cache;
 use quick_cache::GuardResult;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard};
-
-pub enum TreeReadStore<'a, N>
-where
-	N: TreeNode + Debug,
-{
-	/// caches every read nodes
-	Transaction(TreeTransactionRead<N>),
-	/// Nodes are stored in memory with a read guard lock
-	Memory(TreeMemoryRead<'a, N>),
-}
 
 pub(super) struct TreeTransactionRead<N>
 where
@@ -54,24 +43,16 @@ where
 	}
 }
 
-pub(super) struct TreeMemoryRead<'a, N>
-where
-	N: TreeNode + Debug,
-{
-	nodes: RwLockReadGuard<'a, TreeMemoryMap<N>>,
-}
+pub(super) struct TreeMemoryRead {}
 
-impl<'a, N> TreeMemoryRead<'a, N>
-where
-	N: TreeNode + Debug,
-{
-	pub(super) fn new(nodes: Arc<RwLock<TreeMemoryMap<N>>>) -> Self {
-		Self {
-			nodes: nodes.read(),
-		}
-	}
-
-	pub(super) fn get_node(&self, node_id: NodeId) -> Result<Arc<StoredNode<N>>, Error> {
-		self.nodes.get(&node_id).ok_or(Error::Unreachable).cloned()
+impl TreeMemoryRead {
+	pub(super) fn get_node<N>(
+		nodes: &TreeMemoryMap<N>,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error>
+	where
+		N: TreeNode + Debug,
+	{
+		nodes.get(&node_id).ok_or(Error::Unreachable).cloned()
 	}
 }

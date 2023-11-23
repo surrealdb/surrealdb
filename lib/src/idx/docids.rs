@@ -38,12 +38,13 @@ impl DocIds {
 		} else {
 			State::new(default_btree_order)
 		};
+		let tree_node_provider = TreeNodeProvider::DocIds(index_key_base.clone());
 		Ok(Self {
 			state_key,
 			index_key_base,
 			btree: BTree::new(state.btree),
 			index_stores,
-			tree_node_provider: TreeNodeProvider::DocIds(index_key_base.clone()),
+			tree_node_provider,
 			store_provider,
 			available_ids: state.available_ids,
 			next_doc_id: state.next_doc_id,
@@ -104,7 +105,7 @@ impl DocIds {
 				self.tree_node_provider.clone(),
 				self.store_provider,
 				rights,
-				20, //TODO Replace by env
+				20, // TODO: Replace by configuration
 			)
 			.await
 	}

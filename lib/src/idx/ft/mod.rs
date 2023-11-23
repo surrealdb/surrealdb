@@ -20,7 +20,7 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::{IndexStores, TreeStoreType};
+use crate::idx::trees::store::{IndexStores, StoreProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs;
 use crate::kvs::Key;
@@ -97,27 +97,26 @@ impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
-		ctx: &Context<'_>,
+		ixs: IndexStores,
 		opt: &Options,
 		txn: &Transaction,
 		az: &str,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		store_type: TreeStoreType,
+		sp: StoreProvider,
 	) -> Result<Self, Error> {
 		let mut tx = txn.lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
-		Self::with_analyzer(ctx.get_index_stores(), &mut tx, az, index_key_base, p, store_type)
-			.await
+		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, sp).await
 	}
 
 	async fn with_analyzer(
-		ixs: &IndexStores,
+		ixs: IndexStores,
 		run: &mut kvs::Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		store_type: TreeStoreType,
+		sp: StoreProvider,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = run.get(state_key.clone()).await? {
@@ -126,23 +125,17 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs, run, index_key_base.clone(), p.doc_ids_order, store_type).await?,
+			DocIds::new(ixs.clone(), run, sp, index_key_base.clone(), p.doc_ids_order).await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
-			DocLengths::new(
-				ixs.clone(),
-				run,
-				index_key_base.clone(),
-				p.doc_lengths_order,
-				store_type,
-			)
-			.await?,
+			DocLengths::new(ixs.clone(), sp, run, index_key_base.clone(), p.doc_lengths_order)
+				.await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(ixs, run, index_key_base.clone(), p.postings_order, store_type).await?,
+			Postings::new(ixs.clone(), sp, run, index_key_base.clone(), p.postings_order).await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(ixs, run, index_key_base.clone(), p.terms_order, store_type).await?,
+			Terms::new(ixs, sp, run, index_key_base.clone(), p.terms_order).await?,
 		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
@@ -494,7 +487,7 @@ mod tests {
 	use crate::dbs::{Options, Transaction};
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::trees::store::TreeStoreType;
+	use crate::idx::trees::store::StoreProvider;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*};
 	use crate::sql::index::SearchParams;
@@ -547,7 +540,7 @@ mod tests {
 
 	pub(super) async fn tx_fti<'a>(
 		ds: &Datastore,
-		store_type: TreeStoreType,
+		sp: StoreProvider,
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
@@ -558,7 +551,7 @@ mod tests {
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
-			ctx.get_index_stores(),
+			ctx.get_index_stores().clone(),
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
@@ -571,7 +564,7 @@ mod tests {
 				sc: Scoring::bm25(),
 				hl,
 			},
-			TreeStoreType::Write,
+			sp,
 		)
 		.await
 		.unwrap();

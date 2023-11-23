@@ -14,7 +14,7 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::TreeStoreType;
+use crate::idx::trees::store::StoreProvider;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::Key;
@@ -86,13 +86,13 @@ impl QueryExecutor {
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
 							let ft = FtIndex::new(
-								ctx,
+								ctx.get_index_stores().clone(),
 								opt,
 								txn,
 								p.az.as_str(),
 								ikb,
 								p,
-								TreeStoreType::Read,
+								StoreProvider::Transaction,
 							)
 							.await?;
 							if ft_entry.is_none() {
@@ -117,15 +117,20 @@ impl QueryExecutor {
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
 								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
 							} else {
-								let store = if p.in_memory {
-									TreeStoreType::MemoryRead
+								let sp = if p.in_memory {
+									StoreProvider::Memory
 								} else {
-									TreeStoreType::Read
+									StoreProvider::Transaction
 								};
 								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt =
-									MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, store)
-										.await?;
+								let mt = MTreeIndex::new(
+									ctx.get_index_stores().clone(),
+									&mut tx,
+									ikb,
+									p,
+									sp,
+								)
+								.await?;
 								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry

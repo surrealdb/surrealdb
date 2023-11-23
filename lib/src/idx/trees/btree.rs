@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
+use crate::idx::trees::store::memory::TreeMemoryMap;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
@@ -15,7 +16,7 @@ use std::sync::Arc;
 pub type Payload = u64;
 
 type BStoredNode<BK> = Arc<StoredNode<BTreeNode<BK>>>;
-pub(in crate::idx) type BTreeStore<'a, BK> = TreeStore<'a, BTreeNode<BK>>;
+pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
 pub struct BTree<BK>
 where
@@ -203,12 +204,13 @@ where
 	pub async fn search(
 		&self,
 		tx: &mut Transaction,
+		mem: &Option<&TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
-			let current = store.get_node(tx, node_id).await?;
+			let current = store.get_node(tx, mem, node_id).await?;
 			if let Some(payload) = current.n.keys().get(searched_key) {
 				return Ok(Some(payload));
 			}
@@ -223,33 +225,34 @@ where
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
 	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
 			// We already have a root node
-			let root = store.get_node(tx, root_id).await?;
+			let root = store.get_node_mut(tx, mem, root_id).await?;
 			if root.n.keys().len() == self.full_size {
 				// The root node is full, let's split it
 				let new_root_id = self.state.new_node_id();
 				let new_root = store
 					.new_node(new_root_id, BTreeNode::Internal(BK::default(), vec![root_id]))?;
 				self.state.set_root(Some(new_root.id));
-				self.split_child(store, new_root, 0, root).await?;
-				self.insert_non_full(tx, store, new_root_id, key, payload).await?;
+				self.split_child(mem, store, new_root, 0, root).await?;
+				self.insert_non_full(tx, mem, store, new_root_id, key, payload).await?;
 			} else {
 				// The root node has place, let's insert the value
 				let root_id = root.id;
-				store.set_node(root, false).await?;
-				self.insert_non_full(tx, store, root_id, key, payload).await?;
+				store.set_node(mem, root, false).await?;
+				self.insert_non_full(tx, mem, store, root_id, key, payload).await?;
 			}
 		} else {
 			// We don't have a root node, let's create id
 			let new_root_id = self.state.new_node_id();
 			let new_root_node =
 				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
-			store.set_node(new_root_node, true).await?;
+			store.set_node(mem, new_root_node, true).await?;
 			self.state.set_root(Some(new_root_id));
 		}
 		Ok(())
@@ -258,6 +261,7 @@ where
 	async fn insert_non_full(
 		&mut self,
 		tx: &mut Transaction,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		node_id: NodeId,
 		key: Key,
@@ -265,23 +269,24 @@ where
 	) -> Result<(), Error> {
 		let mut next_node_id = Some(node_id);
 		while let Some(node_id) = next_node_id.take() {
-			let mut node = store.get_node(tx, node_id).await?;
+			let mut node = store.get_node(tx, mem, node_id).await?;
 			let key: Key = key.clone();
 			match &mut node.n {
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
-					store.set_node(node, true).await?;
+					store.set_node(mem, node, true).await?;
 				}
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
-						store.set_node(node, true).await?;
+						store.set_node(mem, node, true).await?;
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
-					let child = store.get_node(tx, children[child_idx]).await?;
+					let child = store.get_node(tx, mem, children[child_idx]).await?;
 					let next_id = if child.n.keys().len() == self.full_size {
-						let split_result = self.split_child(store, node, child_idx, child).await?;
+						let split_result =
+							self.split_child(mem, store, node, child_idx, child).await?;
 						if key.gt(&split_result.median_key) {
 							split_result.right_node_id
 						} else {
@@ -289,8 +294,8 @@ where
 						}
 					} else {
 						let child_id = child.id;
-						store.set_node(node, false).await?;
-						store.set_node(child, false).await?;
+						store.set_node(mem, node, false).await?;
+						store.set_node(mem, child, false).await?;
 						child_id
 					};
 					next_node_id.replace(next_id);
@@ -302,6 +307,7 @@ where
 
 	async fn split_child(
 		&mut self,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		mut parent_node: BStoredNode<BK>,
 		idx: usize,
@@ -324,12 +330,12 @@ where
 		// Save the mutated split child with half the (lower) keys
 		let left_node_id = child_node.id;
 		let left_node = store.new_node(left_node_id, left_node)?;
-		store.set_node(left_node, true).await?;
+		store.set_node(mem, left_node, true).await?;
 		// Save the new child with half the (upper) keys
 		let right_node = store.new_node(right_node_id, right_node)?;
-		store.set_node(right_node, true).await?;
+		store.set_node(mem, right_node, true).await?;
 		// Save the parent node
-		store.set_node(parent_node, true).await?;
+		store.set_node(mem, parent_node, true).await?;
 		Ok(SplitResult {
 			left_node_id,
 			right_node_id,
@@ -363,6 +369,7 @@ where
 	pub(in crate::idx) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
@@ -372,7 +379,7 @@ where
 			let mut next_node = Some((true, key_to_delete, root_id));
 
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
-				let mut node = store.get_node(tx, node_id).await?;
+				let mut node = store.get_node(tx, mem, node_id).await?;
 				match &mut node.n {
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
@@ -383,16 +390,16 @@ where
 							keys.remove(&key_to_delete);
 							if keys.len() == 0 {
 								// The node is empty, we can delete it
-								store.remove_node(node).await?;
+								store.remove_node(mem, node.id, node.key.clone()).await?;
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
 								}
 							} else {
-								store.set_node(node, true).await?;
+								store.set_node(mem, node, true).await?;
 							}
 						} else {
-							store.set_node(node, false).await?;
+							store.set_node(mem, node, false).await?;
 						}
 					}
 					BTreeNode::Internal(keys, children) => {
@@ -404,6 +411,7 @@ where
 							next_node.replace(
 								self.deleted_from_internal(
 									tx,
+									mem,
 									store,
 									keys,
 									children,
@@ -411,12 +419,13 @@ where
 								)
 								.await?,
 							);
-							store.set_node(node, true).await?;
+							store.set_node(mem, node, true).await?;
 						} else {
 							// CLRS: 3
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
 								.deleted_traversal(
 									tx,
+									mem,
 									store,
 									keys,
 									children,
@@ -431,10 +440,10 @@ where
 										return Err(Error::Unreachable);
 									}
 								}
-								store.remove_node(node).await?;
+								store.remove_node(mem, node.id, node.key.clone()).await?;
 								self.state.set_root(Some(next_stored_node));
 							} else {
-								store.set_node(node, node_update).await?;
+								store.set_node(mem, node, node_update).await?;
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
 						}
@@ -448,34 +457,35 @@ where
 	async fn deleted_from_internal(
 		&mut self,
 		tx: &mut Transaction,
-		store: &mut BTreeStore<BTreeNode<BK>>,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
 	) -> Result<(bool, Key, NodeId), Error> {
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
-		let mut left_node = store.get_node(tx, left_id).await?;
+		let mut left_node = store.get_node_mut(tx, mem, left_id).await?;
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, true).await?;
+				store.set_node(mem, left_node, true).await?;
 				return Ok((false, key_prim, left_id));
 			}
 		}
 
 		let right_idx = left_idx + 1;
 		let right_id = children[right_idx];
-		let right_node = store.get_node(tx, right_id).await?;
+		let right_node = store.get_node_mut(tx, mem, right_id).await?;
 		if right_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2b -> right_node is name `z` in the book
 			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, false).await?;
-				store.set_node(right_node, true).await?;
+				store.set_node(mem, left_node, false).await?;
+				store.set_node(mem, right_node, true).await?;
 				return Ok((false, key_prim, right_id));
 			}
 		}
@@ -484,8 +494,8 @@ where
 		// Merge children
 		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
 		left_node.n.append(key_to_delete.clone(), 0, right_node.clone())?;
-		store.set_node(left_node, true).await?;
-		store.remove_node(right_node).await?;
+		store.set_node(mem, left_node, true).await?;
+		store.remove_node(mem, right_node.id, right_node.key.clone()).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
@@ -494,6 +504,7 @@ where
 	async fn deleted_traversal(
 		&mut self,
 		tx: &mut Transaction,
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -503,13 +514,15 @@ where
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_id = children[child_idx];
-		let child_stored_node = store.get_node(tx, child_id).await?;
+		let child_stored_node = store.get_node_mut(tx, mem, child_id).await?;
 		if child_stored_node.n.keys().len() < self.state.minimum_degree {
 			// right child (successor)
 			if child_idx < children.len() - 1 {
-				let right_child_stored_node = store.get_node(tx, children[child_idx + 1]).await?;
+				let right_child_stored_node =
+					store.get_node_mut(tx, mem, children[child_idx + 1]).await?;
 				return if right_child_stored_node.n.keys().len() >= self.state.minimum_degree {
 					Self::delete_adjust_successor(
+						mem,
 						store,
 						keys,
 						child_idx,
@@ -522,6 +535,7 @@ where
 				} else {
 					// CLRS 3b successor
 					Self::merge_nodes(
+						mem,
 						store,
 						keys,
 						children,
@@ -538,9 +552,11 @@ where
 			// left child (predecessor)
 			if child_idx > 0 {
 				let child_idx = child_idx - 1;
-				let left_child_stored_node = store.get_node(tx, children[child_idx]).await?;
+				let left_child_stored_node =
+					store.get_node_mut(tx, mem, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
 					Self::delete_adjust_predecessor(
+						mem,
 						store,
 						keys,
 						child_idx,
@@ -553,6 +569,7 @@ where
 				} else {
 					// CLRS 3b predecessor
 					Self::merge_nodes(
+						mem,
 						store,
 						keys,
 						children,
@@ -567,11 +584,12 @@ where
 			}
 		}
 
-		store.set_node(child_stored_node, false).await?;
+		store.set_node(mem, child_stored_node, false).await?;
 		Ok((false, true, key_to_delete, child_id))
 	}
 
 	async fn delete_adjust_successor(
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -589,8 +607,8 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(child_stored_node, true).await?;
-					store.set_node(right_child_stored_node, true).await?;
+					store.set_node(mem, child_stored_node, true).await?;
+					store.set_node(mem, right_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -600,6 +618,7 @@ where
 	}
 
 	async fn delete_adjust_predecessor(
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -617,8 +636,8 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(child_stored_node, true).await?;
-					store.set_node(left_child_stored_node, true).await?;
+					store.set_node(mem, child_stored_node, true).await?;
+					store.set_node(mem, left_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -629,6 +648,7 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes(
+		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -643,8 +663,8 @@ where
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
 				left_child.n.append(descending_key, descending_payload, right_child.clone())?;
-				store.set_node(left_child, true).await?;
-				store.remove_node(right_child).await?;
+				store.set_node(mem, left_child, true).await?;
+				store.remove_node(mem, right_child.id, right_child.key.clone()).await?;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
 		}
@@ -655,6 +675,7 @@ where
 	pub(in crate::idx) async fn statistics(
 		&self,
 		tx: &mut Transaction,
+		mem: &Option<&TreeMemoryMap<BTreeNode<BK>>>,
 		store: &mut BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
@@ -663,7 +684,7 @@ where
 			node_queue.push_front((node_id, 1));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored = store.get_node(tx, node_id).await?;
+			let stored = store.get_node(tx, mem, node_id).await?;
 			stats.keys_count += stored.n.keys().len() as u64;
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
@@ -676,7 +697,6 @@ where
 					node_queue.push_front((*child_id, depth));
 				}
 			};
-			store.set_node(stored, false).await?;
 		}
 		Ok(stats)
 	}
@@ -690,8 +710,11 @@ where
 mod tests {
 	use crate::err::Error;
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{BState, BStatistics, BStoredNode, BTree, BTreeNode, Payload};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider, TreeStoreType};
+	use crate::idx::trees::btree::{
+		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
+	};
+	use crate::idx::trees::store::memory::TreeMemoryMap;
+	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
@@ -739,9 +762,9 @@ mod tests {
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
 			// Insert the sample
-			t.insert(tx, store, key.clone(), payload).await.unwrap();
+			t.insert(tx, &None, store, key.clone(), payload).await.unwrap();
 			// Check we can find it
-			assert_eq!(t.search(tx, store, &key).await.unwrap(), Some(payload));
+			assert_eq!(t.search(tx, &None, store, &key).await.unwrap(), Some(payload));
 		}
 	}
 

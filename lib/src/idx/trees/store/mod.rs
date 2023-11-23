@@ -1,18 +1,19 @@
-mod memory;
-pub mod read;
-pub mod write;
+pub(crate) mod memory;
+pub(crate) mod read;
+pub(crate) mod write;
 
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::BTreeNode;
 use crate::idx::trees::mtree::MTreeNode;
-use crate::idx::trees::store::memory::TreeMemoryProvider;
+use crate::idx::trees::store::memory::{ShardedTreeMemoryMap, TreeMemoryMap, TreeMemoryProvider};
 use crate::idx::trees::store::read::{TreeMemoryRead, TreeTransactionRead};
 use crate::idx::trees::store::write::{TreeMemoryWrite, TreeTransactionWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
 use std::fmt::Debug;
 use std::sync::Arc;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
 pub type NodeId = u64;
 
@@ -23,7 +24,7 @@ pub(in crate::idx) enum StoreRights {
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::idx) enum StoreProvider {
+pub(crate) enum StoreProvider {
 	Transaction,
 	Memory,
 }
@@ -36,19 +37,19 @@ enum TreeStoreType {
 	MemoryRead,
 }
 
-pub enum TreeStore<'a, N>
+pub enum TreeStore<N>
 where
 	N: TreeNode + Debug,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
 	TransactionWrite(TreeTransactionWrite<N>),
 	TransactionRead(TreeTransactionRead<N>),
-	MemoryWrite(TreeMemoryWrite<'a, N>),
+	MemoryWrite(TreeMemoryWrite),
 	/// Nodes are stored in memory with a read guard lock
-	MemoryRead(TreeMemoryRead<'a, N>),
+	MemoryRead,
 }
 
-impl<'a, N> TreeStore<'a, N>
+impl<N> TreeStore<N>
 where
 	N: TreeNode + Debug,
 {
@@ -57,31 +58,30 @@ where
 		prov: StoreProvider,
 		rights: StoreRights,
 		cache_size: usize,
-		tree_memory_provider: &TreeMemoryProvider<N>,
 	) -> Self {
 		match prov {
 			StoreProvider::Transaction => match rights {
-				StoreRights::Write => Self::Transaction(TreeTransactionWrite::new(keys)),
-				StoreRights::Read => Self::Memory(TreeTransactionRead::new(keys, cache_size)),
-			},
-			StoreProvider::Memory => {
-				let keys = tree_memory_provider.get(keys).await;
-				match rights {
-					StoreRights::Write => Self::Memory(TreeMemoryWrite::new(keys)),
-					StoreRights::Read => Self::Memory(TreeMemoryRead::new(keys)),
+				StoreRights::Write => Self::TransactionWrite(TreeTransactionWrite::new(keys)),
+				StoreRights::Read => {
+					Self::TransactionRead(TreeTransactionRead::new(keys, cache_size))
 				}
-			}
+			},
+			StoreProvider::Memory => match rights {
+				StoreRights::Write => Self::MemoryWrite(TreeMemoryWrite::new()),
+				StoreRights::Read => Self::MemoryRead,
+			},
 		}
 	}
 
 	pub(in crate::idx) async fn get_node_mut(
 		&mut self,
 		tx: &mut Transaction,
+		mem: &Option<RwLockWriteGuard<TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			TreeStore::TransactionWrite(w) => w.get_node(tx, node_id).await,
-			TreeStore::MemoryWrite(t) => t.get_node(node_id),
+			TreeStore::MemoryWrite(t) => t.get_node(mem.ok_or(Error::Unreachable)?, node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -89,23 +89,27 @@ where
 	pub(in crate::idx) async fn get_node(
 		&self,
 		tx: &mut Transaction,
+		mem: &Option<&TreeMemoryMap<N>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			TreeStore::TransactionRead(r) => r.get_node(tx, node_id).await,
-			TreeStore::MemoryRead(t) => t.get_node(node_id),
+			TreeStore::MemoryRead => {
+				TreeMemoryRead::get_node(mem.ok_or(Error::Unreachable)?, node_id)
+			}
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(in crate::idx) async fn set_node(
 		&mut self,
+		mem: &Option<&mut TreeMemoryMap<N>>,
 		node: Arc<StoredNode<N>>,
 		updated: bool,
 	) -> Result<(), Error> {
 		match self {
 			TreeStore::TransactionWrite(w) => w.set_node(node, updated),
-			TreeStore::MemoryWrite(t) => t.set_node(node),
+			TreeStore::MemoryWrite(t) => t.set_node(mem.ok_or(Error::Unreachable)?, node),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -124,11 +128,13 @@ where
 
 	pub(in crate::idx) async fn remove_node(
 		&mut self,
-		node: Arc<StoredNode<N>>,
+		mem: &Option<&mut TreeMemoryMap<N>>,
+		node_id: NodeId,
+		node_key: Key,
 	) -> Result<(), Error> {
 		match self {
-			TreeStore::TransactionWrite(w) => w.remove_node(node),
-			TreeStore::MemoryWrite(t) => t.remove_node(node.id),
+			TreeStore::TransactionWrite(w) => w.remove_node(node_id, node_key),
+			TreeStore::MemoryWrite(t) => t.remove_node(mem.ok_or(Error::Unreachable)?, node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -239,7 +245,7 @@ impl IndexStores {
 		rights: StoreRights,
 		cache_size: usize,
 	) -> TreeStore<BTreeNode<FstKeys>> {
-		TreeStore::new(keys, prov, rights, cache_size, &self.0.in_memory_btree_fst).await
+		TreeStore::new(keys, prov, rights, cache_size).await
 	}
 
 	pub(in crate::idx) async fn get_store_btree_trie(
@@ -249,7 +255,7 @@ impl IndexStores {
 		rights: StoreRights,
 		cache_size: usize,
 	) -> TreeStore<BTreeNode<TrieKeys>> {
-		TreeStore::new(keys, prov, rights, cache_size, &self.0.in_memory_btree_trie).await
+		TreeStore::new(keys, prov, rights, cache_size).await
 	}
 
 	pub(in crate::idx) async fn get_store_mtree(
@@ -259,6 +265,18 @@ impl IndexStores {
 		rights: StoreRights,
 		cache_size: usize,
 	) -> TreeStore<MTreeNode> {
-		TreeStore::new(keys, prov, rights, cache_size, &self.0.in_memory_mtree).await
+		TreeStore::new(keys, prov, rights, cache_size).await
+	}
+
+	pub(in crate::idx) fn get_mem_store_mtree(
+		&self,
+		keys: &TreeNodeProvider,
+		sp: StoreProvider,
+	) -> Option<ShardedTreeMemoryMap<MTreeNode>> {
+		if sp == StoreProvider::Memory {
+			Some(self.0.in_memory_mtree.get(keys))
+		} else {
+			None
+		}
 	}
 }
