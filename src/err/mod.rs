@@ -1,3 +1,4 @@
+use crate::cli::abstraction::auth::Error as SurrealAuthError;
 use axum::extract::rejection::TypedHeaderRejection;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -12,7 +13,6 @@ use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
 use surrealdb::iam::Error as SurrealIamError;
-use surrealdb::opt::auth::Error as SurrealAuthError;
 use surrealdb::Error as SurrealError;
 use thiserror::Error;
 

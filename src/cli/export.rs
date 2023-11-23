@@ -1,3 +1,4 @@
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
@@ -5,7 +6,6 @@ use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
@@ -63,8 +63,6 @@ pub async fn init(
 			CredentialsLevel::Root => client.signin(creds.root()?).await?,
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
-			// Clap shouldn't allow any other credentials level
-			_ => unreachable!("Invalid auth level"),
 		};
 
 		client

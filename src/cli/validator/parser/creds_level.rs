@@ -1,6 +1,6 @@
+use crate::cli::abstraction::auth::CredentialsLevel;
 use clap::builder::{NonEmptyStringValueParser, PossibleValue, TypedValueParser};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
-use surrealdb::opt::auth::CredentialsLevel;
 
 #[derive(Clone)]
 pub struct CredentialsLevelParser;

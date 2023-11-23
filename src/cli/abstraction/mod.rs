@@ -1,5 +1,7 @@
+pub(crate) mod auth;
+
+use auth::CredentialsLevel;
 use clap::Args;
-use surrealdb::opt::auth::CredentialsLevel;
 
 #[derive(Args, Debug)]
 pub(crate) struct AuthArguments {

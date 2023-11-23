@@ -1,3 +1,4 @@
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
@@ -11,7 +12,6 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::auth::{CredentialsBuilder, CredentialsLevel};
 use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
@@ -84,8 +84,6 @@ pub async fn init(
 			CredentialsLevel::Root => client.signin(creds.root()?).await?,
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
-			// Clap shouldn't allow any other credentials level
-			_ => unreachable!("Invalid auth level"),
 		};
 
 		client

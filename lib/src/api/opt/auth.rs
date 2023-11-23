@@ -3,7 +3,6 @@
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
-use thiserror::Error;
 
 /// A signup action
 #[derive(Debug)]
@@ -12,108 +11,6 @@ pub struct Signup;
 /// A signin action
 #[derive(Debug)]
 pub struct Signin;
-
-/// Credentials level
-#[derive(Debug, Clone)]
-pub enum CredentialsLevel {
-	Root,
-	Namespace,
-	Database,
-	Scope,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-	#[error("Username is needed for authentication but it was not provided")]
-	NoUsername,
-	#[error("Password is needed for authentication but it was not provided")]
-	NoPassword,
-	#[error("Namespace is needed for authentication but it was not provided")]
-	NoNamespace,
-	#[error("Database is needed for authentication but it was not provided")]
-	NoDatabase,
-	#[error("Scope is needed for authentication but it was not provided")]
-	NoScope,
-	#[error("Scope params are needed for authentication but they were not provided")]
-	NoScopeParams,
-}
-
-/// Construct a Credentials instance for the given auth level
-#[derive(Debug, Default)]
-pub struct CredentialsBuilder<'a> {
-	/// The auth username
-	pub username: Option<&'a str>,
-	/// The auth password
-	pub password: Option<&'a str>,
-	/// The auth namespace
-	pub namespace: Option<&'a str>,
-	/// The auth database
-	pub database: Option<&'a str>,
-	/// The auth scope
-	pub scope: Option<&'a str>,
-}
-
-impl<'a> CredentialsBuilder<'a> {
-	// Builder methods
-	pub fn with_username(mut self, username: impl Into<Option<&'a str>>) -> Self {
-		self.username = username.into();
-		self
-	}
-
-	pub fn with_password(mut self, password: impl Into<Option<&'a str>>) -> Self {
-		self.password = password.into();
-		self
-	}
-
-	pub fn with_namespace(mut self, namespace: impl Into<Option<&'a str>>) -> Self {
-		self.namespace = namespace.into();
-		self
-	}
-
-	pub fn with_database(mut self, database: impl Into<Option<&'a str>>) -> Self {
-		self.database = database.into();
-		self
-	}
-
-	pub fn with_scope(mut self, scope: impl Into<Option<&'a str>>) -> Self {
-		self.scope = scope.into();
-		self
-	}
-
-	pub fn root(self) -> Result<Root<'a>, Error> {
-		Ok(Root {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
-		})
-	}
-
-	pub fn namespace(self) -> Result<Namespace<'a>, Error> {
-		Ok(Namespace {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
-			namespace: self.namespace.ok_or(Error::NoNamespace)?,
-		})
-	}
-
-	pub fn database(self) -> Result<Database<'a>, Error> {
-		Ok(Database {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
-			namespace: self.namespace.ok_or(Error::NoNamespace)?,
-			database: self.database.ok_or(Error::NoDatabase)?,
-		})
-	}
-
-	pub fn scope<P>(self, params: P) -> Result<Scope<'a, P>, Error> {
-		Ok(Scope {
-			namespace: self.namespace.ok_or(Error::NoNamespace)?,
-			database: self.database.ok_or(Error::NoDatabase)?,
-			scope: self.scope.ok_or(Error::NoScope)?,
-			params,
-		})
-	}
-}
 
 /// Credentials for authenticating with the server
 pub trait Credentials<Action, Response>: Serialize {}

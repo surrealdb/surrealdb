@@ -1,4 +1,5 @@
 use super::abstraction::LevelSelectionArguments;
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::AuthArguments;
 use crate::cnf::SERVER_AGENT;
 use crate::err::Error;
@@ -11,8 +12,6 @@ use reqwest::{Body, Client, Response};
 use std::io::ErrorKind;
 use surrealdb::headers::AUTH_DB;
 use surrealdb::headers::AUTH_NS;
-use surrealdb::opt::auth::CredentialsBuilder;
-use surrealdb::opt::auth::CredentialsLevel;
 use tokio::fs::OpenOptions;
 use tokio::io::{copy, stdin, stdout, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -182,8 +181,6 @@ fn req_with_creds(
 				.header(&AUTH_DB, creds.database)
 				.basic_auth(creds.username, Some(creds.password))
 		}
-		// Clap shouldn't allow any other credentials level
-		_ => unreachable!("Invalid auth level"),
 	};
 
 	Ok(req)
