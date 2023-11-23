@@ -16,6 +16,8 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
+
+#[cfg(feature = "ml")]
 mod ml;
 
 use axum::response::Redirect;
@@ -150,9 +152,12 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router())
-		.merge(ml::router())
-		.layer(service);
+		.merge(key::router());
+
+	#[cfg(feature = "ml")]
+	let axum_app = axum_app.merge(ml::router());
+
+	let axum_app = axum_app.layer(service);
 
 	// Setup the graceful shutdown
 	let handle = Handle::new();

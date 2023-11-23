@@ -3,24 +3,31 @@ use crate::{
 	dbs::{Options, Transaction},
 	doc::CursorDoc,
 	err::Error,
-	sql::{value::Value, number::Number},
-	obs::get::get_local_file
+	sql::{value::Value, number::Number}
 };
 use async_recursion::async_recursion;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
 use rust_decimal::prelude::ToPrimitive;
-
-use std::collections::HashMap;
-use surrealml_core::execution::compute::ModelComputation;
-use surrealml_core::storage::surml_file::SurMlFile;
-use crate::kvs::Datastore;
-use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::Read;
 use crate::error::Db::Thrown;
+
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+#[cfg(feature = "ml")]
+use crate::kvs::Datastore;
+#[cfg(feature = "ml")]
+use crate::kvs::LockType::Optimistic;
+#[cfg(feature = "ml")]
+use crate::kvs::TransactionType::Read;
+#[cfg(feature = "ml")]
+use surrealml_core::execution::compute::ModelComputation;
+#[cfg(feature = "ml")]
+use surrealml_core::storage::surml_file::SurMlFile;
+#[cfg(feature = "ml")]
+use crate::obs::get::get_local_file;
+
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -75,6 +82,7 @@ impl Model {
 		format!("{}{}", self.name, self.version)
 	}
 
+	#[cfg(feature = "ml")]
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
@@ -158,6 +166,19 @@ impl Model {
 				return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
 			}
 		}
+	}
+
+	#[cfg(not(feature = "ml"))]
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		_doc: Option<&'async_recursion CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		Err(Thrown("ML is not enabled".to_string()))
 	}
 }
 

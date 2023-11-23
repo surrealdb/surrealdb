@@ -37,6 +37,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
+ml = ["surrealml-core", "ndarray"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 
@@ -118,10 +119,10 @@ ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.4.1"
 
 # ml integration ====================================
-object_store = "0.7.1"
-hex = "0.4.3"
-surrealml-core = "0.0.1"
-ndarray = "0.15.6"
+object_store = { version = "0.8.0", optional = false }
+hex = { version = "0.4.3", optional = false }
+surrealml-core = { version = "0.0.1", optional = true }
+ndarray = { version = "0.15.6", optional = true }
 # ml integration ====================================
 
 [dev-dependencies]
