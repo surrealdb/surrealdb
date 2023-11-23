@@ -15,13 +15,13 @@ pub enum CredentialsLevel {
 #[non_exhaustive]
 pub enum Error {
 	#[error("Username is needed for authentication but it was not provided")]
-	NoUsername,
+	Username,
 	#[error("Password is needed for authentication but it was not provided")]
-	NoPassword,
+	Password,
 	#[error("Namespace is needed for authentication but it was not provided")]
-	NoNamespace,
+	Namespace,
 	#[error("Database is needed for authentication but it was not provided")]
-	NoDatabase,
+	Database,
 }
 
 /// Construct a Credentials instance for the given auth level
@@ -61,25 +61,25 @@ impl<'a> CredentialsBuilder<'a> {
 
 	pub fn root(self) -> Result<Root<'a>, Error> {
 		Ok(Root {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
+			username: self.username.ok_or(Error::Username)?,
+			password: self.password.ok_or(Error::Password)?,
 		})
 	}
 
 	pub fn namespace(self) -> Result<Namespace<'a>, Error> {
 		Ok(Namespace {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
-			namespace: self.namespace.ok_or(Error::NoNamespace)?,
+			username: self.username.ok_or(Error::Username)?,
+			password: self.password.ok_or(Error::Password)?,
+			namespace: self.namespace.ok_or(Error::Namespace)?,
 		})
 	}
 
 	pub fn database(self) -> Result<Database<'a>, Error> {
 		Ok(Database {
-			username: self.username.ok_or(Error::NoUsername)?,
-			password: self.password.ok_or(Error::NoPassword)?,
-			namespace: self.namespace.ok_or(Error::NoNamespace)?,
-			database: self.database.ok_or(Error::NoDatabase)?,
+			username: self.username.ok_or(Error::Username)?,
+			password: self.password.ok_or(Error::Password)?,
+			namespace: self.namespace.ok_or(Error::Namespace)?,
+			database: self.database.ok_or(Error::Database)?,
 		})
 	}
 }
