@@ -9,6 +9,8 @@ use crate::kvs::{Key, Transaction, TransactionType};
 pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
+	index_stores: IndexStores,
+	store: TreeStore<'_, BTreeNode<TrieKeys>>,
 	state_key: Key,
 	btree: BTree<TrieKeys>,
 	store: BTreeStore<TrieKeys>,
@@ -16,7 +18,7 @@ pub(super) struct DocLengths {
 
 impl DocLengths {
 	pub(super) async fn new(
-		ixs: &IndexStores,
+		ixs: IndexStores,
 		tx: &mut Transaction,
 		ikb: IndexKeyBase,
 		default_btree_order: u32,
@@ -38,9 +40,10 @@ impl DocLengths {
 			)
 			.await;
 		Ok(Self {
+			index_stores,
+			store,
 			state_key,
 			btree: BTree::new(state),
-			store,
 		})
 	}
 

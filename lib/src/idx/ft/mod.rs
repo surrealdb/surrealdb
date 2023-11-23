@@ -553,6 +553,7 @@ mod tests {
 		hl: bool,
 	) -> (Context<'a>, Options, Transaction, FtIndex) {
 		let ctx = Context::default();
+		let ctx = Context::default();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
