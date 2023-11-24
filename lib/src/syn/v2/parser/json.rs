@@ -1,0 +1,64 @@
+use std::collections::BTreeMap;
+
+use crate::{
+	sql::{Array, Object, Value},
+	syn::v2::{
+		parser::mac::expected,
+		token::{t, Span, TokenKind},
+	},
+};
+
+use super::{ParseResult, Parser};
+
+impl Parser<'_> {
+	pub fn parse_json(&mut self) -> ParseResult<Value> {
+		let token = self.next();
+		match token.kind {
+			t!("NULL") => Ok(Value::Null),
+			t!("true") => Ok(Value::Bool(true)),
+			t!("false") => Ok(Value::Bool(false)),
+			t!("{") => self.parse_json_object(token.span).map(Value::Object),
+			t!("[") => self.parse_json_array(token.span).map(Value::Array),
+			TokenKind::Duration => self.from_token(token).map(Value::Duration),
+			TokenKind::DateTime => self.from_token(token).map(Value::Datetime),
+			TokenKind::Strand => self.from_token(token).map(Value::Strand),
+			TokenKind::Number => self.from_token(token).map(Value::Number),
+			TokenKind::Uuid => self.from_token(token).map(Value::Uuid),
+			_ => self.parse_thing().map(Value::Thing),
+		}
+	}
+
+	pub fn parse_json_object(&mut self, start: Span) -> ParseResult<Object> {
+		let mut obj = BTreeMap::new();
+		loop {
+			if self.eat(t!("}")) {
+				return Ok(Object(obj));
+			}
+			let key = self.parse_object_key()?;
+			expected!(self, ":");
+			let value = self.parse_json()?;
+			obj.insert(key, value);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!("}"), start)?;
+				return Ok(Object(obj));
+			}
+		}
+	}
+
+	pub fn parse_json_array(&mut self, start: Span) -> ParseResult<Array> {
+		let mut array = Vec::new();
+		loop {
+			if self.eat(t!("]")) {
+				return Ok(Array(array));
+			}
+			let value = self.parse_json()?;
+			array.push(value);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!("]"), start)?;
+				return Ok(Array(array));
+			}
+		}
+	}
+}

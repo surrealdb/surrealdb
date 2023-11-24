@@ -2,7 +2,7 @@ use crate::{
 	sql::Kind,
 	syn::v2::{
 		parser::mac::expected,
-		token::{t, Span, TokenKind},
+		token::{t, Keyword, Span, TokenKind},
 	},
 };
 
@@ -121,7 +121,16 @@ impl Parser<'_> {
 
 	pub fn parse_geometry_kind(&mut self) -> ParseResult<String> {
 		match self.next().kind {
-			TokenKind::Geometry(x) => Ok(x.as_str().to_owned()),
+			TokenKind::Keyword(
+				x @ (Keyword::Feature
+				| Keyword::Point
+				| Keyword::Line
+				| Keyword::Polygon
+				| Keyword::MultiPoint
+				| Keyword::MultiLine
+				| Keyword::MultiPolygon
+				| Keyword::Collection),
+			) => Ok(x.as_str().to_ascii_lowercase()),
 			x => unexpected!(self, x, "a geometry kind name"),
 		}
 	}

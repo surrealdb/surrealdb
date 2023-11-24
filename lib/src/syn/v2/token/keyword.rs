@@ -198,6 +198,14 @@ keyword! {
 	Uuid => "UUID",
 	Ulid => "ULID",
 	Rand => "RAND",
+	Feature => "FEATURE",
+	Line => "LINE",
+	Point => "POINT",
+	Polygon => "POLYGON",
+	MultiPoint => "MULTIPOINT",
+	MultiLine => "MULTILINE",
+	MultiPolygon => "MULTIPOLYGON",
+	Collection => "COLLECTION",
 }
 
 pub(crate) use keyword_t;

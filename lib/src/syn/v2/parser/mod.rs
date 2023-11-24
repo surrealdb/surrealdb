@@ -20,6 +20,7 @@ mod prime;
 mod stmt;
 mod token_buffer;
 
+mod json;
 #[cfg(test)]
 mod test;
 

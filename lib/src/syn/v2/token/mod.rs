@@ -165,33 +165,6 @@ pub enum Delim {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum GeometryName {
-	Feature,
-	Point,
-	Line,
-	Polygon,
-	Multipoint,
-	Multiline,
-	Multipolygon,
-	Collection,
-}
-
-impl GeometryName {
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			GeometryName::Feature => "feature",
-			GeometryName::Point => "point",
-			GeometryName::Line => "line",
-			GeometryName::Polygon => "polygon",
-			GeometryName::Multipoint => "multipoint",
-			GeometryName::Multiline => "multiline",
-			GeometryName::Multipolygon => "multipolygon",
-			GeometryName::Collection => "collection",
-		}
-	}
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum DistanceKind {
 	Euclidean,
 	Manhattan,
@@ -218,7 +191,6 @@ pub enum TokenKind {
 	Keyword(Keyword),
 	Algorithm(Algorithm),
 	Language(Language),
-	Geometry(GeometryName),
 	Distance(DistanceKind),
 	Operator(Operator),
 	OpenDelim(Delim),
@@ -292,7 +264,6 @@ impl TokenKind {
 			TokenKind::Operator(x) => x.as_str(),
 			TokenKind::Algorithm(_) => todo!(),
 			TokenKind::Language(_) => todo!(),
-			TokenKind::Geometry(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",

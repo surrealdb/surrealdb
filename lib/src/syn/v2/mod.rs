@@ -36,7 +36,8 @@ pub fn value(input: &str) -> Result<Value, Error> {
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
-	todo!()
+	let mut parser = Parser::new(input.as_bytes());
+	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
@@ -75,8 +76,9 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
-pub fn range(_input: &str) -> Result<Range, Error> {
-	todo!()
+pub fn range(input: &str) -> Result<Range, Error> {
+	let mut parser = Parser::new(input.as_bytes());
+	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 pub fn thing(input: &str) -> Result<Thing, Error> {

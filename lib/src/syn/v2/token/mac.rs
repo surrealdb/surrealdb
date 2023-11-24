@@ -248,32 +248,6 @@ macro_rules! t {
 		$crate::syn::v2::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs512)
 	};
 
-	// Geometry
-	("FEATURE") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Feature)
-	};
-	("LINE") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Line)
-	};
-	("POINT") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Point)
-	};
-	("POLYGON") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Polygon)
-	};
-	("MULTIPOINT") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Point)
-	};
-	("MULTILINE") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Point)
-	};
-	("MULTIPOLYGON") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Point)
-	};
-	("COLLECTION") => {
-		$crate::syn::v2::token::TokenKind::Geometry($crate::syn::v2::token::GeometryName::Point)
-	};
-
 	// Distance
 	("EUCLIDEAN") => {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Euclidean)
@@ -288,7 +262,9 @@ macro_rules! t {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Hamming)
 	};
 	("MAHALANOBIS") => {
-		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Mahalanobis)
+		$crate::syn::v2::token::TokenKind::Distance(
+			$crate::syn::v2::token::DistanceKind::Mahalanobis,
+		)
 	};
 	("MINKOWSKI") => {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Minkowski)

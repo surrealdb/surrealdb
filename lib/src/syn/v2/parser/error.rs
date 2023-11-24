@@ -29,10 +29,6 @@ pub enum ParseErrorKind {
 		expected: TokenKind,
 		should_close: Span,
 	},
-	Retried {
-		first: Box<ParseError>,
-		then: Box<ParseError>,
-	},
 	InvalidNumber {
 		error: NumberParseError,
 	},
@@ -104,10 +100,15 @@ impl ParseError {
 					snippets: vec![snippet, close_snippet],
 				}
 			}
-			ParseErrorKind::Retried {
-				..
-			} => todo!(),
-			ParseErrorKind::DisallowedStatement => todo!(),
+			ParseErrorKind::DisallowedStatement => {
+				let text = "This statement is not allowed in this location".to_owned();
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
 			ParseErrorKind::InvalidToken(e) => {
 				let text = e.to_string();
 				let locations = Location::range_of_span(source, self.at);

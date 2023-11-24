@@ -1,6 +1,6 @@
 use crate::{
 	sql::{language::Language, Algorithm},
-	syn::v2::token::{DistanceKind, GeometryName, Keyword, TokenKind},
+	syn::v2::token::{DistanceKind, Keyword, TokenKind},
 };
 use phf::phf_map;
 use unicase::UniCase;
@@ -192,6 +192,14 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("UUID") => TokenKind::Keyword(Keyword::Uuid),
 	UniCase::ascii("ULID") => TokenKind::Keyword(Keyword::Ulid),
 	UniCase::ascii("RAND") => TokenKind::Keyword(Keyword::Rand),
+	UniCase::ascii("FEATURE") => TokenKind::Keyword(Keyword::Feature),
+	UniCase::ascii("LINE") => TokenKind::Keyword(Keyword::Line),
+	UniCase::ascii("POINT") => TokenKind::Keyword(Keyword::Point),
+	UniCase::ascii("POLYGON") => TokenKind::Keyword(Keyword::Polygon),
+	UniCase::ascii("MULTIPOINT") => TokenKind::Keyword(Keyword::MultiPoint),
+	UniCase::ascii("MULTILINE") => TokenKind::Keyword(Keyword::MultiLine),
+	UniCase::ascii("MULTIPOLYGON") => TokenKind::Keyword(Keyword::MultiPolygon),
+	UniCase::ascii("COLLECTION") => TokenKind::Keyword(Keyword::Collection),
 
 	// Languages
 	UniCase::ascii("ARABIC") => TokenKind::Language(Language::Arabic),
@@ -268,13 +276,5 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 
 	// Geometry
-	UniCase::ascii("FEATURE") => TokenKind::Geometry(GeometryName::Feature),
-	UniCase::ascii("LINE") => TokenKind::Geometry(GeometryName::Line),
-	UniCase::ascii("POINT") => TokenKind::Geometry(GeometryName::Point),
-	UniCase::ascii("POLYGON") => TokenKind::Geometry(GeometryName::Polygon),
-	UniCase::ascii("MULTIPOINT") => TokenKind::Geometry(GeometryName::Point),
-	UniCase::ascii("MULTILINE") => TokenKind::Geometry(GeometryName::Point),
-	UniCase::ascii("MULTIPOLYGON") => TokenKind::Geometry(GeometryName::Point),
-	UniCase::ascii("COLLECTION") => TokenKind::Geometry(GeometryName::Point),
 
 };
