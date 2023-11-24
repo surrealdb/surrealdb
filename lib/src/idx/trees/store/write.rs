@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::RwLockWriteGuard;
 
-pub(super) struct TreeTransactionWrite<N>
+pub struct TreeTransactionWrite<N>
 where
 	N: TreeNode + Debug,
 {
@@ -104,7 +104,7 @@ where
 		}
 		for node_id in &self.updated {
 			if let Some(node) = self.nodes.remove(node_id) {
-				self.np.save(tx, Arc::try_unwrap(node)?).await?;
+				self.np.save(tx, Arc::into_inner(node).ok_or(Error::Unreachable)?).await?;
 			} else {
 				return Err(Error::Unreachable);
 			}
@@ -120,7 +120,7 @@ where
 	}
 }
 
-pub(super) struct TreeMemoryWrite {
+pub struct TreeMemoryWrite {
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
@@ -135,19 +135,23 @@ impl TreeMemoryWrite {
 
 	pub(super) fn get_node<N>(
 		&mut self,
-		nodes: &mut RwLockWriteGuard<TreeMemoryMap<N>>,
+		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error>
 	where
 		N: TreeNode + Debug,
 	{
-		#[cfg(debug_assertions)]
-		{
-			debug!("GET: {}", node_id);
-			self.out.insert(node_id);
-		}
-		if let Some(n) = nodes.remove(&node_id) {
-			Ok(n)
+		if let Some(ref mut nodes) = nodes {
+			#[cfg(debug_assertions)]
+			{
+				debug!("GET: {}", node_id);
+				self.out.insert(node_id);
+			}
+			if let Some(n) = nodes.remove(&node_id) {
+				Ok(n)
+			} else {
+				Err(Error::Unreachable)
+			}
 		} else {
 			Err(Error::Unreachable)
 		}
@@ -155,19 +159,23 @@ impl TreeMemoryWrite {
 
 	pub(super) fn set_node<N>(
 		&mut self,
-		nodes: &mut TreeMemoryMap<N>,
+		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node: Arc<StoredNode<N>>,
 	) -> Result<(), Error>
 	where
 		N: TreeNode + Debug,
 	{
-		#[cfg(debug_assertions)]
-		{
-			debug!("SET: {} {:?}", node.id, node.n);
-			self.out.remove(&node.id);
+		if let Some(ref mut nodes) = nodes {
+			#[cfg(debug_assertions)]
+			{
+				debug!("SET: {} {:?}", node.id, node.n);
+				self.out.remove(&node.id);
+			}
+			nodes.insert(node.id, node);
+			Ok(())
+		} else {
+			Err(Error::Unreachable)
 		}
-		nodes.lock().insert(node.id, node);
-		Ok(())
 	}
 
 	pub(super) fn new_node<N>(&mut self, id: NodeId, node: N) -> Arc<StoredNode<N>>
@@ -184,22 +192,26 @@ impl TreeMemoryWrite {
 
 	pub(super) fn remove_node<N>(
 		&mut self,
-		nodes: &mut TreeMemoryMap<N>,
+		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<(), Error>
 	where
 		N: TreeNode + Debug,
 	{
-		#[cfg(debug_assertions)]
-		{
-			debug!("REMOVE: {}", node_id);
-			if nodes.contains_key(&node_id) {
-				return Err(Error::Unreachable);
+		if let Some(ref mut nodes) = nodes {
+			#[cfg(debug_assertions)]
+			{
+				debug!("REMOVE: {}", node_id);
+				if nodes.contains_key(&node_id) {
+					return Err(Error::Unreachable);
+				}
+				self.out.remove(&node_id);
 			}
-			self.out.remove(&node_id);
+			nodes.remove(&node_id);
+			Ok(())
+		} else {
+			Err(Error::Unreachable)
 		}
-		nodes.remove(&node_id);
-		Ok(())
 	}
 
 	pub(super) fn finish(&mut self) -> Result<bool, Error> {
