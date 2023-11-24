@@ -274,7 +274,7 @@ pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
 mod tests {
 
 	use crate::sql::{Dir, Expression, Number, Param, Table, Thing};
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	use super::*;
 

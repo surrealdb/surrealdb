@@ -7,6 +7,9 @@ use super::unicode::{chars, U8Ext};
 
 impl<'a> Lexer<'a> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
+	///
+	/// # Lexer State
+	/// Expected the lexer to have already eaten the param starting `$`
 	pub fn lex_param(&mut self) -> Token {
 		loop {
 			if let Some(x) = self.reader.peek() {

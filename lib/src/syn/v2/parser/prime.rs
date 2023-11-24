@@ -50,7 +50,7 @@ impl Parser<'_> {
 			t!("/") => {
 				let token = self.pop_peek();
 				let regex = self.lexer.relex_regex(token);
-				self.from_token(regex).map(Value::Regex)
+				self.token_value(regex).map(Value::Regex)
 			}
 			t!("RETURN")
 			| t!("SELECT")
@@ -140,7 +140,7 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
 			_ => {
-				let name: Ident = self.from_token(token)?;
+				let name: Ident = self.token_value(token)?;
 				if self.peek_kind() == t!(":") {
 					return self.parse_thing_or_range(name.0);
 				}

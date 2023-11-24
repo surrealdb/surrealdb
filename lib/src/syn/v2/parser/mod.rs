@@ -11,11 +11,11 @@ use self::token_buffer::TokenBuffer;
 
 mod basic;
 mod error;
+mod expression;
 mod idiom;
 mod kind;
 mod mac;
 mod object;
-mod operator;
 mod prime;
 mod stmt;
 mod token_buffer;

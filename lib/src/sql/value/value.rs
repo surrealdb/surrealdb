@@ -2714,7 +2714,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::uuid::Uuid;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[test]
 	fn check_none() {

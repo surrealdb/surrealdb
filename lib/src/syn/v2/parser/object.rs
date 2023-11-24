@@ -47,66 +47,56 @@ impl Parser<'_> {
 			"type" => {
 				// for it to be geometry the next value must be a strand like.
 				let token = self.peek();
-				let strand = self.from_token::<Strand>(token);
-				match strand.map(|x| x.as_str()) {
+				let strand = self.token_value::<Strand>(token);
+				match strand.as_ref().map(|x| x.as_str()) {
 					Ok("Point") => {
 						// we matched a type correctly but the field containing the geometry value
 						// can still be wrong.
 						//
 						// we can unwrap strand since we just matched it to not be an err.
-						return self.parse_geometry_after_type(
+						self.parse_geometry_after_type(
 							start,
 							key,
 							strand.unwrap(),
 							Self::to_point,
 							|x| Value::Geometry(Geometry::Point(x)),
-						);
-					}
-					Ok("LineString") => {
-						return self.parse_geometry_after_type(
-							start,
-							key,
-							strand.unwrap(),
-							Self::to_line,
-							|x| Value::Geometry(Geometry::Line(x)),
 						)
 					}
-					Ok("Polygon") => {
-						return self.parse_geometry_after_type(
-							start,
-							key,
-							strand.unwrap(),
-							Self::to_polygon,
-							|x| Value::Geometry(Geometry::Polygon(x)),
-						)
-					}
-					Ok("MultiPoint") => {
-						return self.parse_geometry_after_type(
-							start,
-							key,
-							strand.unwrap(),
-							Self::to_multipoint,
-							|x| Value::Geometry(Geometry::MultiPoint(x)),
-						)
-					}
-					Ok("MultiLineString") => {
-						return self.parse_geometry_after_type(
-							start,
-							key,
-							strand.unwrap(),
-							Self::to_multiline,
-							|x| Value::Geometry(Geometry::MultiLine(x)),
-						)
-					}
-					Ok("MultiPolygon") => {
-						return self.parse_geometry_after_type(
-							start,
-							key,
-							strand.unwrap(),
-							Self::to_multipolygon,
-							|x| Value::Geometry(Geometry::MultiPolygon(x)),
-						)
-					}
+					Ok("LineString") => self.parse_geometry_after_type(
+						start,
+						key,
+						strand.unwrap(),
+						Self::to_line,
+						|x| Value::Geometry(Geometry::Line(x)),
+					),
+					Ok("Polygon") => self.parse_geometry_after_type(
+						start,
+						key,
+						strand.unwrap(),
+						Self::to_polygon,
+						|x| Value::Geometry(Geometry::Polygon(x)),
+					),
+					Ok("MultiPoint") => self.parse_geometry_after_type(
+						start,
+						key,
+						strand.unwrap(),
+						Self::to_multipoint,
+						|x| Value::Geometry(Geometry::MultiPoint(x)),
+					),
+					Ok("MultiLineString") => self.parse_geometry_after_type(
+						start,
+						key,
+						strand.unwrap(),
+						Self::to_multiline,
+						|x| Value::Geometry(Geometry::MultiLine(x)),
+					),
+					Ok("MultiPolygon") => self.parse_geometry_after_type(
+						start,
+						key,
+						strand.unwrap(),
+						Self::to_multipolygon,
+						|x| Value::Geometry(Geometry::MultiPolygon(x)),
+					),
 					Ok("GeometryCollection") => {
 						self.next();
 						let strand = strand.unwrap();
@@ -173,18 +163,19 @@ impl Parser<'_> {
 
 								return Ok(Value::Geometry(Geometry::Collection(geometries)));
 							}
+
+							return Ok(Value::Object(Object(BTreeMap::from([
+								(key, Value::Strand(strand)),
+								(coord_key, Value::Array(x)),
+							]))));
 						}
 
-						return Ok(Value::Object(Object(BTreeMap::from([
+						Ok(Value::Object(Object(BTreeMap::from([
 							(key, Value::Strand(strand)),
 							(coord_key, value),
-						]))));
+						]))))
 					}
-					_ => {
-						return self
-							.parse_object_from_key(key, BTreeMap::new(), start)
-							.map(Value::Object)
-					}
+					_ => self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
 				}
 			}
 			"coordinates" => {
@@ -193,7 +184,7 @@ impl Parser<'_> {
 				let value = self.parse_value()?;
 				if !self.eat(t!(",")) {
 					// no comma object must end early.
-					self.expect_closing_delimiter(t!("}"), start);
+					self.expect_closing_delimiter(t!("}"), start)?;
 					return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
 				}
 
@@ -211,10 +202,9 @@ impl Parser<'_> {
 						.map(Value::Object);
 				}
 				let peek = self.peek();
-				let strand = self.from_token::<Strand>(peek);
-				let mut ate_comma = false;
+				let strand = self.token_value::<Strand>(peek);
 				// match the type and then match the coordinates field to a value of that type.
-				let (ate_commad, type_value) = match strand.map(|x| x.as_str()) {
+				let (ate_comma, type_value) = match strand.as_ref().map(|x| x.as_str()) {
 					Ok("Point") => {
 						self.next();
 						let ate_comma = self.eat(t!(","));
@@ -293,17 +283,16 @@ impl Parser<'_> {
 						(type_key, type_value),
 					]))));
 				}
-				return self
-					.parse_object_from_map(
-						BTreeMap::from([(key, value), (type_key, type_value)]),
-						start,
-					)
-					.map(Value::Object);
+				self.parse_object_from_map(
+					BTreeMap::from([(key, value), (type_key, type_value)]),
+					start,
+				)
+				.map(Value::Object)
 			}
 			"geometries" => {
 				let value = self.parse_value()?;
 				if !self.eat(t!(",")) {
-					self.expect_closing_delimiter(t!("}"), start);
+					self.expect_closing_delimiter(t!("}"), start)?;
 					return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
 				}
 				let type_key = self.parse_object_key()?;
@@ -314,14 +303,17 @@ impl Parser<'_> {
 						.map(Value::Object);
 				}
 				let peek = self.peek();
-				let strand = self.from_token::<Strand>(peek);
+				let strand = self.token_value::<Strand>(peek);
 				let (ate_comma, type_value) =
-					if let Ok("GeometryCollection") = strand.map(|x| x.as_str()) {
+					if let Ok("GeometryCollection") = strand.as_ref().map(|x| x.as_str()) {
 						self.next();
 						let ate_comma = self.eat(t!(","));
 						if self.eat(t!("}")) {
-							if let Value::Array(x) = value {
+							if let Value::Array(ref x) = value {
 								if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
+									let Value::Array(x) = value else {
+										unreachable!()
+									};
 									let geometries = x
 										.into_iter()
 										.map(|x| {
@@ -349,14 +341,13 @@ impl Parser<'_> {
 						(type_key, type_value),
 					]))));
 				}
-				return self
-					.parse_object_from_map(
-						BTreeMap::from([(key, value), (type_key, type_value)]),
-						start,
-					)
-					.map(Value::Object);
+				self.parse_object_from_map(
+					BTreeMap::from([(key, value), (type_key, type_value)]),
+					start,
+				)
+				.map(Value::Object)
 			}
-			_ => return self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
+			_ => self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
 		}
 	}
 
@@ -383,7 +374,11 @@ impl Parser<'_> {
 		if coord_key != "coordinates" {
 			// next field was not correct, fallback to parsing plain object.
 			return self
-				.parse_object_from_key(key, BTreeMap::from([(key, Value::Strand(strand))]), start)
+				.parse_object_from_key(
+					coord_key,
+					BTreeMap::from([(key, Value::Strand(strand))]),
+					start,
+				)
 				.map(Value::Object);
 		}
 		let value = self.parse_value()?;
@@ -416,7 +411,7 @@ impl Parser<'_> {
 			]))));
 		};
 		// successfully matched the value, it is a geometry.
-		return Ok(map(v));
+		Ok(map(v))
 	}
 
 	fn to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
@@ -457,7 +452,7 @@ impl Parser<'_> {
 		let Value::Array(v) = v else {
 			return None;
 		};
-		if v.len() < 1 {
+		if v.is_empty() {
 			return None;
 		}
 		let first = Self::to_line(&v[0])?;
@@ -486,13 +481,13 @@ impl Parser<'_> {
 			return None;
 		}
 		// FIXME: This truncates decimals and large integers into a f64.
-		let Value::Number(a) = v.0[0] else {
+		let Value::Number(ref a) = v.0[0] else {
 			return None;
 		};
-		let Value::Number(b) = v.0[1] else {
+		let Value::Number(ref b) = v.0[1] else {
 			return None;
 		};
-		Some(Point::from((a.try_into().ok()?, b.try_into().ok()?)))
+		Some(Point::from((a.clone().try_into().ok()?, b.clone().try_into().ok()?)))
 	}
 
 	fn parse_object_from_key(

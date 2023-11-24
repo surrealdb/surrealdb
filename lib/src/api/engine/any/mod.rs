@@ -255,7 +255,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
 	use crate::sql::Value;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

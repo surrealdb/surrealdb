@@ -1,7 +1,6 @@
 use crate::{
 	sql::{
-		language::Language, Datetime, Dir, Duration, Ident, Number, Param, Regex, Strand, Table,
-		Uuid,
+		language::Language, Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
 	},
 	syn::v2::{
 		parser::mac::{to_do, unexpected},
@@ -39,7 +38,7 @@ impl TokenValue for Ident {
 
 impl TokenValue for Table {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parser.from_token::<Ident>(token).map(|x| Table(x.0))
+		parser.token_value::<Ident>(token).map(|x| Table(x.0))
 	}
 }
 
@@ -307,7 +306,7 @@ impl TokenValue for Uuid {
 			unexpected!(parser, token.kind, "a duration")
 		};
 		let index = u32::from(token.data_index.unwrap());
-		Ok(parser.lexer.uuid[index as usize].clone())
+		Ok(parser.lexer.uuid[index as usize])
 	}
 }
 
@@ -331,16 +330,7 @@ impl Parser<'_> {
 		res
 	}
 
-	pub fn from_token<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
+	pub fn token_value<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
 		V::from_token(self, token)
-	}
-
-	pub fn parse_dir(&mut self) -> ParseResult<Dir> {
-		match self.next().kind {
-			t!("<-") => Ok(Dir::In),
-			t!("<->") => Ok(Dir::Both),
-			t!("->") => Ok(Dir::Out),
-			x => unexpected!(self, x, "a direction"),
-		}
 	}
 }

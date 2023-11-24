@@ -19,11 +19,11 @@ impl Parser<'_> {
 			t!("false") => Ok(Value::Bool(false)),
 			t!("{") => self.parse_json_object(token.span).map(Value::Object),
 			t!("[") => self.parse_json_array(token.span).map(Value::Array),
-			TokenKind::Duration => self.from_token(token).map(Value::Duration),
-			TokenKind::DateTime => self.from_token(token).map(Value::Datetime),
-			TokenKind::Strand => self.from_token(token).map(Value::Strand),
-			TokenKind::Number => self.from_token(token).map(Value::Number),
-			TokenKind::Uuid => self.from_token(token).map(Value::Uuid),
+			TokenKind::Duration => self.token_value(token).map(Value::Duration),
+			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
+			TokenKind::Strand => self.token_value(token).map(Value::Strand),
+			TokenKind::Number => self.token_value(token).map(Value::Number),
+			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
 			_ => self.parse_thing().map(Value::Thing),
 		}
 	}

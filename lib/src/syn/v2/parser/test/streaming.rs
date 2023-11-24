@@ -459,7 +459,7 @@ fn statements() -> Vec<Statement> {
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
 			)))),
 			fetch: Some(Fetchs(vec![Fetch(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))])),
-			version: Some(Version(Datetime(expected_datetime.clone()))),
+			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
 			explain: Some(Explain(true)),
@@ -655,7 +655,7 @@ fn test_streaming() {
 		}
 	}
 
-	let src = String::from_utf8_lossy(&source_bytes[source_start..]).to_owned();
+	let src = String::from_utf8_lossy(&source_bytes[source_start..]);
 	let range = src.char_indices().nth(100).map(|x| x.0).unwrap_or(src.len());
 	let src = &src[..range];
 	parser.reset();

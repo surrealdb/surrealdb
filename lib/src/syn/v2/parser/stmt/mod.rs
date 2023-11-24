@@ -3,7 +3,7 @@ use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
-use crate::sql::{Fields, Ident, Param, Uuid};
+use crate::sql::{Fields, Ident, Param};
 use crate::syn::v2::token::{t, TokenKind};
 use crate::{
 	sql::{
@@ -311,15 +311,7 @@ impl Parser<'_> {
 		let cond = self.try_parse_condition()?;
 		let fetch = self.try_parse_fetch()?;
 
-		Ok(LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			expr,
-			what,
-			cond,
-			fetch,
-			..Default::default()
-		})
+		Ok(LiveStatement::from_source_parts(expr, what, cond, fetch))
 	}
 
 	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
@@ -369,8 +361,8 @@ impl Parser<'_> {
 		expected!(self, "SINCE");
 		let next = self.next();
 		let since = match next.kind {
-			TokenKind::Number => ShowSince::Versionstamp(self.from_token(next)?),
-			TokenKind::DateTime => ShowSince::Timestamp(self.from_token(next)?),
+			TokenKind::Number => ShowSince::Versionstamp(self.token_value(next)?),
+			TokenKind::DateTime => ShowSince::Timestamp(self.token_value(next)?),
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};
 

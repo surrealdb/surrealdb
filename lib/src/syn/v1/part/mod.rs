@@ -238,7 +238,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::{Datetime, Idiom, Value};
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 	use std::time;
 
 	#[test]

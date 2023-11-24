@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{
 	err::Error,
 	sql::{Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
@@ -6,6 +8,9 @@ use crate::{
 pub mod lexer;
 pub mod parser;
 pub mod token;
+
+#[cfg(test)]
+pub mod test;
 
 use lexer::Lexer;
 use parser::{ParseError, ParseErrorKind, Parser};

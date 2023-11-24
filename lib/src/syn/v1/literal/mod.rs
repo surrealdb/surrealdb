@@ -108,7 +108,7 @@ pub fn tables(i: &str) -> IResult<&str, Tables> {
 mod tests {
 
 	use super::*;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[test]
 	fn ident_normal() {

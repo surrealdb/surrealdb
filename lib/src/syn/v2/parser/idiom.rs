@@ -258,7 +258,7 @@ impl Parser<'_> {
 							Part::Last
 						}
 						t!("123") => {
-							let number = self.from_token(token)?;
+							let number = self.token_value(token)?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),
