@@ -1,10 +1,7 @@
 use std::ops::Bound;
 
 use crate::{
-	sql::{
-		Array, Dir, Id, Ident, Idiom, Mock, Param, Part, Range, Strand, Subquery, Table, Thing,
-		Value,
-	},
+	sql::{Array, Dir, Id, Ident, Idiom, Mock, Part, Range, Subquery, Table, Thing, Value},
 	syn::v2::{
 		parser::mac::{expected, to_do, unexpected},
 		token::{t, Span, TokenKind},
@@ -22,6 +19,10 @@ impl Parser<'_> {
 			TokenKind::Duration => {
 				let duration = self.parse_token_value()?;
 				Ok(Value::Duration(duration))
+			}
+			TokenKind::DateTime => {
+				let datetime = self.parse_token_value()?;
+				Ok(Value::Datetime(datetime))
 			}
 			t!("$param") => {
 				let param = self.parse_token_value()?;
@@ -87,23 +88,27 @@ impl Parser<'_> {
 				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
 			}
 			TokenKind::Strand => {
-				let index = u32::from(token.data_index.unwrap());
-				let strand = Strand(self.lexer.strings[index as usize].clone());
+				let strand = self.token_value(token)?;
 				return Ok(Value::Strand(strand));
 			}
 			TokenKind::Duration => {
-				let index = u32::from(token.data_index.unwrap());
-				let duration = self.lexer.durations[index as usize];
+				let duration = self.token_value(token)?;
 				Value::Duration(duration)
 			}
 			TokenKind::Number => {
-				let index = u32::from(token.data_index.unwrap());
-				let number = self.lexer.numbers[index as usize].clone();
+				let number = self.token_value(token)?;
 				Value::Number(number)
 			}
+			TokenKind::Uuid => {
+				let uuid = self.token_value(token)?;
+				Value::Uuid(uuid)
+			}
+			TokenKind::DateTime => {
+				let datetime = self.token_value(token)?;
+				Value::Datetime(datetime)
+			}
 			t!("$param") => {
-				let index = u32::from(token.data_index.unwrap());
-				let param = Param(Ident(self.lexer.strings[index as usize].clone()));
+				let param = self.token_value(token)?;
 				Value::Param(param)
 			}
 			t!("FUNCTION") => {

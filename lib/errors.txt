@@ -1,0 +1,243 @@
+---- iam::verify::tests::test_basic_root stdout ----
+thread 'iam::verify::tests::test_basic_root' panicked at lib/src/iam/verify.rs:477:40:
+called `Result::unwrap()` on an `Err` value: PhcStringField
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- iam::verify::tests::test_basic_ns stdout ----
+thread 'iam::verify::tests::test_basic_ns' panicked at lib/src/iam/verify.rs:477:40:
+called `Result::unwrap()` on an `Err` value: PhcStringField
+
+---- iam::verify::tests::test_basic_db stdout ----
+thread 'iam::verify::tests::test_basic_db' panicked at lib/src/iam/verify.rs:477:40:
+called `Result::unwrap()` on an `Err` value: PhcStringField
+
+---- iam::verify::tests::test_verify_creds_valid stdout ----
+thread 'iam::verify::tests::test_verify_creds_valid' panicked at lib/src/iam/verify.rs:477:40:
+called `Result::unwrap()` on an `Err` value: PhcStringField
+
+---- iam::verify::tests::test_verify_creds_chain stdout ----
+thread 'iam::verify::tests::test_verify_creds_chain' panicked at lib/src/iam/verify.rs:477:40:
+called `Result::unwrap()` on an `Err` value: PhcStringField
+
+---- idx::ft::analyzer::filter::tests::test_norwegian_stemmer stdout ----
+FOUND ERROR:    0: surrealdb::syn::v2::parser::error::ParseError::new
+             at ./src/syn/v2/parser/error.rs:55:15
+   1: surrealdb::syn::v2::parser::stmt::define::<impl surrealdb::syn::v2::parser::Parser>::parse_define_analyzer
+             at ./src/syn/v2/parser/stmt/define.rs:565:15
+   2: surrealdb::syn::v2::parser::stmt::define::<impl surrealdb::syn::v2::parser::Parser>::parse_define_stmt
+             at ./src/syn/v2/parser/stmt/define.rs:37:22
+   3: surrealdb::syn::v2::parser::stmt::<impl surrealdb::syn::v2::parser::Parser>::parse_stmt
+             at ./src/syn/v2/parser/stmt/mod.rs:86:5
+   4: surrealdb::syn::v2::parser::Parser::parse_query
+             at ./src/syn/v2/parser/mod.rs:172:29
+   5: surrealdb::syn::v2::parse
+             at ./src/syn/v2/mod.rs:31:2
+   6: surrealdb::idx::ft::analyzer::tests::test_analyzer
+             at ./src/idx/ft/analyzer/mod.rs:179:18
+   7: surrealdb::idx::ft::analyzer::filter::tests::test_norwegian_stemmer
+             at ./src/idx/ft/analyzer/filter.rs:440:3
+   8: surrealdb::idx::ft::analyzer::filter::tests::test_norwegian_stemmer::{{closure}}
+             at ./src/idx/ft/analyzer/filter.rs:409:29
+   9: core::ops::function::FnOnce::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+  10: core::ops::function::FnOnce::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+  11: test::__rust_begin_short_backtrace
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:628:18
+  12: test::run_test_in_process::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:651:60
+  13: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/panic/unwind_safe.rs:271:9
+  14: std::panicking::try::do_call
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:504:40
+  15: std::panicking::try
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:468:19
+  16: std::panic::catch_unwind
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panic.rs:142:14
+  17: test::run_test_in_process
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:651:27
+  18: test::run_test::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:574:43
+  19: test::run_test::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:602:41
+  20: std::sys_common::backtrace::__rust_begin_short_backtrace
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/sys_common/backtrace.rs:154:18
+  21: std::thread::Builder::spawn_unchecked_::{{closure}}::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/thread/mod.rs:529:17
+  22: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/panic/unwind_safe.rs:271:9
+  23: std::panicking::try::do_call
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:504:40
+  24: std::panicking::try
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:468:19
+  25: std::panic::catch_unwind
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panic.rs:142:14
+  26: std::thread::Builder::spawn_unchecked_::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/thread/mod.rs:528:30
+  27: core::ops::function::FnOnce::call_once{{vtable.shim}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+  28: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/alloc/src/boxed.rs:2007:9
+  29: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/alloc/src/boxed.rs:2007:9
+  30: std::sys::unix::thread::Thread::new::thread_start
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/sys/unix/thread.rs:108:17
+  31: <unknown>
+  32: <unknown>
+
+thread 'idx::ft::analyzer::filter::tests::test_norwegian_stemmer' panicked at lib/src/idx/ft/analyzer/mod.rs:179:61:
+called `Result::unwrap()` on an `Err` value: InvalidQuery(RenderedError { text: "Unexpected token 'NO' expected a language", snippets: [Snippet { source: " snowball(no);", truncation: Start, location: Location { line: 1, column: 62 }, offset: 10, length: 2, explain: None }] })
+
+---- sql::fmt::tests::pretty_define_query stdout ----
+FOUND ERROR:    0: surrealdb::syn::v2::parser::error::ParseError::new
+             at ./src/syn/v2/parser/error.rs:55:15
+   1: surrealdb::syn::v2::parser::Parser::parse_query
+             at ./src/syn/v2/parser/mod.rs:184:4
+   2: surrealdb::syn::v2::parse
+             at ./src/syn/v2/mod.rs:31:2
+   3: surrealdb::sql::fmt::tests::pretty_define_query
+             at ./src/sql/fmt.rs:295:15
+   4: surrealdb::sql::fmt::tests::pretty_define_query::{{closure}}
+             at ./src/sql/fmt.rs:294:26
+   5: core::ops::function::FnOnce::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+   6: core::ops::function::FnOnce::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+   7: test::__rust_begin_short_backtrace
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:628:18
+   8: test::run_test_in_process::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:651:60
+   9: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/panic/unwind_safe.rs:271:9
+  10: std::panicking::try::do_call
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:504:40
+  11: std::panicking::try
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:468:19
+  12: std::panic::catch_unwind
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panic.rs:142:14
+  13: test::run_test_in_process
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:651:27
+  14: test::run_test::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:574:43
+  15: test::run_test::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/test/src/lib.rs:602:41
+  16: std::sys_common::backtrace::__rust_begin_short_backtrace
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/sys_common/backtrace.rs:154:18
+  17: std::thread::Builder::spawn_unchecked_::{{closure}}::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/thread/mod.rs:529:17
+  18: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/panic/unwind_safe.rs:271:9
+  19: std::panicking::try::do_call
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:504:40
+  20: std::panicking::try
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panicking.rs:468:19
+  21: std::panic::catch_unwind
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/panic.rs:142:14
+  22: std::thread::Builder::spawn_unchecked_::{{closure}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/thread/mod.rs:528:30
+  23: core::ops::function::FnOnce::call_once{{vtable.shim}}
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/core/src/ops/function.rs:250:5
+  24: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/alloc/src/boxed.rs:2007:9
+  25: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/alloc/src/boxed.rs:2007:9
+  26: std::sys::unix::thread::Thread::new::thread_start
+             at /rustc/0039d739d40a076334e111488946441378d11cd7/library/std/src/sys/unix/thread.rs:108:17
+  27: <unknown>
+  28: <unknown>
+
+thread 'sql::fmt::tests::pretty_define_query' panicked at lib/src/sql/fmt.rs:295:135:
+called `Result::unwrap()` on an `Err` value: InvalidQuery(RenderedError { text: "Unexpected token 'FOR' expected ;", snippets: [Snippet { source: "lete NONE FOR select WHERE public = true;", truncation: Start, location: Location { line: 1, column: 74 }, offset: 10, length: 3, explain: None }] })
+
+---- sql::value::decrement::tests::decrement_none stdout ----
+thread 'sql::value::decrement::tests::decrement_none' panicked at lib/src/sql/value/decrement.rs:53:9:
+assertion `left == right` failed
+  left: Object(Object({"other": Expression(Unary { o: Sub, v: Number(Int(10)) }), "test": Number(Int(100))}))
+ right: Object(Object({"other": Number(Int(-10)), "test": Number(Int(100))}))
+
+---- sql::value::get::tests::get_future_embedded_field_with_reference stdout ----
+thread 'sql::value::get::tests::get_future_embedded_field_with_reference' panicked at lib/src/sql/value/get.rs:393:9:
+assertion `left == right` failed
+  left: None
+ right: Array(Array([Object(Object({"age": Number(Int(36))}))]))
+
+---- sql::value::inc::tests::increment_none stdout ----
+thread 'sql::value::inc::tests::increment_none' panicked at lib/src/sql/value/inc.rs:41:9:
+assertion `left == right` failed
+  left: Object(Object({"other": Expression(Unary { o: Add, v: Number(Int(10)) }), "test": Number(Int(100))}))
+ right: Object(Object({"other": Number(Int(10)), "test": Number(Int(100))}))
+
+---- sql::value::increment::tests::increment_none stdout ----
+thread 'sql::value::increment::tests::increment_none' panicked at lib/src/sql/value/increment.rs:54:9:
+assertion `left == right` failed
+  left: Object(Object({"other": Expression(Unary { o: Add, v: Number(Int(10)) }), "test": Number(Int(100))}))
+ right: Object(Object({"other": Number(Int(10)), "test": Number(Int(100))}))
+
+---- syn::v2::parser::test::stmt::parse_create stdout ----
+thread 'syn::v2::parser::test::stmt::parse_create' panicked at lib/src/syn/v2/parser/test/stmt.rs:86:5:
+assertion `left == right` failed
+  left: Create(CreateStatement { only: true, what: Values([Table(Table("foo"))]), data: Some(SetExpression([(Idiom([Field(Ident("bar"))]), Equal, Number(Int(3))), (Idiom([Field(Ident("foo"))]), Ext, Number(Int(4)))])), output: Some(Fields(Fields([Single { expr: Idiom(Idiom([Field(Ident("foo"))])), alias: Some(Idiom([Field(Ident("bar"))])) }], true))), timeout: Some(Timeout(Duration(1s))), parallel: false })
+ right: Create(CreateStatement { only: true, what: Values([Table(Table("foo"))]), data: Some(SetExpression([(Idiom([Field(Ident("bar"))]), Equal, Number(Int(3))), (Idiom([Field(Ident("foo"))]), Ext, Number(Int(4)))])), output: Some(Fields(Fields([Single { expr: Idiom(Idiom([Field(Ident("foo"))])), alias: Some(Idiom([Field(Ident("bar"))])) }], true))), timeout: Some(Timeout(Duration(1s))), parallel: true })
+
+---- syn::v2::parser::test::stmt::parse_define_table stdout ----
+thread 'syn::v2::parser::test::stmt::parse_define_table' panicked at lib/src/syn/v2/parser/test/stmt.rs:285:5:
+assertion `left == right` failed
+  left: Define(Table(DefineTableStatement { id: None, name: Ident("name"), drop: true, full: true, view: None, permissions: Permissions { select: Full, create: Full, update: Full, delete: Full }, changefeed: Some(ChangeFeed { expiry: 1s }), comment: None }))
+ right: Define(Table(DefineTableStatement { id: None, name: Ident("name"), drop: true, full: true, view: Some(View { expr: Fields([Single { expr: Idiom(Idiom([Field(Ident("foo"))])), alias: None }], false), what: Tables([Table("bar")]), cond: None, group: Some(Groups([Group(Idiom([Field(Ident("foo"))]))])) }), permissions: Permissions { select: Specific(Expression(Binary { l: Idiom(Idiom([Field(Ident("a"))])), o: Equal, r: Number(Int(1)) })), create: Full, update: Full, delete: Full }, changefeed: Some(ChangeFeed { expiry: 1s }), comment: None }))
+
+---- syn::v2::parser::test::stmt::parse_define_scope stdout ----
+thread 'syn::v2::parser::test::stmt::parse_define_scope' panicked at lib/src/syn/v2/parser/test/stmt.rs:249:5:
+assertion `left == right` failed
+  left: None
+ right: Some(Strand("bar"))
+
+---- syn::v2::parser::test::stmt::parse_delete stdout ----
+thread 'syn::v2::parser::test::stmt::parse_delete' panicked at lib/src/syn/v2/parser/test/stmt.rs:482:5:
+assertion `left == right` failed
+  left: Delete(DeleteStatement { only: true, what: Values([Mock(Range("foo", 32, 64))]), cond: Some(Cond(Number(Int(2)))), output: Some(After), timeout: Some(Timeout(Duration(1s))), parallel: false })
+ right: Delete(DeleteStatement { only: true, what: Values([Mock(Range("foo", 32, 64))]), cond: Some(Cond(Number(Int(2)))), output: Some(After), timeout: Some(Timeout(Duration(1s))), parallel: true })
+
+---- syn::v2::parser::test::stmt::parse_delete_2 stdout ----
+thread 'syn::v2::parser::test::stmt::parse_delete_2' panicked at lib/src/syn/v2/parser/test/stmt.rs:503:5:
+assertion `left == right` failed
+  left: Delete(DeleteStatement { only: true, what: Values([Idiom(Idiom([Value(Edges(Edges { dir: Out, from: Thing { tb: "a", id: String("b") }, what: Tables([]) })), Last, Where(Bool(true))]))]), cond: Some(Cond(Null)), output: Some(Null), timeout: Some(Timeout(Duration(3600s))), parallel: false })
+ right: Delete(DeleteStatement { only: true, what: Values([Idiom(Idiom([Value(Edges(Edges { dir: Out, from: Thing { tb: "a", id: String("b") }, what: Tables([]) })), Last, Where(Bool(true))]))]), cond: Some(Cond(Null)), output: Some(Null), timeout: Some(Timeout(Duration(3600s))), parallel: true })
+
+---- syn::v2::parser::test::stmt::parse_update stdout ----
+thread 'syn::v2::parser::test::stmt::parse_update' panicked at lib/src/syn/v2/parser/test/stmt.rs:1153:5:
+assertion `left == right` failed
+  left: Update(UpdateStatement { only: true, what: Values([Future(Future(Block([Value(Strand(Strand("text")))]))), Idiom(Idiom([Field(Ident("a")), Graph(Graph { dir: Out, expr: Fields([], false), what: Tables([Table("b")]), cond: None, split: None, group: None, order: None, limit: None, start: None, alias: None })]))]), data: Some(UnsetExpression([Idiom([Field(Ident("foo")), Flatten]), Idiom([Field(Ident("a")), Graph(Graph { dir: Out, expr: Fields([], false), what: Tables([Table("b")]), cond: None, split: None, group: None, order: None, limit: None, start: None, alias: None })]), Idiom([Field(Ident("c")), All])])), cond: Some(Cond(Bool(true))), output: Some(Diff), timeout: Some(Timeout(Duration(1s))), parallel: false })
+ right: Update(UpdateStatement { only: true, what: Values([Future(Future(Block([Value(Strand(Strand("text")))]))), Idiom(Idiom([Field(Ident("a")), Graph(Graph { dir: Out, expr: Fields([], false), what: Tables([Table("b")]), cond: None, split: None, group: None, order: None, limit: None, start: None, alias: None })]))]), data: Some(UnsetExpression([Idiom([Field(Ident("foo")), Flatten]), Idiom([Field(Ident("a")), Graph(Graph { dir: Out, expr: Fields([], false), what: Tables([Table("b")]), cond: None, split: None, group: None, order: None, limit: None, start: None, alias: None })]), Idiom([Field(Ident("c")), All])])), cond: Some(Cond(Bool(true))), output: Some(Diff), timeout: Some(Timeout(Duration(1s))), parallel: true })
+
+---- syn::v2::parser::test::streaming::test_streaming stdout ----
+thread 'syn::v2::parser::test::streaming::test_streaming' panicked at lib/src/syn/v2/parser/test/streaming.rs:663:5:
+assertion `left == right` failed: failed to parse at
+        CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL;
+        DEFINE NAMESP
+At statement CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL
+
+Pending { value: Ok(Create(CreateStatement { only: true, what: Values([Table(Table("foo"))]), data: Some(SetExpression([(Idiom([Field(Ident("bar"))]), Equal, Number(Int(3))), (Idiom([Field(Ident("foo"))]), Ext, Number(Int(4)))])), output: Some(Fields(Fields([Single { expr: Idiom(Idiom([Field(Ident("foo"))])), alias: Some(Idiom([Field(Ident("bar"))])) }], true))), timeout: Some(Timeout(Duration(1s))), parallel: false })), used: 84 }
+  left: 9
+ right: 47
+
+
+failures:
+    iam::verify::tests::test_basic_db
+    iam::verify::tests::test_basic_ns
+    iam::verify::tests::test_basic_root
+    iam::verify::tests::test_verify_creds_chain
+    iam::verify::tests::test_verify_creds_valid
+    idx::ft::analyzer::filter::tests::test_norwegian_stemmer
+    key::thing::tests::key_complex
+    sql::fmt::tests::pretty_define_query
+    sql::value::decrement::tests::decrement_none
+    sql::value::get::tests::get_future_embedded_field_with_reference
+    sql::value::inc::tests::increment_none
+    sql::value::increment::tests::increment_none
+    syn::v2::parser::test::stmt::parse_create
+    syn::v2::parser::test::stmt::parse_define_scope
+    syn::v2::parser::test::stmt::parse_define_table
+    syn::v2::parser::test::stmt::parse_delete
+    syn::v2::parser::test::stmt::parse_delete_2
+    syn::v2::parser::test::stmt::parse_update
+    syn::v2::parser::test::streaming::test_stre
