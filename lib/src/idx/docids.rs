@@ -1,7 +1,10 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
+use crate::idx::trees::btree::{BStatistics, BTree, BTreeNode};
+use crate::idx::trees::store::memory::ShardedTreeMemoryMap;
+use crate::idx::trees::store::{
+	IndexStores, StoreProvider, StoreRights, TreeNodeProvider, TreeStore,
+};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use revision::revisioned;
@@ -17,6 +20,7 @@ pub(crate) struct DocIds {
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	index_stores: IndexStores,
+	mem_store: Option<ShardedTreeMemoryMap<BTreeNode<TrieKeys>>>,
 	tree_node_provider: TreeNodeProvider,
 	store_provider: StoreProvider,
 	available_ids: Option<RoaringTreemap>,
@@ -26,30 +30,43 @@ pub(crate) struct DocIds {
 
 impl DocIds {
 	pub(in crate::idx) async fn new(
-		index_stores: IndexStores,
+		ixs: IndexStores,
 		tx: &mut Transaction,
-		store_provider: StoreProvider,
-		index_key_base: IndexKeyBase,
+		sp: StoreProvider,
+		ikb: IndexKeyBase,
 		default_btree_order: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bd_key(None);
+		let state_key: Key = ikb.new_bd_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {
 			State::new(default_btree_order)
 		};
-		let tree_node_provider = TreeNodeProvider::DocIds(index_key_base.clone());
+		let tree_node_provider = TreeNodeProvider::DocIds(ikb.clone());
+		let mem_store = ixs.get_mem_store_btree_trie(&tree_node_provider, sp).await;
 		Ok(Self {
 			state_key,
-			index_key_base,
+			index_key_base: ikb,
 			btree: BTree::new(state.btree),
-			index_stores,
+			index_stores: ixs,
+			mem_store,
 			tree_node_provider,
-			store_provider,
+			store_provider: sp,
 			available_ids: state.available_ids,
 			next_doc_id: state.next_doc_id,
 			updated: false,
 		})
+	}
+
+	async fn get_store(&self, rights: StoreRights) -> TreeStore<BTreeNode<TrieKeys>> {
+		self.index_stores
+			.get_store_btree_trie(
+				self.tree_node_provider.clone(),
+				self.store_provider,
+				rights,
+				20, // TODO: Replace by configuration
+			)
+			.await
 	}
 
 	fn get_next_doc_id(&mut self) -> DocId {
@@ -74,8 +91,15 @@ impl DocIds {
 		tx: &mut Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		let mut store = self.get_read_store().await;
-		self.btree.search(tx, &mut store, &doc_key).await
+		let mut store = self.get_store(StoreRights::Read).await;
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.search(tx, &mem, &mut store, &doc_key).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	/// Returns the doc_id for the given doc_key.
@@ -86,28 +110,29 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
 		{
-			let mut store = self.get_read_store().await;
-			if let Some(doc_id) = self.btree.search(tx, &mut store, &doc_key).await? {
+			let mut store = self.get_store(StoreRights::Read).await;
+			let mem = if let Some(mem_store) = &self.mem_store {
+				Some(mem_store.read().await)
+			} else {
+				None
+			};
+			if let Some(doc_id) = self.btree.search(tx, &mem, &mut store, &doc_key).await? {
 				return Ok(Resolved::Existing(doc_id));
 			}
+			store.finish(tx).await?;
 		}
 		let doc_id = self.get_next_doc_id();
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
-		let mut store = self.get_write_store().await;
-		self.btree.insert(tx, &mut store, doc_key, doc_id).await?;
+		let mut store = self.get_store(StoreRights::Write).await;
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		self.btree.insert(tx, &mut mem, &mut store, doc_key, doc_id).await?;
+		store.finish(tx).await?;
 		self.updated = true;
 		Ok(Resolved::New(doc_id))
-	}
-
-	async fn get_store(&self, rights: StoreRights) -> BTreeStore<TrieKeys> {
-		self.index_stores
-			.get_store_btree_trie(
-				self.tree_node_provider.clone(),
-				self.store_provider,
-				rights,
-				20, // TODO: Replace by configuration
-			)
-			.await
 	}
 
 	pub(in crate::idx) async fn remove_doc(
@@ -116,7 +141,13 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.get_store(StoreRights::Write).await;
-		if let Some(doc_id) = self.btree.delete(tx, &mut store, doc_key).await? {
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		let res = if let Some(doc_id) = self.btree.delete(tx, &mut mem, &mut store, doc_key).await?
+		{
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
@@ -126,10 +157,12 @@ impl DocIds {
 				self.available_ids = Some(available_ids);
 			}
 			self.updated = true;
-			Ok(Some(doc_id))
+			Some(doc_id)
 		} else {
-			Ok(None)
-		}
+			None
+		};
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(in crate::idx) async fn get_doc_key(
@@ -150,13 +183,18 @@ impl DocIds {
 		tx: &mut Transaction,
 	) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		self.btree.statistics(tx, &mut store).await
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.statistics(tx, &mem, &mut store).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		let mut store = self.get_store(StoreRights::Write).await;
-		let updated = store.await.finish(tx).await?;
-		if self.updated || updated {
+		if self.updated {
 			// TODO: The state should be handled by the IndexStores too
 			let state = State {
 				btree: self.btree.get_state().clone(),

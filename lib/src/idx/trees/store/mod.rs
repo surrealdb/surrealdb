@@ -13,18 +13,18 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockWriteGuard};
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 pub type NodeId = u64;
 
 #[derive(Clone, Copy)]
-pub(in crate::idx) enum StoreRights {
+pub enum StoreRights {
 	Write,
 	Read,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum StoreProvider {
+pub enum StoreProvider {
 	Transaction,
 	Memory,
 }
@@ -76,12 +76,12 @@ where
 	pub(in crate::idx) async fn get_node_mut(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<RwLockWriteGuard<TreeMemoryMap<N>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			TreeStore::TransactionWrite(w) => w.get_node(tx, node_id).await,
-			TreeStore::MemoryWrite(t) => t.get_node(mem.ok_or(Error::Unreachable)?, node_id),
+			TreeStore::MemoryWrite(t) => t.get_node(mem, node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -89,27 +89,25 @@ where
 	pub(in crate::idx) async fn get_node(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<&TreeMemoryMap<N>>,
+		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			TreeStore::TransactionRead(r) => r.get_node(tx, node_id).await,
-			TreeStore::MemoryRead => {
-				TreeMemoryRead::get_node(mem.ok_or(Error::Unreachable)?, node_id)
-			}
+			TreeStore::MemoryRead => TreeMemoryRead::get_node(mem, node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
 
 	pub(in crate::idx) async fn set_node(
 		&mut self,
-		mem: &Option<&mut TreeMemoryMap<N>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node: Arc<StoredNode<N>>,
 		updated: bool,
 	) -> Result<(), Error> {
 		match self {
 			TreeStore::TransactionWrite(w) => w.set_node(node, updated),
-			TreeStore::MemoryWrite(t) => t.set_node(mem.ok_or(Error::Unreachable)?, node),
+			TreeStore::MemoryWrite(t) => t.set_node(mem, node),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -128,13 +126,13 @@ where
 
 	pub(in crate::idx) async fn remove_node(
 		&mut self,
-		mem: &Option<&mut TreeMemoryMap<N>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 		node_key: Key,
 	) -> Result<(), Error> {
 		match self {
 			TreeStore::TransactionWrite(w) => w.remove_node(node_id, node_key),
-			TreeStore::MemoryWrite(t) => t.remove_node(mem.ok_or(Error::Unreachable)?, node_id),
+			TreeStore::MemoryWrite(t) => t.remove_node(mem, node_id),
 			_ => Err(Error::Unreachable),
 		}
 	}
@@ -143,7 +141,7 @@ where
 		match self {
 			TreeStore::TransactionWrite(w) => w.finish(tx).await,
 			TreeStore::MemoryWrite(t) => t.finish(),
-			_ => Err(Error::Unreachable),
+			_ => Ok(false),
 		}
 	}
 }
@@ -194,7 +192,7 @@ impl TreeNodeProvider {
 	}
 }
 
-pub(super) struct StoredNode<N> {
+pub struct StoredNode<N> {
 	pub(super) n: N,
 	pub(super) id: NodeId,
 	pub(super) key: Key,
@@ -268,13 +266,37 @@ impl IndexStores {
 		TreeStore::new(keys, prov, rights, cache_size).await
 	}
 
-	pub(in crate::idx) fn get_mem_store_mtree(
+	pub(in crate::idx) async fn get_mem_store_btree_trie(
+		&self,
+		keys: &TreeNodeProvider,
+		sp: StoreProvider,
+	) -> Option<ShardedTreeMemoryMap<BTreeNode<TrieKeys>>> {
+		if matches!(sp, StoreProvider::Memory) {
+			Some(self.0.in_memory_btree_trie.get(keys).await)
+		} else {
+			None
+		}
+	}
+
+	pub(in crate::idx) async fn get_mem_store_btree_fst(
+		&self,
+		keys: &TreeNodeProvider,
+		sp: StoreProvider,
+	) -> Option<ShardedTreeMemoryMap<BTreeNode<FstKeys>>> {
+		if matches!(sp, StoreProvider::Memory) {
+			Some(self.0.in_memory_btree_fst.get(keys).await)
+		} else {
+			None
+		}
+	}
+
+	pub(in crate::idx) async fn get_mem_store_mtree(
 		&self,
 		keys: &TreeNodeProvider,
 		sp: StoreProvider,
 	) -> Option<ShardedTreeMemoryMap<MTreeNode>> {
-		if sp == StoreProvider::Memory {
-			Some(self.0.in_memory_mtree.get(keys))
+		if matches!(sp, StoreProvider::Memory) {
+			Some(self.0.in_memory_mtree.get(keys).await)
 		} else {
 			None
 		}

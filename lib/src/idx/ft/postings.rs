@@ -2,7 +2,8 @@ use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNode, BTreeStore};
+use crate::idx::trees::store::memory::ShardedTreeMemoryMap;
 use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
@@ -14,14 +15,15 @@ pub(super) struct Postings {
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	index_stores: IndexStores,
+	mem_store: Option<ShardedTreeMemoryMap<BTreeNode<TrieKeys>>>,
 	tree_node_provider: TreeNodeProvider,
 	store_provider: StoreProvider,
 }
 
 impl Postings {
 	pub(super) async fn new(
-		index_stores: IndexStores,
-		store_provider: StoreProvider,
+		ixs: IndexStores,
+		sp: StoreProvider,
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
@@ -33,13 +35,15 @@ impl Postings {
 			BState::new(order)
 		};
 		let tree_node_provider = TreeNodeProvider::Postings(index_key_base.clone());
+		let mem_store = ixs.get_mem_store_btree_trie(&tree_node_provider, sp).await;
 		Ok(Self {
-			index_stores,
+			index_stores: ixs,
 			state_key,
 			index_key_base,
+			mem_store,
 			tree_node_provider,
 			btree: BTree::new(state),
-			store_provider,
+			store_provider: sp,
 		})
 	}
 
@@ -63,7 +67,14 @@ impl Postings {
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Write).await;
-		self.btree.insert(tx, &mut store, key, term_freq).await
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		let res = self.btree.insert(tx, &mut mem, &mut store, key, term_freq).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn get_term_frequency(
@@ -74,7 +85,14 @@ impl Postings {
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Read).await;
-		self.btree.search(tx, &mut store, &key).await
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.search(tx, &mem, &mut store, &key).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn remove_posting(
@@ -85,16 +103,29 @@ impl Postings {
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Write).await;
-		self.btree.delete(tx, &mut store, key).await
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		let res = self.btree.delete(tx, &mut mem, &mut store, key).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		self.btree.statistics(tx, &mut store).await
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.statistics(tx, &mem, &mut store).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		self.get_store(StoreRights::Write).await.finish(tx).await?;
 		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}

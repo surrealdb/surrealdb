@@ -12,6 +12,7 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 pub type Payload = u64;
 
@@ -159,9 +160,10 @@ where
 	}
 
 	fn append(&mut self, key: Key, payload: Payload, node: BStoredNode<BK>) -> Result<(), Error> {
+		let node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
 		match self {
 			BTreeNode::Internal(keys, children) => {
-				if let BTreeNode::Internal(append_keys, mut append_children) = &node.n {
+				if let BTreeNode::Internal(append_keys, mut append_children) = node.n {
 					keys.insert(key, payload);
 					keys.append(append_keys);
 					children.append(&mut append_children);
@@ -171,7 +173,7 @@ where
 				}
 			}
 			BTreeNode::Leaf(keys) => {
-				if let BTreeNode::Leaf(append_keys) = node {
+				if let BTreeNode::Leaf(append_keys) = node.n {
 					keys.insert(key, payload);
 					keys.append(append_keys);
 					Ok(())
@@ -204,7 +206,7 @@ where
 	pub async fn search(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<&TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
@@ -225,7 +227,7 @@ where
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
@@ -239,6 +241,7 @@ where
 				let new_root = store
 					.new_node(new_root_id, BTreeNode::Internal(BK::default(), vec![root_id]))?;
 				self.state.set_root(Some(new_root.id));
+				let new_root = Arc::into_inner(new_root).ok_or(Error::Unreachable)?;
 				self.split_child(mem, store, new_root, 0, root).await?;
 				self.insert_non_full(tx, mem, store, new_root_id, key, payload).await?;
 			} else {
@@ -261,7 +264,7 @@ where
 	async fn insert_non_full(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		node_id: NodeId,
 		key: Key,
@@ -269,21 +272,22 @@ where
 	) -> Result<(), Error> {
 		let mut next_node_id = Some(node_id);
 		while let Some(node_id) = next_node_id.take() {
-			let mut node = store.get_node(tx, mem, node_id).await?;
+			let node = store.get_node_mut(tx, mem, node_id).await?;
 			let key: Key = key.clone();
+			let mut node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
 			match &mut node.n {
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
-					store.set_node(mem, node, true).await?;
+					store.set_node(mem, Arc::new(node), true).await?;
 				}
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
-						store.set_node(mem, node, true).await?;
+						store.set_node(mem, Arc::new(node), true).await?;
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
-					let child = store.get_node(tx, mem, children[child_idx]).await?;
+					let child = store.get_node_mut(tx, mem, children[child_idx]).await?;
 					let next_id = if child.n.keys().len() == self.full_size {
 						let split_result =
 							self.split_child(mem, store, node, child_idx, child).await?;
@@ -294,7 +298,7 @@ where
 						}
 					} else {
 						let child_id = child.id;
-						store.set_node(mem, node, false).await?;
+						store.set_node(mem, Arc::new(node), false).await?;
 						store.set_node(mem, child, false).await?;
 						child_id
 					};
@@ -307,13 +311,14 @@ where
 
 	async fn split_child(
 		&mut self,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
-		mut parent_node: BStoredNode<BK>,
+		mut parent_node: StoredNode<BTreeNode<BK>>,
 		idx: usize,
 		child_node: BStoredNode<BK>,
 	) -> Result<SplitResult, Error> {
-		let (left_node, right_node, median_key, median_payload) = match &child_node.n {
+		let child_node = Arc::into_inner(child_node).ok_or(Error::Unreachable)?;
+		let (left_node, right_node, median_key, median_payload) = match child_node.n {
 			BTreeNode::Internal(keys, children) => self.split_internal_node(keys, children)?,
 			BTreeNode::Leaf(keys) => self.split_leaf_node(keys)?,
 		};
@@ -335,7 +340,7 @@ where
 		let right_node = store.new_node(right_node_id, right_node)?;
 		store.set_node(mem, right_node, true).await?;
 		// Save the parent node
-		store.set_node(mem, parent_node, true).await?;
+		store.set_node(mem, Arc::new(parent_node), true).await?;
 		Ok(SplitResult {
 			left_node_id,
 			right_node_id,
@@ -346,10 +351,9 @@ where
 	fn split_internal_node(
 		&mut self,
 		keys: BK,
-		left_children: &[NodeId],
+		mut left_children: Vec<NodeId>,
 	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
 		let r = keys.split_keys()?;
-		let mut left_children = left_children.to_vec();
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = BTreeNode::Internal(r.left, left_children);
 		let right_node = BTreeNode::Internal(r.right, right_children);
@@ -369,7 +373,7 @@ where
 	pub(in crate::idx) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
@@ -379,7 +383,8 @@ where
 			let mut next_node = Some((true, key_to_delete, root_id));
 
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
-				let mut node = store.get_node(tx, mem, node_id).await?;
+				let node = store.get_node_mut(tx, mem, node_id).await?;
+				let mut node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
 				match &mut node.n {
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
@@ -396,10 +401,10 @@ where
 									self.state.set_root(None);
 								}
 							} else {
-								store.set_node(mem, node, true).await?;
+								store.set_node(mem, Arc::new(node), true).await?;
 							}
 						} else {
-							store.set_node(mem, node, false).await?;
+							store.set_node(mem, Arc::new(node), false).await?;
 						}
 					}
 					BTreeNode::Internal(keys, children) => {
@@ -419,7 +424,7 @@ where
 								)
 								.await?,
 							);
-							store.set_node(mem, node, true).await?;
+							store.set_node(mem, Arc::new(node), true).await?;
 						} else {
 							// CLRS: 3
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
@@ -443,7 +448,7 @@ where
 								store.remove_node(mem, node.id, node.key.clone()).await?;
 								self.state.set_root(Some(next_stored_node));
 							} else {
-								store.set_node(mem, node, node_update).await?;
+								store.set_node(mem, Arc::new(node), node_update).await?;
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
 						}
@@ -457,7 +462,7 @@ where
 	async fn deleted_from_internal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -465,7 +470,7 @@ where
 	) -> Result<(bool, Key, NodeId), Error> {
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
-		let mut left_node = store.get_node_mut(tx, mem, left_id).await?;
+		let left_node = store.get_node_mut(tx, mem, left_id).await?;
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
@@ -493,9 +498,10 @@ where
 		// CLRS: 2c
 		// Merge children
 		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
+		let mut left_node = Arc::into_inner(left_node).ok_or(Error::Unreachable)?;
 		left_node.n.append(key_to_delete.clone(), 0, right_node.clone())?;
-		store.set_node(mem, left_node, true).await?;
-		store.remove_node(mem, right_node.id, right_node.key.clone()).await?;
+		store.set_node(mem, Arc::new(left_node), true).await?;
+		store.remove_node(mem, right_id, right_node.key.clone()).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
@@ -504,7 +510,7 @@ where
 	async fn deleted_traversal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -589,26 +595,30 @@ where
 	}
 
 	async fn delete_adjust_successor(
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut child_stored_node: BStoredNode<BK>,
-		mut right_child_stored_node: BStoredNode<BK>,
+		child_stored_node: BStoredNode<BK>,
+		right_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
+		let mut right_child_stored_node =
+			Arc::into_inner(right_child_stored_node).ok_or(Error::Unreachable)?;
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.n.keys().get_first_key()
 		{
 			right_child_stored_node.n.keys_mut().remove(&ascending_key);
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
+					let mut child_stored_node =
+						Arc::into_inner(child_stored_node).ok_or(Error::Unreachable)?;
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(mem, child_stored_node, true).await?;
-					store.set_node(mem, right_child_stored_node, true).await?;
+					store.set_node(mem, Arc::new(child_stored_node), true).await?;
+					store.set_node(mem, Arc::new(right_child_stored_node), true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -618,26 +628,30 @@ where
 	}
 
 	async fn delete_adjust_predecessor(
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut child_stored_node: BStoredNode<BK>,
-		mut left_child_stored_node: BStoredNode<BK>,
+		child_stored_node: BStoredNode<BK>,
+		left_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
+		let mut left_child_stored_node =
+			Arc::into_inner(left_child_stored_node).ok_or(Error::Unreachable)?;
 		if let Some((ascending_key, ascending_payload)) =
 			left_child_stored_node.n.keys().get_last_key()
 		{
 			left_child_stored_node.n.keys_mut().remove(&ascending_key);
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
+					let mut child_stored_node =
+						Arc::into_inner(child_stored_node).ok_or(Error::Unreachable)?;
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(mem, child_stored_node, true).await?;
-					store.set_node(mem, left_child_stored_node, true).await?;
+					store.set_node(mem, Arc::new(child_stored_node), true).await?;
+					store.set_node(mem, Arc::new(left_child_stored_node), true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -648,22 +662,23 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes(
-		mem: &Option<&mut TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut left_child: BStoredNode<BK>,
+		left_child: BStoredNode<BK>,
 		right_child: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		if let Some(descending_key) = keys.get_key(child_idx) {
 			if let Some(descending_payload) = keys.remove(&descending_key) {
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
+				let mut left_child = Arc::into_inner(left_child).ok_or(Error::Unreachable)?;
 				left_child.n.append(descending_key, descending_payload, right_child.clone())?;
-				store.set_node(mem, left_child, true).await?;
+				store.set_node(mem, Arc::new(left_child), true).await?;
 				store.remove_node(mem, right_child.id, right_child.key.clone()).await?;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
@@ -675,7 +690,7 @@ where
 	pub(in crate::idx) async fn statistics(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<&TreeMemoryMap<BTreeNode<BK>>>,
+		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();

@@ -1,7 +1,8 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNode, BTreeStore, Payload};
+use crate::idx::trees::store::memory::ShardedTreeMemoryMap;
 use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
@@ -10,6 +11,7 @@ pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	index_stores: IndexStores,
+	mem_store: Option<ShardedTreeMemoryMap<BTreeNode<TrieKeys>>>,
 	tree_node_provider: TreeNodeProvider,
 	store_provider: StoreProvider,
 	state_key: Key,
@@ -18,22 +20,25 @@ pub(super) struct DocLengths {
 
 impl DocLengths {
 	pub(super) async fn new(
-		index_stores: IndexStores,
-		store_provider: StoreProvider,
+		ixs: IndexStores,
+		sp: StoreProvider,
 		tx: &mut Transaction,
-		index_key_base: IndexKeyBase,
+		ikb: IndexKeyBase,
 		default_btree_order: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bl_key(None);
+		let state_key: Key = ikb.new_bl_key(None);
 		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
 			BState::try_from_val(val)?
 		} else {
 			BState::new(default_btree_order)
 		};
+		let tree_node_provider = TreeNodeProvider::DocLengths(ikb);
+		let mem_store = ixs.get_mem_store_btree_trie(&tree_node_provider, sp).await;
 		Ok(Self {
-			index_stores,
-			store_provider,
-			tree_node_provider: TreeNodeProvider::DocLengths(index_key_base),
+			index_stores: ixs,
+			store_provider: sp,
+			mem_store,
+			tree_node_provider,
 			state_key,
 			btree: BTree::new(state),
 		})
@@ -56,7 +61,14 @@ impl DocLengths {
 		doc_id: DocId,
 	) -> Result<Option<DocLength>, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		self.btree.search(tx, &mut store, &doc_id.to_be_bytes().to_vec()).await
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.search(tx, &mem, &mut store, &doc_id.to_be_bytes().to_vec()).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn set_doc_length(
@@ -66,7 +78,17 @@ impl DocLengths {
 		doc_length: DocLength,
 	) -> Result<(), Error> {
 		let mut store = self.get_store(StoreRights::Write).await;
-		self.btree.insert(tx, &mut store, doc_id.to_be_bytes().to_vec(), doc_length).await
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		let res = self
+			.btree
+			.insert(tx, &mut mem, &mut store, doc_id.to_be_bytes().to_vec(), doc_length)
+			.await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn remove_doc_length(
@@ -75,16 +97,30 @@ impl DocLengths {
 		doc_id: DocId,
 	) -> Result<Option<Payload>, Error> {
 		let mut store = self.get_store(StoreRights::Write).await;
-		self.btree.delete(tx, &mut store, doc_id.to_be_bytes().to_vec()).await
+		let mut mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.write().await)
+		} else {
+			None
+		};
+		let res =
+			self.btree.delete(tx, &mut mem, &mut store, doc_id.to_be_bytes().to_vec()).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		self.btree.statistics(tx, &mut store).await
+		let mem = if let Some(mem_store) = &self.mem_store {
+			Some(mem_store.read().await)
+		} else {
+			None
+		};
+		let res = self.btree.statistics(tx, &mem, &mut store).await?;
+		store.finish(tx).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn finish(&self, tx: &mut Transaction) -> Result<(), Error> {
-		self.get_store(StoreRights::Write).await.finish(tx).await?;
 		self.btree.get_state().finish(tx, &self.state_key).await?;
 		Ok(())
 	}
@@ -93,7 +129,7 @@ impl DocLengths {
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::doclength::DocLengths;
-	use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights};
+	use crate::idx::trees::store::{IndexStores, StoreProvider};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 

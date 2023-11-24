@@ -6,8 +6,9 @@ use quick_cache::sync::Cache;
 use quick_cache::GuardResult;
 use std::fmt::Debug;
 use std::sync::Arc;
+use tokio::sync::RwLockReadGuard;
 
-pub(super) struct TreeTransactionRead<N>
+pub struct TreeTransactionRead<N>
 where
 	N: TreeNode,
 {
@@ -35,7 +36,7 @@ where
 			GuardResult::Value(v) => Ok(v),
 			GuardResult::Guard(g) => {
 				let n = Arc::new(self.keys.load::<N>(tx, node_id).await?);
-				g.insert(n.clone())?;
+				g.insert(n.clone()).ok();
 				Ok(n)
 			}
 			GuardResult::Timeout => Err(Error::Unreachable),
@@ -47,12 +48,16 @@ pub(super) struct TreeMemoryRead {}
 
 impl TreeMemoryRead {
 	pub(super) fn get_node<N>(
-		nodes: &TreeMemoryMap<N>,
+		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error>
 	where
 		N: TreeNode + Debug,
 	{
-		nodes.get(&node_id).ok_or(Error::Unreachable).cloned()
+		if let Some(nodes) = mem {
+			nodes.get(&node_id).ok_or(Error::Unreachable).cloned()
+		} else {
+			Err(Error::Unreachable)
+		}
 	}
 }

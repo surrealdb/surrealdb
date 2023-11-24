@@ -6,8 +6,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-pub(in crate::idx) type TreeMemoryMap<N> = HashMap<NodeId, Arc<StoredNode<N>>>;
-pub(in crate::idx) type ShardedTreeMemoryMap<N> = Arc<RwLock<TreeMemoryMap<N>>>;
+pub type TreeMemoryMap<N> = HashMap<NodeId, Arc<StoredNode<N>>>;
+pub type ShardedTreeMemoryMap<N> = Arc<RwLock<TreeMemoryMap<N>>>;
 
 #[derive(Default)]
 pub struct TreeMemoryProvider<N>
