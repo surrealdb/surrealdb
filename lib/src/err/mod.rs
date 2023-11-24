@@ -45,8 +45,8 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic")]
-	Unreachable,
+	#[error("The database encountered unreachable logic: {0}")]
+	Unreachable(&'static str),
 
 	/// Statement has been deprecated
 	#[error("{0}")]

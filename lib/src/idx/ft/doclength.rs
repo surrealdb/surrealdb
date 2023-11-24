@@ -83,12 +83,11 @@ impl DocLengths {
 		} else {
 			None
 		};
-		let res = self
-			.btree
+		self.btree
 			.insert(tx, &mut mem, &mut store, doc_id.to_be_bytes().to_vec(), doc_length)
 			.await?;
 		store.finish(tx).await?;
-		Ok(res)
+		Ok(())
 	}
 
 	pub(super) async fn remove_doc_length(

@@ -14,7 +14,7 @@ pub struct TreeMemoryProvider<N>
 where
 	N: TreeNode + Debug,
 {
-	map: Arc<Mutex<HashMap<Key, Arc<RwLock<TreeMemoryMap<N>>>>>>,
+	map: Arc<Mutex<HashMap<Key, ShardedTreeMemoryMap<N>>>>,
 }
 
 impl<N> TreeMemoryProvider<N>

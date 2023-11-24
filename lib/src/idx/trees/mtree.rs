@@ -348,7 +348,7 @@ impl MTree {
 			{
 				debug!("Visit node id: {} - dist: {}", current.1, current.0);
 				if visited_nodes.insert(current.1, node.n.len()).is_some() {
-					return Err(Error::Unreachable);
+					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
 			match node.n {
@@ -497,13 +497,12 @@ impl MTree {
 			queue.push(root_id);
 		}
 		while let Some(current) = queue.pop() {
-			let node = store.get_node_mut(tx, mem, current).await?;
-			let mut node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
+			let mut node = store.get_node_mut(tx, mem, current).await?;
 			match node.n {
 				MTreeNode::Leaf(ref mut n) => {
 					if let Some(p) = n.get_mut(object) {
 						p.docs.insert(id);
-						store.set_node(mem, Arc::new(node), true).await?;
+						store.set_node(mem, node, true).await?;
 						return Ok(true);
 					}
 				}
@@ -516,11 +515,12 @@ impl MTree {
 					}
 				}
 			}
-			store.set_node(mem, Arc::new(node), false).await?;
+			store.set_node(mem, node, false).await?;
 		}
 		Ok(false)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	async fn insert_at_node(
@@ -535,8 +535,6 @@ impl MTree {
 	) -> Result<InsertionResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("insert_at_node - node: {} - doc: {} - obj: {:?}", node.id, doc, object);
-		// We can unwrap the node because by design, only one thread have access to the TreeStore
-		let node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
 		match node.n {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
@@ -638,7 +636,7 @@ impl MTree {
 				store
 					.set_node(
 						mem,
-						Arc::new(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0)),
+						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 						false,
 					)
 					.await?;
@@ -665,7 +663,7 @@ impl MTree {
 				store
 					.set_node(
 						mem,
-						Arc::new(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0)),
+						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 						updated,
 					)
 					.await?;
@@ -693,7 +691,7 @@ impl MTree {
 		if let Some((o, p)) = closest {
 			Ok((o, p))
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("MTree::find_closest"))
 		}
 	}
 
@@ -715,7 +713,7 @@ impl MTree {
 				store
 					.set_node(
 						mem,
-						Arc::new(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0)),
+						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 						true,
 					)
 					.await?;
@@ -738,11 +736,7 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			debug!("NODE LEAF: {} - MAX_DIST: {:?}", node_id, max_dist);
 			store
-				.set_node(
-					mem,
-					Arc::new(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0)),
-					true,
-				)
+				.set_node(mem, StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
 				.await?;
 			Ok(InsertionResult::CoveringRadius(max_dist))
 		} else {
@@ -792,7 +786,7 @@ impl MTree {
 		let new_node_id = self.new_node_id();
 
 		// Update the store/cache
-		let n = Arc::new(StoredNode::new(node1.into_mtree_node(), node_id, node_key, 0));
+		let n = StoredNode::new(node1.into_mtree_node(), node_id, node_key, 0);
 		store.set_node(mem, n, true).await?;
 		let n = store.new_node(new_node_id, node2.into_mtree_node())?;
 		store.set_node(mem, n, true).await?;
@@ -811,7 +805,7 @@ impl MTree {
 
 		#[cfg(debug_assertions)]
 		if p1.node == p2.node {
-			return Err(Error::Unreachable);
+			return Err(Error::Unreachable("MTree::split_node"));
 		}
 		Ok((o1, p1, o2, p2))
 	}
@@ -854,7 +848,7 @@ impl MTree {
 			assert_eq!(dist_cache.len(), n * n - n);
 		}
 		match promo {
-			None => Err(Error::Unreachable),
+			None => Err(Error::Unreachable("MTree::compute_distances_and_promoted_objects")),
 			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
 		}
 	}
@@ -931,13 +925,13 @@ impl MTree {
 				match &sn.n {
 					MTreeNode::Internal(n) => match n.len() {
 						0 => {
-							store.remove_node(mem, sn.id, sn.key.clone()).await?;
+							store.remove_node(mem, sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
 						1 => {
-							store.remove_node(mem, sn.id, sn.key.clone()).await?;
-							let e = n.values().next().ok_or(Error::Unreachable)?;
+							store.remove_node(mem, sn.id, sn.key).await?;
+							let e = n.values().next().ok_or(Error::Unreachable("MTree::delete"))?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
 						}
@@ -945,7 +939,7 @@ impl MTree {
 					},
 					MTreeNode::Leaf(n) => {
 						if n.is_empty() {
-							store.remove_node(mem, sn.id, sn.key.clone()).await?;
+							store.remove_node(mem, sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
@@ -974,7 +968,6 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		debug!("delete_at_node ID: {} - obj: {:?}", node.id, object);
 		// Delete ( Od:LeafEntry, N:Node)
-		let node = Arc::into_inner(node).ok_or(Error::Unreachable)?;
 		match node.n {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
@@ -1119,7 +1112,7 @@ impl MTree {
 		if n_node.len() < self.minimum {
 			// Return N
 			return Ok(DeletionResult::Underflown(
-				Arc::new(StoredNode::new(MTreeNode::Internal(n_node), node_id, node_key, 0)),
+				StoredNode::new(MTreeNode::Internal(n_node), node_id, node_key, 0),
 				n_updated,
 			));
 		}
@@ -1138,7 +1131,7 @@ impl MTree {
 		node: MTreeNode,
 		updated: bool,
 	) -> Result<(), Error> {
-		store.set_node(mem, Arc::new(StoredNode::new(node, node_id, node_key, 0)), updated).await
+		store.set_node(mem, StoredNode::new(node, node_id, node_key, 0), updated).await
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -1208,14 +1201,12 @@ impl MTree {
 		p: MStoredNode,
 		onn_obj: SharedVector,
 		mut onn_entry: RoutingProperties,
-		onn_child: MStoredNode,
+		mut onn_child: MStoredNode,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("deletion_underflown - fit into Node ID: {}", onn_child.id);
 		// Remove On from N;
 		n_node.remove(&on_obj);
-		let p = Arc::into_inner(p).ok_or(Error::Unreachable)?;
-		let mut onn_child = Arc::into_inner(onn_child).ok_or(Error::Unreachable)?;
 		match &mut onn_child.n {
 			MTreeNode::Internal(s) => {
 				let p_node = p.n.internal()?;
@@ -1261,8 +1252,8 @@ impl MTree {
 				n_node.insert(onn_obj, onn_entry);
 			}
 		}
-		store.remove_node(mem, p.id, p.key.clone()).await?;
-		store.set_node(mem, Arc::new(onn_child), true).await?;
+		store.remove_node(mem, p.id, p.key).await?;
+		store.set_node(mem, onn_child, true).await?;
 		Ok(())
 	}
 
@@ -1275,7 +1266,7 @@ impl MTree {
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
 		onn_obj: SharedVector,
-		p: MStoredNode,
+		mut p: MStoredNode,
 		onn_child: MStoredNode,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
@@ -1283,9 +1274,6 @@ impl MTree {
 		// Remove On and Onn from N;
 		n_node.remove(&on_obj);
 		n_node.remove(&onn_obj);
-
-		let onn_child = Arc::into_inner(onn_child).ok_or(Error::Unreachable)?;
-		let mut p = Arc::into_inner(p).ok_or(Error::Unreachable)?;
 		// (S U P)
 		p.n.merge(onn_child.n)?;
 		// Split(S U P)
@@ -1337,7 +1325,7 @@ impl MTree {
 				}
 			}
 		} else {
-			let sn = Arc::new(StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0));
+			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
 			store.set_node(mem, sn, false).await?;
 			return Ok(DeletionResult::NotFound);
 		}
@@ -1345,17 +1333,17 @@ impl MTree {
 			// If (N is underflown)
 			if leaf_node.len() < self.minimum {
 				return Ok(DeletionResult::Underflown(
-					Arc::new(StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0)),
+					StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0),
 					true,
 				));
 			}
 			// Return max(Ol E N) { parentDistance(Ol)};
 			let max_dist = self.compute_leaf_max_distance(&leaf_node, parent_center)?;
-			let sn = Arc::new(StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0));
+			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
 			store.set_node(mem, sn, true).await?;
 			Ok(DeletionResult::CoveringRadius(max_dist))
 		} else {
-			let sn = Arc::new(StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0));
+			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
 			store.set_node(mem, sn, true).await?;
 			Ok(DeletionResult::DocRemoved)
 		}
@@ -1435,8 +1423,8 @@ fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
 	}
 }
 
-type MTreeStore = TreeStore<MTreeNode>;
-type MStoredNode = Arc<StoredNode<MTreeNode>>;
+pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
+type MStoredNode = StoredNode<MTreeNode>;
 
 type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
 
@@ -1465,13 +1453,13 @@ impl MTreeNode {
 	fn internal(self) -> Result<InternalNode, Error> {
 		match self {
 			MTreeNode::Internal(n) => Ok(n),
-			MTreeNode::Leaf(_) => Err(Error::Unreachable),
+			MTreeNode::Leaf(_) => Err(Error::Unreachable("MTreeNode::internal")),
 		}
 	}
 
 	fn leaf(self) -> Result<LeafNode, Error> {
 		match self {
-			MTreeNode::Internal(_) => Err(Error::Unreachable),
+			MTreeNode::Internal(_) => Err(Error::Unreachable("MTreeNode::lead")),
 			MTreeNode::Leaf(n) => Ok(n),
 		}
 	}
@@ -1486,7 +1474,7 @@ impl MTreeNode {
 				Self::merge_leaf(s, o);
 				Ok(())
 			}
-			(_, _) => Err(Error::Unreachable),
+			(_, _) => Err(Error::Unreachable("MTreeNode::merge")),
 		}
 	}
 
@@ -1545,7 +1533,8 @@ impl NodeVectors for LeafNode {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
-			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let mut props =
+				self.remove(&o).ok_or(Error::Unreachable("NodeVectors/LeafNode::extract_node)"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			if dist > r {
 				r = dist;
@@ -1579,7 +1568,9 @@ impl NodeVectors for InternalNode {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
-			let mut props = self.remove(&o).ok_or(Error::Unreachable)?;
+			let mut props = self
+				.remove(&o)
+				.ok_or(Error::Unreachable("NodeVectors/InternalNode::extract_node"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			let r = dist + props.radius;
 			if r > max_r {
@@ -1675,7 +1666,7 @@ pub struct RoutingProperties {
 	radius: f64,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,
@@ -1742,19 +1733,10 @@ mod tests {
 		sp: StoreProvider,
 		tt: TransactionType,
 	) -> (TreeStore<MTreeNode>, Option<ShardedTreeMemoryMap<MTreeNode>>, Transaction) {
-		let tree_node_provider = TreeNodeProvider::Debug;
-		let mem = ixs.get_mem_store_mtree(&tree_node_provider, sp).await;
-		let store = ixs
-			.get_store_mtree(
-				tree_node_provider.clone(),
-				sp,
-				(&tt).into(),
-				20, // TODO: Replace by configuration
-			)
-			.await;
-
+		let mem = ixs.get_mem_store_mtree(&TreeNodeProvider::Debug, sp).await;
+		let st = ixs.get_store_mtree(TreeNodeProvider::Debug, sp, (&tt).into(), 20).await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		(store, mem, tx)
+		(st, mem, tx)
 	}
 
 	async fn finish_operation(

@@ -104,7 +104,7 @@ impl BKeys for FstKeys {
 	}
 
 	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
-		Err(Error::Unreachable)
+		Err(Error::Unreachable("BKeys/FSTKeys::collect_with_prefix"))
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -159,7 +159,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("BKeys/FSTKeys::split_keys"))
 		}
 	}
 
@@ -400,7 +400,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(Error::Unreachable);
+			return Err(Error::Unreachable("BKeys/TrieKeys::split_keys"));
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {

@@ -72,9 +72,9 @@ impl Postings {
 		} else {
 			None
 		};
-		let res = self.btree.insert(tx, &mut mem, &mut store, key, term_freq).await?;
+		self.btree.insert(tx, &mut mem, &mut store, key, term_freq).await?;
 		store.finish(tx).await?;
-		Ok(res)
+		Ok(())
 	}
 
 	pub(super) async fn get_term_frequency(

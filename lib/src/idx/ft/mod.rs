@@ -489,7 +489,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::trees::store::StoreProvider;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*};
+	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
@@ -540,14 +540,14 @@ mod tests {
 
 	pub(super) async fn tx_fti<'a>(
 		ds: &Datastore,
+		tt: TransactionType,
 		sp: StoreProvider,
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
 	) -> (Context<'a>, Options, Transaction, FtIndex) {
 		let ctx = Context::default();
-		let write = matches!(store_type, TreeStoreType::Write);
-		let tx = ds.transaction(write.into(), Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
@@ -593,8 +593,15 @@ mod tests {
 
 		{
 			// Add one document
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+			let (ctx, opt, txn, mut fti) = tx_fti(
+				&ds,
+				TransactionType::Write,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			fti.index_document(&ctx, &opt, &txn, &doc1, vec![Value::from("hello the world")])
 				.await
 				.unwrap();
@@ -603,8 +610,15 @@ mod tests {
 
 		{
 			// Add two documents
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+			let (ctx, opt, txn, mut fti) = tx_fti(
+				&ds,
+				TransactionType::Write,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			fti.index_document(&ctx, &opt, &txn, &doc2, vec![Value::from("a yellow hello")])
 				.await
 				.unwrap();
@@ -615,8 +629,15 @@ mod tests {
 		}
 
 		{
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+			let (ctx, opt, txn, fti) = tx_fti(
+				&ds,
+				TransactionType::Read,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			// Check the statistics
 			let statistics = fti.statistics(&txn).await.unwrap();
 			assert_eq!(statistics.terms.keys_count, 7);
@@ -647,15 +668,29 @@ mod tests {
 
 		{
 			// Reindex one document
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+			let (ctx, opt, txn, mut fti) = tx_fti(
+				&ds,
+				TransactionType::Write,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			fti.index_document(&ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
 				.await
 				.unwrap();
 			finish(&txn, fti).await;
 
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+			let (ctx, opt, txn, fti) = tx_fti(
+				&ds,
+				TransactionType::Read,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 
 			// We can still find 'foo'
 			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -672,8 +707,15 @@ mod tests {
 
 		{
 			// Remove documents
-			let (_, _, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+			let (_, _, txn, mut fti) = tx_fti(
+				&ds,
+				TransactionType::Write,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			fti.remove_document(&txn, &doc1).await.unwrap();
 			fti.remove_document(&txn, &doc2).await.unwrap();
 			fti.remove_document(&txn, &doc3).await.unwrap();
@@ -681,8 +723,15 @@ mod tests {
 		}
 
 		{
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+			let (ctx, opt, txn, fti) = tx_fti(
+				&ds,
+				TransactionType::Read,
+				StoreProvider::Transaction,
+				&az,
+				btree_order,
+				false,
+			)
+			.await;
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "hello").await;
 			assert!(hits.is_none());
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -709,8 +758,15 @@ mod tests {
 
 			let btree_order = 5;
 			{
-				let (ctx, opt, txn, mut fti) =
-					tx_fti(&ds, TreeStoreType::Write, &az, btree_order, hl).await;
+				let (ctx, opt, txn, mut fti) = tx_fti(
+					&ds,
+					TransactionType::Write,
+					StoreProvider::Transaction,
+					&az,
+					btree_order,
+					hl,
+				)
+				.await;
 				fti.index_document(
 					&ctx,
 					&opt,
@@ -751,8 +807,15 @@ mod tests {
 			}
 
 			{
-				let (ctx, opt, txn, fti) =
-					tx_fti(&ds, TreeStoreType::Read, &az, btree_order, hl).await;
+				let (ctx, opt, txn, fti) = tx_fti(
+					&ds,
+					TransactionType::Read,
+					StoreProvider::Transaction,
+					&az,
+					btree_order,
+					hl,
+				)
+				.await;
 
 				let statistics = fti.statistics(&txn).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);

@@ -5,6 +5,7 @@ use crate::idx::trees::store::memory::ShardedTreeMemoryMap;
 use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::{mem_store_read_lock, mem_store_write_lock};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -90,11 +91,7 @@ impl Terms {
 		let term_key = term.into();
 		{
 			let mut store = self.get_store(StoreRights::Read).await;
-			let mem = if let Some(mem_store) = &self.mem_store {
-				Some(mem_store.read().await)
-			} else {
-				None
-			};
+			let mem = mem_store_read_lock!(self.mem_store);
 			if let Some(term_id) = self.btree.search(tx, &mem, &mut store, &term_key).await? {
 				return Ok(term_id);
 			}
@@ -103,11 +100,7 @@ impl Terms {
 		let term_id = self.get_next_term_id();
 		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
 		let mut store = self.get_store(StoreRights::Write).await;
-		let mut mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.write().await)
-		} else {
-			None
-		};
+		let mut mem = mem_store_write_lock!(self.mem_store);
 		self.btree.insert(tx, &mut mem, &mut store, term_key, term_id).await?;
 		self.updated = true;
 		store.finish(tx).await?;
@@ -120,11 +113,7 @@ impl Terms {
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.search(tx, &mem, &mut store, &term.into()).await?;
 		store.finish(tx).await?;
 		Ok(res)
@@ -138,11 +127,7 @@ impl Terms {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
 		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
 			let mut store = self.get_store(StoreRights::Write).await;
-			let mut mem = if let Some(mem_store) = &self.mem_store {
-				Some(mem_store.write().await)
-			} else {
-				None
-			};
+			let mut mem = mem_store_write_lock!(self.mem_store);
 			self.btree.delete(tx, &mut mem, &mut store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
@@ -160,11 +145,7 @@ impl Terms {
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.statistics(tx, &mem, &mut store).await?;
 		store.finish(tx).await?;
 		Ok(res)
@@ -212,6 +193,7 @@ mod tests {
 	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use rand::{thread_rng, Rng};
 	use std::collections::HashSet;
+	use test_log::test;
 
 	fn random_term(key_length: usize) -> String {
 		thread_rng()
@@ -229,7 +211,7 @@ mod tests {
 		set
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_resolve_terms() {
 		const BTREE_ORDER: u32 = 7;
 
@@ -298,7 +280,7 @@ mod tests {
 		}
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_deletion() {
 		const BTREE_ORDER: u32 = 7;
 
@@ -350,10 +332,11 @@ mod tests {
 
 	async fn test_resolve_100_docs_with_50_words_one_by_one(sp: StoreProvider) {
 		let ds = Datastore::new("memory").await.unwrap();
+		let ixs = IndexStores::default();
 		for _ in 0..100 {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let ixs = IndexStores::default();
-			let mut t = Terms::new(ixs, sp, &mut tx, IndexKeyBase::default(), 100).await.unwrap();
+			let mut t =
+				Terms::new(ixs.clone(), sp, &mut tx, IndexKeyBase::default(), 100).await.unwrap();
 			let terms_string = random_term_freq_vec(50);
 			for (term, _) in terms_string {
 				t.resolve_term_id(&mut tx, &term).await.unwrap();
@@ -363,22 +346,23 @@ mod tests {
 		}
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_resolve_100_docs_with_50_words_one_by_one_memory() {
 		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Memory).await
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_resolve_100_docs_with_50_words_one_by_one_transaction() {
 		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Transaction).await
 	}
 
 	async fn test_resolve_100_docs_with_50_words_batch_of_10(sp: StoreProvider) {
 		let ds = Datastore::new("memory").await.unwrap();
+		let ixs = IndexStores::default();
 		for _ in 0..10 {
 			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let ixs = IndexStores::default();
-			let mut t = Terms::new(ixs, sp, &mut tx, IndexKeyBase::default(), 100).await.unwrap();
+			let mut t =
+				Terms::new(ixs.clone(), sp, &mut tx, IndexKeyBase::default(), 100).await.unwrap();
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
 				for (term, _) in terms_string {
@@ -390,12 +374,12 @@ mod tests {
 		}
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_resolve_100_docs_with_50_words_batch_of_10_memory() {
 		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Memory).await
 	}
 
-	#[tokio::test]
+	#[test(tokio::test)]
 	async fn test_resolve_100_docs_with_50_words_batch_of_10_transaction() {
 		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Transaction).await
 	}
