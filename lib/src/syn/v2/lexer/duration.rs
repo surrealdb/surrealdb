@@ -44,11 +44,12 @@ impl<'a> Lexer<'a> {
 		// span already contains
 		let mut span = self.current_span();
 		span.len -= 1;
-		for b in self.reader.span(self.current_span()).iter().copied() {
-			debug_assert!(b.is_ascii_digit(), "`{}` is not a digit", b as char);
+		for b in self.scratch.as_bytes() {
+			debug_assert!(b.is_ascii_digit(), "`{}` is not a digit", b);
 			current_value = current_value.checked_mul(10).ok_or(Error::Overflow)?;
 			current_value = current_value.checked_add((b - b'0') as u64).ok_or(Error::Overflow)?;
 		}
+		self.scratch.clear();
 
 		loop {
 			let Some(next) = self.reader.peek() else {

@@ -1,66 +1,59 @@
-pub use super::{
+use super::{
 	super::Parse,
+	builtin,
 	expression::binary as expression,
 	function::script_body as script,
 	idiom::plain as idiom,
 	literal::param,
 	thing::thing,
-	value::{array, object, value},
+	value::{array, value},
 };
+use nom::Finish;
 
-use crate::{
-	api::err::Error,
-	sql::{Array, Expression, Idiom, Param, Script, Thing, Value},
-};
+use crate::sql::{Array, Expression, Idiom, Param, Script, Thing, Value};
 
-use super::{idiom, thing, value};
-
-pub fn builtin_name(i: &str) -> Result<(), Error> {
-	todo!()
-}
-
-pub trait Parse<T> {
-	fn parse(val: &str) -> T;
+pub fn builtin_name(i: &str) -> Result<(), ()> {
+	builtin::builtin_name(i).finish().map(|_| ()).map_err(|_| ())
 }
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {
-		value(val).unwrap()
+		value(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Array {
 	fn parse(val: &str) -> Self {
-		todo!()
+		array(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Param {
 	fn parse(val: &str) -> Self {
-		todo!()
+		param(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Idiom {
 	fn parse(val: &str) -> Self {
-		idiom(val).unwrap()
+		idiom(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Script {
 	fn parse(val: &str) -> Self {
-		todo!()
+		script(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Thing {
 	fn parse(val: &str) -> Self {
-		thing(val).unwrap()
+		thing(val).finish().unwrap().1
 	}
 }
 
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
-		todo!()
+		expression(val).finish().unwrap().1
 	}
 }

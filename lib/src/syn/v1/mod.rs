@@ -7,7 +7,7 @@ mod part;
 mod stmt;
 
 mod block;
-pub(crate) mod builtin;
+mod builtin;
 mod comment;
 mod common;
 mod depth;

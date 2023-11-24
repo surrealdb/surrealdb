@@ -28,21 +28,39 @@ pub use error::{NumberParseError, ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
+/// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
 pub enum PartialResult<T> {
-	/// The parser might require more source to make a decision
+	/// The parser couldn't be sure that it has finished a full value.
 	Pending {
-		value: Result<T, ParseError>,
+		/// The value that was parsed.
+		/// This will not always be an error, if optional keywords after the end of a statement
+		/// where missing this will still parse that statement in full.
+		possible_value: Result<T, ParseError>,
+		/// number of bytes used for parsing the above statement.
 		used: usize,
 	},
-	/// The parser parsed a value.
+	/// The parser is sure that it doesn't need more data to return either an error or a value.
 	Ready {
+		/// The value the parser is sure the query should return.
 		value: Result<T, ParseError>,
+		/// number of bytes used
 		used: usize,
 	},
 }
 
 /// The SurrealQL parser.
+///
+/// The SurrealQL parse is a relatively simple recursive decent parser.
+/// At every point in the parser the next branch to pick is chosen by looking at the comming
+/// tokens. The parser allows looking up to 4 tokens in the future. Practically the max the parser
+/// needs to look forward is 3 tokens. Based on these future tokens the parser picks which function
+/// to choose.
+///
+/// Most of the methods in the parser are implemented by first calling either [`Parser::peek`]
+/// returning the next token or [`Parser::next`] which also advances the parser forward on token.
+/// Most other methods, other then those actually implementing the parser, of the parser are
+/// shorthands for common operations done on tokens after peeking or calling next.
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
@@ -78,7 +96,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Returns the next token.
+	/// Returns the next token and advance the parser one token forward.
 	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
@@ -86,7 +104,7 @@ impl<'a> Parser<'a> {
 		res
 	}
 
-	/// Consume the current peeked value.
+	/// Consume the current peeked value and advance the parser one token forward.
 	///
 	/// Should only be called after peeking a value.
 	pub fn pop_peek(&mut self) -> Token {
@@ -124,7 +142,8 @@ impl<'a> Parser<'a> {
 		self.token_buffer.at(at).unwrap()
 	}
 
-	/// Returns the span of the last peeked if there is one, otherwise the last consumed token.
+	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
+	/// the last consumed token.
 	pub fn last_span(&mut self) -> Span {
 		self.token_buffer.first().map(|x| x.span).unwrap_or(self.last_span)
 	}
@@ -168,6 +187,8 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a full query.
+	///
+	/// This is the primary entry point of the parser.
 	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
 		let mut statements = vec![self.parse_stmt()?];
 		while self.eat(t!(";")) {
@@ -191,6 +212,10 @@ impl<'a> Parser<'a> {
 		self.parse_stmt()
 	}
 
+	/// Parse a possibly partial statement.
+	///
+	/// This will try to parse a statement if a full statement can be parsed from the buffer parser
+	/// is operating on.
 	pub fn parse_partial_statement(&mut self) -> PartialResult<sql::Statement> {
 		while self.eat(t!(";")) {}
 
@@ -207,7 +232,7 @@ impl<'a> Parser<'a> {
 				..
 			}) => {
 				return PartialResult::Pending {
-					value: res,
+					possible_value: res,
 					used: self.lexer.reader.offset(),
 				};
 			}
@@ -235,7 +260,7 @@ impl<'a> Parser<'a> {
 		let colon = self.next();
 		if colon.kind != t!(";") {
 			return PartialResult::Pending {
-				value: res,
+				possible_value: res,
 				used: self.lexer.reader.offset(),
 			};
 		}

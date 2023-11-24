@@ -160,9 +160,10 @@ impl Parser<'_> {
 			t!("FOR") => {
 				let mut permission = Permissions::default();
 				self.parse_specific_permission(&mut permission)?;
-				while self.eat(t!(",")) {
-					expected!(self, "FOR");
+				self.eat(t!(","));
+				while self.eat(t!("FOR")) {
 					self.parse_specific_permission(&mut permission)?;
+					self.eat(t!(","));
 				}
 				Ok(permission)
 			}

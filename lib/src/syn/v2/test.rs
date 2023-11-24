@@ -1,11 +1,10 @@
 use super::super::Parse;
 use super::lexer::Lexer;
 use super::parser::Parser;
-use crate::err::Error;
 use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
 use crate::syn::v2::token::{t, TokenKind};
 
-pub fn builtin_name(_i: &str) -> Result<(), Error> {
+pub fn builtin_name(_i: &str) -> Result<(), ()> {
 	// TODO: Actually test builtin_name once properly implemented.
 	Ok(())
 }

@@ -127,11 +127,11 @@ impl Parser<'_> {
 		expected!(self, "ON");
 		let base = self.parse_base(false)?;
 
-		let mut res = DefineUserStatement {
+		let mut res = DefineUserStatement::from_parsed_values(
 			name,
 			base,
-			..Default::default()
-		};
+			vec!["Viewer".into()], // New users get the viewer role by default
+		);
 
 		loop {
 			match self.peek_kind() {
@@ -141,11 +141,11 @@ impl Parser<'_> {
 				}
 				t!("PASSWORD") => {
 					self.pop_peek();
-					res.code = self.parse_token_value::<Strand>()?.0;
+					res.set_password(&self.parse_token_value::<Strand>()?.0);
 				}
 				t!("PASSHASH") => {
 					self.pop_peek();
-					res.hash = self.parse_token_value::<Strand>()?.0;
+					res.set_passhash(self.parse_token_value::<Strand>()?.0);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
@@ -560,10 +560,7 @@ impl Parser<'_> {
 							}
 							t!("SNOWBALL") => {
 								let open_span = expected!(self, "(").span;
-								let language = match self.next().kind {
-									TokenKind::Language(x) => x,
-									x => unexpected!(self, x, "a language"),
-								};
+								let language = self.parse_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
 							}

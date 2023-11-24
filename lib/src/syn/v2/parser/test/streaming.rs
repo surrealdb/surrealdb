@@ -11,10 +11,10 @@ use crate::{
 			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DefineUserStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
-			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			DefineTableStatement, DefineTokenStatement, DeleteStatement, ForeachStatement,
+			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OutputStatement,
+			RelateStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveStatement,
+			SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -45,7 +45,6 @@ static SOURCE: &str = r#"
 	DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 		RETURN a
 	} COMMENT 'test' PERMISSIONS FULL;
-	DEFINE USER user ON ROOT COMMENT 'test' PASSWORD 'hunter2' PASSHASH 'r4' ROLES foo, bar COMMENT "*******";
 	DEFINE TOKEN a ON SCOPE b TYPE EDDSA VALUE "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
@@ -175,14 +174,6 @@ fn statements() -> Vec<Statement> {
 			})]),
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
-		})),
-		Statement::Define(DefineStatement::User(DefineUserStatement {
-			name: Ident("user".to_string()),
-			base: Base::Root,
-			hash: "r4".to_string(),
-			code: "hunter2".to_string(),
-			roles: vec![Ident("foo".to_string()), Ident("bar".to_string())],
-			comment: Some(Strand("*******".to_string())),
 		})),
 		Statement::Define(DefineStatement::Token(DefineTokenStatement {
 			name: Ident("a".to_string()),

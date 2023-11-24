@@ -121,7 +121,7 @@ impl Parser<'_> {
 								)
 								.map(Value::Object);
 						}
-						let value = self.parse_value()?;
+						let value = self.parse_value_field()?;
 						let comma = self.eat(t!(","));
 						if !self.eat(t!("}")) {
 							if !comma {
@@ -181,7 +181,7 @@ impl Parser<'_> {
 			"coordinates" => {
 				// found coordinates field, next must be a coordinates value but we don't know
 				// which until we match type.
-				let value = self.parse_value()?;
+				let value = self.parse_value_field()?;
 				if !self.eat(t!(",")) {
 					// no comma object must end early.
 					self.expect_closing_delimiter(t!("}"), start)?;
@@ -269,7 +269,7 @@ impl Parser<'_> {
 						(ate_comma, Value::Strand(strand.unwrap()))
 					}
 					_ => {
-						let value = self.parse_value()?;
+						let value = self.parse_value_field()?;
 						(self.eat(t!(",")), value)
 					}
 				};
@@ -290,7 +290,7 @@ impl Parser<'_> {
 				.map(Value::Object)
 			}
 			"geometries" => {
-				let value = self.parse_value()?;
+				let value = self.parse_value_field()?;
 				if !self.eat(t!(",")) {
 					self.expect_closing_delimiter(t!("}"), start)?;
 					return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
@@ -330,7 +330,7 @@ impl Parser<'_> {
 						}
 						(ate_comma, Value::Strand(strand.unwrap()))
 					} else {
-						let value = self.parse_value()?;
+						let value = self.parse_value_field()?;
 						(self.eat(t!(",")), value)
 					};
 
@@ -381,7 +381,7 @@ impl Parser<'_> {
 				)
 				.map(Value::Object);
 		}
-		let value = self.parse_value()?;
+		let value = self.parse_value_field()?;
 		let comma = self.eat(t!(","));
 		if !self.eat(t!("}")) {
 			// the object didn't end, either an error or not a geometry.
@@ -496,7 +496,7 @@ impl Parser<'_> {
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
-		let v = self.parse_value()?;
+		let v = self.parse_value_field()?;
 		map.insert(key, v);
 		if !self.eat(t!(",")) {
 			self.expect_closing_delimiter(t!("}"), start)?;
@@ -569,7 +569,7 @@ impl Parser<'_> {
 	fn parse_object_entry(&mut self) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, ":");
-		let value = self.parse_value()?;
+		let value = self.parse_value_field()?;
 		Ok((text, value))
 	}
 

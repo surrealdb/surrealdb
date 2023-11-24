@@ -11,14 +11,14 @@ use crate::{
 			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DefineUserStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OptionStatement, OutputStatement, RelateStatement, RemoveAnalyzerStatement,
-			RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-			RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
-			RemoveParamStatement, RemoveScopeStatement, RemoveStatement, RemoveTableStatement,
-			RemoveTokenStatement, RemoveUserStatement, SelectStatement, SetStatement,
-			ThrowStatement, UpdateStatement, UseStatement,
+			DefineTableStatement, DefineTokenStatement, DeleteStatement, ForeachStatement,
+			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OptionStatement,
+			OutputStatement, RelateStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
+			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
+			RemoveScopeStatement, RemoveStatement, RemoveTableStatement, RemoveTokenStatement,
+			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			UseStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -196,21 +196,19 @@ fn parse_define_function() {
 fn parse_define_user() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE USER user ON ROOT COMMENT 'test' PASSWORD 'hunter2' PASSHASH 'r4' ROLES foo, bar COMMENT "*******""#
+		r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar COMMENT "*******""#
 	)
 	.unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::User(DefineUserStatement {
-			name: Ident("user".to_string()),
-			base: Base::Root,
-			hash: "r4".to_string(),
-			code: "hunter2".to_string(),
-			roles: vec![Ident("foo".to_string()), Ident("bar".to_string())],
-			comment: Some(Strand("*******".to_string()))
-		}))
-	)
+	let Statement::Define(DefineStatement::User(stmt)) = res else {
+		panic!()
+	};
+
+	assert_eq!(stmt.name, Ident("user".to_string()));
+	assert_eq!(stmt.base, Base::Root);
+	assert_eq!(stmt.hash, "hunter2".to_owned());
+	assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
+	assert_eq!(stmt.comment, Some(Strand("*******".to_string())))
 }
 
 #[test]

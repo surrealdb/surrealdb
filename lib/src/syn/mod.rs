@@ -12,7 +12,7 @@ pub use v1::{datetime_raw, duration, idiom, json, parse, range, subquery, thing,
 pub use v1::test::builtin_name;
 
 #[cfg(feature = "experimental_parser")]
-mod v2;
+pub mod v2;
 #[cfg(feature = "experimental_parser")]
 pub use v2::{datetime_raw, duration, idiom, json, parse, range, subquery, thing, value};
 

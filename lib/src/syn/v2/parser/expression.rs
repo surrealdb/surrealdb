@@ -1,14 +1,18 @@
 //! This module defines the pratt parser for operators.
-
-use crate::sql::{Cast, Expression, Operator, Value};
-use crate::syn::v2::parser::mac::expected;
-use crate::syn::v2::parser::{ParseResult, Parser};
-use crate::syn::v2::token::{t, TokenKind};
+use crate::sql::{value::TryNeg, Cast, Expression, Operator, Value};
+use crate::syn::v2::{
+	parser::{mac::expected, ParseResult, Parser},
+	token::{t, TokenKind},
+};
 
 use super::mac::unexpected;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
+	///
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
+	/// depending on context: a table or a field the current document. This function parses loose
+	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
 	pub fn parse_value(&mut self) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
@@ -17,6 +21,11 @@ impl Parser<'_> {
 		res
 	}
 
+	/// Parsers a generic value.
+	///
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
+	/// depending on context: a table or a field the current document. This function parses loose
+	/// idents as a field, see [`parse_value`] for parsing loose idents as table
 	pub fn parse_value_field(&mut self) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
@@ -130,10 +139,33 @@ impl Parser<'_> {
 			_ => unreachable!(),
 		};
 		let v = self.pratt_parse_expr(min_bp)?;
-		Ok(Value::Expression(Box::new(Expression::Unary {
-			o: operator,
-			v,
-		})))
+
+		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
+		// left value is a number.
+		// FIXME: This has the problem that you can't specify the full range of an integer. All numbers
+		// are currently parsed as positive numbers and the range of values for positive numbers
+		// is one smaller then the range positive values, resulting in an overflow if you try to
+		// use the max negative value.
+		if let Value::Number(number) = v {
+			if let Operator::Sub = operator {
+				// this can only panic if `number` is i64::MIN which currently can't be parsed.
+				return Ok(Value::Number(number.try_neg().unwrap()));
+			}
+
+			if let Operator::Add = operator {
+				// doesn't do anything.
+				return Ok(Value::Number(number));
+			}
+			Ok(Value::Expression(Box::new(Expression::Unary {
+				o: operator,
+				v: Value::Number(number),
+			})))
+		} else {
+			Ok(Value::Expression(Box::new(Expression::Unary {
+				o: operator,
+				v,
+			})))
+		}
 	}
 
 	fn parse_infix_op(&mut self, min_bp: u8, lhs: Value) -> ParseResult<Value> {
