@@ -252,7 +252,7 @@ impl Resolved {
 #[cfg(test)]
 mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
-	use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights};
+	use crate::idx::trees::store::{IndexStores, StoreProvider};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 

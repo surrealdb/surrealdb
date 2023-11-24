@@ -365,12 +365,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_100_docs_with_50_words_one_by_one_memory() {
-		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Memory)
+		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Memory).await
 	}
 
 	#[tokio::test]
 	async fn test_resolve_100_docs_with_50_words_one_by_one_transaction() {
-		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Transaction)
+		test_resolve_100_docs_with_50_words_one_by_one(StoreProvider::Transaction).await
 	}
 
 	async fn test_resolve_100_docs_with_50_words_batch_of_10(sp: StoreProvider) {
@@ -392,11 +392,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_100_docs_with_50_words_batch_of_10_memory() {
-		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Memory)
+		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Memory).await
 	}
 
 	#[tokio::test]
 	async fn test_resolve_100_docs_with_50_words_batch_of_10_transaction() {
-		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Transaction)
+		test_resolve_100_docs_with_50_words_batch_of_10(StoreProvider::Transaction).await
 	}
 }
