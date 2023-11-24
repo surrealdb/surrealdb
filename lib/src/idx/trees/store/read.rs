@@ -39,7 +39,7 @@ where
 				g.insert(n.clone()).ok();
 				Ok(n)
 			}
-			GuardResult::Timeout => Err(Error::Unreachable),
+			GuardResult::Timeout => Err(Error::Unreachable("TreeTransactionRead::get_node")),
 		}
 	}
 }
@@ -55,9 +55,13 @@ impl TreeMemoryRead {
 		N: TreeNode + Debug,
 	{
 		if let Some(nodes) = mem {
-			nodes.get(&node_id).ok_or(Error::Unreachable).cloned()
+			if let Some(n) = nodes.get(&node_id).cloned() {
+				Ok(n)
+			} else {
+				Err(Error::Unreachable("TreeMemoryRead::get_node(1)"))
+			}
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("TreeMemoryRead::get_node(2)"))
 		}
 	}
 }

@@ -12,7 +12,7 @@ where
 	N: TreeNode + Debug,
 {
 	np: TreeNodeProvider,
-	nodes: HashMap<NodeId, Arc<StoredNode<N>>>,
+	nodes: HashMap<NodeId, StoredNode<N>>,
 	updated: HashSet<NodeId>,
 	removed: HashMap<NodeId, Key>,
 	#[cfg(debug_assertions)]
@@ -34,11 +34,11 @@ where
 		}
 	}
 
-	pub(super) async fn get_node(
+	pub(super) async fn get_node_mut(
 		&mut self,
 		tx: &mut Transaction,
 		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error> {
+	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("GET: {}", node_id);
@@ -47,14 +47,10 @@ where
 		if let Some(n) = self.nodes.remove(&node_id) {
 			return Ok(n);
 		}
-		Ok(Arc::new(self.np.load::<N>(tx, node_id).await?))
+		self.np.load::<N>(tx, node_id).await
 	}
 
-	pub(super) fn set_node(
-		&mut self,
-		node: Arc<StoredNode<N>>,
-		updated: bool,
-	) -> Result<(), Error> {
+	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("SET: {} {} {:?}", node.id, updated, node.n);
@@ -64,19 +60,19 @@ where
 			self.updated.insert(node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(Error::Unreachable);
+			return Err(Error::Unreachable("TreeTransactionWrite::set_node"));
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
 	}
 
-	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Arc<StoredNode<N>> {
+	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> StoredNode<N> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("NEW: {}", id);
 			self.out.insert(id);
 		}
-		Arc::new(StoredNode::new(node, id, self.np.get_key(id), 0))
+		StoredNode::new(node, id, self.np.get_key(id), 0)
 	}
 
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
@@ -84,7 +80,7 @@ where
 		{
 			debug!("REMOVE: {}", node_id);
 			if self.nodes.contains_key(&node_id) {
-				return Err(Error::Unreachable);
+				return Err(Error::Unreachable("TreeTransactionWrite::remove_node"));
 			}
 			self.out.remove(&node_id);
 		}
@@ -99,14 +95,14 @@ where
 		{
 			if !self.out.is_empty() {
 				debug!("OUT: {:?}", self.out);
-				return Err(Error::Unreachable);
+				return Err(Error::Unreachable("TreeTransactionWrite::finish(1)"));
 			}
 		}
 		for node_id in &self.updated {
 			if let Some(node) = self.nodes.remove(node_id) {
-				self.np.save(tx, Arc::into_inner(node).ok_or(Error::Unreachable)?).await?;
+				self.np.save(tx, node).await?;
 			} else {
-				return Err(Error::Unreachable);
+				return Err(Error::Unreachable("TreeTransactionWrite::finish(2)"));
 			}
 		}
 		self.updated.clear();
@@ -133,11 +129,11 @@ impl TreeMemoryWrite {
 		}
 	}
 
-	pub(super) fn get_node<N>(
+	pub(super) fn get_node_mut<N>(
 		&mut self,
 		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
 		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error>
+	) -> Result<StoredNode<N>, Error>
 	where
 		N: TreeNode + Debug,
 	{
@@ -148,19 +144,21 @@ impl TreeMemoryWrite {
 				self.out.insert(node_id);
 			}
 			if let Some(n) = nodes.remove(&node_id) {
+				let n =
+					Arc::into_inner(n).ok_or(Error::Unreachable("TreeMemoryWrite::get_node(1)"))?;
 				Ok(n)
 			} else {
-				Err(Error::Unreachable)
+				Err(Error::Unreachable("TreeMemoryWrite::get_node(2)"))
 			}
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("TreeMemoryWrite::get_node(3)"))
 		}
 	}
 
 	pub(super) fn set_node<N>(
 		&mut self,
 		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
-		node: Arc<StoredNode<N>>,
+		node: StoredNode<N>,
 	) -> Result<(), Error>
 	where
 		N: TreeNode + Debug,
@@ -171,14 +169,14 @@ impl TreeMemoryWrite {
 				debug!("SET: {} {:?}", node.id, node.n);
 				self.out.remove(&node.id);
 			}
-			nodes.insert(node.id, node);
+			nodes.insert(node.id, Arc::new(node));
 			Ok(())
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("TreeMemoryWrite::set_node"))
 		}
 	}
 
-	pub(super) fn new_node<N>(&mut self, id: NodeId, node: N) -> Arc<StoredNode<N>>
+	pub(super) fn new_node<N>(&mut self, id: NodeId, node: N) -> StoredNode<N>
 	where
 		N: TreeNode + Debug,
 	{
@@ -187,7 +185,7 @@ impl TreeMemoryWrite {
 			debug!("NEW: {}", id);
 			self.out.insert(id);
 		}
-		Arc::new(StoredNode::new(node, id, vec![], 0))
+		StoredNode::new(node, id, vec![], 0)
 	}
 
 	pub(super) fn remove_node<N>(
@@ -203,14 +201,14 @@ impl TreeMemoryWrite {
 			{
 				debug!("REMOVE: {}", node_id);
 				if nodes.contains_key(&node_id) {
-					return Err(Error::Unreachable);
+					return Err(Error::Unreachable("TreeMemoryWrite::remove_node(1)"));
 				}
 				self.out.remove(&node_id);
 			}
 			nodes.remove(&node_id);
 			Ok(())
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("TreeMemoryWrite::remove_node(2)"))
 		}
 	}
 
@@ -219,7 +217,7 @@ impl TreeMemoryWrite {
 		{
 			if !self.out.is_empty() {
 				debug!("OUT: {:?}", self.out);
-				return Err(Error::Unreachable);
+				return Err(Error::Unreachable("TreeMemoryWrite::finish"));
 			}
 		}
 		Ok(true)
