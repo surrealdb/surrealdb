@@ -671,3 +671,30 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to create a new record if the table exists and grants full permissions");
 	}
 }
+
+#[tokio::test]
+async fn create_only() -> Result<(), Error> {
+	let sql: &str = "
+		CREATE ONLY test:1;
+		CREATE ONLY test:2, test:3;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			id: test:1
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	Ok(())
+}
