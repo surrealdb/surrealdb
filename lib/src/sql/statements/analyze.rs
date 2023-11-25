@@ -28,7 +28,7 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,

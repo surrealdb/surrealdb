@@ -6,7 +6,6 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
-use crate::idx::trees::store::IndexStores;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -97,7 +96,6 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
-			index_stores: IndexStores::default(),
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 		}
@@ -112,7 +110,6 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
-			index_stores: parent.index_stores.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 		}
