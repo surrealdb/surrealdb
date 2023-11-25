@@ -70,9 +70,9 @@ impl Parser<'_> {
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RECORD") => {
-				let next = self.next();
-				let tables = match next.kind {
+				let tables = match self.peek_kind() {
 					t!("<") => {
+						let next = self.next();
 						let mut tables = vec![self.parse_token_value()?];
 						while self.eat(t!("|")) {
 							tables.push(self.parse_token_value()?);
@@ -81,6 +81,7 @@ impl Parser<'_> {
 						tables
 					}
 					t!("(") => {
+						let next = self.next();
 						let mut tables = vec![self.parse_token_value()?];
 						while self.eat(t!(",")) {
 							tables.push(self.parse_token_value()?);
@@ -88,7 +89,7 @@ impl Parser<'_> {
 						self.expect_closing_delimiter(t!(")"), next.span)?;
 						tables
 					}
-					x => unexpected!(self, x, "either `<` or `(`"),
+					_ => Vec::new(),
 				};
 				Ok(Kind::Record(tables))
 			}

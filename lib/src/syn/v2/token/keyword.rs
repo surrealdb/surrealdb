@@ -206,6 +206,9 @@ keyword! {
 	MultiLine => "MULTILINE",
 	MultiPolygon => "MULTIPOLYGON",
 	Collection => "COLLECTION",
+
+	FN => "fn",
+	ML => "ml",
 }
 
 pub(crate) use keyword_t;

@@ -1,5 +1,5 @@
 use crate::{
-	sql::{statements::InsertStatement, Data, Ident, Param, Value},
+	sql::{statements::InsertStatement, Data, Value},
 	syn::v2::{
 		parser::{mac::expected, ParseResult, Parser},
 		token::t,
@@ -11,13 +11,14 @@ impl Parser<'_> {
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, "INTO");
 		let next = self.next();
+		// TODO: Explain that more complicated expressions are not allowed here.
 		let into = match next.kind {
 			t!("$param") => {
-				let str = self.lexer.strings[u32::from(next.data_index.unwrap()) as usize].clone();
-				Value::Param(Param(Ident(str)))
+				let param = self.token_value(next)?;
+				Value::Param(param)
 			}
 			_ => {
-				let table = self.parse_token_value()?;
+				let table = self.token_value(next)?;
 				Value::Table(table)
 			}
 		};

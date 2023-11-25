@@ -3,16 +3,16 @@ use crate::syn::v2::{
 		unicode::{byte, chars},
 		Error, Lexer,
 	},
-	token::{t, Token, TokenKind},
+	token::{t, DataIndex, Token, TokenKind},
 };
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment and returns the next token.
-	fn eat_single_line_comment(&mut self) -> Token {
+	pub fn eat_single_line_comment(&mut self) {
 		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
-				return self.eof_token();
+				break;
 			};
 			match byte {
 				byte::CR => {
@@ -24,9 +24,15 @@ impl<'a> Lexer<'a> {
 					break;
 				}
 				x if !x.is_ascii() => {
+					// -1 because we already ate the byte.
+					let backup = self.reader.offset() - 1;
 					let char = match self.reader.complete_char(x) {
 						Ok(x) => x,
-						Err(_) => return self.invalid_token(Error::InvalidUtf8),
+						Err(_) => {
+							// let the next token handle the error.
+							self.reader.backup(backup);
+							break;
+						}
 					};
 
 					match char {
@@ -38,34 +44,32 @@ impl<'a> Lexer<'a> {
 			}
 		}
 		self.skip_offset();
-		self.next_token_inner()
 	}
 
 	/// Eats a multi line comment and returns the next token.
-	fn eat_multi_line_comment(&mut self) -> Token {
+	pub fn eat_multi_line_comment(&mut self) -> Result<(), Error> {
 		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
-				return self.eof_token();
+				return Err(Error::UnexpectedEof);
 			};
 			if let b'*' = byte {
 				let Some(byte) = self.reader.next() else {
-					return self.eof_token();
+					return Err(Error::UnexpectedEof);
 				};
 				if b'/' == byte {
 					self.skip_offset();
-					return self.next_token_inner();
+					return Ok(());
 				}
 			}
 		}
 	}
 
-	/// Eats a whitespace and returns the next token.
-	fn eat_whitespace(&mut self) -> Token {
+	pub fn eat_whitespace(&mut self) {
 		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.peek() else {
-				return self.eof_token();
+				return;
 			};
 			match byte {
 				byte::CR | byte::FF | byte::LF | byte::SP | byte::VT | byte::TAB => {
@@ -76,7 +80,10 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					let char = match self.reader.complete_char(x) {
 						Ok(x) => x,
-						Err(_) => return self.invalid_token(Error::InvalidUtf8),
+						Err(_) => {
+							self.reader.backup(backup);
+							break;
+						}
 					};
 
 					match char {
@@ -94,7 +101,6 @@ impl<'a> Lexer<'a> {
 			}
 		}
 		self.skip_offset();
-		self.next_token_inner()
 	}
 
 	// re-lexes a `/` token to a regex token.
@@ -131,7 +137,15 @@ impl<'a> Lexer<'a> {
 			}
 		}
 
-		self.finish_string_token(TokenKind::Regex)
+		match self.scratch.parse() {
+			Ok(x) => {
+				self.scratch.clear();
+				let idx = u32::try_from(self.regex.len()).unwrap();
+				self.regex.push(x);
+				self.finish_token(TokenKind::Regex, Some(DataIndex::from(idx)))
+			}
+			Err(e) => self.invalid_token(Error::Regex(e)),
+		}
 	}
 
 	/// Lex the next token, starting from the given byte.
@@ -145,8 +159,10 @@ impl<'a> Lexer<'a> {
 			b'(' => t!("("),
 			b';' => t!(";"),
 			b',' => t!(","),
+			b'@' => t!("@"),
 			byte::CR | byte::FF | byte::LF | byte::SP | byte::VT | byte::TAB => {
-				return self.eat_whitespace()
+				self.eat_whitespace();
+				return self.next_token_inner();
 			}
 			b'|' => match self.reader.peek() {
 				Some(b'|') => {
@@ -236,7 +252,8 @@ impl<'a> Lexer<'a> {
 				}
 				Some(b'-') => {
 					self.reader.next();
-					return self.eat_single_line_comment();
+					self.eat_single_line_comment();
+					return self.next_token_inner();
 				}
 				Some(b'=') => {
 					self.reader.next();
@@ -264,11 +281,16 @@ impl<'a> Lexer<'a> {
 			b'/' => match self.reader.peek() {
 				Some(b'*') => {
 					self.reader.next();
-					return self.eat_multi_line_comment();
+					// A `*/` could be missing which would be invalid.
+					if let Err(e) = self.eat_multi_line_comment() {
+						return self.invalid_token(e);
+					}
+					return self.next_token_inner();
 				}
 				Some(b'/') => {
 					self.reader.next();
-					return self.eat_single_line_comment();
+					self.eat_single_line_comment();
+					return self.next_token_inner();
 				}
 				_ => t!("/"),
 			},
@@ -308,12 +330,13 @@ impl<'a> Lexer<'a> {
 				t!("$")
 			}
 			b'#' => {
-				return self.eat_single_line_comment();
+				self.eat_single_line_comment();
+				return self.next_token_inner();
 			}
 			b'`' => return self.lex_surrounded_ident(true),
 			b'"' => return self.lex_strand(true),
 			b'\'' => return self.lex_strand(false),
-			b't' => {
+			b'd' => {
 				match self.reader.peek() {
 					Some(b'"') => {
 						self.reader.next();
@@ -325,7 +348,7 @@ impl<'a> Lexer<'a> {
 					}
 					_ => {}
 				}
-				return self.lex_ident_from_next_byte(b't');
+				return self.lex_ident_from_next_byte(b'd');
 			}
 			b'u' => {
 				match self.reader.peek() {

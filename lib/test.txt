@@ -1,0 +1,1 @@
+   Compiling surrealdb v1.0.0 (/home/mees/Documents/programming/rust/surrealdb/lib)

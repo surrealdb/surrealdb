@@ -469,11 +469,11 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	//
 	// Show changes using timestamp 1
 	//
-	let sql = format!(
-		"
-        SHOW CHANGES FOR TABLE user SINCE '{ts1_dt}' LIMIT 10;
-    "
-	);
+	let sql = if cfg!(feature = "experimental_parser") {
+		format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ")
+	} else {
+		format!("SHOW CHANGES FOR TABLE user SINCE '{ts1_dt}' LIMIT 10; ")
+	};
 	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
@@ -510,7 +510,11 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	//
 	// Show changes using timestamp 3
 	//
-	let sql = format!("SHOW CHANGES FOR TABLE user SINCE '{ts3_dt}' LIMIT 10;");
+	let sql = if cfg!(feature = "experimental_parser") {
+		format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ")
+	} else {
+		format!("SHOW CHANGES FOR TABLE user SINCE '{ts3_dt}' LIMIT 10; ")
+	};
 	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()

@@ -24,7 +24,7 @@ fn self_referential_field() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})
@@ -44,7 +44,7 @@ fn cyclic_fields() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})
@@ -68,7 +68,7 @@ fn cyclic_records() -> Result<(), Error> {
 		assert!(tmp.is_ok());
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})

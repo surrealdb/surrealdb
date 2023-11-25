@@ -92,6 +92,7 @@ impl Parser<'_> {
 			t!("INDEX") => {
 				let name = self.parse_token_value()?;
 				expected!(self, "ON");
+				self.eat(t!("TABLE"));
 				let what = self.parse_token_value()?;
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,

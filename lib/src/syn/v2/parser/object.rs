@@ -371,6 +371,7 @@ impl Parser<'_> {
 			return Ok(Value::Object(Object(BTreeMap::from([(key, Value::Strand(strand))]))));
 		}
 		let coord_key = self.parse_object_key()?;
+		expected!(self, ":");
 		if coord_key != "coordinates" {
 			// next field was not correct, fallback to parsing plain object.
 			return self
@@ -549,13 +550,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			let statement_span = self.peek().span;
-			let stmt = self.parse_statement()?;
-			if let Some(x) = stmt.into_entry() {
-				statements.push(x);
-			} else {
-				return Err(ParseError::new(ParseErrorKind::DisallowedStatement, statement_span));
-			}
+			let stmt = self.parse_entry()?;
+			statements.push(stmt);
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				break;
@@ -577,7 +573,10 @@ impl Parser<'_> {
 	pub fn parse_object_key(&mut self) -> ParseResult<String> {
 		let token = self.peek();
 		match token.kind {
-			TokenKind::Keyword(_) => {
+			TokenKind::Keyword(_)
+			| TokenKind::Language(_)
+			| TokenKind::Algorithm(_)
+			| TokenKind::Distance(_) => {
 				self.pop_peek();
 				let str = self.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8

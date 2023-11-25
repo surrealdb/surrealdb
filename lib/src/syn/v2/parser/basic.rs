@@ -17,7 +17,10 @@ pub trait TokenValue: Sized {
 impl TokenValue for Ident {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Keyword(_) | TokenKind::Language(_) | TokenKind::Algorithm(_) => {
+			TokenKind::Keyword(_)
+			| TokenKind::Language(_)
+			| TokenKind::Algorithm(_)
+			| TokenKind::Distance(_) => {
 				let str = parser.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let str = std::str::from_utf8(str).unwrap().to_owned();

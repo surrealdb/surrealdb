@@ -141,7 +141,7 @@ impl Parser<'_> {
 		// alias or a condition.
 		if res.len() == 1 && graph.alias.is_none() && graph.cond.is_none() {
 			match std::mem::replace(&mut res[0], Part::All) {
-				Part::Value(Value::Thing(t)) => {
+				Part::Value(Value::Thing(t)) | Part::Start(Value::Thing(t)) => {
 					let edge = Edges {
 						dir: graph.dir,
 						from: t,
@@ -152,7 +152,7 @@ impl Parser<'_> {
 					if !Self::continues_idiom(self.peek_kind()) {
 						return Ok(Some(value));
 					}
-					res[0] = Part::Value(value);
+					res[0] = Part::Start(value);
 					return Ok(None);
 				}
 				x => {
@@ -338,7 +338,7 @@ impl Parser<'_> {
 			let start = match start {
 				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
 				Value::Idiom(Idiom(x)) => x,
-				x => vec![Part::Value(x)],
+				x => vec![Part::Start(x)],
 			};
 
 			let idiom = self.parse_remaining_value_idiom(start)?;
@@ -392,6 +392,7 @@ impl Parser<'_> {
 					what,
 					cond,
 					alias,
+					expr: Fields::all(),
 					..Default::default()
 				})
 			}
@@ -401,6 +402,7 @@ impl Parser<'_> {
 				let table = self.parse_token_value().unwrap();
 				Ok(Graph {
 					dir,
+					expr: Fields::all(),
 					what: Tables(vec![table]),
 					..Default::default()
 				})

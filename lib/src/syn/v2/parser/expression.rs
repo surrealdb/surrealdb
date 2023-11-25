@@ -127,8 +127,8 @@ impl Parser<'_> {
 		let token = self.next();
 		let operator = match token.kind {
 			t!("+") => Operator::Add,
-			t!("-") => Operator::Sub,
-			t!("!") => Operator::Neg,
+			t!("-") => Operator::Neg,
+			t!("!") => Operator::Not,
 			t!("<") => {
 				let kind = self.parse_kind(token.span)?;
 				let value = self.pratt_parse_expr(min_bp)?;
@@ -147,7 +147,7 @@ impl Parser<'_> {
 		// is one smaller then the range positive values, resulting in an overflow if you try to
 		// use the max negative value.
 		if let Value::Number(number) = v {
-			if let Operator::Sub = operator {
+			if let Operator::Neg = operator {
 				// this can only panic if `number` is i64::MIN which currently can't be parsed.
 				return Ok(Value::Number(number.try_neg().unwrap()));
 			}

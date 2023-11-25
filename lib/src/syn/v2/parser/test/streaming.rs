@@ -28,7 +28,7 @@ use crate::{
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
 static SOURCE: &str = r#"
-	ANALYZE INDEX a on b;
+	ANALYZE INDEX b on a;
 	BEGIN;
 	BEGIN TRANSACTION;
 	BREAK;
@@ -71,14 +71,14 @@ static SOURCE: &str = r#"
 		SPLIT ON foo,bar
 		GROUP foo,bar
 		ORDER BY foo COLLATE NUMERIC ASC
-		LIMIT BY a:b
 		START AT { a: true }
+		LIMIT BY a:b
 		FETCH foo
-		VERSION t"2012-04-23T18:25:43.0000511Z"
+		VERSION d"2012-04-23T18:25:43.0000511Z"
 		EXPLAIN FULL;
 	LET $param = 1;
 	SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10;
-	SHOW CHANGES FOR DATABASE SINCE t"2012-04-23T18:25:43.0000511Z";
+	SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z";
 	SLEEP 1s;
 	THROW 1s;
 	INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE a.b +?= null, c.d += none RETURN AFTER;
@@ -330,7 +330,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Delete(DeleteStatement {
 			only: true,
 			what: Values(vec![Value::Idiom(Idiom(vec![
-				Part::Value(Value::Edges(Box::new(Edges {
+				Part::Start(Value::Edges(Box::new(Edges {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
@@ -382,19 +382,19 @@ fn statements() -> Vec<Statement> {
 			exprs: vec![
 				(
 					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-						"bar".to_owned(),
-					)))]))),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
+						Part::Field(Ident("bar".to_owned())),
+					])))]))),
 				),
 				(
 					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-						"baz".to_owned(),
-					)))]))),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
+						Part::Field(Ident("baz".to_owned())),
+					])))]))),
 				),
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-				"baq".to_owned(),
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
+				vec![Part::Field(Ident("baq".to_owned()))],
 			)))])))),
 		}),
 		Statement::Info(InfoStatement::Root),
@@ -560,7 +560,7 @@ fn statements() -> Vec<Statement> {
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(
 				Idiom(vec![Part::Field(Ident("a".to_owned()))]),
-				Operator::Sub,
+				Operator::Inc,
 				Value::Number(Number::Int(1)),
 			)])),
 			output: Some(Output::None),
@@ -589,6 +589,7 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
 						..Default::default()
 					}),
 				])),
@@ -601,6 +602,7 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
 						..Default::default()
 					}),
 				]),

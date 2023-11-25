@@ -14,6 +14,7 @@ impl<'a> Lexer<'a> {
 		};
 		let kind = match c {
 			'⟨' => return self.lex_surrounded_ident(false),
+			'…' => t!("..."),
 			'∋' => t!("∋"),
 			'∌' => t!("∌"),
 			'∈' => t!("∈"),

@@ -4,11 +4,6 @@ use super::parser::Parser;
 use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
 use crate::syn::v2::token::{t, TokenKind};
 
-pub fn builtin_name(_i: &str) -> Result<(), ()> {
-	// TODO: Actually test builtin_name once properly implemented.
-	Ok(())
-}
-
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {
 		super::value(val).unwrap()

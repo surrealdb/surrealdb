@@ -26,8 +26,8 @@ impl Parser<'_> {
 					let idiom = self.parse_plain_idiom()?;
 					let operator = match self.next().kind {
 						t!("=") => Operator::Equal,
-						t!("+=") => Operator::Sub,
-						t!("-=") => Operator::Add,
+						t!("+=") => Operator::Inc,
+						t!("-=") => Operator::Dec,
 						t!("+?=") => Operator::Ext,
 						x => unexpected!(self, x, "a assign operator"),
 					};
@@ -115,7 +115,7 @@ impl Parser<'_> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = self.parse_value()?;
+		let v = self.parse_value_field()?;
 		Ok(Some(Cond(v)))
 	}
 

@@ -25,6 +25,10 @@ macro_rules! t {
 		$crate::syn::v2::token::TokenKind::CloseDelim($crate::syn::v2::token::Delim::Paren)
 	};
 
+	("r\"") => {
+		$crate::syn::v2::token::TokenKind::OpenRecordString
+	};
+
 	("<") => {
 		$crate::syn::v2::token::TokenKind::LeftChefron
 	};

@@ -20,9 +20,12 @@ mod prime;
 mod stmt;
 mod token_buffer;
 
+mod builtin;
+mod function;
 mod json;
 #[cfg(test)]
 mod test;
+mod thing;
 
 pub use error::{NumberParseError, ParseError, ParseErrorKind};
 

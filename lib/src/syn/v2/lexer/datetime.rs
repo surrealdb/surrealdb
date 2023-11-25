@@ -83,19 +83,31 @@ impl<'a> Lexer<'a> {
 		if negative {
 			year = -year;
 		}
-
 		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
 		}
-
 		let month = self.lex_datetime_part(2, 1..=12).map_err(Error::Month)?;
 		if !self.eat(b'-') {
 			return Err(Error::MissingSeparator(b'-'));
 		}
-
 		let day = self.lex_datetime_part(2, 1..=31).map_err(Error::Day)?;
+
 		if !self.eat(b'T') {
-			return Err(Error::MissingSeparator(b'T'));
+			let Some(date) = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32) else {
+				return Err(Error::NonExistantDate);
+			};
+			let time = NaiveTime::default();
+			let date_time = NaiveDateTime::new(date, time);
+
+			let datetime = Utc
+				.fix()
+				.from_local_datetime(&date_time)
+				.earliest()
+				// this should never panic with a fixed offset.
+				.unwrap()
+				.with_timezone(&Utc);
+
+			return Ok(Datetime(datetime));
 		}
 
 		let hour = self.lex_datetime_part(2, 0..=24).map_err(Error::Hour)?;

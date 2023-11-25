@@ -33,7 +33,7 @@ use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
 #[test]
 pub fn parse_analyze() {
-	let res = test_parse!(parse_stmt, r#"ANALYZE INDEX a on b"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"ANALYZE INDEX b on a"#).unwrap();
 	assert_eq!(
 		res,
 		Statement::Analyze(AnalyzeStatement::Idx(Ident("a".to_string()), Ident("b".to_string())))
@@ -503,7 +503,7 @@ fn parse_delete_2() {
 		Statement::Delete(DeleteStatement {
 			only: true,
 			what: Values(vec![Value::Idiom(Idiom(vec![
-				Part::Value(Value::Edges(Box::new(Edges {
+				Part::Start(Value::Edges(Box::new(Edges {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
@@ -588,19 +588,19 @@ fn parse_if_block() {
 			exprs: vec![
 				(
 					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-						"bar".to_owned()
-					)))]))),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
+						Part::Field(Ident("bar".to_owned()))
+					])))]))),
 				),
 				(
 					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-						"baz".to_owned()
-					)))]))),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
+						Part::Field(Ident("baz".to_owned()))
+					])))]))),
 				)
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
-				"baq".to_owned()
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
+				vec![Part::Field(Ident("baq".to_owned()))]
 			)))])))),
 		})
 	)
@@ -644,10 +644,10 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
     SPLIT ON foo,bar
     GROUP foo,bar
     ORDER BY foo COLLATE NUMERIC ASC
-    LIMIT BY a:b
     START AT { a: true }
+    LIMIT BY a:b
     FETCH foo
-    VERSION t"2012-04-23T18:25:43.0000511Z"
+    VERSION d"2012-04-23T18:25:43.0000511Z"
     EXPLAIN FULL
 		"#
 	)
@@ -772,7 +772,7 @@ fn parse_show() {
 
 	let res = test_parse!(
 		parse_stmt,
-		r#"SHOW CHANGES FOR DATABASE SINCE t"2012-04-23T18:25:43.0000511Z""#
+		r#"SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z""#
 	)
 	.unwrap();
 	assert_eq!(
@@ -1016,7 +1016,7 @@ fn parse_relate() {
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(
 				Idiom(vec![Part::Field(Ident("a".to_owned()))]),
-				Operator::Sub,
+				Operator::Inc,
 				Value::Number(Number::Int(1))
 			)])),
 			output: Some(Output::None),
@@ -1161,6 +1161,7 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
 						..Default::default()
 					})
 				]))
@@ -1173,6 +1174,7 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
 						..Default::default()
 					})
 				]),

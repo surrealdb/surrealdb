@@ -1,3 +1,4 @@
+use crate::sql::block::Entry;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -159,8 +160,79 @@ impl Parser<'_> {
 			}
 			_ => {
 				// TODO: Provide information about keywords.
-				let value = self.parse_value()?;
+				let value = self.parse_value_field()?;
 				Ok(Self::refine_stmt_value(value))
+			}
+		}
+	}
+
+	pub(super) fn parse_entry(&mut self) -> ParseResult<Entry> {
+		let token = self.peek();
+		match token.kind {
+			t!("BREAK") => {
+				self.pop_peek();
+				Ok(Entry::Break(BreakStatement))
+			}
+			t!("CONTINUE") => {
+				self.pop_peek();
+				Ok(Entry::Continue(ContinueStatement))
+			}
+			t!("CREATE") => {
+				self.pop_peek();
+				self.parse_create_stmt().map(Entry::Create)
+			}
+			t!("DEFINE") => {
+				self.pop_peek();
+				self.parse_define_stmt().map(Entry::Define)
+			}
+			t!("DELETE") => {
+				self.pop_peek();
+				self.parse_delete_stmt().map(Entry::Delete)
+			}
+			t!("FOR") => {
+				self.pop_peek();
+				self.parse_for_stmt().map(Entry::Foreach)
+			}
+			t!("IF") => {
+				self.pop_peek();
+				self.parse_if_stmt().map(Entry::Ifelse)
+			}
+			t!("INSERT") => {
+				self.pop_peek();
+				self.parse_insert_stmt().map(Entry::Insert)
+			}
+			t!("RETURN") => {
+				self.pop_peek();
+				self.parse_return_stmt().map(Entry::Output)
+			}
+			t!("RELATE") => {
+				self.pop_peek();
+				self.parse_relate_stmt().map(Entry::Relate)
+			}
+			t!("REMOVE") => {
+				self.pop_peek();
+				self.parse_remove_stmt().map(Entry::Remove)
+			}
+			t!("SELECT") => {
+				self.pop_peek();
+				self.parse_select_stmt().map(Entry::Select)
+			}
+			t!("LET") => {
+				self.pop_peek();
+				self.parse_let_stmt().map(Entry::Set)
+			}
+			t!("THROW") => {
+				self.pop_peek();
+				self.parse_throw_stmt().map(Entry::Throw)
+			}
+			t!("UPDATE") => {
+				self.pop_peek();
+				self.parse_update_stmt().map(Entry::Update)
+			}
+			_ => {
+				// TODO: Provide information about keywords.
+				// TODO: Look at 'let' less let statement.
+				self.parse_value_field().map(Entry::Value)
 			}
 		}
 	}
@@ -194,7 +266,7 @@ impl Parser<'_> {
 		expected!(self, "ON");
 		let table = self.parse_token_value()?;
 
-		Ok(AnalyzeStatement::Idx(index, table))
+		Ok(AnalyzeStatement::Idx(table, index))
 	}
 
 	fn parse_begin(&mut self) -> ParseResult<BeginStatement> {
@@ -316,11 +388,14 @@ impl Parser<'_> {
 
 	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
 		let name = self.parse_token_value()?;
-		expected!(self, "=");
-		let what = match self.next().kind {
-			t!("true") => true,
-			t!("false") => false,
-			x => unexpected!(self, x, "either 'true' or 'false'"),
+		let what = if self.eat(t!("=")) {
+			match self.next().kind {
+				t!("true") => true,
+				t!("false") => false,
+				x => unexpected!(self, x, "either 'true' or 'false'"),
+			}
+		} else {
+			true
 		};
 		Ok(OptionStatement {
 			name,

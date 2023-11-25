@@ -6,6 +6,7 @@ use crate::syn::{
 		token::{Span, TokenKind},
 	},
 };
+use std::fmt::Write;
 
 #[derive(Debug)]
 pub enum NumberParseError {
@@ -35,6 +36,10 @@ pub enum ParseErrorKind {
 	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
 	InvalidToken(LexError),
+	/// Matched a path which was invalid.
+	InvalidPath {
+		possibly: Option<&'static str>,
+	},
 	/// A path in the parser which was not yet finished.
 	/// Should eventually be removed.
 	Todo,
@@ -122,6 +127,25 @@ impl ParseError {
 				let text = "Parser hit not yet implemented path".to_string();
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidPath {
+				possibly,
+			} => {
+				let mut text = "Invalid path".to_owned();
+				if let Some(p) = possibly {
+					// writing into a string never causes an error.
+					write!(text, ", did you maybe mean `{}`", p).unwrap();
+				}
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(
+					source,
+					locations,
+					Some("This path does not exist."),
+				);
 				RenderedError {
 					text,
 					snippets: vec![snippet],

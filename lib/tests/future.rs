@@ -56,7 +56,7 @@ async fn future_function_arguments() -> Result<(), Error> {
 			{
 				a: 'test@surrealdb.com',
 				b: 'test@surrealdb.com',
-				id: 'future:test',
+				id: future:test,
 				x: 'a-test',
 				y: 'b-test',
 			}

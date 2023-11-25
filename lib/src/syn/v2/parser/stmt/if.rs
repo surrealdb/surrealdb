@@ -60,8 +60,9 @@ impl Parser<'_> {
 
 	fn parse_bracketed_tail(&mut self, res: &mut IfelseStatement) -> ParseResult<()> {
 		loop {
-			match self.next().kind {
+			match self.peek_kind() {
 				t!("ELSE") => {
+					self.pop_peek();
 					if self.eat(t!("IF")) {
 						let condition = self.parse_value_field()?;
 						let span = expected!(self, "{").span;

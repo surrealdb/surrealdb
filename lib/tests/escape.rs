@@ -8,11 +8,22 @@ use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn complex_ids() -> Result<(), Error> {
+	#[cfg(not(feature = "experimental_parser"))]
 	let sql = r#"
 		CREATE person:100 SET test = 'One';
 		CREATE person:00100;
 		CREATE 'person:100';
 		CREATE "person:100";
+		CREATE person:⟨100⟩ SET test = 'Two';
+		CREATE person:`100`;
+		SELECT * FROM person;
+	"#;
+	#[cfg(feature = "experimental_parser")]
+	let sql = r#"
+		CREATE person:100 SET test = 'One';
+		CREATE person:00100;
+		CREATE r'person:100';
+		CREATE r"person:100";
 		CREATE person:⟨100⟩ SET test = 'Two';
 		CREATE person:`100`;
 		SELECT * FROM person;

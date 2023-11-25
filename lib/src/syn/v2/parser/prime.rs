@@ -1,14 +1,11 @@
-use std::ops::Bound;
-
+use super::{ParseResult, Parser};
 use crate::{
-	sql::{Array, Dir, Id, Ident, Idiom, Mock, Part, Range, Subquery, Table, Thing, Value},
+	sql::{Array, Dir, Ident, Idiom, Mock, Part, Subquery, Table, Value},
 	syn::v2::{
-		parser::mac::{expected, to_do, unexpected},
+		parser::mac::{expected, to_do},
 		token::{t, Span, TokenKind},
 	},
 };
-
-use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	/// Parse a what primary.
@@ -23,6 +20,10 @@ impl Parser<'_> {
 			TokenKind::DateTime => {
 				let datetime = self.parse_token_value()?;
 				Ok(Value::Datetime(datetime))
+			}
+			t!("r\"") => {
+				let span = self.pop_peek().span;
+				Ok(Value::Thing(self.parse_record_string(span)?))
 			}
 			t!("$param") => {
 				let param = self.parse_token_value()?;
@@ -61,25 +62,44 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x))),
+			t!("fn") => self.parse_custom_function().map(|x| Value::Function(Box::new(x))),
+			t!("ml") => self.parse_model().map(|x| Value::MlModel(Box::new(x))),
 			_ => {
-				let table = self.parse_token_value::<Table>()?;
-				if self.peek_kind() == t!(":") {
-					return self.parse_thing_or_range(table.0);
+				let token = self.next();
+				match self.peek_kind() {
+					t!("::") | t!("(") => self.parse_builtin(token.span),
+					t!(":") => {
+						let str = self.token_value::<Ident>(token)?.0;
+						self.parse_thing_or_range(str)
+					}
+					_ => Ok(Value::Table(self.token_value(token)?)),
 				}
-				Ok(Value::Table(table))
 			}
 		}
 	}
 
 	/// Parse an expressions
 	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {
-		let token = self.next();
+		let token = self.peek();
 		let value = match token.kind {
-			t!("NONE") => return Ok(Value::None),
-			t!("NULL") => return Ok(Value::Null),
-			t!("true") => return Ok(Value::Bool(true)),
-			t!("false") => return Ok(Value::Bool(false)),
+			t!("NONE") => {
+				self.pop_peek();
+				return Ok(Value::None);
+			}
+			t!("NULL") => {
+				self.pop_peek();
+				return Ok(Value::Null);
+			}
+			t!("true") => {
+				self.pop_peek();
+				return Ok(Value::Bool(true));
+			}
+			t!("false") => {
+				self.pop_peek();
+				return Ok(Value::Bool(false));
+			}
 			t!("<") => {
+				self.pop_peek();
 				// Casting should already have been parsed.
 				expected!(self, "FUTURE");
 				self.expect_closing_delimiter(t!(">"), token.span)?;
@@ -88,26 +108,36 @@ impl Parser<'_> {
 				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
 			}
 			TokenKind::Strand => {
+				self.pop_peek();
 				let strand = self.token_value(token)?;
 				return Ok(Value::Strand(strand));
 			}
 			TokenKind::Duration => {
+				self.pop_peek();
 				let duration = self.token_value(token)?;
 				Value::Duration(duration)
 			}
 			TokenKind::Number => {
+				self.pop_peek();
 				let number = self.token_value(token)?;
 				Value::Number(number)
 			}
 			TokenKind::Uuid => {
+				self.pop_peek();
 				let uuid = self.token_value(token)?;
 				Value::Uuid(uuid)
 			}
 			TokenKind::DateTime => {
+				self.pop_peek();
 				let datetime = self.token_value(token)?;
 				Value::Datetime(datetime)
 			}
+			t!("r\"") => {
+				let span = self.pop_peek().span;
+				Value::Thing(self.parse_record_string(span)?)
+			}
 			t!("$param") => {
+				self.pop_peek();
 				let param = self.token_value(token)?;
 				Value::Param(param)
 			}
@@ -115,26 +145,45 @@ impl Parser<'_> {
 				to_do!(self)
 			}
 			t!("->") => {
+				self.pop_peek();
 				let graph = self.parse_graph(Dir::Out)?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<->") => {
+				self.pop_peek();
 				let graph = self.parse_graph(Dir::Both)?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<-") => {
+				self.pop_peek();
 				let graph = self.parse_graph(Dir::In)?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
-			t!("[") => self.parse_array(token.span).map(Value::Array)?,
-			t!("{") => self.parse_object_like(token.span)?,
-			t!("|") => self.parse_mock(token.span).map(Value::Mock)?,
+			t!("[") => {
+				self.pop_peek();
+				self.parse_array(token.span).map(Value::Array)?
+			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_object_like(token.span)?
+			}
+			t!("|") => {
+				self.pop_peek();
+				self.parse_mock(token.span).map(Value::Mock)?
+			}
 			t!("IF") => {
+				self.pop_peek();
 				let stmt = self.parse_if_stmt()?;
 				Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
 			}
 			t!("(") => {
+				self.pop_peek();
 				self.parse_inner_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))?
+			}
+			t!("/") => {
+				self.pop_peek();
+				let regex = self.lexer.relex_regex(token);
+				self.token_value(regex).map(Value::Regex)?
 			}
 			t!("RETURN")
 			| t!("SELECT")
@@ -144,16 +193,29 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
+			t!("fn") => {
+				self.pop_peek();
+				self.parse_custom_function().map(|x| Value::Function(Box::new(x)))?
+			}
+			t!("ml") => {
+				self.pop_peek();
+				self.parse_model().map(|x| Value::MlModel(Box::new(x)))?
+			}
 			_ => {
-				let name: Ident = self.token_value(token)?;
-				if self.peek_kind() == t!(":") {
-					return self.parse_thing_or_range(name.0);
-				}
-
-				if self.table_as_field {
-					Value::Idiom(Idiom(vec![Part::Field(name)]))
-				} else {
-					Value::Table(Table(name.0))
+				self.pop_peek();
+				match self.peek_kind() {
+					t!("::") | t!("(") => self.parse_builtin(token.span)?,
+					t!(":") => {
+						let str = self.token_value::<Ident>(token)?.0;
+						self.parse_thing_or_range(str)?
+					}
+					_ => {
+						if self.table_as_field {
+							Value::Idiom(Idiom(vec![Part::Field(self.token_value(token)?)]))
+						} else {
+							Value::Table(self.token_value(token)?)
+						}
+					}
 				}
 			}
 		};
@@ -170,7 +232,7 @@ impl Parser<'_> {
 				Value::Table(Table(x)) => {
 					self.parse_remaining_value_idiom(vec![Part::Field(Ident(x))])
 				}
-				x => self.parse_remaining_value_idiom(vec![Part::Value(x)]),
+				x => self.parse_remaining_value_idiom(vec![Part::Start(x)]),
 			}
 		} else {
 			Ok(value)
@@ -187,7 +249,7 @@ impl Parser<'_> {
 			if self.eat(t!("]")) {
 				break;
 			}
-			values.push(self.parse_value()?);
+			values.push(self.parse_value_field()?);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("]"), start)?;
@@ -208,98 +270,6 @@ impl Parser<'_> {
 			Ok(Mock::Range(name, from, to))
 		} else {
 			Ok(Mock::Count(name, from))
-		}
-	}
-
-	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
-		expected!(self, ":");
-		let exclusive = self.eat(t!(">"));
-		let id = self.parse_id()?;
-		if self.eat(t!("..")) {
-			let inclusive = self.eat(t!("="));
-			let end = self.parse_id()?;
-			Ok(Value::Range(Box::new(Range {
-				tb: ident,
-				beg: if exclusive {
-					Bound::Excluded(id)
-				} else {
-					Bound::Included(id)
-				},
-				end: if inclusive {
-					Bound::Included(end)
-				} else {
-					Bound::Excluded(end)
-				},
-			})))
-		} else {
-			if exclusive {
-				unexpected!(self, self.peek_kind(), "the range operator '..'")
-			}
-			Ok(Value::Thing(Thing {
-				tb: ident,
-				id,
-			}))
-		}
-	}
-
-	pub fn parse_range(&mut self) -> ParseResult<Range> {
-		let tb = self.parse_token_value::<Ident>()?.0;
-		expected!(self, ":");
-		let exclusive = self.eat(t!(">"));
-		let id = self.parse_id()?;
-		expected!(self, "..");
-		let inclusive = self.eat(t!("="));
-		let end = self.parse_id()?;
-		Ok(Range {
-			tb,
-			beg: if exclusive {
-				Bound::Excluded(id)
-			} else {
-				Bound::Included(id)
-			},
-			end: if inclusive {
-				Bound::Included(end)
-			} else {
-				Bound::Excluded(end)
-			},
-		})
-	}
-
-	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
-		let ident = self.parse_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ident)
-	}
-
-	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
-		expected!(self, ":");
-		let id = self.parse_id()?;
-		Ok(Thing {
-			tb: ident,
-			id,
-		})
-	}
-
-	pub fn parse_id(&mut self) -> ParseResult<Id> {
-		match self.peek_kind() {
-			t!("{") => {
-				let start = self.pop_peek().span;
-				let object = self.parse_object(start)?;
-				Ok(Id::Object(object))
-			}
-			t!("[") => {
-				let start = self.pop_peek().span;
-				let array = self.parse_array(start)?;
-				Ok(Id::Array(array))
-			}
-			// TODO: negative numbers.
-			TokenKind::Number => {
-				let number = self.parse_token_value::<u64>()?;
-				Ok(Id::Number(number as i64))
-			}
-			_ => {
-				let ident = self.parse_token_value::<Ident>()?.0;
-				Ok(Id::String(ident))
-			}
 		}
 	}
 
@@ -362,7 +332,7 @@ impl Parser<'_> {
 				Subquery::Remove(stmt)
 			}
 			_ => {
-				let value = self.parse_value()?;
+				let value = self.parse_value_field()?;
 				Subquery::Value(value)
 			}
 		};

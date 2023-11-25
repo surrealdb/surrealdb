@@ -1,6 +1,5 @@
 use super::{
 	super::Parse,
-	builtin,
 	expression::binary as expression,
 	function::script_body as script,
 	idiom::plain as idiom,
@@ -11,10 +10,6 @@ use super::{
 use nom::Finish;
 
 use crate::sql::{Array, Expression, Idiom, Param, Script, Thing, Value};
-
-pub fn builtin_name(i: &str) -> Result<(), ()> {
-	builtin::builtin_name(i).finish().map(|_| ()).map_err(|_| ())
-}
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {

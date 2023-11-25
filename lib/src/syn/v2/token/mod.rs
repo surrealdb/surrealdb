@@ -31,6 +31,17 @@ impl Span {
 	pub fn is_empty(&self) -> bool {
 		self.len == 0
 	}
+
+	/// Create a span that covers the range of both spans as well as possible space inbetween.
+	pub fn covers(self, other: Span) -> Span {
+		let start = self.offset.min(other.offset);
+		let end = (self.offset + self.len).max(other.offset + other.len);
+		let len = end - start;
+		Span {
+			offset: start,
+			len,
+		}
+	}
 }
 
 #[repr(u8)]
@@ -195,6 +206,11 @@ pub enum TokenKind {
 	Operator(Operator),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
+	// a token denoting the opening of a record string, i.e. `r"`
+	OpenRecordString,
+	/// a token denoting the clsoing of a record string, i.e. `"`
+	/// Never produced normally by the lexer.
+	CloseRecordString,
 	Regex,
 	Uuid,
 	DateTime,
@@ -263,7 +279,7 @@ impl TokenKind {
 			TokenKind::Keyword(x) => x.as_str(),
 			TokenKind::Operator(x) => x.as_str(),
 			TokenKind::Algorithm(_) => todo!(),
-			TokenKind::Language(_) => todo!(),
+			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",
@@ -271,6 +287,8 @@ impl TokenKind {
 			TokenKind::CloseDelim(Delim::Paren) => ")",
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
+			TokenKind::OpenRecordString => "a record string",
+			TokenKind::CloseRecordString => "a closing record string",
 			TokenKind::Uuid => "a uuid",
 			TokenKind::DateTime => "a date-time",
 			TokenKind::Strand => "a strand",

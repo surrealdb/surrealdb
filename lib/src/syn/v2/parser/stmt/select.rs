@@ -34,8 +34,8 @@ impl Parser<'_> {
 		let split = self.try_parse_split()?;
 		let group = self.try_parse_group()?;
 		let order = self.try_parse_orders()?;
-		let limit = self.try_parse_limit()?;
 		let start = self.try_parse_start()?;
+		let limit = self.try_parse_limit()?;
 		let fetch = self.try_parse_fetch()?;
 		let version = self.try_parse_version()?;
 		let timeout = self.try_parse_timeout()?;

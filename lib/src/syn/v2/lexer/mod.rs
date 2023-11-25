@@ -41,6 +41,8 @@ pub enum Error {
 	Duration(#[from] duration::Error),
 	#[error("failed to lex number, {0}")]
 	Number(#[from] number::Error),
+	#[error("failed to parse regex, {0}")]
+	Regex(regex::Error),
 }
 
 impl From<CharError> for Error {
@@ -280,14 +282,79 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex a single `"` character with possible leading whitespace.
+	///
+	/// Used for parsing record strings.
+	pub fn lex_record_string_close(&mut self) -> Token {
+		loop {
+			let Some(byte) = self.reader.next() else {
+				return self.invalid_token(Error::UnexpectedEof);
+			};
+			match byte {
+				unicode::byte::CR
+				| unicode::byte::FF
+				| unicode::byte::LF
+				| unicode::byte::SP
+				| unicode::byte::VT
+				| unicode::byte::TAB => {
+					self.eat_whitespace();
+					continue;
+				}
+				b'"' => {
+					return self.finish_token(TokenKind::CloseRecordString, None);
+				}
+				b'-' => match self.reader.next() {
+					Some(b'-') => {
+						self.eat_single_line_comment();
+						continue;
+					}
+					Some(x) => match self.reader.convert_to_char(x) {
+						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
+						Err(e) => return self.invalid_token(e.into()),
+					},
+					None => return self.invalid_token(Error::UnexpectedEof),
+				},
+				b'/' => match self.reader.next() {
+					Some(b'*') => {
+						if let Err(e) = self.eat_multi_line_comment() {
+							return self.invalid_token(e);
+						}
+						continue;
+					}
+					Some(b'/') => {
+						self.eat_single_line_comment();
+						continue;
+					}
+					Some(x) => match self.reader.convert_to_char(x) {
+						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
+						Err(e) => return self.invalid_token(e.into()),
+					},
+					None => return self.invalid_token(Error::UnexpectedEof),
+				},
+				b'#' => {
+					self.eat_single_line_comment();
+					continue;
+				}
+				x => match self.reader.convert_to_char(x) {
+					Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
+					Err(e) => return self.invalid_token(e.into()),
+				},
+			}
+		}
+	}
+
 	pub fn lex_only_datetime(&mut self) -> Result<Datetime, Error> {
 		self.lex_datetime_raw_err().map_err(Error::DateTime)
 	}
 
 	pub fn lex_only_duration(&mut self) -> Result<Duration, Error> {
 		match self.reader.next() {
-			Some(b'0'..=b'9') => {
-				while let Some(b'0'..=b'9') = self.reader.peek() {}
+			Some(x @ b'0'..=b'9') => {
+				self.scratch.push(x as char);
+				while let Some(x @ b'0'..=b'9') = self.reader.peek() {
+					self.reader.next();
+					self.scratch.push(x as char);
+				}
 				self.lex_duration_err().map_err(Error::Duration)
 			}
 			Some(x) => {

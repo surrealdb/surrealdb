@@ -25,9 +25,9 @@ pub enum Language {
 	Turkish,
 }
 
-impl Display for Language {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
+impl Language {
+	pub fn as_str(&self) -> &'static str {
+		match self {
 			Self::Arabic => "ARABIC",
 			Self::Danish => "DANISH",
 			Self::Dutch => "DUTCH",
@@ -45,6 +45,12 @@ impl Display for Language {
 			Self::Swedish => "SWEDISH",
 			Self::Tamil => "TAMIL",
 			Self::Turkish => "TURKISH",
-		})
+		}
+	}
+}
+
+impl Display for Language {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
 	}
 }
