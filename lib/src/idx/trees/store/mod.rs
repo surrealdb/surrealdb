@@ -11,6 +11,7 @@ use crate::idx::trees::store::read::{TreeMemoryRead, TreeTransactionRead};
 use crate::idx::trees::store::write::{TreeMemoryWrite, TreeTransactionWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
+use once_cell::sync::Lazy;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
@@ -225,6 +226,7 @@ impl Default for IndexStores {
 	}
 }
 
+pub(crate) static INDEX_STORES: Lazy<IndexStores> = Lazy::new(|| IndexStores::default());
 impl IndexStores {
 	pub(in crate::idx) async fn get_store_btree_fst(
 		&self,

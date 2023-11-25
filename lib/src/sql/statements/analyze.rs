@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::StoreProvider;
+use crate::idx::trees::store::{StoreProvider, INDEX_STORES};
 use crate::idx::IndexKeyBase;
 use crate::sql::ident::Ident;
 use crate::sql::index::Index;
@@ -28,7 +28,7 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
@@ -49,7 +49,7 @@ impl AnalyzeStatement {
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
 						let ft = FtIndex::new(
-							ctx.get_index_stores().clone(),
+							INDEX_STORES.clone(),
 							opt,
 							txn,
 							p.az.as_str(),
@@ -67,9 +67,7 @@ impl AnalyzeStatement {
 						} else {
 							StoreProvider::Transaction
 						};
-						let mt =
-							MTreeIndex::new(ctx.get_index_stores().clone(), &mut tx, ikb, p, sp)
-								.await?;
+						let mt = MTreeIndex::new(INDEX_STORES.clone(), &mut tx, ikb, p, sp).await?;
 						mt.statistics(&mut tx).await?.into()
 					}
 					_ => {

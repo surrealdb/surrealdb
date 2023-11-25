@@ -7,6 +7,7 @@ use crate::idx::trees::store::memory::ShardedTreeMemoryMap;
 use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::{mem_store_read_lock, mem_store_write_lock};
 
 pub(super) type TermFrequency = u64;
 
@@ -67,11 +68,7 @@ impl Postings {
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Write).await;
-		let mut mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.write().await)
-		} else {
-			None
-		};
+		let mut mem = mem_store_write_lock!(self.mem_store);
 		self.btree.insert(tx, &mut mem, &mut store, key, term_freq).await?;
 		store.finish(tx).await?;
 		Ok(())
@@ -85,11 +82,7 @@ impl Postings {
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.search(tx, &mem, &mut store, &key).await?;
 		store.finish(tx).await?;
 		Ok(res)
@@ -103,11 +96,7 @@ impl Postings {
 	) -> Result<Option<TermFrequency>, Error> {
 		let key = self.index_key_base.new_bf_key(term_id, doc_id);
 		let mut store = self.get_store(StoreRights::Write).await;
-		let mut mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.write().await)
-		} else {
-			None
-		};
+		let mut mem = mem_store_write_lock!(self.mem_store);
 		let res = self.btree.delete(tx, &mut mem, &mut store, key).await?;
 		store.finish(tx).await?;
 		Ok(res)
@@ -115,11 +104,7 @@ impl Postings {
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.statistics(tx, &mem, &mut store).await?;
 		store.finish(tx).await?;
 		Ok(res)

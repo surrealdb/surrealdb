@@ -7,6 +7,7 @@ use crate::idx::trees::store::{
 };
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::{mem_store_read_lock, mem_store_write_lock};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -92,11 +93,7 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.search(tx, &mem, &mut store, &doc_key).await?;
 		store.finish(tx).await?;
 		Ok(res)
@@ -111,11 +108,7 @@ impl DocIds {
 	) -> Result<Resolved, Error> {
 		{
 			let mut store = self.get_store(StoreRights::Read).await;
-			let mem = if let Some(mem_store) = &self.mem_store {
-				Some(mem_store.read().await)
-			} else {
-				None
-			};
+			let mem = mem_store_read_lock!(self.mem_store);
 			if let Some(doc_id) = self.btree.search(tx, &mem, &mut store, &doc_key).await? {
 				return Ok(Resolved::Existing(doc_id));
 			}
@@ -124,11 +117,7 @@ impl DocIds {
 		let doc_id = self.get_next_doc_id();
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
 		let mut store = self.get_store(StoreRights::Write).await;
-		let mut mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.write().await)
-		} else {
-			None
-		};
+		let mut mem = mem_store_write_lock!(self.mem_store);
 		self.btree.insert(tx, &mut mem, &mut store, doc_key, doc_id).await?;
 		store.finish(tx).await?;
 		self.updated = true;
@@ -141,11 +130,7 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.get_store(StoreRights::Write).await;
-		let mut mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.write().await)
-		} else {
-			None
-		};
+		let mut mem = mem_store_write_lock!(self.mem_store);
 		let res = if let Some(doc_id) = self.btree.delete(tx, &mut mem, &mut store, doc_key).await?
 		{
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
@@ -183,11 +168,7 @@ impl DocIds {
 		tx: &mut Transaction,
 	) -> Result<BStatistics, Error> {
 		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = if let Some(mem_store) = &self.mem_store {
-			Some(mem_store.read().await)
-		} else {
-			None
-		};
+		let mem = mem_store_read_lock!(self.mem_store);
 		let res = self.btree.statistics(tx, &mem, &mut store).await?;
 		store.finish(tx).await?;
 		Ok(res)

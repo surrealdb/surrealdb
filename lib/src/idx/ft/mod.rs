@@ -487,7 +487,7 @@ mod tests {
 	use crate::dbs::{Options, Transaction};
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::trees::store::StoreProvider;
+	use crate::idx::trees::store::{StoreProvider, INDEX_STORES};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
@@ -551,7 +551,7 @@ mod tests {
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
-			ctx.get_index_stores().clone(),
+			INDEX_STORES.clone(),
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
