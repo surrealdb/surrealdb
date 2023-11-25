@@ -1,6 +1,6 @@
 use super::super::{
 	comment::shouldbespace,
-	part::{cond, output, timeout},
+	part::{cond, limit, output, timeout},
 	value::whats,
 	IResult,
 };
@@ -14,6 +14,7 @@ pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
@@ -23,6 +24,7 @@ pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
 			only: only.is_some(),
 			what,
 			cond,
+			limit,
 			output,
 			timeout,
 			parallel: parallel.is_some(),

@@ -1,6 +1,6 @@
 use super::super::{
 	comment::shouldbespace,
-	part::{data, output, timeout},
+	part::{data, limit, output, timeout},
 	value::whats,
 	IResult,
 };
@@ -16,12 +16,13 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = whats(i)?;
-	let (i, (data, output, timeout, parallel)) = cut(|i| {
+	let (i, (data, limit, output, timeout, parallel)) = cut(|i| {
 		let (i, data) = opt(preceded(shouldbespace, data))(i)?;
+		let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 		let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 		let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 		let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-		Ok((i, (data, output, timeout, parallel)))
+		Ok((i, (data, limit, output, timeout, parallel)))
 	})(i)?;
 	Ok((
 		i,
@@ -29,6 +30,7 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 			only: only.is_some(),
 			what,
 			data,
+			limit,
 			output,
 			timeout,
 			parallel: parallel.is_some(),

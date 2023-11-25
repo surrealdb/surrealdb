@@ -1,6 +1,6 @@
 use super::super::{
 	comment::shouldbespace,
-	part::{cond, data, output, timeout},
+	part::{cond, data, limit, output, timeout},
 	value::whats,
 	IResult,
 };
@@ -14,6 +14,7 @@ pub fn update(i: &str) -> IResult<&str, UpdateStatement> {
 	let (i, what) = whats(i)?;
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
+	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
@@ -24,6 +25,7 @@ pub fn update(i: &str) -> IResult<&str, UpdateStatement> {
 			what,
 			data,
 			cond,
+			limit,
 			output,
 			timeout,
 			parallel: parallel.is_some(),

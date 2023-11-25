@@ -4,6 +4,7 @@ use crate::sql::value::serde::ser;
 use crate::sql::Cond;
 use crate::sql::Data;
 use crate::sql::Duration;
+use crate::sql::Limit;
 use crate::sql::Output;
 use crate::sql::Timeout;
 use crate::sql::Values;
@@ -44,6 +45,7 @@ pub struct SerializeUpdateStatement {
 	what: Option<Values>,
 	data: Option<Data>,
 	cond: Option<Cond>,
+	limit: Option<Limit>,
 	output: Option<Output>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
@@ -69,6 +71,9 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 			}
 			"cond" => {
 				self.cond = value.serialize(ser::cond::opt::Serializer.wrap())?;
+			}
+			"limit" => {
+				self.limit = value.serialize(ser::limit::opt::Serializer.wrap())?;
 			}
 			"output" => {
 				self.output = value.serialize(ser::output::opt::Serializer.wrap())?;
@@ -96,6 +101,7 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 				parallel,
 				data: self.data,
 				cond: self.cond,
+				limit: self.limit,
 				output: self.output,
 				timeout: self.timeout,
 			}),
@@ -129,6 +135,16 @@ mod tests {
 	fn with_cond() {
 		let stmt = UpdateStatement {
 			cond: Some(Default::default()),
+			..Default::default()
+		};
+		let value: UpdateStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
+
+	#[test]
+	fn with_limit() {
+		let stmt = UpdateStatement {
+			limit: Some(Default::default()),
 			..Default::default()
 		};
 		let value: UpdateStatement = stmt.serialize(Serializer.wrap()).unwrap();
