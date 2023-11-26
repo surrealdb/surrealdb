@@ -69,12 +69,12 @@ impl SelectStatement {
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Used for ONLY: is the limit 1?
-		let limit_is_one = self.limit.clone().is_some_and(|l| match l.0 {
+		let limit_is_one_or_zero = self.limit.clone().is_some_and(|l| match l.0 {
 			Value::Number(l) => l.to_usize() <= 1,
 			_ => false,
 		});
 		// Fail for multiple targets without a limit
-		if self.only && !limit_is_one && self.what.0.len() > 1 {
+		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
 		}
 		// Loop over the select targets
@@ -83,27 +83,27 @@ impl SelectStatement {
 			match v {
 				Value::Table(t) => {
 					planner.add_iterables(ctx, txn, t, &mut i).await?;
-					if self.only && !limit_is_one {
+					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => {
-					if self.only && !limit_is_one {
+					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 
 					i.ingest(Iterable::Range(*v))
 				}
 				Value::Edges(v) => {
-					if self.only && !limit_is_one {
+					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 
 					i.ingest(Iterable::Edges(*v))
 				}
 				Value::Mock(v) => {
-					if self.only && !limit_is_one {
+					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 
@@ -112,7 +112,7 @@ impl SelectStatement {
 					}
 				}
 				Value::Array(v) => {
-					if self.only && !limit_is_one {
+					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 
