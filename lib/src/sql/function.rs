@@ -105,6 +105,7 @@ impl Function {
 		match self {
 			Self::Normal(f, _) if f == "array::distinct" => true,
 			Self::Normal(f, _) if f == "array::first" => true,
+			Self::Normal(f, _) if f == "array::flatten" => true,
 			Self::Normal(f, _) if f == "array::group" => true,
 			Self::Normal(f, _) if f == "array::last" => true,
 			Self::Normal(f, _) if f == "count" => true,
