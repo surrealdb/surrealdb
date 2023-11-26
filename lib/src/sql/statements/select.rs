@@ -69,7 +69,7 @@ impl SelectStatement {
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = self.limit.clone().is_some_and(|l| match l.0 {
+		let limit_is_one_or_zero = self.limit.to_owned().is_some_and(|l| match l.0 {
 			Value::Number(l) => l.to_usize() <= 1,
 			_ => false,
 		});
@@ -82,10 +82,11 @@ impl SelectStatement {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(t) => {
-					planner.add_iterables(ctx, txn, t, &mut i).await?;
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
+
+					planner.add_iterables(ctx, txn, t, &mut i).await?;
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => {
