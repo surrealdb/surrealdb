@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Ws;
 use crate::api::engine::remote::ws::Wss;
@@ -62,3 +63,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, SocketAddr);
+identity!(Client = Client, Ws, Wss);

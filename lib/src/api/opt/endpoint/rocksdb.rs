@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::File;
 use crate::api::engine::local::RocksDb;
@@ -62,3 +63,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, &Path, PathBuf);
+identity!(Client = Db, File, RocksDb);

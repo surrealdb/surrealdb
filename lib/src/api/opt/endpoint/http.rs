@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::remote::http::Client;
 use crate::api::engine::remote::http::Http;
 use crate::api::engine::remote::http::Https;
@@ -62,3 +63,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, SocketAddr);
+identity!(Client = Client, Http, Https);

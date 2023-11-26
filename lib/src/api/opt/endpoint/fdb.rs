@@ -38,3 +38,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, &Path, PathBuf);
+identity!(Client = Db, Http, Https);

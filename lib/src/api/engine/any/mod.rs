@@ -165,6 +165,12 @@ where
 	}
 }
 
+impl IntoEndpoint for Endpoint {
+	fn into_endpoint(self) -> Result<Endpoint> {
+		Ok(self)
+	}
+}
+
 /// A dynamic connection that supports any engine and allows you to pick at runtime
 #[derive(Debug, Clone)]
 pub struct Any {

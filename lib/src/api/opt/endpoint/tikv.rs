@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::TiKv;
 use crate::api::opt::Config;
@@ -37,3 +38,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, SocketAddr);
+identity!(Client = Db, TiKv);

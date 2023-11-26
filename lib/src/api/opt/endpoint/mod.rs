@@ -23,7 +23,7 @@ use url::Url;
 use super::Config;
 
 /// A server address used to connect to the server
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
 	#[doc(hidden)]
@@ -63,6 +63,23 @@ pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) 
 	let cleaned = Path::new(&expanded).clean();
 	format!("{protocol}{}", cleaned.display())
 }
+
+// Macro for implementing the identity implementation of IntoEndpoint for Endpoint for various schemes
+macro_rules! identity {
+	(Client = $client:ty, $($scheme:ty),*) => {
+		$(
+			impl IntoEndpoint<$scheme> for Endpoint {
+				type Client = $client;
+
+				fn into_endpoint(self) -> Result<Endpoint> {
+					Ok(self)
+				}
+			}
+		)*
+	}
+}
+
+pub(crate) use identity;
 
 #[cfg(test)]
 mod tests {

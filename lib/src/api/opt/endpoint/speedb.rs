@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::SpeeDb;
 use crate::api::opt::Config;
@@ -38,3 +39,4 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, &Path, PathBuf);
+identity!(Client = Db, SpeeDb);

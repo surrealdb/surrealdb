@@ -1,3 +1,4 @@
+use super::identity;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::Mem;
 use crate::api::opt::Endpoint;
@@ -27,3 +28,5 @@ impl IntoEndpoint<Mem> for Config {
 		Ok(endpoint)
 	}
 }
+
+identity!(Client = Db, Mem);
