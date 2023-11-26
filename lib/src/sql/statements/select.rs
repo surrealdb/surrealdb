@@ -69,10 +69,10 @@ impl SelectStatement {
 		// Get a query planner
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = self.limit.to_owned().is_some_and(|l| match l.0 {
-			Value::Number(l) => l.to_usize() <= 1,
+		let limit_is_one_or_zero = match &self.limit {
+			Some(l) => l.process(ctx, opt, txn, doc).await? <= 1,
 			_ => false,
-		});
+		};
 		// Fail for multiple targets without a limit
 		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
