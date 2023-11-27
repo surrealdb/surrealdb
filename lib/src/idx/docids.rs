@@ -19,7 +19,6 @@ pub(crate) struct DocIds {
 	store: BTreeStore<TrieKeys>,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,
-	updated: bool,
 }
 
 impl DocIds {
@@ -52,7 +51,6 @@ impl DocIds {
 			store,
 			available_ids: state.available_ids,
 			next_doc_id: state.next_doc_id,
-			updated: false,
 		})
 	}
 
@@ -96,7 +94,6 @@ impl DocIds {
 		let doc_id = self.get_next_doc_id();
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
 		self.btree.insert(tx, &mut &mut self.store, doc_key, doc_id).await?;
-		self.updated = true;
 		Ok(Resolved::New(doc_id))
 	}
 
@@ -114,7 +111,6 @@ impl DocIds {
 				available_ids.insert(doc_id);
 				self.available_ids = Some(available_ids);
 			}
-			self.updated = true;
 			Ok(Some(doc_id))
 		} else {
 			Ok(None)
@@ -142,11 +138,10 @@ impl DocIds {
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.finish(tx).await?;
-		if self.updated || updated {
-			let btree = self.btree.finish();
+		if self.store.finish(tx).await? {
+			let btree = self.btree.inc_generation().clone();
 			let state = State {
-				btree: btree.clone(),
+				btree,
 				available_ids: self.available_ids.take(),
 				next_doc_id: self.next_doc_id,
 			};

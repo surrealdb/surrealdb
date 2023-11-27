@@ -17,7 +17,6 @@ pub(super) struct Terms {
 	store: BTreeStore<FstKeys>,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
-	updated: bool,
 }
 
 impl Terms {
@@ -50,7 +49,6 @@ impl Terms {
 			store,
 			available_ids: state.available_ids,
 			next_term_id: state.next_term_id,
-			updated: false,
 		})
 	}
 
@@ -85,7 +83,6 @@ impl Terms {
 		let term_id = self.get_next_term_id();
 		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
-		self.updated = true;
 		Ok(term_id)
 	}
 
@@ -113,7 +110,6 @@ impl Terms {
 				available_ids.insert(term_id);
 				self.available_ids = Some(available_ids);
 			}
-			self.updated = true;
 		}
 		Ok(())
 	}
@@ -123,11 +119,10 @@ impl Terms {
 	}
 
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.finish(tx).await?;
-		if self.updated || updated {
-			let btree = self.btree.finish();
+		if self.store.finish(tx).await? {
+			let btree = self.btree.inc_generation().clone();
 			let state = State {
-				btree: btree.clone(),
+				btree,
 				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};

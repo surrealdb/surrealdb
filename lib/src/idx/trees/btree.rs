@@ -21,7 +21,6 @@ where
 	BK: BKeys,
 {
 	state: BState,
-	updated: bool,
 	full_size: u32,
 	bk: PhantomData<BK>,
 }
@@ -187,9 +186,13 @@ where
 		Self {
 			full_size: state.minimum_degree * 2 - 1,
 			state,
-			updated: false,
 			bk: PhantomData,
 		}
+	}
+
+	pub(in crate::idx) fn inc_generation(&mut self) -> &BState {
+		self.state.generation += 1;
+		&self.state
 	}
 
 	pub async fn search(
@@ -228,7 +231,6 @@ where
 				let new_root = store
 					.new_node(new_root_id, BTreeNode::Internal(BK::default(), vec![root_id]))?;
 				self.state.set_root(Some(new_root.id));
-				self.updated = true;
 				self.split_child(store, new_root, 0, root).await?;
 				self.insert_non_full(tx, store, new_root_id, key, payload).await?;
 			} else {
@@ -244,7 +246,6 @@ where
 				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
 			store.set_node(new_root_node, true).await?;
 			self.state.set_root(Some(new_root_id));
-			self.updated = true;
 		}
 		Ok(())
 	}
@@ -265,13 +266,11 @@ where
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
 					store.set_node(node, true).await?;
-					self.updated = true;
 				}
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
 						store.set_node(node, true).await?;
-						self.updated = true;
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
@@ -326,7 +325,6 @@ where
 		store.set_node(right_node, true).await?;
 		// Save the parent node
 		store.set_node(parent_node, true).await?;
-		self.updated = true;
 		Ok(SplitResult {
 			left_node_id,
 			right_node_id,
@@ -383,11 +381,9 @@ where
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
-									self.updated = true;
 								}
 							} else {
 								store.set_node(node, true).await?;
-								self.updated = true;
 							}
 						} else {
 							store.set_node(node, false).await?;
@@ -410,7 +406,6 @@ where
 								.await?,
 							);
 							store.set_node(node, true).await?;
-							self.updated = true;
 						} else {
 							// CLRS: 3
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
@@ -432,12 +427,8 @@ where
 								}
 								store.remove_node(node.id, node.key).await?;
 								self.state.set_root(Some(next_stored_node));
-								self.updated = true;
 							} else {
 								store.set_node(node, node_update).await?;
-								if node_update {
-									self.updated = true;
-								}
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
 						}
@@ -465,7 +456,6 @@ where
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
 				store.set_node(left_node, true).await?;
-				self.updated = true;
 				return Ok((false, key_prim, left_id));
 			}
 		}
@@ -480,7 +470,6 @@ where
 				keys.insert(key_prim.clone(), payload_prim);
 				store.set_node(left_node, false).await?;
 				store.set_node(right_node, true).await?;
-				self.updated = true;
 				return Ok((false, key_prim, right_id));
 			}
 		}
@@ -493,7 +482,6 @@ where
 		store.remove_node(right_id, right_node.key).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
-		self.updated = true;
 		Ok((false, key_to_delete, left_id))
 	}
 
@@ -599,7 +587,6 @@ where
 					let child_id = child_stored_node.id;
 					store.set_node(child_stored_node, true).await?;
 					store.set_node(right_child_stored_node, true).await?;
-					self.updated = true;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -629,7 +616,6 @@ where
 					let child_id = child_stored_node.id;
 					store.set_node(child_stored_node, true).await?;
 					store.set_node(left_child_stored_node, true).await?;
-					self.updated = true;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -657,7 +643,6 @@ where
 				left_child.n.append(descending_key, descending_payload, right_child.n)?;
 				store.set_node(left_child, true).await?;
 				store.remove_node(right_child.id, right_child.key).await?;
-				self.updated = true;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
 		}
@@ -691,14 +676,6 @@ where
 			};
 		}
 		Ok(stats)
-	}
-
-	pub(in crate::idx) fn finish(&mut self) -> &BState {
-		if self.updated {
-			self.state.generation += 1;
-			self.updated = false;
-		}
-		&self.state
 	}
 }
 
@@ -1214,9 +1191,9 @@ mod tests {
 	where
 		BK: BKeys + Clone + Debug,
 	{
-		assert_eq!(t.updated, true, "{}", info);
-		st.finish(&mut tx).await?;
-		t.finish();
+		if st.finish(&mut tx).await? {
+			t.state.generation += 1;
+		}
 		gen += 1;
 		assert_eq!(t.state.generation, gen, "{}", info);
 		tx.commit().await?;

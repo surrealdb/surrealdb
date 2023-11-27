@@ -75,9 +75,8 @@ impl DocLengths {
 	}
 
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		let updated = self.store.finish(tx).await?;
-		if updated {
-			let state = self.btree.finish();
+		if self.store.finish(tx).await? {
+			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
 		}
 		Ok(())
