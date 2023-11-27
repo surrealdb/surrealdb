@@ -65,6 +65,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::value::Value;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn thing_normal() {
@@ -86,6 +87,37 @@ mod tests {
 		let sql = "test:001";
 		let res = thing(sql);
 		let out = res.unwrap().1;
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_string() {
+		let sql = "'test:001'";
+		let res = Value::parse(sql);
+		let Value::Thing(out) = res else {
+			panic!()
+		};
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
+			}
+		);
+
+		let sql = "r'test:001'";
+		let res = Value::parse(sql);
+		let Value::Thing(out) = res else {
+			panic!()
+		};
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
 			out,

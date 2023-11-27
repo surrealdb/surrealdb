@@ -194,6 +194,8 @@ mod tests {
 
 	// use chrono::Date;
 
+	use crate::{sql::Value, syn::test::Parse};
+
 	use super::*;
 
 	#[test]
@@ -264,6 +266,25 @@ mod tests {
 		let sql = "2012-04-23T18:25:43.0000511Z";
 		let res = datetime_raw(sql);
 		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
+	}
+
+	#[test]
+	fn date_time_timezone_utc_sub_nanoseconds_from_value() {
+		let sql = "'2012-04-23T18:25:43.0000511Z'";
+		let res = Value::parse(sql);
+		let Value::Uuid(out) = res else {
+			panic!();
+		};
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
+
+		let sql = "t'2012-04-23T18:25:43.0000511Z'";
+		let res = Value::parse(sql);
+		let Value::Uuid(out) = res else {
+			panic!();
+		};
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 	}
