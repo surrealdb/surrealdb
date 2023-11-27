@@ -14,7 +14,6 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::INDEX_STORES;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::{Key, TransactionType};
@@ -86,7 +85,7 @@ impl QueryExecutor {
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
 							let ft = FtIndex::new(
-								&INDEX_STORES,
+								ctx.get_index_stores(),
 								opt,
 								txn,
 								p.az.as_str(),
@@ -119,7 +118,7 @@ impl QueryExecutor {
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let mt = MTreeIndex::new(
-									&INDEX_STORES,
+									ctx.get_index_stores(),
 									&mut tx,
 									ikb,
 									p,

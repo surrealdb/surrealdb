@@ -215,6 +215,28 @@ where
 		Ok(None)
 	}
 
+	pub async fn search_mut(
+		&self,
+		tx: &mut Transaction,
+		store: &mut BTreeStore<BK>,
+		searched_key: &Key,
+	) -> Result<Option<Payload>, Error> {
+		let mut next_node = self.state.root;
+		while let Some(node_id) = next_node.take() {
+			let current = store.get_node_mut(tx, node_id).await?;
+			if let Some(payload) = current.n.keys().get(searched_key) {
+				store.set_node(current, false).await?;
+				return Ok(Some(payload));
+			}
+			if let BTreeNode::Internal(keys, children) = &current.n {
+				let child_idx = keys.get_child_idx(searched_key);
+				next_node.replace(children[child_idx]);
+			}
+			store.set_node(current, false).await?;
+		}
+		Ok(None)
+	}
+
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
@@ -504,7 +526,7 @@ where
 				let right_child_stored_node =
 					store.get_node_mut(tx, children[child_idx + 1]).await?;
 				return if right_child_stored_node.n.keys().len() >= self.state.minimum_degree {
-					self.delete_adjust_successor(
+					Self::delete_adjust_successor(
 						store,
 						keys,
 						child_idx,
@@ -516,7 +538,7 @@ where
 					.await
 				} else {
 					// CLRS 3b successor
-					self.merge_nodes(
+					Self::merge_nodes(
 						store,
 						keys,
 						children,
@@ -535,7 +557,7 @@ where
 				let child_idx = child_idx - 1;
 				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
-					self.delete_adjust_predecessor(
+					Self::delete_adjust_predecessor(
 						store,
 						keys,
 						child_idx,
@@ -547,7 +569,7 @@ where
 					.await
 				} else {
 					// CLRS 3b predecessor
-					self.merge_nodes(
+					Self::merge_nodes(
 						store,
 						keys,
 						children,
@@ -567,7 +589,6 @@ where
 	}
 
 	async fn delete_adjust_successor(
-		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -596,7 +617,6 @@ where
 	}
 
 	async fn delete_adjust_predecessor(
-		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -626,7 +646,6 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes(
-		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,

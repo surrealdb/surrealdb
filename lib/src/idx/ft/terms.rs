@@ -76,7 +76,7 @@ impl Terms {
 	) -> Result<TermId, Error> {
 		let term_key = term.into();
 		{
-			if let Some(term_id) = self.btree.search(tx, &self.store, &term_key).await? {
+			if let Some(term_id) = self.btree.search_mut(tx, &mut self.store, &term_key).await? {
 				return Ok(term_id);
 			}
 		}

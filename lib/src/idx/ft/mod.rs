@@ -256,7 +256,7 @@ impl FtIndex {
 		let mut tx = txn.lock().await;
 		let mut dl = self.doc_lengths.write().await;
 		if resolved.was_existing() {
-			if let Some(old_doc_length) = dl.get_doc_length(&mut tx, doc_id).await? {
+			if let Some(old_doc_length) = dl.get_doc_length_mut(&mut tx, doc_id).await? {
 				self.state.total_docs_lengths -= old_doc_length as u128;
 			}
 		}
@@ -496,7 +496,6 @@ mod tests {
 	use crate::dbs::{Options, Transaction};
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::trees::store::INDEX_STORES;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
@@ -559,7 +558,7 @@ mod tests {
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
-			&INDEX_STORES,
+			ctx.get_index_stores(),
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),

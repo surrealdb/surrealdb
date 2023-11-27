@@ -87,13 +87,13 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
 		{
-			if let Some(doc_id) = self.btree.search(tx, &self.store, &doc_key).await? {
+			if let Some(doc_id) = self.btree.search_mut(tx, &mut self.store, &doc_key).await? {
 				return Ok(Resolved::Existing(doc_id));
 			}
 		}
 		let doc_id = self.get_next_doc_id();
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
-		self.btree.insert(tx, &mut &mut self.store, doc_key, doc_id).await?;
+		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
 

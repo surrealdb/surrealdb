@@ -3,6 +3,7 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
 use quick_cache::sync::Cache;
 use quick_cache::GuardResult;
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -31,18 +32,20 @@ where
 			Entry::Occupied(mut e) => {
 				let c = e.get_mut();
 				// The cache and the store are matching, we can send a clone of the cache.
-				if c.generation == generation {
-					c.clone()
-				} else if generation > c.generation {
-					// The store generation is more recent than the cache,
-					// we create a new one and hold it
-					let c = TreeCache::new(generation, keys.clone(), cache_size);
-					e.insert((&c).clone());
-					c
-				} else {
-					// The store generation is older than the current cache,
-					// we return an empty cache, but we don't hold it
-					TreeCache::new(generation, keys.clone(), cache_size)
+				match generation.cmp(&c.generation) {
+					Ordering::Less => {
+						// The store generation is older than the current cache,
+						// we return an empty cache, but we don't hold it
+						TreeCache::new(generation, keys.clone(), cache_size)
+					}
+					Ordering::Equal => c.clone(),
+					Ordering::Greater => {
+						// The store generation is more recent than the cache,
+						// we create a new one and hold it
+						let c = TreeCache::new(generation, keys.clone(), cache_size);
+						e.insert(c.clone());
+						c
+					}
 				}
 			}
 			Entry::Vacant(e) => {

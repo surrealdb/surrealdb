@@ -52,6 +52,14 @@ impl DocLengths {
 		self.btree.search(tx, &self.store, &doc_id.to_be_bytes().to_vec()).await
 	}
 
+	pub(super) async fn get_doc_length_mut(
+		&mut self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+	) -> Result<Option<DocLength>, Error> {
+		self.btree.search_mut(tx, &mut self.store, &doc_id.to_be_bytes().to_vec()).await
+	}
+
 	pub(super) async fn set_doc_length(
 		&mut self,
 		tx: &mut Transaction,

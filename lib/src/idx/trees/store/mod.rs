@@ -9,7 +9,6 @@ use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -190,7 +189,6 @@ impl Default for IndexStores {
 	}
 }
 
-pub(crate) static INDEX_STORES: Lazy<IndexStores> = Lazy::new(|| IndexStores::default());
 impl IndexStores {
 	pub(in crate::idx) async fn get_store_btree_fst(
 		&self,
