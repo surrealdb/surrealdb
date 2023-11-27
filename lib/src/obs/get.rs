@@ -42,6 +42,7 @@ pub async fn get_local_file(file_hash: String) -> Result<Vec<u8>, String> {
 
 
 #[cfg(test)]
+#[cfg(feature = "ml")]
 mod tests {
 
     use super::*;

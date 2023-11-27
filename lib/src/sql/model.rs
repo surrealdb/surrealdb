@@ -185,10 +185,10 @@ impl Model {
 
 #[cfg(test)]
 mod test {
-	// use super::*;
+
 	use rust_decimal::Decimal;
 	use crate::sql::number::Number;
-	// use super::Model;
+	use super::Model;
 
 	#[test]
 	fn test_unpack_int() {
