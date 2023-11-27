@@ -42,6 +42,7 @@ axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
 clap = { version = "4.4.7", features = ["env", "derive", "wrap_help", "unicode"] }
+console-subscriber = "0.2.0"
 futures = "0.3.29"
 futures-util = "0.3.29"
 glob = "0.3.1"
@@ -63,7 +64,7 @@ serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
-tokio = { version = "1.33.0", features = ["macros", "signal"] }
+tokio = { version = "1.33.0", features = ["macros", "signal", "tracing"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }

@@ -27,6 +27,7 @@ use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing::Span;
@@ -93,6 +94,7 @@ impl Connection {
 			WebSocketRef(internal_sender.clone(), rpc.read().await.canceller.clone()),
 		);
 
+		trace!("WebSocket starting tasks {}", ws_id);
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
@@ -102,6 +104,7 @@ impl Connection {
 
 		// Wait until all tasks finish
 		while let Some(res) = tasks.join_next().await {
+			trace!("Finished tasks: {:?} for WebSocket {}", res, ws_id);
 			if let Err(err) = res {
 				error!("Error handling RPC connection: {}", err);
 			}
@@ -143,11 +146,15 @@ impl Connection {
 		let canceller = rpc.read().await.canceller.clone();
 		// Loop, and listen for messages to write
 		loop {
+			trace!("ping loop");
 			tokio::select! {
 				//
 				biased;
 				// Check if this has shutdown
-				_ = canceller.cancelled() => break,
+				_ = canceller.cancelled() => {
+					trace!("WebSocket {} ping task cancelled", rpc.read().await.ws_id);
+					break
+				},
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
@@ -174,19 +181,24 @@ impl Connection {
 		let canceller = rpc.read().await.canceller.clone();
 		// Loop, and listen for messages to write
 		loop {
+			trace!("write loop");
 			tokio::select! {
 				//
 				biased;
 				// Check if this has shutdown
-				_ = canceller.cancelled() => break,
+				_ = canceller.cancelled() => {
+					trace!("WebSocket {} write task cancelled", rpc.read().await.ws_id);
+					break
+				},
 				// Wait for the next message to send
 				msg = internal_receiver.next() => {
 					if let Some(res) = msg {
+						let msg_txt = res.to_text().unwrap().to_string();
 						// Send the message to the client
 						if let Err(err) = sender.send(res).await {
 							// Output any errors if not a close error
 							if err.to_string() != CONN_CLOSED_ERR {
-								debug!("WebSocket error: {:?}", err);
+								debug!("WebSocket error[{:?}]: {:?} for message: {:?}", rpc.read().await.ws_id, err, msg_txt);
 							}
 							// Cancel the WebSocket tasks
 							rpc.read().await.canceller.cancel();
@@ -211,11 +223,15 @@ impl Connection {
 		let canceller = rpc.read().await.canceller.clone();
 		// Loop, and listen for messages to write
 		loop {
+			trace!("read loop");
 			tokio::select! {
 				//
 				biased;
 				// Check if this has shutdown
-				_ = canceller.cancelled() => break,
+				_ = canceller.cancelled() => {
+					trace!("WebSocket {} read task cancelled", rpc.read().await.ws_id);
+					break;
+				},
 				// Wait for the next message to read
 				msg = receiver.next() => {
 					if let Some(msg) = msg {
@@ -224,7 +240,19 @@ impl Connection {
 							// We've received a message from the client
 							Ok(msg) => match msg {
 								Message::Text(_) => {
-									tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+									// let timedout = timeout(
+									// 	WEBSOCKET_PING_FREQUENCY,
+									// 	Connection::handle_message(rpc.clone(), msg, internal_sender.clone()) );
+									let rpc_clone = rpc.clone();
+									let sender_clone = internal_sender.clone();
+									tasks.spawn(async move {
+										let res = timeout(
+											   WEBSOCKET_PING_FREQUENCY,
+											   Connection::handle_message(rpc_clone, msg, sender_clone)).await;
+										if let Err(err) = res {
+											error!("Error while handling RPC message: {}", err);
+										};
+									});
 								}
 								Message::Binary(_) => {
 									tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
@@ -269,27 +297,51 @@ impl Connection {
 		if let Some(channel) = DB.get().unwrap().notifications() {
 			let canceller = rpc.read().await.canceller.clone();
 			loop {
+				trace!("notification loop");
 				tokio::select! {
 					//
 					biased;
 					// Check if this has shutdown
-					_ = canceller.cancelled() => break,
+					_ = canceller.cancelled() => {
+						trace!("WebSocket {} notifications task cancelled", rpc.read().await.ws_id);
+						break
+					},
 					//
 					msg = channel.recv() => {
-						if let Ok(notification) = msg {
-							// Find which WebSocket the notification belongs to
-							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
-								// Check to see if the WebSocket exists
-								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
-									// Serialize the message to send
-									let message = success(None, notification);
-									// Get the current output format
-									let format = rpc.read().await.format;
-									// Send the notification to the client
-									message.send(format, ws).await
-								}
+						match msg {
+							Ok(notification) => {
+								  // Find which WebSocket the notification belongs to
+								  if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+									  // Check to see if the WebSocket exists
+									  if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
+										   // Serialize the message to send
+										   let message = success(None, notification);
+										   // Get the current output format
+										   let format = rpc.read().await.format;
+										   // Send the notification to the client
+										   message.send(format, ws).await
+									  }
+								  }
+							},
+							Err(e) => {
+								error!("Error receiving notification: {}", e);
+								break
 							}
 						}
+						// if let Ok(notification) = msg {
+						// 	// Find which WebSocket the notification belongs to
+						// 	if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+						// 		// Check to see if the WebSocket exists
+						// 		if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
+						// 			// Serialize the message to send
+						// 			let message = success(None, notification);
+						// 			// Get the current output format
+						// 			let format = rpc.read().await.format;
+						// 			// Send the notification to the client
+						// 			message.send(format, ws).await
+						// 		}
+						// 	}
+						// }
 					},
 				}
 			}

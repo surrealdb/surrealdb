@@ -9,7 +9,11 @@ pub struct CustomEnvFilter(pub EnvFilter);
 
 impl Clone for CustomEnvFilter {
 	fn clone(&self) -> Self {
-		Self(EnvFilter::builder().parse(self.0.to_string()).unwrap())
+		Self(
+			EnvFilter::builder()
+				.parse(format!("{},tokio=trace,runtime=trace", self.0.to_string()))
+				.unwrap(),
+		)
 	}
 }
 

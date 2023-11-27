@@ -82,6 +82,9 @@ impl Builder {
 		// Setup tracing layer
 		let registry = registry.with(traces::new(self.filter));
 
+		// Setup tokio-console debug layer
+		let registry = registry.with(console_subscriber::spawn());
+
 		Box::new(registry)
 	}
 
