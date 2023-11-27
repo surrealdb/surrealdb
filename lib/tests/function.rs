@@ -6325,23 +6325,23 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[true]");
+	let val = Value::parse("[true]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[true, NONE]");
+	let val = Value::parse("[true, NONE]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[true, false]");
+	let val = Value::parse("[true, false]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[true, false, true]");
+	let val = Value::parse("[true, false, true]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[true, NONE, true]");
+	let val = Value::parse("[true, NONE, true]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
