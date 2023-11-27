@@ -22,14 +22,14 @@ pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 
 fn datetime_single(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(tag("t\'"), cut(datetime_raw), cut(char('\''))),
+		delimited(tag("d\'"), cut(datetime_raw), cut(char('\''))),
 		delimited(char('\''), datetime_raw, char('\'')),
 	))(i)
 }
 
 fn datetime_double(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(tag("t\""), cut(datetime_raw), cut(char('\"'))),
+		delimited(tag("d\""), cut(datetime_raw), cut(char('\"'))),
 		delimited(char('\"'), datetime_raw, char('\"')),
 	))(i)
 }
@@ -280,7 +280,7 @@ mod tests {
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 
-		let sql = "t'2012-04-23T18:25:43.0000511Z'";
+		let sql = "d'2012-04-23T18:25:43.0000511Z'";
 		let res = Value::parse(sql);
 		let Value::Datetime(out) = res else {
 			panic!();
