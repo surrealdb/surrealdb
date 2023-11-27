@@ -138,9 +138,9 @@ mod test {
 		assert_eq!(strand.to_string().as_str(), "s'a:b'");
 
 		let strand = Strand("2012-04-23T18:25:43.0000511Z".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s\"2012-04-23T18:25:43.0000511Z\"");
+		assert_eq!(strand.to_string().as_str(), "s'2012-04-23T18:25:43.0000511Z'");
 
 		let strand = Strand("b19bc00b-aa98-486c-ae37-c8e1c54295b1".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s\"b19bc00b-aa98-486c-ae37-c8e1c54295b1\"");
+		assert_eq!(strand.to_string().as_str(), "s'b19bc00b-aa98-486c-ae37-c8e1c54295b1'");
 	}
 }
