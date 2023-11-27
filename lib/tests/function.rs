@@ -2704,10 +2704,14 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 	Ok(())
 }
 
+// --------------------------------------------------
+// object
+// --------------------------------------------------
+
 #[tokio::test]
-async fn function_parse_meta_tb() -> Result<(), Error> {
+async fn function_object_entries() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::tb("person:tobie");
+		RETURN meta::entries({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2715,7 +2719,75 @@ async fn function_parse_meta_tb() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("person");
+	let val = Value::from("[ [ 'a', 1 ], [ 'b', 2 ] ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_from_entries() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::from_entries([ [ 'a', 1 ], [ 'b', 2 ] ]);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("{ a: 1, b: 2 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_keys() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::keys({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[ 'a', 'b' ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::len({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("2");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_values() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::values({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[ 1, 2 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
