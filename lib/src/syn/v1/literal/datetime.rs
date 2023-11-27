@@ -274,7 +274,7 @@ mod tests {
 	fn date_time_timezone_utc_sub_nanoseconds_from_value() {
 		let sql = "'2012-04-23T18:25:43.0000511Z'";
 		let res = Value::parse(sql);
-		let Value::Uuid(out) = res else {
+		let Value::Datetime(out) = res else {
 			panic!();
 		};
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
@@ -282,7 +282,7 @@ mod tests {
 
 		let sql = "t'2012-04-23T18:25:43.0000511Z'";
 		let res = Value::parse(sql);
-		let Value::Uuid(out) = res else {
+		let Value::Datetime(out) = res else {
 			panic!();
 		};
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
