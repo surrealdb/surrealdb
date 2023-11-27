@@ -705,7 +705,7 @@ mod tests {
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
-	use crate::idx::trees::store::{IndexStores, NodeId, TreeNode, TreeNodeProvider};
+	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
@@ -781,7 +781,6 @@ mod tests {
 	}
 
 	async fn new_operation_fst<BK>(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &BTree<BK>,
 		tt: TransactionType,
@@ -789,13 +788,15 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let st = ixs.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, 20).await;
+		let st = ds
+			.index_store()
+			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, 20)
+			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
 	}
 
 	async fn new_operation_trie<BK>(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &BTree<BK>,
 		tt: TransactionType,
@@ -803,31 +804,32 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let st =
-			ixs.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, 20).await;
+		let st = ds
+			.index_store()
+			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, 20)
+			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_sequential_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 
 		let mut t = BTree::new(BState::new(5));
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
 			insertions_test::<_, FstKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -843,22 +845,21 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_sequential_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(6));
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			insertions_test::<_, TrieKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -874,7 +875,6 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_random_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(8));
 
@@ -883,17 +883,17 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
@@ -902,7 +902,6 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_random_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(75));
 
@@ -911,17 +910,17 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
@@ -930,22 +929,21 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -961,22 +959,21 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_large_order_sequential_insertions() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -997,38 +994,36 @@ mod tests {
 	];
 
 	async fn test_btree_fst_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
 		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 		statistics
 	}
 
 	async fn test_btree_trie_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 
@@ -1114,12 +1109,11 @@ mod tests {
 	#[test(tokio::test)]
 	// This check node splitting. CLRS: Figure 18.7, page 498.
 	async fn clrs_insertion_test() {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				t.insert(&mut tx, &mut st, key.into(), payload).await.unwrap();
 			}
@@ -1127,7 +1121,7 @@ mod tests {
 			tx.commit().await.unwrap();
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 
 		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 23);
@@ -1222,12 +1216,11 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
 	async fn test_btree_clrs_deletion_test() -> Result<(), Error> {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 		let mut check_generation = 0;
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
 			}
@@ -1246,7 +1239,7 @@ mod tests {
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
 				{
 					let (mut tx, mut st) =
-						new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+						new_operation_trie(&ds, &t, TransactionType::Write).await;
 					debug!("Delete {}", key);
 					assert_eq!(t.delete(&mut tx, &mut st, key.into()).await?, Some(payload));
 					check_generation = check_finish_commit(
@@ -1260,15 +1253,14 @@ mod tests {
 				}
 				key_count -= 1;
 				{
-					let (mut tx, mut st) =
-						new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+					let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 					let s = t.statistics(&mut tx, &mut st).await?;
 					assert_eq!(s.keys_count, key_count);
 				}
 			}
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 
 		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 18);
@@ -1334,7 +1326,6 @@ mod tests {
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
 	async fn test_btree_fill_and_empty() -> Result<(), Error> {
-		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
@@ -1342,7 +1333,7 @@ mod tests {
 
 		let mut check_generation = 0;
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
@@ -1358,7 +1349,7 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 			print_tree(&mut tx, &mut st, &t).await;
 			tx.cancel().await?;
 		}
@@ -1367,8 +1358,7 @@ mod tests {
 			debug!("------------------------");
 			debug!("Delete {}", key);
 			{
-				let (mut tx, mut st) =
-					new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
 				t.delete(&mut tx, &mut &mut st, key.into()).await?;
 				check_generation = check_finish_commit(
 					&mut t,
@@ -1384,8 +1374,7 @@ mod tests {
 			expected_keys.remove(key);
 
 			{
-				let (mut tx, mut st) =
-					new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
 						t.search(&mut tx, &mut st, &key.as_str().into()).await?,
@@ -1396,7 +1385,7 @@ mod tests {
 			}
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
 		let s = t.statistics(&mut tx, &mut st).await?;
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);

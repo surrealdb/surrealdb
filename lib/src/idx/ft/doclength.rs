@@ -94,89 +94,85 @@ impl DocLengths {
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::doclength::DocLengths;
-	use crate::idx::trees::store::IndexStores;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionType, TransactionType::*};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+
+	async fn doc_length(
+		ds: &Datastore,
+		order: u32,
+		tt: TransactionType,
+	) -> (Transaction, DocLengths) {
+		let mut tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let dl =
+			DocLengths::new(ds.index_store(), &mut tx, IndexKeyBase::default(), order, tt, 100)
+				.await
+				.unwrap();
+		(tx, dl)
+	}
+
+	async fn finish(mut l: DocLengths, mut tx: Transaction) {
+		l.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap()
+	}
 
 	#[tokio::test]
 	async fn test_doc_lengths() {
 		const BTREE_ORDER: u32 = 7;
 
 		let ds = Datastore::new("memory").await.unwrap();
-		let ixs = IndexStores::default();
-
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 
 		{
 			// Check empty state
-			let l = DocLengths::new(
-				&ixs,
-				&mut tx,
-				IndexKeyBase::default(),
-				BTREE_ORDER,
-				TransactionType::Read,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
 			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 0);
 			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
 			assert_eq!(dl, None);
+			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Set a doc length
-			let mut l = DocLengths::new(
-				&ixs,
-				&mut tx,
-				IndexKeyBase::default(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
 			l.set_doc_length(&mut tx, 99, 199).await.unwrap();
+			finish(l, tx).await;
+		}
+
+		{
+			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
 			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
-			l.finish(&mut tx).await.unwrap();
 			assert_eq!(dl, Some(199));
+			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Update doc length
-			let mut l = DocLengths::new(
-				&ixs,
-				&mut tx,
-				IndexKeyBase::default(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
 			l.set_doc_length(&mut tx, 99, 299).await.unwrap();
+			finish(l, tx).await;
+		}
+
+		{
+			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
 			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
-			l.finish(&mut tx).await.unwrap();
 			assert_eq!(dl, Some(299));
+			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Remove doc lengths
-			let mut l = DocLengths::new(
-				&ixs,
-				&mut tx,
-				IndexKeyBase::default(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
 			assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));
 			assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), None);
+			finish(l, tx).await;
 		}
-		tx.commit().await.unwrap()
+
+		{
+			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
+			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+			assert_eq!(dl, None);
+			tx.cancel().await.unwrap();
+		}
 	}
 }

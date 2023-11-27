@@ -91,16 +91,16 @@ impl serde::ser::SerializeStruct for SerializeSearch {
 				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			"doc_ids_cache" => {
-				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+				self.doc_ids_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			"doc_lengths_cache" => {
-				self.doc_lengths_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+				self.doc_lengths_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			"postings_cache" => {
-				self.postings_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+				self.postings_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			"terms_cache" => {
-				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+				self.terms_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `SearchParams {{ {key} }}`")));

@@ -394,6 +394,10 @@ impl Datastore {
 		self
 	}
 
+	pub(crate) fn index_store(&self) -> &IndexStores {
+		&self.index_stores
+	}
+
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled

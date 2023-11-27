@@ -1610,7 +1610,7 @@ mod tests {
 	use crate::idx::trees::mtree::{
 		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
-	use crate::idx::trees::store::{IndexStores, NodeId, TreeNodeProvider, TreeStore};
+	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
@@ -1620,11 +1620,13 @@ mod tests {
 
 	async fn new_operation(
 		ds: &Datastore,
-		ixs: &IndexStores,
 		t: &MTree,
 		tt: TransactionType,
 	) -> (TreeStore<MTreeNode>, Transaction) {
-		let st = ixs.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, 20).await;
+		let st = ds
+			.index_store()
+			.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, 20)
+			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(st, tx)
 	}
@@ -1667,12 +1669,11 @@ mod tests {
 	async fn test_mtree_insertions() -> Result<(), Error> {
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 		let ds = Datastore::new("memory").await?;
-		let ixs = IndexStores::default();
 
 		let vec1 = new_vec(1, VectorType::F64, 1);
 		// First the index is empty
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![]);
 			#[cfg(debug_assertions)]
@@ -1680,7 +1681,7 @@ mod tests {
 		}
 		// Insert single element
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec1.as_ref().clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
 			check_leaf_write(&mut tx, &mut &mut st, 0, |m| {
@@ -1692,7 +1693,7 @@ mod tests {
 		}
 		// Check KNN
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1]);
 			#[cfg(debug_assertions)]
@@ -1703,13 +1704,13 @@ mod tests {
 		// insert second element
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 2).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec1 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1, 2]);
 			#[cfg(debug_assertions)]
@@ -1725,7 +1726,7 @@ mod tests {
 		}
 		// vec2 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 1]);
 			#[cfg(debug_assertions)]
@@ -1734,13 +1735,13 @@ mod tests {
 
 		// insert new doc to existing vector
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec2 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 3, 1]);
 			#[cfg(debug_assertions)]
@@ -1758,13 +1759,13 @@ mod tests {
 		// insert third vector
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec3.as_ref().clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec3 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec3, 10).await?;
 			check_knn(&res.docs, vec![3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
@@ -1783,13 +1784,13 @@ mod tests {
 		// Check split leaf node
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec4.as_ref().clone(), 4).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec4 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec4, 10).await?;
 			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
@@ -1819,13 +1820,13 @@ mod tests {
 		// Insert vec extending the radius of the last node, calling compute_leaf_radius
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec6.as_ref().clone(), 6).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec6 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec6, 10).await?;
 			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
@@ -1858,12 +1859,12 @@ mod tests {
 		// Insert vec8
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec8.as_ref().clone(), 8).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(2), 6, 7);
 			assert_eq!(t.state.root, Some(2));
 			// Check Root node (level 1)
@@ -1897,12 +1898,12 @@ mod tests {
 
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec9.as_ref().clone(), 9).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(3), 7, 8);
 			assert_eq!(t.state.root, Some(2));
 			// Check Root node (level 1)
@@ -1937,12 +1938,12 @@ mod tests {
 
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write).await;
 			t.insert(&mut tx, &mut &mut st, vec10.as_ref().clone(), 10).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			check_tree_properties(&mut tx, &mut st, &t).await?.check(7, 3, Some(2), Some(2), 8, 9);
 			assert_eq!(t.state.root, Some(6));
 			// Check Root node (level 1)
@@ -1994,7 +1995,7 @@ mod tests {
 
 		// vec8 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec8, 20).await?;
 			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
@@ -2002,7 +2003,7 @@ mod tests {
 		}
 		// vec4 knn(2)
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec4, 2).await?;
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
@@ -2011,7 +2012,7 @@ mod tests {
 
 		// vec10 knn(2)
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, &t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read).await;
 			let res = t.knn_search(&mut tx, &mut st, &vec10, 2).await?;
 			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
@@ -2021,7 +2022,6 @@ mod tests {
 	}
 
 	async fn insert_collection_one_by_one(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -2030,14 +2030,14 @@ mod tests {
 		let mut c = 0;
 		for (doc_id, obj) in collection.as_ref() {
 			{
-				let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Write).await;
+				let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Write).await;
 				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			c += 1;
 			{
-				let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+				let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 				let p = check_tree_properties(&mut tx, &mut st, &t).await?;
 				assert_eq!(p.doc_count, c);
 			}
@@ -2046,14 +2046,13 @@ mod tests {
 	}
 
 	async fn insert_collection_batch(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Write).await;
+			let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Write).await;
 			for (doc_id, obj) in collection.as_ref() {
 				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
@@ -2061,14 +2060,13 @@ mod tests {
 			finish_operation(t, tx, st, true).await?;
 		}
 		{
-			let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+			let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 			check_tree_properties(&mut tx, &mut st, &t).await?;
 		}
 		Ok(map)
 	}
 
 	async fn delete_collection(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -2076,7 +2074,7 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
-				let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Write).await;
+				let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Write).await;
 				assert!(
 					t.delete(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
@@ -2086,28 +2084,27 @@ mod tests {
 				finish_operation(t, tx, st, true).await?;
 			}
 			{
-				let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+				let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
 				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
-				let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+				let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 				check_tree_properties(&mut tx, &mut st, &t).await?;
 			}
 		}
 
-		let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 		check_tree_properties(&mut tx, &mut st, &t).await?.check(0, 0, None, None, 0, 0);
 		Ok(())
 	}
 
 	async fn find_collection(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
-		let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
@@ -2141,12 +2138,11 @@ mod tests {
 	}
 
 	async fn check_full_knn(
-		ixs: &IndexStores,
 		ds: &Datastore,
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 	) -> Result<(), Error> {
-		let (mut st, mut tx) = new_operation(&ds, &ixs, t, TransactionType::Read).await;
+		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read).await;
 		for (_, obj) in map {
 			let res = t.knn_search(&mut tx, &mut st, obj, map.len()).await?;
 			assert_eq!(
@@ -2188,22 +2184,21 @@ mod tests {
 					vector_type,
 				);
 				let ds = Datastore::new("memory").await?;
-				let ixs = IndexStores::default();
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
 				let map = if collection.as_ref().len() < 1000 {
-					insert_collection_one_by_one(&ixs, &ds, &mut t, &collection).await?
+					insert_collection_one_by_one(&ds, &mut t, &collection).await?
 				} else {
-					insert_collection_batch(&ixs, &ds, &mut t, &collection).await?
+					insert_collection_batch(&ds, &mut t, &collection).await?
 				};
 				if check_find {
-					find_collection(&ixs, &ds, &mut t, &collection).await?;
+					find_collection(&ds, &mut t, &collection).await?;
 				}
 				if check_full {
-					check_full_knn(&ixs, &ds, &mut t, &map).await?;
+					check_full_knn(&ds, &mut t, &map).await?;
 				}
 				if check_delete {
-					delete_collection(&ixs, &ds, &mut t, &collection).await?;
+					delete_collection(&ds, &mut t, &collection).await?;
 				}
 			}
 		}

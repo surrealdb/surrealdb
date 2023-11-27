@@ -196,20 +196,17 @@ impl Resolved {
 #[cfg(test)]
 mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
-	use crate::idx::trees::store::IndexStores;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 
 	const BTREE_ORDER: u32 = 7;
 
-	async fn get_doc_ids(
-		ds: &Datastore,
-		ixs: &IndexStores,
-		tt: TransactionType,
-	) -> (Transaction, DocIds) {
+	async fn get_doc_ids(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
 		let mut tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		let d =
-			DocIds::new(ixs, &mut tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
+			DocIds::new(ds.index_store(), &mut tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100)
+				.await
+				.unwrap();
 		(tx, d)
 	}
 
@@ -221,11 +218,10 @@ mod tests {
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let ixs = IndexStores::default();
 
 		// Resolve a first doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
@@ -235,7 +231,7 @@ mod tests {
 
 		// Resolve the same doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
@@ -245,7 +241,7 @@ mod tests {
 
 		// Resolve another single doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap();
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
 			assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
@@ -255,7 +251,7 @@ mod tests {
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(
 				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
 				Resolved::Existing(0)
@@ -271,7 +267,7 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(
 				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
 				Resolved::Existing(0)
@@ -300,11 +296,10 @@ mod tests {
 	#[tokio::test]
 	async fn test_remove_doc() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let ixs = IndexStores::default();
 
 		// Create two docs
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::New(0));
 			assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::New(1));
 			finish(tx, d).await;
@@ -312,7 +307,7 @@ mod tests {
 
 		// Remove doc 1
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), Some(0));
 			finish(tx, d).await;
@@ -320,21 +315,21 @@ mod tests {
 
 		// Check 'Foo' has been removed
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 			finish(tx, d).await;
 		}
 
 		// Insert a new doc - should take the available id 1
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(0));
 			finish(tx, d).await;
 		}
 
 		// Remove doc 2
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
 			assert_eq!(d.remove_doc(&mut tx, "Bar".into()).await.unwrap(), Some(1));
 			finish(tx, d).await;
@@ -342,14 +337,14 @@ mod tests {
 
 		// Check 'Bar' has been removed
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 			finish(tx, d).await;
 		}
 
 		// Insert a new doc - should take the available id 2
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, &ixs, TransactionType::Write).await;
+			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(1));
 			finish(tx, d).await;
 		}

@@ -217,14 +217,14 @@ mod tests {
 					capacity: 40,
 					doc_ids_order: 100,
 					doc_ids_cache: 110,
-					mtree_cache: 0,
+					mtree_cache: 100,
 				}),
 				comment: None,
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100 DOC_IDS_CACHE 100 MTREE_CACHE 100"
 		);
 	}
 }
