@@ -138,7 +138,7 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1100 DOC_LENGTHS_ORDER 1200 POSTINGS_ORDER 1300 DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 200 POSTINGS_CACHE 300 TERMS_CACHE 400 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -153,10 +153,14 @@ mod tests {
 						k1: 1.2,
 						b: 0.75,
 					},
-					doc_ids_order: 1000,
-					doc_lengths_order: 1000,
-					postings_order: 1000,
-					terms_order: 1000,
+					doc_ids_order: 1100,
+					doc_lengths_order: 1200,
+					postings_order: 1300,
+					terms_order: 1400,
+					doc_ids_cache: 100,
+					doc_lengths_cache: 200,
+					postings_cache: 300,
+					terms_cache: 400,
 				}),
 				comment: None,
 			}
@@ -182,6 +186,10 @@ mod tests {
 					doc_lengths_order: 100,
 					postings_order: 100,
 					terms_order: 100,
+					doc_ids_cache: 100,
+					doc_lengths_cache: 100,
+					postings_cache: 100,
+					terms_cache: 100,
 				}),
 				comment: None,
 			}
@@ -203,12 +211,13 @@ mod tests {
 				what: Ident("my_table".to_string()),
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::MTree(MTreeParams {
-					in_memory: false,
 					dimension: 4,
 					vector_type: VectorType::F64,
 					distance: Distance::Euclidean,
 					capacity: 40,
 					doc_ids_order: 100,
+					doc_ids_cache: 110,
+					mtree_cache: 0,
 				}),
 				comment: None,
 			}

@@ -54,6 +54,10 @@ pub(super) struct SerializeSearch {
 	doc_lengths_order: u32,
 	postings_order: u32,
 	terms_order: u32,
+	doc_ids_cache: u32,
+	doc_lengths_cache: u32,
+	postings_cache: u32,
+	terms_cache: u32,
 }
 
 impl serde::ser::SerializeStruct for SerializeSearch {
@@ -86,6 +90,18 @@ impl serde::ser::SerializeStruct for SerializeSearch {
 			"terms_order" => {
 				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
+			"doc_ids_cache" => {
+				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"doc_lengths_cache" => {
+				self.doc_lengths_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"postings_cache" => {
+				self.postings_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"terms_cache" => {
+				self.terms_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `SearchParams {{ {key} }}`")));
 			}
@@ -103,6 +119,10 @@ impl serde::ser::SerializeStruct for SerializeSearch {
 				doc_lengths_order: self.doc_lengths_order,
 				postings_order: self.postings_order,
 				terms_order: self.terms_order,
+				doc_ids_cache: self.doc_ids_cache,
+				doc_lengths_cache: self.doc_lengths_cache,
+				postings_cache: self.postings_cache,
+				terms_cache: self.terms_cache,
 			}),
 			_ => Err(Error::custom("`SearchParams` missing required field(s)")),
 		}
@@ -115,10 +135,14 @@ fn search_params() {
 		az: Default::default(),
 		hl: false,
 		sc: Scoring::Vs,
-		doc_ids_order: 0,
-		doc_lengths_order: 0,
-		postings_order: 0,
-		terms_order: 0,
+		doc_ids_order: 1,
+		doc_lengths_order: 2,
+		postings_order: 3,
+		terms_order: 4,
+		doc_ids_cache: 5,
+		doc_lengths_cache: 6,
+		postings_cache: 7,
+		terms_cache: 8,
 	};
 	let serialized = params.serialize(Serializer.wrap()).unwrap();
 	assert_eq!(params, serialized);

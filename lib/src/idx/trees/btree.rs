@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::memory::TreeMemoryMap;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
@@ -11,7 +10,6 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
-use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 pub type Payload = u64;
 
@@ -23,18 +21,19 @@ where
 	BK: BKeys,
 {
 	state: BState,
+	updated: bool,
 	full_size: u32,
 	bk: PhantomData<BK>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
-	#[serde(skip)]
-	updated: bool,
+	#[revision(start = 2)]
+	generation: u64,
 }
 
 impl VersionedSerdeState for BState {}
@@ -46,33 +45,24 @@ impl BState {
 			minimum_degree,
 			root: None,
 			next_node_id: 0,
-			updated: false,
+			generation: 0,
 		}
 	}
 
 	fn set_root(&mut self, node_id: Option<NodeId>) {
 		if node_id.ne(&self.root) {
 			self.root = node_id;
-			self.updated = true;
 		}
 	}
 
 	fn new_node_id(&mut self) -> NodeId {
 		let new_node_id = self.next_node_id;
 		self.next_node_id += 1;
-		self.updated = true;
 		new_node_id
 	}
 
-	pub(in crate::idx) async fn finish(
-		&self,
-		tx: &mut Transaction,
-		key: &Key,
-	) -> Result<(), Error> {
-		if self.updated {
-			tx.set(key.clone(), self.try_to_val()?).await?;
-		}
-		Ok(())
+	pub(in crate::idx) fn generation(&self) -> u64 {
+		self.generation
 	}
 }
 
@@ -95,10 +85,10 @@ impl From<BStatistics> for Value {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BTreeNode<BK>
 where
-	BK: BKeys,
+	BK: BKeys + Clone,
 {
 	Internal(BK, Vec<NodeId>),
 	Leaf(BK),
@@ -106,7 +96,7 @@ where
 
 impl<BK> TreeNode for BTreeNode<BK>
 where
-	BK: BKeys,
+	BK: BKeys + Clone,
 {
 	fn try_from_val(val: Val) -> Result<Self, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
@@ -142,7 +132,7 @@ where
 
 impl<BK> BTreeNode<BK>
 where
-	BK: BKeys,
+	BK: BKeys + Clone,
 {
 	fn keys(&self) -> &BK {
 		match self {
@@ -191,12 +181,13 @@ struct SplitResult {
 
 impl<BK> BTree<BK>
 where
-	BK: BKeys + Debug,
+	BK: BKeys + Debug + Clone,
 {
 	pub fn new(state: BState) -> Self {
 		Self {
 			full_size: state.minimum_degree * 2 - 1,
 			state,
+			updated: false,
 			bk: PhantomData,
 		}
 	}
@@ -204,13 +195,12 @@ where
 	pub async fn search(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
-		store: &mut BTreeStore<BK>,
+		store: &BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
-			let current = store.get_node(tx, mem, node_id).await?;
+			let current = store.get_node(tx, node_id).await?;
 			if let Some(payload) = current.n.keys().get(searched_key) {
 				return Ok(Some(payload));
 			}
@@ -225,35 +215,36 @@ where
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
 	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
 			// We already have a root node
-			let root = store.get_node_mut(tx, mem, root_id).await?;
+			let root = store.get_node_mut(tx, root_id).await?;
 			if root.n.keys().len() == self.full_size {
 				// The root node is full, let's split it
 				let new_root_id = self.state.new_node_id();
 				let new_root = store
 					.new_node(new_root_id, BTreeNode::Internal(BK::default(), vec![root_id]))?;
 				self.state.set_root(Some(new_root.id));
-				self.split_child(mem, store, new_root, 0, root).await?;
-				self.insert_non_full(tx, mem, store, new_root_id, key, payload).await?;
+				self.updated = true;
+				self.split_child(store, new_root, 0, root).await?;
+				self.insert_non_full(tx, store, new_root_id, key, payload).await?;
 			} else {
 				// The root node has place, let's insert the value
 				let root_id = root.id;
-				store.set_node(mem, root, false).await?;
-				self.insert_non_full(tx, mem, store, root_id, key, payload).await?;
+				store.set_node(root, false).await?;
+				self.insert_non_full(tx, store, root_id, key, payload).await?;
 			}
 		} else {
 			// We don't have a root node, let's create id
 			let new_root_id = self.state.new_node_id();
 			let new_root_node =
 				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
-			store.set_node(mem, new_root_node, true).await?;
+			store.set_node(new_root_node, true).await?;
 			self.state.set_root(Some(new_root_id));
+			self.updated = true;
 		}
 		Ok(())
 	}
@@ -261,7 +252,6 @@ where
 	async fn insert_non_full(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		node_id: NodeId,
 		key: Key,
@@ -269,24 +259,25 @@ where
 	) -> Result<(), Error> {
 		let mut next_node_id = Some(node_id);
 		while let Some(node_id) = next_node_id.take() {
-			let mut node = store.get_node_mut(tx, mem, node_id).await?;
+			let mut node = store.get_node_mut(tx, node_id).await?;
 			let key: Key = key.clone();
 			match &mut node.n {
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
-					store.set_node(mem, node, true).await?;
+					store.set_node(node, true).await?;
+					self.updated = true;
 				}
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
-						store.set_node(mem, node, true).await?;
+						store.set_node(node, true).await?;
+						self.updated = true;
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
-					let child = store.get_node_mut(tx, mem, children[child_idx]).await?;
+					let child = store.get_node_mut(tx, children[child_idx]).await?;
 					let next_id = if child.n.keys().len() == self.full_size {
-						let split_result =
-							self.split_child(mem, store, node, child_idx, child).await?;
+						let split_result = self.split_child(store, node, child_idx, child).await?;
 						if key.gt(&split_result.median_key) {
 							split_result.right_node_id
 						} else {
@@ -294,8 +285,8 @@ where
 						}
 					} else {
 						let child_id = child.id;
-						store.set_node(mem, node, false).await?;
-						store.set_node(mem, child, false).await?;
+						store.set_node(node, false).await?;
+						store.set_node(child, false).await?;
 						child_id
 					};
 					next_node_id.replace(next_id);
@@ -307,7 +298,6 @@ where
 
 	async fn split_child(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		mut parent_node: StoredNode<BTreeNode<BK>>,
 		idx: usize,
@@ -330,12 +320,13 @@ where
 		// Save the mutated split child with half the (lower) keys
 		let left_node_id = child_node.id;
 		let left_node = store.new_node(left_node_id, left_node)?;
-		store.set_node(mem, left_node, true).await?;
+		store.set_node(left_node, true).await?;
 		// Save the new child with half the (upper) keys
 		let right_node = store.new_node(right_node_id, right_node)?;
-		store.set_node(mem, right_node, true).await?;
+		store.set_node(right_node, true).await?;
 		// Save the parent node
-		store.set_node(mem, parent_node, true).await?;
+		store.set_node(parent_node, true).await?;
+		self.updated = true;
 		Ok(SplitResult {
 			left_node_id,
 			right_node_id,
@@ -368,7 +359,6 @@ where
 	pub(in crate::idx) async fn delete(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
@@ -378,7 +368,7 @@ where
 			let mut next_node = Some((true, key_to_delete, root_id));
 
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
-				let mut node = store.get_node_mut(tx, mem, node_id).await?;
+				let mut node = store.get_node_mut(tx, node_id).await?;
 				match &mut node.n {
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
@@ -389,16 +379,18 @@ where
 							keys.remove(&key_to_delete);
 							if keys.len() == 0 {
 								// The node is empty, we can delete it
-								store.remove_node(mem, node.id, node.key).await?;
+								store.remove_node(node.id, node.key).await?;
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
+									self.updated = true;
 								}
 							} else {
-								store.set_node(mem, node, true).await?;
+								store.set_node(node, true).await?;
+								self.updated = true;
 							}
 						} else {
-							store.set_node(mem, node, false).await?;
+							store.set_node(node, false).await?;
 						}
 					}
 					BTreeNode::Internal(keys, children) => {
@@ -410,7 +402,6 @@ where
 							next_node.replace(
 								self.deleted_from_internal(
 									tx,
-									mem,
 									store,
 									keys,
 									children,
@@ -418,13 +409,13 @@ where
 								)
 								.await?,
 							);
-							store.set_node(mem, node, true).await?;
+							store.set_node(node, true).await?;
+							self.updated = true;
 						} else {
 							// CLRS: 3
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
 								.deleted_traversal(
 									tx,
-									mem,
 									store,
 									keys,
 									children,
@@ -439,10 +430,14 @@ where
 										return Err(Error::Unreachable("BTree::delete"));
 									}
 								}
-								store.remove_node(mem, node.id, node.key).await?;
+								store.remove_node(node.id, node.key).await?;
 								self.state.set_root(Some(next_stored_node));
+								self.updated = true;
 							} else {
-								store.set_node(mem, node, node_update).await?;
+								store.set_node(node, node_update).await?;
+								if node_update {
+									self.updated = true;
+								}
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
 						}
@@ -456,7 +451,6 @@ where
 	async fn deleted_from_internal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -464,27 +458,29 @@ where
 	) -> Result<(bool, Key, NodeId), Error> {
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
-		let mut left_node = store.get_node_mut(tx, mem, left_id).await?;
+		let mut left_node = store.get_node_mut(tx, left_id).await?;
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(mem, left_node, true).await?;
+				store.set_node(left_node, true).await?;
+				self.updated = true;
 				return Ok((false, key_prim, left_id));
 			}
 		}
 
 		let right_idx = left_idx + 1;
 		let right_id = children[right_idx];
-		let right_node = store.get_node_mut(tx, mem, right_id).await?;
+		let right_node = store.get_node_mut(tx, right_id).await?;
 		if right_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2b -> right_node is name `z` in the book
 			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(mem, left_node, false).await?;
-				store.set_node(mem, right_node, true).await?;
+				store.set_node(left_node, false).await?;
+				store.set_node(right_node, true).await?;
+				self.updated = true;
 				return Ok((false, key_prim, right_id));
 			}
 		}
@@ -493,18 +489,17 @@ where
 		// Merge children
 		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
 		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
-		store.set_node(mem, left_node, true).await?;
-		store.remove_node(mem, right_id, right_node.key).await?;
+		store.set_node(left_node, true).await?;
+		store.remove_node(right_id, right_node.key).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
+		self.updated = true;
 		Ok((false, key_to_delete, left_id))
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn deleted_traversal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -514,15 +509,14 @@ where
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_id = children[child_idx];
-		let child_stored_node = store.get_node_mut(tx, mem, child_id).await?;
+		let child_stored_node = store.get_node_mut(tx, child_id).await?;
 		if child_stored_node.n.keys().len() < self.state.minimum_degree {
 			// right child (successor)
 			if child_idx < children.len() - 1 {
 				let right_child_stored_node =
-					store.get_node_mut(tx, mem, children[child_idx + 1]).await?;
+					store.get_node_mut(tx, children[child_idx + 1]).await?;
 				return if right_child_stored_node.n.keys().len() >= self.state.minimum_degree {
-					Self::delete_adjust_successor(
-						mem,
+					self.delete_adjust_successor(
 						store,
 						keys,
 						child_idx,
@@ -534,8 +528,7 @@ where
 					.await
 				} else {
 					// CLRS 3b successor
-					Self::merge_nodes(
-						mem,
+					self.merge_nodes(
 						store,
 						keys,
 						children,
@@ -552,11 +545,9 @@ where
 			// left child (predecessor)
 			if child_idx > 0 {
 				let child_idx = child_idx - 1;
-				let left_child_stored_node =
-					store.get_node_mut(tx, mem, children[child_idx]).await?;
+				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
-					Self::delete_adjust_predecessor(
-						mem,
+					self.delete_adjust_predecessor(
 						store,
 						keys,
 						child_idx,
@@ -568,8 +559,7 @@ where
 					.await
 				} else {
 					// CLRS 3b predecessor
-					Self::merge_nodes(
-						mem,
+					self.merge_nodes(
 						store,
 						keys,
 						children,
@@ -584,13 +574,12 @@ where
 			}
 		}
 
-		store.set_node(mem, child_stored_node, false).await?;
+		store.set_node(child_stored_node, false).await?;
 		Ok((false, true, key_to_delete, child_id))
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn delete_adjust_successor(
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
+		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -608,8 +597,9 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(mem, child_stored_node, true).await?;
-					store.set_node(mem, right_child_stored_node, true).await?;
+					store.set_node(child_stored_node, true).await?;
+					store.set_node(right_child_stored_node, true).await?;
+					self.updated = true;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -618,9 +608,8 @@ where
 		Err(Error::CorruptedIndex)
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn delete_adjust_predecessor(
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
+		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
@@ -638,8 +627,9 @@ where
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
-					store.set_node(mem, child_stored_node, true).await?;
-					store.set_node(mem, left_child_stored_node, true).await?;
+					store.set_node(child_stored_node, true).await?;
+					store.set_node(left_child_stored_node, true).await?;
+					self.updated = true;
 					return Ok((true, is_main_key, key_to_delete, child_id));
 				}
 			}
@@ -650,7 +640,7 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	async fn merge_nodes(
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
+		&mut self,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -665,8 +655,9 @@ where
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
 				left_child.n.append(descending_key, descending_payload, right_child.n)?;
-				store.set_node(mem, left_child, true).await?;
-				store.remove_node(mem, right_child.id, right_child.key).await?;
+				store.set_node(left_child, true).await?;
+				store.remove_node(right_child.id, right_child.key).await?;
+				self.updated = true;
 				return Ok((true, is_main_key, key_to_delete, left_id));
 			}
 		}
@@ -677,8 +668,7 @@ where
 	pub(in crate::idx) async fn statistics(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
-		store: &mut BTreeStore<BK>,
+		store: &BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
 		let mut node_queue = VecDeque::new();
@@ -686,7 +676,7 @@ where
 			node_queue.push_front((node_id, 1));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored = store.get_node(tx, mem, node_id).await?;
+			let stored = store.get_node(tx, node_id).await?;
 			stats.keys_count += stored.n.keys().len() as u64;
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
@@ -703,7 +693,11 @@ where
 		Ok(stats)
 	}
 
-	pub(in crate::idx) fn get_state(&self) -> &BState {
+	pub(in crate::idx) fn finish(&mut self) -> &BState {
+		if self.updated {
+			self.state.generation += 1;
+			self.updated = false;
+		}
 		&self.state
 	}
 }
@@ -715,20 +709,15 @@ mod tests {
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
-	use crate::idx::trees::store::memory::{ShardedTreeMemoryMap, TreeMemoryMap};
-	use crate::idx::trees::store::{
-		IndexStores, NodeId, StoreProvider, TreeNode, TreeNodeProvider,
-	};
+	use crate::idx::trees::store::{IndexStores, NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
-	use crate::{mem_store_read_lock, mem_store_write_lock};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
 	use std::fmt::Debug;
 	use std::sync::Arc;
 	use test_log::test;
-	use tokio::sync::RwLockReadGuard;
 
 	#[test]
 	fn test_btree_state_serde() {
@@ -758,19 +747,17 @@ mod tests {
 	async fn insertions_test<F, BK>(
 		mut tx: Transaction,
 		mut st: BTreeStore<BK>,
-		mem: Option<ShardedTreeMemoryMap<BTreeNode<BK>>>,
 		t: &mut BTree<BK>,
 		samples_size: usize,
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys + Debug,
+		BK: BKeys + Debug + Clone,
 	{
-		let mut mem = mem_store_write_lock!(mem);
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
 			// Insert the sample
-			t.insert(&mut tx, &mut mem, &mut st, key, payload).await.unwrap();
+			t.insert(&mut tx, &mut st, key, payload).await.unwrap();
 		}
 		st.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
@@ -779,18 +766,16 @@ mod tests {
 	async fn check_insertions<F, BK>(
 		mut tx: Transaction,
 		mut st: BTreeStore<BK>,
-		mem: Option<ShardedTreeMemoryMap<BTreeNode<BK>>>,
 		t: &mut BTree<BK>,
 		samples_size: usize,
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys + Debug,
+		BK: BKeys + Debug + Clone,
 	{
-		let mem = mem_store_read_lock!(mem);
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
-			assert_eq!(t.search(&mut tx, &mem, &mut st, &key).await.unwrap(), Some(payload));
+			assert_eq!(t.search(&mut tx, &mut st, &key).await.unwrap(), Some(payload));
 		}
 		tx.cancel().await.unwrap();
 	}
@@ -799,62 +784,61 @@ mod tests {
 		(format!("{}", idx).into(), (idx * 10) as Payload)
 	}
 
-	async fn new_operation_fst(
+	async fn new_operation_fst<BK>(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
+		t: &BTree<BK>,
 		tt: TransactionType,
-	) -> (Transaction, BTreeStore<FstKeys>, Option<ShardedTreeMemoryMap<BTreeNode<FstKeys>>>) {
-		let st = ixs.get_store_btree_fst(TreeNodeProvider::Debug, sp, (&tt).into(), 20).await;
-		let mem = ixs.get_mem_store_btree_fst(&TreeNodeProvider::Debug, sp).await;
+	) -> (Transaction, BTreeStore<FstKeys>)
+	where
+		BK: BKeys + Debug + Clone,
+	{
+		let st = ixs.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, 20).await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		(tx, st, mem)
+		(tx, st)
 	}
 
-	async fn new_operation_trie(
+	async fn new_operation_trie<BK>(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
+		t: &BTree<BK>,
 		tt: TransactionType,
-	) -> (Transaction, BTreeStore<TrieKeys>, Option<ShardedTreeMemoryMap<BTreeNode<TrieKeys>>>) {
-		let st = ixs.get_store_btree_trie(TreeNodeProvider::Debug, sp, (&tt).into(), 20).await;
-		let mem = ixs.get_mem_store_btree_trie(&TreeNodeProvider::Debug, sp).await;
+	) -> (Transaction, BTreeStore<TrieKeys>)
+	where
+		BK: BKeys + Debug + Clone,
+	{
+		let st =
+			ixs.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, 20).await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		(tx, st, mem)
+		(tx, st)
 	}
 
-	async fn test_btree_fst_small_order_sequential_insertions(sp: StoreProvider) {
+	#[test(tokio::test)]
+	async fn test_btree_fst_small_order_sequential_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 
 		let mut t = BTree::new(BState::new(5));
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test::<_, FstKeys>(tx, st, mem, &mut t, 100, get_key_value).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test::<_, FstKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 100, get_key_value).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let expected_size = if matches!(sp, StoreProvider::Memory) {
-				0
-			} else {
-				1691
-			};
+			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mem, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
 					keys_count: 100,
 					max_depth: 3,
 					nodes_count: 22,
-					total_size: expected_size,
+					total_size: 1691,
 				}
 			);
 			tx.cancel().await.unwrap();
@@ -862,46 +846,30 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_sequential_insertions_memory() {
-		test_btree_fst_small_order_sequential_insertions(StoreProvider::Memory).await;
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_sequential_insertions_transaction() {
-		test_btree_fst_small_order_sequential_insertions(StoreProvider::Transaction).await;
-	}
-
-	async fn test_btree_trie_small_order_sequential_insertions(sp: StoreProvider) {
+	async fn test_btree_trie_small_order_sequential_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(6));
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test::<_, TrieKeys>(tx, st, mem, &mut t, 100, get_key_value).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test::<_, TrieKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 100, get_key_value).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let expected_size = if matches!(sp, StoreProvider::Memory) {
-				0
-			} else {
-				1656
-			};
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mem, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
 					keys_count: 100,
 					max_depth: 3,
 					nodes_count: 18,
-					total_size: expected_size,
+					total_size: 1656,
 				}
 			);
 			tx.cancel().await.unwrap();
@@ -909,16 +877,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_trie_small_order_sequential_insertions_memory() {
-		test_btree_trie_small_order_sequential_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_small_order_sequential_insertions_transaction() {
-		test_btree_trie_small_order_sequential_insertions(StoreProvider::Transaction).await
-	}
-
-	async fn test_btree_fst_small_order_random_insertions(sp: StoreProvider) {
+	async fn test_btree_fst_small_order_random_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(8));
@@ -928,36 +887,25 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, 100, |i| get_key_value(samples[i])).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 100, |i| get_key_value(samples[i])).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let s = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
 		}
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_random_insertions_memory() {
-		test_btree_fst_small_order_random_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_random_insertions_transaction() {
-		test_btree_fst_small_order_random_insertions(StoreProvider::Transaction).await
-	}
-
-	async fn test_btree_trie_small_order_random_insertions(sp: StoreProvider) {
+	async fn test_btree_trie_small_order_random_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(75));
@@ -967,67 +915,48 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, 100, |i| get_key_value(samples[i])).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 100, |i| get_key_value(samples[i])).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let s = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
 		}
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_trie_small_order_random_insertions_memory() {
-		test_btree_trie_small_order_random_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_small_order_random_insertions_transaction() {
-		test_btree_trie_small_order_random_insertions(StoreProvider::Transaction).await
-	}
-
-	async fn test_btree_fst_keys_large_order_sequential_insertions(sp: StoreProvider) {
+	async fn test_btree_fst_keys_large_order_sequential_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, 10000, get_key_value).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 10000, get_key_value).await;
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-
-			let expected_size = if matches!(sp, StoreProvider::Memory) {
-				0
-			} else {
-				57486
-			};
+			let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mem, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
 					keys_count: 10000,
 					max_depth: 3,
 					nodes_count: 158,
-					total_size: expected_size,
+					total_size: 57486,
 				}
 			);
 			tx.cancel().await.unwrap();
@@ -1035,60 +964,34 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_keys_large_order_sequential_insertions_memory() {
-		test_btree_fst_keys_large_order_sequential_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_large_order_sequential_insertions_transaction() {
-		test_btree_fst_keys_large_order_sequential_insertions(StoreProvider::Transaction).await
-	}
-
-	async fn test_btree_trie_keys_large_order_sequential_insertions(sp: StoreProvider) {
+	async fn test_btree_trie_keys_large_order_sequential_insertions() {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, 10000, get_key_value).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			check_insertions(tx, st, mem, &mut t, 10000, get_key_value).await;
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let expected_size = if matches!(sp, StoreProvider::Memory) {
-				0
-			} else {
-				75206
-			};
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mem, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
 					keys_count: 10000,
 					max_depth: 3,
 					nodes_count: 158,
-					total_size: expected_size,
+					total_size: 75206,
 				}
 			);
 			tx.cancel().await.unwrap();
 		}
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_large_order_sequential_insertions_memory() {
-		test_btree_trie_keys_large_order_sequential_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_large_order_sequential_insertions_transaction() {
-		test_btree_trie_keys_large_order_sequential_insertions(StoreProvider::Transaction).await
 	}
 
 	const REAL_WORLD_TERMS: [&str; 30] = [
@@ -1097,146 +1000,90 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_fst_real_world_insertions(
-		default_minimum_degree: u32,
-		sp: StoreProvider,
-	) -> BStatistics {
+	async fn test_btree_fst_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, REAL_WORLD_TERMS.len(), |i| {
+			let (tx, st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st, mem) = new_operation_fst(&ixs, &ds, sp, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
-		let statistics = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+		let (mut tx, mut st) = new_operation_fst(&ixs, &ds, &t, TransactionType::Read).await;
+		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 		statistics
 	}
 
-	async fn test_btree_trie_real_world_insertions(
-		default_minimum_degree: u32,
-		sp: StoreProvider,
-	) -> BStatistics {
+	async fn test_btree_trie_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
 		let ixs = IndexStores::default();
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Write).await;
-			insertions_test(tx, st, mem, &mut t, REAL_WORLD_TERMS.len(), |i| {
+			let (tx, st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st, mem) = new_operation_trie(&ixs, &ds, sp, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
-		let statistics = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 
 		statistics
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_small_order_memory() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 2,
-			nodes_count: 5,
-			total_size: 0,
-		};
-		let s = test_btree_fst_real_world_insertions(4, StoreProvider::Memory).await;
-		assert_eq!(s, expected);
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_small_order_transaction() {
+	async fn test_btree_fst_keys_real_world_insertions_small_order() {
 		let expected = BStatistics {
 			keys_count: 17,
 			max_depth: 2,
 			nodes_count: 5,
 			total_size: 421,
 		};
-		let s = test_btree_fst_real_world_insertions(4, StoreProvider::Transaction).await;
+		let s = test_btree_fst_real_world_insertions(4).await;
 		assert_eq!(s, expected);
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_large_order_memory() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 1,
-			nodes_count: 1,
-			total_size: 0,
-		};
-		let s = test_btree_fst_real_world_insertions(100, StoreProvider::Memory).await;
-		assert_eq!(s, expected);
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_large_order_transaction() {
+	async fn test_btree_fst_keys_real_world_insertions_large_order() {
 		let expected = BStatistics {
 			keys_count: 17,
 			max_depth: 1,
 			nodes_count: 1,
 			total_size: 189,
 		};
-		let s = test_btree_fst_real_world_insertions(100, StoreProvider::Transaction).await;
+		let s = test_btree_fst_real_world_insertions(100).await;
 		assert_eq!(s, expected);
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_insertions_small_order_memory() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 2,
-			nodes_count: 3,
-			total_size: 0,
-		};
-		let s = test_btree_trie_real_world_insertions(6, StoreProvider::Memory).await;
-		assert_eq!(s, expected);
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_insertions_small_transaction() {
+	async fn test_btree_trie_keys_real_world_insertions_small_() {
 		let expected = BStatistics {
 			keys_count: 17,
 			max_depth: 2,
 			nodes_count: 3,
 			total_size: 339,
 		};
-		let s = test_btree_trie_real_world_insertions(6, StoreProvider::Transaction).await;
+		let s = test_btree_trie_real_world_insertions(6).await;
 		assert_eq!(s, expected);
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_insertions_large_order_memory() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 1,
-			nodes_count: 1,
-			total_size: 0,
-		};
-		let s = test_btree_trie_real_world_insertions(100, StoreProvider::Memory).await;
-		assert_eq!(s, expected);
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_insertions_large_order_transaction() {
+	async fn test_btree_trie_keys_real_world_insertions_large_order() {
 		let expected = BStatistics {
 			keys_count: 17,
 			max_depth: 1,
 			nodes_count: 1,
 			total_size: 229,
 		};
-		let s = test_btree_trie_real_world_insertions(100, StoreProvider::Transaction).await;
+		let s = test_btree_trie_real_world_insertions(100).await;
 		assert_eq!(s, expected);
 	}
 
@@ -1276,22 +1123,17 @@ mod tests {
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Write)
-					.await;
-			let mut mem = mem_store_write_lock!(mem);
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
-				t.insert(&mut tx, &mut mem, &mut st, key.into(), payload).await.unwrap();
+				t.insert(&mut tx, &mut st, key.into(), payload).await.unwrap();
 			}
 			st.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
-		let (mut tx, mut st, mem) =
-			new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
+		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
 
-		let s = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 23);
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
@@ -1299,7 +1141,7 @@ mod tests {
 		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes(&mut tx, &mut st, &mem, |count, depth, node_id, node| match count {
+			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
 				0 => {
 					assert_eq!(depth, 1);
 					assert_eq!(node_id, 7);
@@ -1362,49 +1204,77 @@ mod tests {
 		tx.cancel().await.unwrap();
 	}
 
+	async fn check_finish_commit<BK>(
+		t: &mut BTree<BK>,
+		mut st: BTreeStore<BK>,
+		mut tx: Transaction,
+		mut gen: u64,
+		info: String,
+	) -> Result<u64, Error>
+	where
+		BK: BKeys + Clone + Debug,
+	{
+		assert_eq!(t.updated, true, "{}", info);
+		st.finish(&mut tx).await?;
+		t.finish();
+		gen += 1;
+		assert_eq!(t.state.generation, gen, "{}", info);
+		tx.commit().await?;
+		Ok(gen)
+	}
+
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
-	async fn test_btree_clrs_deletion_test() {
+	async fn test_btree_clrs_deletion_test() -> Result<(), Error> {
 		let ixs = IndexStores::default();
-		let ds = Datastore::new("memory").await.unwrap();
+		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
-
+		let mut check_generation = 0;
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Write)
-					.await;
-			let mut mem = mem_store_write_lock!(mem);
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
-				t.insert(&mut tx, &mut mem, &mut st, key.into(), payload).await.unwrap();
+				t.insert(&mut tx, &mut st, key.into(), payload).await?;
 			}
-			st.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			check_generation = check_finish_commit(
+				&mut t,
+				st,
+				tx,
+				check_generation,
+				format!("Insert CLRS example"),
+			)
+			.await?;
 		}
 
 		{
+			let mut key_count = CLRS_EXAMPLE.len() as u64;
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
-				let (mut tx, mut st, mem) = new_operation_trie(
-					&ixs,
-					&ds,
-					StoreProvider::Transaction,
-					TransactionType::Write,
-				)
-				.await;
-				let mut mem = mem_store_write_lock!(mem);
-				debug!("Delete {}", key);
-				assert_eq!(
-					t.delete(&mut tx, &mut mem, &mut st, key.into()).await.unwrap(),
-					Some(payload)
-				);
-				st.finish(&mut tx).await.unwrap();
-				tx.commit().await.unwrap();
+				{
+					let (mut tx, mut st) =
+						new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+					debug!("Delete {}", key);
+					assert_eq!(t.delete(&mut tx, &mut st, key.into()).await?, Some(payload));
+					check_generation = check_finish_commit(
+						&mut t,
+						st,
+						tx,
+						check_generation,
+						format!("Delete {key}"),
+					)
+					.await?;
+				}
+				key_count -= 1;
+				{
+					let (mut tx, mut st) =
+						new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+					let s = t.statistics(&mut tx, &mut st).await?;
+					assert_eq!(s.keys_count, key_count);
+				}
 			}
 		}
 
-		let (mut tx, mut st, mem) =
-			new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
-		let s = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+
+		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 18);
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
@@ -1412,7 +1282,7 @@ mod tests {
 		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes(&mut tx, &mut st, &mem, |count, depth, node_id, node| {
+			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| {
 				debug!("{} -> {}", depth, node_id);
 				node.n.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
 				match count {
@@ -1461,89 +1331,84 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(nodes_count, 7);
-		tx.cancel().await.unwrap();
+		tx.cancel().await?;
+		Ok(())
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
-	async fn test_btree_fill_and_empty() {
+	async fn test_btree_fill_and_empty() -> Result<(), Error> {
 		let ixs = IndexStores::default();
-		let ds = Datastore::new("memory").await.unwrap();
+		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
 		let mut expected_keys = HashMap::new();
 
+		let mut check_generation = 0;
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Write)
-					.await;
-			let mut mem = mem_store_write_lock!(mem);
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
-				t.insert(&mut tx, &mut mem, &mut st, key.into(), payload).await.unwrap();
+				t.insert(&mut tx, &mut st, key.into(), payload).await?;
 			}
-			st.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			check_generation = check_finish_commit(
+				&mut t,
+				st,
+				tx,
+				check_generation,
+				format!("Insert CLRS example"),
+			)
+			.await?;
 		}
 
 		{
-			let (mut tx, mut st, mem) =
-				new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Read)
-					.await;
-			let mem = mem_store_read_lock!(mem);
-			print_tree(&mut tx, &mut st, &mem, &t).await;
-			tx.cancel().await.unwrap();
+			let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+			print_tree(&mut tx, &mut st, &t).await;
+			tx.cancel().await?;
 		}
 
 		for (key, _) in CLRS_EXAMPLE {
 			debug!("------------------------");
 			debug!("Delete {}", key);
 			{
-				let (mut tx, mut st, mem) = new_operation_trie(
-					&ixs,
-					&ds,
-					StoreProvider::Transaction,
-					TransactionType::Write,
+				let (mut tx, mut st) =
+					new_operation_trie(&ixs, &ds, &t, TransactionType::Write).await;
+				t.delete(&mut tx, &mut &mut st, key.into()).await?;
+				check_generation = check_finish_commit(
+					&mut t,
+					st,
+					tx,
+					check_generation,
+					format!("Delete CLRS example {key}"),
 				)
-				.await;
-				let mut mem = mem_store_write_lock!(mem);
-				t.delete(&mut tx, &mut mem, &mut st, key.into()).await.unwrap();
-				st.finish(&mut tx).await.unwrap();
-				tx.commit().await.unwrap();
+				.await?;
 			}
 
 			// Check that every expected keys are still found in the tree
 			expected_keys.remove(key);
 
 			{
-				let (mut tx, mut st, mem) = new_operation_trie(
-					&ixs,
-					&ds,
-					StoreProvider::Transaction,
-					TransactionType::Read,
-				)
-				.await;
-				let mem = mem_store_read_lock!(mem);
+				let (mut tx, mut st) =
+					new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
-						t.search(&mut tx, &mem, &mut st, &key.as_str().into()).await.unwrap(),
+						t.search(&mut tx, &mut st, &key.as_str().into()).await?,
 						Some(*payload)
 					)
 				}
-				tx.cancel().await.unwrap();
+				tx.cancel().await?;
 			}
 		}
 
-		let (mut tx, mut st, mem) =
-			new_operation_trie(&ixs, &ds, StoreProvider::Transaction, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
-		let s = t.statistics(&mut tx, &mem, &mut st).await.unwrap();
+		let (mut tx, mut st) = new_operation_trie(&ixs, &ds, &t, TransactionType::Read).await;
+		let s = t.statistics(&mut tx, &mut st).await?;
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
-		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
-		tx.cancel().await.unwrap();
+		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await?.len());
+		tx.cancel().await?;
+		Ok(())
 	}
 
 	/////////////
@@ -1555,7 +1420,7 @@ mod tests {
 		expected_keys: Vec<(&str, i32)>,
 		expected_children: Vec<NodeId>,
 	) where
-		BK: BKeys,
+		BK: BKeys + Clone,
 	{
 		if let BTreeNode::Internal(keys, children) = node {
 			check_keys(keys, expected_keys);
@@ -1567,7 +1432,7 @@ mod tests {
 
 	fn check_is_leaf_node<BK>(node: &BTreeNode<BK>, expected_keys: Vec<(&str, i32)>)
 	where
-		BK: BKeys,
+		BK: BKeys + Clone,
 	{
 		if let BTreeNode::Leaf(keys) = node {
 			check_keys(keys, expected_keys);
@@ -1576,16 +1441,12 @@ mod tests {
 		}
 	}
 
-	async fn print_tree<BK>(
-		tx: &mut Transaction,
-		st: &mut BTreeStore<BK>,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
-		t: &BTree<BK>,
-	) where
-		BK: BKeys + Debug,
+	async fn print_tree<BK>(tx: &mut Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
+	where
+		BK: BKeys + Debug + Clone,
 	{
 		debug!("----------------------------------");
-		t.inspect_nodes(tx, st, mem, |_count, depth, node_id, node| {
+		t.inspect_nodes(tx, st, |_count, depth, node_id, node| {
 			debug!("{} -> {}", depth, node_id);
 			node.n.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
 		})
@@ -1611,14 +1472,13 @@ mod tests {
 
 	impl<BK> BTree<BK>
 	where
-		BK: BKeys + Debug,
+		BK: BKeys + Debug + Clone,
 	{
 		/// This is for debugging
 		async fn inspect_nodes<F>(
 			&self,
 			tx: &mut Transaction,
 			st: &mut BTreeStore<BK>,
-			mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<BTreeNode<BK>>>>,
 			inspect_func: F,
 		) -> Result<usize, Error>
 		where
@@ -1630,7 +1490,7 @@ mod tests {
 			}
 			let mut count = 0;
 			while let Some((node_id, depth)) = node_queue.pop_front() {
-				let stored_node = st.get_node(tx, &mem, node_id).await?;
+				let stored_node = st.get_node(tx, node_id).await?;
 				if let BTreeNode::Internal(_, children) = &stored_node.n {
 					let depth = depth + 1;
 					for child_id in children {
@@ -1646,7 +1506,7 @@ mod tests {
 
 	impl<BK> BTreeNode<BK>
 	where
-		BK: BKeys,
+		BK: BKeys + Clone,
 	{
 		fn debug<F>(&self, to_string: F) -> Result<(), Error>
 		where

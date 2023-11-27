@@ -1,17 +1,17 @@
 use crate::err::Error;
-use crate::idx::trees::store::memory::TreeMemoryMap;
+use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::RwLockWriteGuard;
 
-pub struct TreeTransactionWrite<N>
+pub struct TreeWrite<N>
 where
-	N: TreeNode + Debug,
+	N: TreeNode + Debug + Clone,
 {
 	np: TreeNodeProvider,
+	cache: TreeCache<N>,
 	nodes: HashMap<NodeId, StoredNode<N>>,
 	updated: HashSet<NodeId>,
 	removed: HashMap<NodeId, Key>,
@@ -19,13 +19,14 @@ where
 	out: HashSet<NodeId>,
 }
 
-impl<N: Debug> TreeTransactionWrite<N>
+impl<N: Debug> TreeWrite<N>
 where
-	N: TreeNode,
+	N: TreeNode + Clone,
 {
-	pub(super) fn new(keys: TreeNodeProvider) -> Self {
+	pub(super) fn new(keys: TreeNodeProvider, cache: TreeCache<N>) -> Self {
 		Self {
 			np: keys,
+			cache,
 			nodes: HashMap::new(),
 			updated: HashSet::new(),
 			removed: HashMap::new(),
@@ -47,7 +48,8 @@ where
 		if let Some(n) = self.nodes.remove(&node_id) {
 			return Ok(n);
 		}
-		self.np.load::<N>(tx, node_id).await
+		let r = self.cache.get_node(tx, node_id).await?;
+		Ok(StoredNode::new(r.n.clone(), r.id, r.key.clone(), r.size))
 	}
 
 	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
@@ -116,110 +118,31 @@ where
 	}
 }
 
-pub struct TreeMemoryWrite {
-	#[cfg(debug_assertions)]
-	out: HashSet<NodeId>,
+pub struct TreeRead<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	cache: TreeCache<N>,
 }
 
-impl TreeMemoryWrite {
-	pub(super) fn new() -> Self {
+impl<N> TreeRead<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	pub(super) fn new(cache: TreeCache<N>) -> Self {
 		Self {
-			#[cfg(debug_assertions)]
-			out: HashSet::new(),
+			cache,
 		}
 	}
 
-	pub(super) fn get_node_mut<N>(
-		&mut self,
-		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
+	pub(super) async fn get_node(
+		&self,
+		tx: &mut Transaction,
 		node_id: NodeId,
-	) -> Result<StoredNode<N>, Error>
-	where
-		N: TreeNode + Debug,
-	{
-		if let Some(ref mut nodes) = nodes {
-			#[cfg(debug_assertions)]
-			{
-				debug!("GET: {}", node_id);
-				self.out.insert(node_id);
-			}
-			if let Some(n) = nodes.remove(&node_id) {
-				let n =
-					Arc::into_inner(n).ok_or(Error::Unreachable("TreeMemoryWrite::get_node(1)"))?;
-				Ok(n)
-			} else {
-				Err(Error::Unreachable("TreeMemoryWrite::get_node(2)"))
-			}
-		} else {
-			Err(Error::Unreachable("TreeMemoryWrite::get_node(3)"))
-		}
-	}
-
-	pub(super) fn set_node<N>(
-		&mut self,
-		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
-		node: StoredNode<N>,
-	) -> Result<(), Error>
-	where
-		N: TreeNode + Debug,
-	{
-		if let Some(ref mut nodes) = nodes {
-			#[cfg(debug_assertions)]
-			{
-				debug!("SET: {} {:?}", node.id, node.n);
-				self.out.remove(&node.id);
-			}
-			nodes.insert(node.id, Arc::new(node));
-			Ok(())
-		} else {
-			Err(Error::Unreachable("TreeMemoryWrite::set_node"))
-		}
-	}
-
-	pub(super) fn new_node<N>(&mut self, id: NodeId, node: N) -> StoredNode<N>
-	where
-		N: TreeNode + Debug,
-	{
+	) -> Result<Arc<StoredNode<N>>, Error> {
+		let r = self.cache.get_node(tx, node_id).await?;
 		#[cfg(debug_assertions)]
-		{
-			debug!("NEW: {}", id);
-			self.out.insert(id);
-		}
-		StoredNode::new(node, id, vec![], 0)
-	}
-
-	pub(super) fn remove_node<N>(
-		&mut self,
-		nodes: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<N>>>,
-		node_id: NodeId,
-	) -> Result<(), Error>
-	where
-		N: TreeNode + Debug,
-	{
-		if let Some(ref mut nodes) = nodes {
-			#[cfg(debug_assertions)]
-			{
-				debug!("REMOVE: {}", node_id);
-				if nodes.contains_key(&node_id) {
-					return Err(Error::Unreachable("TreeMemoryWrite::remove_node(1)"));
-				}
-				self.out.remove(&node_id);
-			}
-			nodes.remove(&node_id);
-			Ok(())
-		} else {
-			Err(Error::Unreachable("TreeMemoryWrite::remove_node(2)"))
-		}
-	}
-
-	pub(super) fn finish(&mut self) -> Result<bool, Error> {
-		#[cfg(debug_assertions)]
-		{
-			if !self.out.is_empty() {
-				debug!("OUT: {:?}", self.out);
-				return Err(Error::Unreachable("TreeMemoryWrite::finish"));
-			}
-		}
-		Ok(true)
+		debug!("GET: {} {:?}", node_id, r.n);
+		Ok(r)
 	}
 }

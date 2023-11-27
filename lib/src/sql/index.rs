@@ -21,7 +21,7 @@ pub enum Index {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -30,6 +30,14 @@ pub struct SearchParams {
 	pub doc_lengths_order: u32,
 	pub postings_order: u32,
 	pub terms_order: u32,
+	#[revision(start = 2)]
+	pub doc_ids_cache: u32,
+	#[revision(start = 2)]
+	pub doc_lengths_cache: u32,
+	#[revision(start = 2)]
+	pub postings_cache: u32,
+	#[revision(start = 2)]
+	pub terms_cache: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -41,7 +49,9 @@ pub struct MTreeParams {
 	pub capacity: u16,
 	pub doc_ids_order: u32,
 	#[revision(start = 2)]
-	pub in_memory: bool,
+	pub doc_ids_cache: u32,
+	#[revision(start = 2)]
+	pub mtree_cache: u32,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

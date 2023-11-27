@@ -9,45 +9,39 @@ use async_recursion::async_recursion;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::RwLock;
 
 use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::memory::{ShardedTreeMemoryMap, TreeMemoryMap};
 use crate::idx::trees::store::{
-	IndexStores, NodeId, StoreProvider, StoreRights, StoredNode, TreeNode, TreeNodeProvider,
-	TreeStore,
+	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::{Array, Object, Thing, Value};
-use crate::{mem_store_read_lock, mem_store_write_lock};
 pub(crate) struct MTreeIndex {
 	state_key: Key,
 	dim: usize,
 	vector_type: VectorType,
-	index_stores: IndexStores,
-	mem_store: Option<ShardedTreeMemoryMap<MTreeNode>>,
-	tree_node_provider: TreeNodeProvider,
-	store_provider: StoreProvider,
+	store: MTreeStore,
 	doc_ids: Arc<RwLock<DocIds>>,
 	mtree: Arc<RwLock<MTree>>,
 }
 
 impl MTreeIndex {
 	pub(crate) async fn new(
-		ixs: IndexStores,
+		ixs: &IndexStores,
 		tx: &mut Transaction,
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
-		sp: StoreProvider,
+		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs.clone(), tx, sp, ikb.clone(), p.doc_ids_order).await?,
+			DocIds::new(ixs, tx, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -55,33 +49,24 @@ impl MTreeIndex {
 		} else {
 			MState::new(p.capacity)
 		};
-		let tree_node_provider = TreeNodeProvider::Vector(ikb);
-		let mem_store = ixs.get_mem_store_mtree(&tree_node_provider, sp).await;
+		let store = ixs
+			.get_store_mtree(
+				TreeNodeProvider::Vector(ikb),
+				state.generation,
+				tt,
+				p.mtree_cache as usize,
+			)
+			.await;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
 			state_key,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			index_stores: ixs,
-			mem_store,
-			tree_node_provider,
-			store_provider: sp,
 			doc_ids,
 			mtree,
+			store,
 		})
 	}
-
-	async fn get_store(&self, rights: StoreRights) -> MTreeStore {
-		self.index_stores
-			.get_store_mtree(
-				self.tree_node_provider.clone(),
-				self.store_provider,
-				rights,
-				20, // TODO: Replace by configuration
-			)
-			.await
-	}
-
 	pub(crate) async fn index_document(
 		&mut self,
 		tx: &mut Transaction,
@@ -92,15 +77,12 @@ impl MTreeIndex {
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 		// Index the values
-		let mut store = self.get_store(StoreRights::Write).await;
 		let mut mtree = self.mtree.write().await;
-		let mut mem = mem_store_write_lock!(self.mem_store);
 		for v in content {
 			// Extract the vector
 			let vector = self.extract_vector(v)?;
-			mtree.insert(tx, &mut mem, &mut store, vector, doc_id).await?;
+			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
 		}
-		store.finish(tx).await?;
 		Ok(())
 	}
 
@@ -113,10 +95,7 @@ impl MTreeIndex {
 		// Extract the vector
 		let vector = self.check_vector_array(a)?;
 		// Lock the store
-		let mut store = self.get_store(StoreRights::Read).await;
-		let mem = mem_store_read_lock!(self.mem_store);
-		let res = self.mtree.read().await.knn_search(tx, &mem, &mut store, &vector, k).await?;
-		store.finish(tx).await?;
+		let res = self.mtree.read().await.knn_search(tx, &self.store, &vector, k).await?;
 		Ok(res.docs)
 	}
 
@@ -178,15 +157,12 @@ impl MTreeIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
-			let mut store = self.get_store(StoreRights::Write).await;
-			let mut mem = mem_store_write_lock!(self.mem_store);
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
 				let vector = self.extract_vector(v)?;
-				mtree.delete(tx, &mut mem, &mut store, vector, doc_id).await?;
+				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
 			}
-			store.finish(tx).await?;
 		}
 		Ok(())
 	}
@@ -201,9 +177,14 @@ impl MTreeIndex {
 		})
 	}
 
-	pub(crate) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
 		self.doc_ids.write().await.finish(tx).await?;
-		self.mtree.write().await.finish(tx, self.state_key).await?;
+		let mut mtree = self.mtree.write().await;
+		if self.store.finish(tx).await? {
+			mtree.state.generation += 1;
+			mtree.updated = true;
+		}
+		mtree.finish(tx, self.state_key.clone()).await?;
 		Ok(())
 	}
 }
@@ -328,8 +309,7 @@ impl MTree {
 	pub async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<MTreeNode>>>,
-		store: &mut MTreeStore,
+		store: &MTreeStore,
 		v: &SharedVector,
 		k: usize,
 	) -> Result<KnnResult, Error> {
@@ -343,7 +323,7 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, mem, current.1).await?;
+			let node = store.get_node(tx, current.1).await?;
 			#[cfg(debug_assertions)]
 			{
 				debug!("Visit node id: {} - dist: {}", current.1, current.0);
@@ -410,7 +390,6 @@ impl MTree {
 	pub async fn insert(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		obj: Vector,
 		id: DocId,
@@ -419,26 +398,25 @@ impl MTree {
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
 		let obj = Arc::new(obj);
 		// First we check if we already have the object. In this case we just append the doc.
-		if self.append(tx, mem, store, &obj, id).await? {
+		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
 		}
 		if let Some(root_id) = self.state.root {
-			let node = store.get_node_mut(tx, mem, root_id).await?;
+			let node = store.get_node_mut(tx, root_id).await?;
 			// Otherwise, we insert the object with possibly mutating the tree
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
-				self.insert_at_node(tx, mem, store, node, &None, obj, id).await?
+				self.insert_at_node(tx, store, node, &None, obj, id).await?
 			{
-				self.create_new_internal_root(mem, store, o1, p1, o2, p2).await?;
+				self.create_new_internal_root(store, o1, p1, o2, p2).await?;
 			}
 		} else {
-			self.create_new_leaf_root(mem, store, obj, id).await?;
+			self.create_new_leaf_root(store, obj, id).await?;
 		}
 		Ok(())
 	}
 
 	async fn create_new_leaf_root(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		obj: SharedVector,
 		id: DocId,
@@ -448,14 +426,13 @@ impl MTree {
 		let mut objects = LeafMap::new();
 		objects.insert(obj, p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
-		store.set_node(mem, new_root_node, true).await?;
+		store.set_node(new_root_node, true).await?;
 		self.set_root(Some(new_root_id));
 		Ok(())
 	}
 
 	async fn create_new_internal_root(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		o1: SharedVector,
 		p1: RoutingProperties,
@@ -478,7 +455,7 @@ impl MTree {
 		entries.insert(o1, p1);
 		entries.insert(o2, p2);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Internal(entries))?;
-		store.set_node(mem, new_root_node, true).await?;
+		store.set_node(new_root_node, true).await?;
 		self.set_root(Some(new_root_id));
 
 		Ok(())
@@ -487,7 +464,6 @@ impl MTree {
 	async fn append(
 		&self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		object: &SharedVector,
 		id: DocId,
@@ -497,12 +473,12 @@ impl MTree {
 			queue.push(root_id);
 		}
 		while let Some(current) = queue.pop() {
-			let mut node = store.get_node_mut(tx, mem, current).await?;
+			let mut node = store.get_node_mut(tx, current).await?;
 			match node.n {
 				MTreeNode::Leaf(ref mut n) => {
 					if let Some(p) = n.get_mut(object) {
 						p.docs.insert(id);
-						store.set_node(mem, node, true).await?;
+						store.set_node(node, true).await?;
 						return Ok(true);
 					}
 				}
@@ -515,7 +491,7 @@ impl MTree {
 					}
 				}
 			}
-			store.set_node(mem, node, false).await?;
+			store.set_node(node, false).await?;
 		}
 		Ok(false)
 	}
@@ -526,7 +502,6 @@ impl MTree {
 	async fn insert_at_node(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node: MStoredNode,
 		parent_center: &Option<SharedVector>,
@@ -538,14 +513,12 @@ impl MTree {
 		match node.n {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
-				self.insert_node_leaf(mem, store, node.id, node.key, n, parent_center, object, doc)
-					.await
+				self.insert_node_leaf(store, node.id, node.key, n, parent_center, object, doc).await
 			}
 			// Else
 			MTreeNode::Internal(n) => {
 				self.insert_node_internal(
 					tx,
-					mem,
 					store,
 					node.id,
 					node.key,
@@ -563,7 +536,6 @@ impl MTree {
 	async fn insert_node_internal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -574,18 +546,10 @@ impl MTree {
 	) -> Result<InsertionResult, Error> {
 		// Choose `best` subtree entry ObestSubstree from N;
 		let (best_entry_obj, mut best_entry) = self.find_closest(&node, &object)?;
-		let best_node = store.get_node_mut(tx, mem, best_entry.node).await?;
+		let best_node = store.get_node_mut(tx, best_entry.node).await?;
 		// Insert(Oi, child(ObestSubstree), ObestSubtree);
 		match self
-			.insert_at_node(
-				tx,
-				mem,
-				store,
-				best_node,
-				&Some(best_entry_obj.clone()),
-				object,
-				doc_id,
-			)
+			.insert_at_node(tx, store, best_node, &Some(best_entry_obj.clone()), object, doc_id)
 			.await?
 		{
 			// If (entry returned)
@@ -613,32 +577,20 @@ impl MTree {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					let max_dist = self.compute_internal_max_distance(&node);
-					Self::set_stored_node(
-						mem,
-						store,
-						node_id,
-						node_key,
-						node.into_mtree_node(),
-						true,
-					)
-					.await?;
+					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)
+						.await?;
 					Ok(InsertionResult::CoveringRadius(max_dist))
 				} else {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
 					// Split(N U P)
-					let (o1, p1, o2, p2) =
-						self.split_node(mem, store, node_id, node_key, node).await?;
+					let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node).await?;
 					Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 				}
 			}
 			InsertionResult::DocAdded => {
 				store
-					.set_node(
-						mem,
-						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-						false,
-					)
+					.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), false)
 					.await?;
 				Ok(InsertionResult::DocAdded)
 			}
@@ -662,7 +614,6 @@ impl MTree {
 				debug!("NODE INTERNAL: {} - MAX_DIST: {:?}", node_id, max_dist);
 				store
 					.set_node(
-						mem,
 						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
 						updated,
 					)
@@ -698,7 +649,6 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_leaf(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -711,11 +661,7 @@ impl MTree {
 			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(doc_id);
 				store
-					.set_node(
-						mem,
-						StoredNode::new(node.into_mtree_node(), node_id, node_key, 0),
-						true,
-					)
+					.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
 					.await?;
 				return Ok(InsertionResult::DocAdded);
 			}
@@ -736,13 +682,13 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			debug!("NODE LEAF: {} - MAX_DIST: {:?}", node_id, max_dist);
 			store
-				.set_node(mem, StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
+				.set_node(StoredNode::new(node.into_mtree_node(), node_id, node_key, 0), true)
 				.await?;
 			Ok(InsertionResult::CoveringRadius(max_dist))
 		} else {
 			// Else
 			// Split (N)
-			let (o1, p1, o2, p2) = self.split_node(mem, store, node_id, node_key, node).await?;
+			let (o1, p1, o2, p2) = self.split_node(store, node_id, node_key, node).await?;
 			Ok(InsertionResult::PromotedEntries(o1, p1, o2, p2))
 		}
 	}
@@ -756,7 +702,6 @@ impl MTree {
 
 	async fn split_node<N>(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -787,9 +732,9 @@ impl MTree {
 
 		// Update the store/cache
 		let n = StoredNode::new(node1.into_mtree_node(), node_id, node_key, 0);
-		store.set_node(mem, n, true).await?;
+		store.set_node(n, true).await?;
 		let n = store.new_node(new_node_id, node2.into_mtree_node())?;
-		store.set_node(mem, n, true).await?;
+		store.set_node(n, true).await?;
 
 		// Update the split node
 		let p1 = RoutingProperties {
@@ -901,36 +846,26 @@ impl MTree {
 	async fn delete(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		object: Vector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		let mut deleted = false;
 		if let Some(root_id) = self.state.root {
-			let root_node = store.get_node_mut(tx, mem, root_id).await?;
+			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(
-					tx,
-					mem,
-					store,
-					root_node,
-					&None,
-					Arc::new(object),
-					doc_id,
-					&mut deleted,
-				)
+				.delete_at_node(tx, store, root_node, &None, Arc::new(object), doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
 					MTreeNode::Internal(n) => match n.len() {
 						0 => {
-							store.remove_node(mem, sn.id, sn.key).await?;
+							store.remove_node(sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
 						1 => {
-							store.remove_node(mem, sn.id, sn.key).await?;
+							store.remove_node(sn.id, sn.key).await?;
 							let e = n.values().next().ok_or(Error::Unreachable("MTree::delete"))?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
@@ -939,13 +874,13 @@ impl MTree {
 					},
 					MTreeNode::Leaf(n) => {
 						if n.is_empty() {
-							store.remove_node(mem, sn.id, sn.key).await?;
+							store.remove_node(sn.id, sn.key).await?;
 							self.set_root(None);
 							return Ok(deleted);
 						}
 					}
 				}
-				store.set_node(mem, sn, n_updated).await?;
+				store.set_node(sn, n_updated).await?;
 			}
 		}
 		Ok(deleted)
@@ -957,7 +892,6 @@ impl MTree {
 	async fn delete_at_node(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node: MStoredNode,
 		parent_center: &Option<SharedVector>,
@@ -972,7 +906,6 @@ impl MTree {
 			// If (N is a leaf)
 			MTreeNode::Leaf(n) => {
 				self.delete_node_leaf(
-					mem,
 					store,
 					node.id,
 					node.key,
@@ -988,7 +921,6 @@ impl MTree {
 			MTreeNode::Internal(n) => {
 				self.delete_node_internal(
 					tx,
-					mem,
 					store,
 					node.id,
 					node.key,
@@ -1007,7 +939,6 @@ impl MTree {
 	async fn delete_node_internal(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -1037,20 +968,11 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			debug!("on_obj: {:?}", on_obj.as_ref());
 			// Delete (Od, child(On))
-			let on_node = store.get_node_mut(tx, mem, on_entry.node).await?;
+			let on_node = store.get_node_mut(tx, on_entry.node).await?;
 			#[cfg(debug_assertions)]
 			let d_id = on_node.id;
 			match self
-				.delete_at_node(
-					tx,
-					mem,
-					store,
-					on_node,
-					&Some(on_obj.clone()),
-					od.clone(),
-					id,
-					deleted,
-				)
+				.delete_at_node(tx, store, on_node, &Some(on_obj.clone()), od.clone(), id, deleted)
 				.await?
 			{
 				DeletionResult::NotFound => {
@@ -1079,7 +1001,6 @@ impl MTree {
 					if self
 						.deletion_underflown(
 							tx,
-							mem,
 							store,
 							parent_center,
 							&mut n_node,
@@ -1095,13 +1016,12 @@ impl MTree {
 				}
 			}
 		}
-		self.delete_node_internal_check_underflown(mem, store, node_id, node_key, n_node, n_updated)
+		self.delete_node_internal_check_underflown(store, node_id, node_key, n_node, n_updated)
 			.await
 	}
 
 	async fn delete_node_internal_check_underflown(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -1118,27 +1038,25 @@ impl MTree {
 		}
 		// Return max(On E N) { parentDistance(On) + r(On)}
 		let max_dist = self.compute_internal_max_distance(&n_node);
-		Self::set_stored_node(mem, store, node_id, node_key, n_node.into_mtree_node(), n_updated)
+		Self::set_stored_node(store, node_id, node_key, n_node.into_mtree_node(), n_updated)
 			.await?;
 		Ok(DeletionResult::CoveringRadius(max_dist))
 	}
 
 	async fn set_stored_node(
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
 		node: MTreeNode,
 		updated: bool,
 	) -> Result<(), Error> {
-		store.set_node(mem, StoredNode::new(node, node_id, node_key, 0), updated).await
+		store.set_node(StoredNode::new(node, node_id, node_key, 0), updated).await
 	}
 
 	#[allow(clippy::too_many_arguments)]
 	async fn deletion_underflown(
 		&mut self,
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
@@ -1165,16 +1083,15 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			debug!("deletion_underflown: onn_entry {}", onn_entry.node);
 			// Let S be the set of entries in child(Onn()
-			let onn_child = store.get_node_mut(tx, mem, onn_entry.node).await?;
+			let onn_child = store.get_node_mut(tx, onn_entry.node).await?;
 			// If (S U P) will fit into child(Onn)
 			if onn_child.n.len() + p.n.len() <= self.state.capacity as usize {
 				self.delete_underflown_fit_into_child(
-					mem, store, n_node, on_obj, p, onn_obj, onn_entry, onn_child,
+					store, n_node, on_obj, p, onn_obj, onn_entry, onn_child,
 				)
 				.await?;
 			} else {
 				self.delete_underflown_redistribute(
-					mem,
 					store,
 					parent_center,
 					n_node,
@@ -1187,14 +1104,13 @@ impl MTree {
 			}
 			return Ok(true);
 		}
-		store.set_node(mem, p, p_updated).await?;
+		store.set_node(p, p_updated).await?;
 		Ok(false)
 	}
 
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_underflown_fit_into_child(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
@@ -1252,15 +1168,14 @@ impl MTree {
 				n_node.insert(onn_obj, onn_entry);
 			}
 		}
-		store.remove_node(mem, p.id, p.key).await?;
-		store.set_node(mem, onn_child, true).await?;
+		store.remove_node(p.id, p.key).await?;
+		store.set_node(onn_child, true).await?;
 		Ok(())
 	}
 
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_underflown_redistribute(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
@@ -1278,8 +1193,8 @@ impl MTree {
 		p.n.merge(onn_child.n)?;
 		// Split(S U P)
 		let (o1, mut e1, o2, mut e2) = match p.n {
-			MTreeNode::Internal(n) => self.split_node(mem, store, p.id, p.key, n).await?,
-			MTreeNode::Leaf(n) => self.split_node(mem, store, p.id, p.key, n).await?,
+			MTreeNode::Internal(n) => self.split_node(store, p.id, p.key, n).await?,
+			MTreeNode::Leaf(n) => self.split_node(store, p.id, p.key, n).await?,
 		};
 		if let Some(pc) = parent_center {
 			e1.parent_dist = self.calculate_distance(&o1, pc)?;
@@ -1291,14 +1206,13 @@ impl MTree {
 		// Add new child pointer entries to N;
 		n_node.insert(o1, e1);
 		n_node.insert(o2, e2);
-		store.remove_node(mem, onn_child.id, onn_child.key).await?;
+		store.remove_node(onn_child.id, onn_child.key).await?;
 		Ok(())
 	}
 
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_leaf(
 		&mut self,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		store: &mut MTreeStore,
 		node_id: NodeId,
 		node_key: Key,
@@ -1326,7 +1240,7 @@ impl MTree {
 			}
 		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(mem, sn, false).await?;
+			store.set_node(sn, false).await?;
 			return Ok(DeletionResult::NotFound);
 		}
 		if entry_removed {
@@ -1340,11 +1254,11 @@ impl MTree {
 			// Return max(Ol E N) { parentDistance(Ol)};
 			let max_dist = self.compute_leaf_max_distance(&leaf_node, parent_center)?;
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(mem, sn, true).await?;
+			store.set_node(sn, true).await?;
 			Ok(DeletionResult::CoveringRadius(max_dist))
 		} else {
 			let sn = StoredNode::new(MTreeNode::Leaf(leaf_node), node_id, node_key, 0);
-			store.set_node(mem, sn, true).await?;
+			store.set_node(sn, true).await?;
 			Ok(DeletionResult::DocRemoved)
 		}
 	}
@@ -1430,7 +1344,7 @@ type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
 
 type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
 /// Each entry is a tuple consisting of an object and its associated properties.
 /// It's essential to note that the properties vary between a LeafNode and an InternalNode.
@@ -1638,11 +1552,13 @@ impl From<MtStatistics> for Value {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
+	#[revision(start = 2)]
+	generation: u64,
 }
 
 impl MState {
@@ -1652,6 +1568,7 @@ impl MState {
 			capacity,
 			root: None,
 			next_node_id: 0,
+			generation: 0,
 		}
 	}
 }
@@ -1666,7 +1583,7 @@ pub struct RoutingProperties {
 	radius: f64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,
@@ -1700,43 +1617,27 @@ mod tests {
 
 	use crate::err::Error;
 	use test_log::test;
-	use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{
 		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
-	use crate::idx::trees::store::memory::{ShardedTreeMemoryMap, TreeMemoryMap};
-	use crate::idx::trees::store::{
-		IndexStores, NodeId, StoreProvider, StoreRights, TreeNodeProvider, TreeStore,
-	};
+	use crate::idx::trees::store::{IndexStores, NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::Number;
-	use crate::{mem_store_read_lock, mem_store_write_lock};
-
-	impl From<&TransactionType> for StoreRights {
-		fn from(value: &TransactionType) -> Self {
-			match value {
-				TransactionType::Read => StoreRights::Read,
-				TransactionType::Write => StoreRights::Write,
-			}
-		}
-	}
 
 	async fn new_operation(
 		ds: &Datastore,
 		ixs: &IndexStores,
-		sp: StoreProvider,
 		tt: TransactionType,
-	) -> (TreeStore<MTreeNode>, Option<ShardedTreeMemoryMap<MTreeNode>>, Transaction) {
-		let mem = ixs.get_mem_store_mtree(&TreeNodeProvider::Debug, sp).await;
-		let st = ixs.get_store_mtree(TreeNodeProvider::Debug, sp, (&tt).into(), 20).await;
+	) -> (TreeStore<MTreeNode>, Transaction) {
+		let st = ixs.get_store_mtree(TreeNodeProvider::Debug, 0, tt, 20).await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		(st, mem, tx)
+		(st, tx)
 	}
 
 	async fn finish_operation(
@@ -1770,7 +1671,8 @@ mod tests {
 		Arc::new(vec)
 	}
 
-	async fn test_mtree_insertions(sp: StoreProvider) -> Result<(), Error> {
+	#[test(tokio::test)]
+	async fn test_mtree_insertions() -> Result<(), Error> {
 		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
 		let ds = Datastore::new("memory").await?;
 		let ixs = IndexStores::default();
@@ -1778,20 +1680,18 @@ mod tests {
 		let vec1 = new_vec(1, VectorType::F64, 1);
 		// First the index is empty
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec1, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 0);
 		}
 		// Insert single element
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec1.as_ref().clone(), 1).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec1.as_ref().clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
-			check_leaf_write(&mut tx, &mut mem, &mut st, 0, |m| {
+			check_leaf_write(&mut tx, &mut &mut st, 0, |m| {
 				assert_eq!(m.len(), 1);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 			})
@@ -1800,59 +1700,41 @@ mod tests {
 		}
 		// Check KNN
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec1, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				1,
-				1,
-				Some(1),
-				Some(1),
-				1,
-				1,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(1), Some(1), 1, 1);
 		}
 
 		// insert second element
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec2.as_ref().clone(), 2).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 2).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		// vec1 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec1, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1, 2]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 0.0, &[2]);
 			})
 			.await;
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				1,
-				1,
-				Some(2),
-				Some(2),
-				2,
-				2,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(2), Some(2), 2, 2);
 		}
 		// vec2 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec2, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1860,159 +1742,123 @@ mod tests {
 
 		// insert new doc to existing vector
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec2.as_ref().clone(), 3).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 3).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		// vec2 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec2, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 0.0, &[2, 3]);
 			})
 			.await;
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				1,
-				1,
-				Some(2),
-				Some(2),
-				2,
-				3,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(2), Some(2), 2, 3);
 		}
 
 		// insert third vector
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec3.as_ref().clone(), 3).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec3.as_ref().clone(), 3).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		// vec3 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec3, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec3, 10).await?;
 			check_knn(&res.docs, vec![3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
 			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 3);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 0.0, &[2, 3]);
 				check_leaf_vec(m, &vec3, 0.0, &[3]);
 			})
 			.await;
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				1,
-				1,
-				Some(3),
-				Some(3),
-				3,
-				4,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(3), Some(3), 3, 4);
 		}
 
 		// Check split leaf node
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec4.as_ref().clone(), 4).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec4.as_ref().clone(), 4).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		// vec4 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec4, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec4, 10).await?;
 			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 3);
 			assert_eq!(t.state.root, Some(2));
-			check_internal(&mut tx, &mem, &mut st, 2, |m| {
+			check_internal(&mut tx, &mut st, 2, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
 				check_routing_vec(m, &vec4, 0.0, 1, 1.0);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 1, |m| {
+			check_leaf_read(&mut tx, &mut st, 1, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec3, 1.0, &[3]);
 				check_leaf_vec(m, &vec4, 0.0, &[4]);
 			})
 			.await;
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				3,
-				2,
-				Some(2),
-				Some(2),
-				4,
-				5,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(3, 2, Some(2), Some(2), 4, 5);
 		}
 
 		// Insert vec extending the radius of the last node, calling compute_leaf_radius
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec6.as_ref().clone(), 6).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec6.as_ref().clone(), 6).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		// vec6 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec6, 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec6, 10).await?;
 			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 3);
 			assert_eq!(t.state.root, Some(2));
-			check_internal(&mut tx, &mem, &mut st, 2, |m| {
+			check_internal(&mut tx, &mut st, 2, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
 				check_routing_vec(m, &vec4, 0.0, 1, 2.0);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 1, |m| {
+			check_leaf_read(&mut tx, &mut st, 1, |m| {
 				assert_eq!(m.len(), 3);
 				check_leaf_vec(m, &vec3, 1.0, &[3]);
 				check_leaf_vec(m, &vec4, 0.0, &[4]);
 				check_leaf_vec(m, &vec6, 2.0, &[6]);
 			})
 			.await;
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				3,
-				2,
-				Some(2),
-				Some(3),
-				5,
-				6,
-			);
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(3, 2, Some(2), Some(3), 5, 6);
 		}
 
 		// Insert check split internal node
@@ -2020,25 +1866,16 @@ mod tests {
 		// Insert vec8
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec8.as_ref().clone(), 8).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec8.as_ref().clone(), 8).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				4,
-				2,
-				Some(2),
-				Some(2),
-				6,
-				7,
-			);
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(2), 6, 7);
 			assert_eq!(t.state.root, Some(2));
 			// Check Root node (level 1)
-			check_internal(&mut tx, &mem, &mut st, 2, |m| {
+			check_internal(&mut tx, &mut st, 2, |m| {
 				assert_eq!(m.len(), 3);
 				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
 				check_routing_vec(m, &vec3, 0.0, 1, 1.0);
@@ -2046,19 +1883,19 @@ mod tests {
 			})
 			.await;
 			// Check level 2
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 1, |m| {
+			check_leaf_read(&mut tx, &mut st, 1, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec3, 0.0, &[3]);
 				check_leaf_vec(m, &vec4, 1.0, &[4]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 3, |m| {
+			check_leaf_read(&mut tx, &mut st, 3, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec6, 2.0, &[6]);
 				check_leaf_vec(m, &vec8, 0.0, &[8]);
@@ -2068,25 +1905,16 @@ mod tests {
 
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec9.as_ref().clone(), 9).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec9.as_ref().clone(), 9).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				4,
-				2,
-				Some(2),
-				Some(3),
-				7,
-				8,
-			);
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(3), 7, 8);
 			assert_eq!(t.state.root, Some(2));
 			// Check Root node (level 1)
-			check_internal(&mut tx, &mem, &mut st, 2, |m| {
+			check_internal(&mut tx, &mut st, 2, |m| {
 				assert_eq!(m.len(), 3);
 				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
 				check_routing_vec(m, &vec3, 0.0, 1, 1.0);
@@ -2094,19 +1922,19 @@ mod tests {
 			})
 			.await;
 			// Check level 2
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 1, |m| {
+			check_leaf_read(&mut tx, &mut st, 1, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec3, 0.0, &[3]);
 				check_leaf_vec(m, &vec4, 1.0, &[4]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 3, |m| {
+			check_leaf_read(&mut tx, &mut st, 3, |m| {
 				assert_eq!(m.len(), 3);
 				check_leaf_vec(m, &vec6, 2.0, &[6]);
 				check_leaf_vec(m, &vec8, 0.0, &[8]);
@@ -2117,63 +1945,54 @@ mod tests {
 
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
-			t.insert(&mut tx, &mut mem, &mut st, vec10.as_ref().clone(), 10).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+			t.insert(&mut tx, &mut &mut st, vec10.as_ref().clone(), 10).await?;
 			finish_operation(tx, st, true).await?;
 		}
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(
-				7,
-				3,
-				Some(2),
-				Some(2),
-				8,
-				9,
-			);
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			check_tree_properties(&mut tx, &mut st, &t).await?.check(7, 3, Some(2), Some(2), 8, 9);
 			assert_eq!(t.state.root, Some(6));
 			// Check Root node (level 1)
-			check_internal(&mut tx, &mem, &mut st, 6, |m| {
+			check_internal(&mut tx, &mut st, 6, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, &vec1, 0.0, 2, 3.0);
 				check_routing_vec(m, &vec10, 0.0, 5, 6.0);
 			})
 			.await;
 			// Check level 2
-			check_internal(&mut tx, &mem, &mut st, 2, |m| {
+			check_internal(&mut tx, &mut st, 2, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
 				check_routing_vec(m, &vec3, 2.0, 1, 1.0);
 			})
 			.await;
-			check_internal(&mut tx, &mem, &mut st, 5, |m| {
+			check_internal(&mut tx, &mut st, 5, |m| {
 				assert_eq!(m.len(), 2);
 				check_routing_vec(m, &vec6, 4.0, 3, 2.0);
 				check_routing_vec(m, &vec10, 0.0, 4, 1.0);
 			})
 			.await;
 			// Check level 3
-			check_leaf_read(&mut tx, &mem, &mut st, 0, |m| {
+			check_leaf_read(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 1, |m| {
+			check_leaf_read(&mut tx, &mut st, 1, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec3, 0.0, &[3]);
 				check_leaf_vec(m, &vec4, 1.0, &[4]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 3, |m| {
+			check_leaf_read(&mut tx, &mut st, 3, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec6, 0.0, &[6]);
 				check_leaf_vec(m, &vec8, 2.0, &[8]);
 			})
 			.await;
-			check_leaf_read(&mut tx, &mem, &mut st, 4, |m| {
+			check_leaf_read(&mut tx, &mut st, 4, |m| {
 				assert_eq!(m.len(), 2);
 				check_leaf_vec(m, &vec9, 1.0, &[9]);
 				check_leaf_vec(m, &vec10, 0.0, &[10]);
@@ -2183,18 +2002,16 @@ mod tests {
 
 		// vec8 knn
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec8, 20).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec8, 20).await?;
 			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
 		}
 		// vec4 knn(2)
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec4, 2).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec4, 2).await?;
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
@@ -2202,9 +2019,8 @@ mod tests {
 
 		// vec10 knn(2)
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			let res = t.knn_search(&mut tx, &mem, &mut st, &vec10, 2).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			let res = t.knn_search(&mut tx, &mut st, &vec10, 2).await?;
 			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
@@ -2212,20 +2028,9 @@ mod tests {
 		Ok(())
 	}
 
-	#[test(tokio::test)]
-	async fn test_mtree_insertions_memory() -> Result<(), Error> {
-		test_mtree_insertions(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_insertions_transaction() -> Result<(), Error> {
-		test_mtree_insertions(StoreProvider::Transaction).await
-	}
-
 	async fn insert_collection_one_by_one(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
@@ -2233,19 +2038,15 @@ mod tests {
 		let mut c = 0;
 		for (doc_id, obj) in collection.as_ref() {
 			{
-				let (mut st, mem, mut tx) =
-					new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-				let mut mem = mem_store_write_lock!(mem);
-				t.insert(&mut tx, &mut mem, &mut st, obj.as_ref().clone(), *doc_id).await?;
+				let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
+				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				finish_operation(tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			c += 1;
 			{
-				let (mut st, mem, mut tx) =
-					new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-				let mem = mem_store_read_lock!(mem);
-				let p = check_tree_properties(&mut tx, &mem, &mut st, &t).await?;
+				let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+				let p = check_tree_properties(&mut tx, &mut st, &t).await?;
 				assert_eq!(p.doc_count, c);
 			}
 		}
@@ -2255,24 +2056,21 @@ mod tests {
 	async fn insert_collection_batch(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-			let mut mem = mem_store_write_lock!(mem);
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
 			for (doc_id, obj) in collection.as_ref() {
-				t.insert(&mut tx, &mut mem, &mut st, obj.as_ref().clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(tx, st, true).await?;
 		}
 		{
-			let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-			let mem = mem_store_read_lock!(mem);
-			check_tree_properties(&mut tx, &mem, &mut st, &t).await?;
+			let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+			check_tree_properties(&mut tx, &mut st, &t).await?;
 		}
 		Ok(map)
 	}
@@ -2280,18 +2078,15 @@ mod tests {
 	async fn delete_collection(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
 		for (doc_id, obj) in collection.as_ref() {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
-				let (mut st, mem, mut tx) =
-					new_operation(&ds, &ixs, sp, TransactionType::Write).await;
-				let mut mem = mem_store_write_lock!(mem);
+				let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Write).await;
 				assert!(
-					t.delete(&mut tx, &mut mem, &mut st, obj.as_ref().clone(), *doc_id).await?,
+					t.delete(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
 					doc_id,
 					obj
@@ -2299,39 +2094,32 @@ mod tests {
 				finish_operation(tx, st, true).await?;
 			}
 			{
-				let (mut st, mem, mut tx) =
-					new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-				let mem = mem_store_read_lock!(mem);
-				let res = t.knn_search(&mut tx, &mem, &mut st, obj, 1).await?;
+				let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
 				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
-				let (mut st, mem, mut tx) =
-					new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-				let mem = mem_store_read_lock!(mem);
-				check_tree_properties(&mut tx, &mem, &mut st, &t).await?;
+				let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+				check_tree_properties(&mut tx, &mut st, &t).await?;
 			}
 		}
 
-		let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
-		check_tree_properties(&mut tx, &mem, &mut st, &t).await?.check(0, 0, None, None, 0, 0);
+		let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
+		check_tree_properties(&mut tx, &mut st, &t).await?.check(0, 0, None, None, 0, 0);
 		Ok(())
 	}
 
 	async fn find_collection(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
 		t: &mut MTree,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
-		let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
+		let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
-				let res = t.knn_search(&mut tx, &mem, &mut st, obj, knn).await?;
+				let res = t.knn_search(&mut tx, &mut st, obj, knn).await?;
 				if collection.is_unique() {
 					assert!(
 						res.docs.contains(doc_id),
@@ -2345,7 +2133,7 @@ mod tests {
 				let expected_len = collection.as_ref().len().min(knn);
 				if expected_len != res.docs.len() {
 					debug!("{:?}", res.visited_nodes);
-					check_tree_properties(&mut tx, &mem, &mut st, t).await?;
+					check_tree_properties(&mut tx, &mut st, t).await?;
 				}
 				assert_eq!(
 					expected_len,
@@ -2363,14 +2151,12 @@ mod tests {
 	async fn check_full_knn(
 		ixs: &IndexStores,
 		ds: &Datastore,
-		sp: StoreProvider,
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 	) -> Result<(), Error> {
-		let (mut st, mem, mut tx) = new_operation(&ds, &ixs, sp, TransactionType::Read).await;
-		let mem = mem_store_read_lock!(mem);
+		let (mut st, mut tx) = new_operation(&ds, &ixs, TransactionType::Read).await;
 		for (_, obj) in map {
-			let res = t.knn_search(&mut tx, &mem, &mut st, obj, map.len()).await?;
+			let res = t.knn_search(&mut tx, &mut st, obj, map.len()).await?;
 			assert_eq!(
 				map.len(),
 				res.docs.len(),
@@ -2393,7 +2179,6 @@ mod tests {
 	}
 
 	async fn test_mtree_collection(
-		sp: StoreProvider,
 		capacities: &[u16],
 		vector_type: VectorType,
 		collection: TestCollection,
@@ -2415,18 +2200,18 @@ mod tests {
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
 				let map = if collection.as_ref().len() < 1000 {
-					insert_collection_one_by_one(&ixs, &ds, sp, &mut t, &collection).await?
+					insert_collection_one_by_one(&ixs, &ds, &mut t, &collection).await?
 				} else {
-					insert_collection_batch(&ixs, &ds, sp, &mut t, &collection).await?
+					insert_collection_batch(&ixs, &ds, &mut t, &collection).await?
 				};
 				if check_find {
-					find_collection(&ixs, &ds, sp, &mut t, &collection).await?;
+					find_collection(&ixs, &ds, &mut t, &collection).await?;
 				}
 				if check_full {
-					check_full_knn(&ixs, &ds, sp, &mut t, &map).await?;
+					check_full_knn(&ixs, &ds, &mut t, &map).await?;
 				}
 				if check_delete {
-					delete_collection(&ixs, &ds, sp, &mut t, &collection).await?;
+					delete_collection(&ixs, &ds, &mut t, &collection).await?;
 				}
 			}
 		}
@@ -2482,13 +2267,13 @@ mod tests {
 		}
 	}
 
-	async fn test_mtree_unique_xs(sp: StoreProvider) -> Result<(), Error> {
+	#[test(tokio::test)]
+	async fn test_mtree_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
 			for i in 0..30 {
 				test_mtree_collection(
-					sp,
 					&[3, 40],
 					vt,
 					TestCollection::new_unique(i, vt, 2),
@@ -2503,19 +2288,9 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_unique_xs_memory() -> Result<(), Error> {
-		test_mtree_unique_xs(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_unique_xs_transaction() -> Result<(), Error> {
-		test_mtree_unique_xs(StoreProvider::Transaction).await
-	}
-
-	async fn test_mtree_unique_small(sp: StoreProvider) -> Result<(), Error> {
+	async fn test_mtree_unique_small() -> Result<(), Error> {
 		for vt in [VectorType::F64, VectorType::I64] {
 			test_mtree_collection(
-				sp,
 				&[10, 20],
 				vt,
 				TestCollection::new_unique(150, vt, 3),
@@ -2529,19 +2304,9 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_unique_small_memory() -> Result<(), Error> {
-		test_mtree_unique_small(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_unique_small_transaction() -> Result<(), Error> {
-		test_mtree_unique_small(StoreProvider::Transaction).await
-	}
-
-	async fn test_mtree_unique_normal(sp: StoreProvider) -> Result<(), Error> {
+	async fn test_mtree_unique_normal() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
-				sp,
 				&[40],
 				vt,
 				TestCollection::new_unique(1000, vt, 20),
@@ -2555,16 +2320,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_unique_normal_memory() -> Result<(), Error> {
-		test_mtree_unique_normal(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_unique_normal_transaction() -> Result<(), Error> {
-		test_mtree_unique_normal(StoreProvider::Transaction).await
-	}
-
-	async fn test_mtree_random_xs(sp: StoreProvider) -> Result<(), Error> {
+	async fn test_mtree_random_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
@@ -2572,7 +2328,6 @@ mod tests {
 				info!("test_mtree_random_xs {}", i);
 				// 10, 40
 				test_mtree_collection(
-					sp,
 					&[3, 40],
 					vt,
 					TestCollection::new_random(i, vt, 1),
@@ -2587,19 +2342,9 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_random_xs_memory() -> Result<(), Error> {
-		test_mtree_random_xs(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_random_xs_transaction() -> Result<(), Error> {
-		test_mtree_random_xs(StoreProvider::Transaction).await
-	}
-
-	async fn test_mtree_random_small(sp: StoreProvider) -> Result<(), Error> {
+	async fn test_mtree_random_small() -> Result<(), Error> {
 		for vt in [VectorType::F64, VectorType::I64] {
 			test_mtree_collection(
-				sp,
 				&[10, 20],
 				vt,
 				TestCollection::new_random(150, vt, 3),
@@ -2613,19 +2358,9 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_random_small_memory() -> Result<(), Error> {
-		test_mtree_random_small(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_random_small_transaction() -> Result<(), Error> {
-		test_mtree_random_small(StoreProvider::Transaction).await
-	}
-
-	async fn test_mtree_random_normal(sp: StoreProvider) -> Result<(), Error> {
+	async fn test_mtree_random_normal() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
-				sp,
 				&[40],
 				vt,
 				TestCollection::new_random(1000, vt, 20),
@@ -2636,16 +2371,6 @@ mod tests {
 			.await?;
 		}
 		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_random_normal_memory() -> Result<(), Error> {
-		test_mtree_random_normal(StoreProvider::Memory).await
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_random_normal_transaction() -> Result<(), Error> {
-		test_mtree_random_normal(StoreProvider::Transaction).await
 	}
 
 	fn check_leaf_vec(
@@ -2677,41 +2402,38 @@ mod tests {
 
 	async fn check_node_read<F>(
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		node_id: NodeId,
 		check_func: F,
 	) where
 		F: FnOnce(&MTreeNode),
 	{
-		let n = st.get_node(tx, mem, node_id).await.unwrap();
+		let n = st.get_node(tx, node_id).await.unwrap();
 		check_func(&n.n);
 	}
 
 	async fn check_node_write<F>(
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		node_id: NodeId,
 		check_func: F,
 	) where
 		F: FnOnce(&MTreeNode),
 	{
-		let n = st.get_node_mut(tx, mem, node_id).await.unwrap();
+		let n = st.get_node_mut(tx, node_id).await.unwrap();
 		check_func(&n.n);
-		st.set_node(mem, n, false).await.unwrap();
+		st.set_node(n, false).await.unwrap();
 	}
 
 	async fn check_leaf_read<F>(
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		node_id: NodeId,
 		check_func: F,
 	) where
 		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
 	{
-		check_node_read(tx, mem, st, node_id, |n| {
+		check_node_read(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
 				check_func(m);
 			} else {
@@ -2723,14 +2445,13 @@ mod tests {
 
 	async fn check_leaf_write<F>(
 		tx: &mut Transaction,
-		mem: &mut Option<RwLockWriteGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		node_id: NodeId,
 		check_func: F,
 	) where
 		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
 	{
-		check_node_write(tx, mem, st, node_id, |n| {
+		check_node_write(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
 				check_func(m);
 			} else {
@@ -2742,14 +2463,13 @@ mod tests {
 
 	async fn check_internal<F>(
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		node_id: NodeId,
 		check_func: F,
 	) where
 		F: FnOnce(&InternalMap),
 	{
-		check_node_read(tx, mem, st, node_id, |n| {
+		check_node_read(tx, st, node_id, |n| {
 			if let MTreeNode::Internal(m) = n {
 				check_func(m);
 			} else {
@@ -2804,7 +2524,6 @@ mod tests {
 
 	async fn check_tree_properties(
 		tx: &mut Transaction,
-		mem: &Option<RwLockReadGuard<'_, TreeMemoryMap<MTreeNode>>>,
 		st: &mut MTreeStore,
 		t: &MTree,
 	) -> Result<CheckedProperties, Error> {
@@ -2822,7 +2541,7 @@ mod tests {
 			if depth > checks.max_depth {
 				checks.max_depth = depth;
 			}
-			let node = st.get_node(tx, mem, node_id).await?;
+			let node = st.get_node(tx, node_id).await?;
 			debug!(
 				"Node id: {} - depth: {} - len: {} - {:?}",
 				node.id,

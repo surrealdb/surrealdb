@@ -74,7 +74,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
 }
-
+#[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
 	Write,

@@ -5,9 +5,10 @@ use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::{StoreProvider, INDEX_STORES};
+use crate::idx::trees::store::INDEX_STORES;
 use crate::idx::IndexKeyBase;
 use crate::key;
+use crate::kvs::TransactionType;
 use crate::sql::array::Array;
 use crate::sql::index::{Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
@@ -335,16 +336,9 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 
-		let mut ft = FtIndex::new(
-			INDEX_STORES.clone(),
-			self.opt,
-			txn,
-			&p.az,
-			ikb,
-			p,
-			StoreProvider::Transaction,
-		)
-		.await?;
+		let mut ft =
+			FtIndex::new(&INDEX_STORES, self.opt, txn, &p.az, ikb, p, TransactionType::Write)
+				.await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(ctx, self.opt, txn, self.rid, n).await?;
@@ -357,12 +351,8 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(&mut self, txn: &Transaction, p: &MTreeParams) -> Result<(), Error> {
 		let mut tx = txn.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let sp = if p.in_memory {
-			StoreProvider::Memory
-		} else {
-			StoreProvider::Transaction
-		};
-		let mut mt = MTreeIndex::new(INDEX_STORES.clone(), &mut tx, ikb, p, sp).await?;
+		let mut mt =
+			MTreeIndex::new(&INDEX_STORES, &mut tx, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(&mut tx, self.rid, o).await?;

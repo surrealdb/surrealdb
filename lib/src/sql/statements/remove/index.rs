@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::idx::trees::store::INDEX_STORES;
 use crate::sql::{Base, Ident, Value};
 use derive::Store;
 use revision::revisioned;

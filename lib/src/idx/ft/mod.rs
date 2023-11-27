@@ -20,10 +20,10 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::{IndexStores, StoreProvider};
+use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs;
-use crate::kvs::Key;
+use crate::kvs::{Key, TransactionType};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -97,26 +97,26 @@ impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
-		ixs: IndexStores,
+		ixs: &IndexStores,
 		opt: &Options,
 		txn: &Transaction,
 		az: &str,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		sp: StoreProvider,
+		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let mut tx = txn.lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
-		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, sp).await
+		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await
 	}
 
 	async fn with_analyzer(
-		ixs: IndexStores,
+		ixs: &IndexStores,
 		run: &mut kvs::Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		sp: StoreProvider,
+		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = run.get(state_key.clone()).await? {
@@ -125,17 +125,26 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs.clone(), run, sp, index_key_base.clone(), p.doc_ids_order).await?,
-		));
-		let doc_lengths = Arc::new(RwLock::new(
-			DocLengths::new(ixs.clone(), sp, run, index_key_base.clone(), p.doc_lengths_order)
+			DocIds::new(ixs, run, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
 				.await?,
 		));
+		let doc_lengths = Arc::new(RwLock::new(
+			DocLengths::new(
+				ixs,
+				run,
+				index_key_base.clone(),
+				p.doc_lengths_order,
+				tt,
+				p.doc_lengths_cache,
+			)
+			.await?,
+		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(ixs.clone(), sp, run, index_key_base.clone(), p.postings_order).await?,
+			Postings::new(ixs, run, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
+				.await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(ixs, sp, run, index_key_base.clone(), p.terms_order).await?,
+			Terms::new(ixs, run, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
@@ -445,7 +454,7 @@ impl FtIndex {
 		})
 	}
 
-	pub(crate) async fn finish(self, tx: &Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, tx: &Transaction) -> Result<(), Error> {
 		let mut run = tx.lock().await;
 		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
@@ -487,7 +496,7 @@ mod tests {
 	use crate::dbs::{Options, Transaction};
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::trees::store::{StoreProvider, INDEX_STORES};
+	use crate::idx::trees::store::INDEX_STORES;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
@@ -541,7 +550,6 @@ mod tests {
 	pub(super) async fn tx_fti<'a>(
 		ds: &Datastore,
 		tt: TransactionType,
-		sp: StoreProvider,
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
@@ -551,7 +559,7 @@ mod tests {
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
-			INDEX_STORES.clone(),
+			&INDEX_STORES,
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
@@ -563,8 +571,12 @@ mod tests {
 				terms_order: order,
 				sc: Scoring::bm25(),
 				hl,
+				doc_ids_cache: 100,
+				doc_lengths_cache: 100,
+				postings_cache: 100,
+				terms_cache: 100,
 			},
-			sp,
+			tt,
 		)
 		.await
 		.unwrap();
@@ -593,15 +605,8 @@ mod tests {
 
 		{
 			// Add one document
-			let (ctx, opt, txn, mut fti) = tx_fti(
-				&ds,
-				TransactionType::Write,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, mut fti) =
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc1, vec![Value::from("hello the world")])
 				.await
 				.unwrap();
@@ -610,15 +615,8 @@ mod tests {
 
 		{
 			// Add two documents
-			let (ctx, opt, txn, mut fti) = tx_fti(
-				&ds,
-				TransactionType::Write,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, mut fti) =
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc2, vec![Value::from("a yellow hello")])
 				.await
 				.unwrap();
@@ -629,15 +627,8 @@ mod tests {
 		}
 
 		{
-			let (ctx, opt, txn, fti) = tx_fti(
-				&ds,
-				TransactionType::Read,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, fti) =
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 			// Check the statistics
 			let statistics = fti.statistics(&txn).await.unwrap();
 			assert_eq!(statistics.terms.keys_count, 7);
@@ -668,29 +659,15 @@ mod tests {
 
 		{
 			// Reindex one document
-			let (ctx, opt, txn, mut fti) = tx_fti(
-				&ds,
-				TransactionType::Write,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, mut fti) =
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
 				.await
 				.unwrap();
 			finish(&txn, fti).await;
 
-			let (ctx, opt, txn, fti) = tx_fti(
-				&ds,
-				TransactionType::Read,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, fti) =
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 
 			// We can still find 'foo'
 			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -707,15 +684,8 @@ mod tests {
 
 		{
 			// Remove documents
-			let (_, _, txn, mut fti) = tx_fti(
-				&ds,
-				TransactionType::Write,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (_, _, txn, mut fti) =
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.remove_document(&txn, &doc1).await.unwrap();
 			fti.remove_document(&txn, &doc2).await.unwrap();
 			fti.remove_document(&txn, &doc3).await.unwrap();
@@ -723,15 +693,8 @@ mod tests {
 		}
 
 		{
-			let (ctx, opt, txn, fti) = tx_fti(
-				&ds,
-				TransactionType::Read,
-				StoreProvider::Transaction,
-				&az,
-				btree_order,
-				false,
-			)
-			.await;
+			let (ctx, opt, txn, fti) =
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "hello").await;
 			assert!(hits.is_none());
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -758,15 +721,8 @@ mod tests {
 
 			let btree_order = 5;
 			{
-				let (ctx, opt, txn, mut fti) = tx_fti(
-					&ds,
-					TransactionType::Write,
-					StoreProvider::Transaction,
-					&az,
-					btree_order,
-					hl,
-				)
-				.await;
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
 				fti.index_document(
 					&ctx,
 					&opt,
@@ -807,15 +763,8 @@ mod tests {
 			}
 
 			{
-				let (ctx, opt, txn, fti) = tx_fti(
-					&ds,
-					TransactionType::Read,
-					StoreProvider::Transaction,
-					&az,
-					btree_order,
-					hl,
-				)
-				.await;
+				let (ctx, opt, txn, fti) =
+					tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
 
 				let statistics = fti.statistics(&txn).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);
