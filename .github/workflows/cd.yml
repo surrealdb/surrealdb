@@ -1,0 +1,39 @@
+name: Continuous deployment
+
+run-name: "CI run '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: Check format
+    runs-on: ubuntu-latest
+    steps:
+        - name: Install stable toolchain
+          uses: dtolnay/rust-toolchain@stable
+          with:
+            toolchain: stable
+  
+        - name: Checkout sources
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ inputs.git-ref || github.ref_name }}
+  
+        - name: Publish
+          env:
+            CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+            GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          run: |
+            # Install release-plz
+            cargo install --force --locked --version 0.3.30 release-plz
+  
+            # Bump the version
+            /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml

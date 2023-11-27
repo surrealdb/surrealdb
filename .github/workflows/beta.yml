@@ -1,0 +1,80 @@
+name: Beta release
+
+run-name: "Beta release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        description: "The github ref of this beta version (i.e. main, 1234567)"
+        default: main
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the beta release"
+  schedule:
+    - cron: '0 0 * * TUE'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare-vars:
+    name: Prepare vars
+    if: ${{ inputs.publish || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    outputs:
+      num-tuesday: ${{ steps.outputs.outputs.git-ref }}
+    steps:
+      - name: Set outputs
+        id: outputs
+        run: |
+          # Find out the number of Tuesday in a month this is
+          echo "num-tuesday=$((($(date +%d)-1)/7+1))" >> $GITHUB_OUTPUT
+      
+  crate:
+    name: Publish surrealdb to crates.io
+    needs: [prepare-vars]
+    # We are only going to release the beta version every second or fourth Tuesday
+    if: ${{ needs.prepare-vars.outputs.num-tuesday == 2 || needs.prepare-vars.outputs.num-tuesday == 4 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref || github.ref_name }}
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Install release-plz
+          cargo install --force --locked --version 0.3.30 release-plz
+
+          # Bump the version
+          /home/runner/.cargo/bin/release-plz update --config .config/release-plz.toml
+
+          # And append "-beta.1" at the end
+          sed -i "s#^version = \"\(.*\)\"#version = \"\1-beta.1\"#" lib/Cargo.toml
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          commit-message: Bump surrealdb version
+          author: GitHub <noreply@github.com>
+          title: Release new beta version
+          body: Merging this PR will trigger a new beta release
+          base: main
+          labels: release
+          branch: beta-release
+          delete-branch: true

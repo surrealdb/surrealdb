@@ -3,7 +3,7 @@ name: Version release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "surrealdb-v*.*.*"
 
 defaults:
   run:
@@ -245,7 +245,7 @@ jobs:
       - name: Configure tag
         shell: bash
         run: |
-          VERSION=${{ github.ref_name }}
+          VERSION=${${{ github.ref_name }}#surrealdb-}
           echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
 
       - name: Build the Docker image
