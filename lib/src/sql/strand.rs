@@ -135,7 +135,7 @@ mod test {
 		use super::Strand;
 
 		let strand = Strand("a:b".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s\"a:b\"");
+		assert_eq!(strand.to_string().as_str(), "s'a:b'");
 
 		let strand = Strand("2012-04-23T18:25:43.0000511Z".to_owned());
 		assert_eq!(strand.to_string().as_str(), "s\"2012-04-23T18:25:43.0000511Z\"");
