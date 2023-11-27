@@ -6272,3 +6272,77 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 
 	Ok(())
 }
+
+// Tests for custom defined functions
+
+#[tokio::test]
+async fn function_custom_optional_args() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
+		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
+		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
+
+		RETURN fn::one_arg();
+		RETURN fn::last_option();
+		RETURN fn::middle_option();
+
+		RETURN fn::one_arg(true);
+		RETURN fn::last_option(true);
+		RETURN fn::last_option(true, false);
+		RETURN fn::middle_option(true, false, true);
+		RETURN fn::middle_option(true, NONE, true);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 11);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[true, NONE]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[true, false]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[true, false, true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("[true, NONE, true]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
