@@ -134,10 +134,12 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[doc(hidden)]
-pub mod syn;
+
+#[cfg(feature = "ml")]
 #[doc(hidden)]
 pub mod obs;
+#[doc(hidden)]
+pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;

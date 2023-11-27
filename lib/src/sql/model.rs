@@ -1,20 +1,18 @@
+use crate::error::Db::Thrown;
 use crate::{
 	ctx::Context,
 	dbs::{Options, Transaction},
 	doc::CursorDoc,
 	err::Error,
-	sql::{value::Value, number::Number}
+	sql::{number::Number, value::Value},
 };
 use async_recursion::async_recursion;
 use derive::Store;
 use revision::revisioned;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use rust_decimal::prelude::ToPrimitive;
-use crate::error::Db::Thrown;
 
-#[cfg(feature = "ml")]
-use std::collections::HashMap;
 #[cfg(feature = "ml")]
 use crate::kvs::Datastore;
 #[cfg(feature = "ml")]
@@ -22,12 +20,13 @@ use crate::kvs::LockType::Optimistic;
 #[cfg(feature = "ml")]
 use crate::kvs::TransactionType::Read;
 #[cfg(feature = "ml")]
+use crate::obs::get::get_local_file;
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+#[cfg(feature = "ml")]
 use surrealml_core::execution::compute::ModelComputation;
 #[cfg(feature = "ml")]
 use surrealml_core::storage::surml_file::SurMlFile;
-#[cfg(feature = "ml")]
-use crate::obs::get::get_local_file;
-
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -51,7 +50,6 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-
 	/// This function unpacks a Value into a f32. This is used for unpacking the arguements passed
 	/// into the ML model from the SQL statement.
 	///
@@ -62,15 +60,9 @@ impl Model {
 	/// * `f32` - The unpacked value.
 	pub fn unpack_number(number: &Number) -> f32 {
 		match number {
-			Number::Int(i) => {
-				*i as f32
-			},
-			Number::Float(f) => {
-				*f as f32
-			},
-			Number::Decimal(d) => {
-				d.to_f32().unwrap()
-			}
+			Number::Int(i) => *i as f32,
+			Number::Float(f) => *f as f32,
+			Number::Decimal(d) => d.to_f32().unwrap(),
 		}
 	}
 
@@ -100,10 +92,11 @@ impl Model {
 					match values.get(key).unwrap() {
 						Value::Number(number) => {
 							map.insert(key.to_string(), Self::unpack_number(number));
-						},
-						_ => {
-							return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()))
 						}
+						_ => return Err(Thrown(
+							"args need to be either a number or an object or a vector of numbers"
+								.to_string(),
+						)),
 					}
 				}
 				// load the file hash from the Datastore
@@ -124,9 +117,11 @@ impl Model {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut map).map_err(|e| Thrown(e.to_string()))
-				}).await.unwrap()?;
-				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-			},
+				})
+				.await
+				.unwrap()?;
+				return Ok(Value::Number(Number::Float(outcome[0] as f64)));
+			}
 			// performing a raw compute
 			Value::Number(_) => {
 				let mut buffer = Vec::new();
@@ -134,7 +129,7 @@ impl Model {
 					match i {
 						Value::Number(number) => {
 							buffer.push(Self::unpack_number(number));
-						},
+						}
 						_ => {
 							println!("Not a number");
 						}
@@ -158,12 +153,17 @@ impl Model {
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(|e| {Thrown(e.to_string())})
-				}).await.unwrap()?;
-				return Ok(Value::Number(Number::Float(outcome[0] as f64)))
-			},
+					compute_unit.raw_compute(tensor, None).map_err(|e| Thrown(e.to_string()))
+				})
+				.await
+				.unwrap()?;
+				return Ok(Value::Number(Number::Float(outcome[0] as f64)));
+			}
 			_ => {
-				return Err(Thrown("args need to be either a number or an object or a vector of numbers".to_string()));
+				return Err(Thrown(
+					"args need to be either a number or an object or a vector of numbers"
+						.to_string(),
+				));
 			}
 		}
 	}
@@ -182,13 +182,12 @@ impl Model {
 	}
 }
 
-
 #[cfg(test)]
 mod test {
 
-	use rust_decimal::Decimal;
-	use crate::sql::number::Number;
 	use super::Model;
+	use crate::sql::number::Number;
+	use rust_decimal::Decimal;
 
 	#[test]
 	fn test_unpack_int() {
