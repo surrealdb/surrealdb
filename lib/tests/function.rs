@@ -6278,14 +6278,17 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 #[tokio::test]
 async fn function_custom_optional_args() -> Result<(), Error> {
 	let sql = r#"
+		DEFINE FUNCTION fn::zero_arg() { [] };
 		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
 		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
 		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
 
+		RETURN fn::zero_arg();
 		RETURN fn::one_arg();
 		RETURN fn::last_option();
 		RETURN fn::middle_option();
 
+		RETURN fn::zero_arg(true);
 		RETURN fn::one_arg(true);
 		RETURN fn::last_option(true);
 		RETURN fn::last_option(true, false);
@@ -6309,6 +6312,14 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
 	match res.remove(0).result {
 		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
 		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.")
@@ -6322,6 +6333,11 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	match res.remove(0).result {
 		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
 		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 3 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.")
 	}
 	//
 	let tmp = res.remove(0).result?;

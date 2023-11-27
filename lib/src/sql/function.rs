@@ -191,16 +191,17 @@ impl Function {
 				}
 				// Return the value
 				// Check the function arguments
-				let mut required_args_len = 0;
+				let max_args_len = val.args.len();
+				let mut min_args_len = 0;
 				val.args.iter().rev().for_each(|(_, kind)| match kind {
-					Kind::Option(_) if required_args_len == 0 => {}
-					_ => required_args_len += 1,
+					Kind::Option(_) if min_args_len == 0 => {}
+					_ => min_args_len += 1,
 				});
 
-				if x.len() < required_args_len {
+				if x.len() < min_args_len || max_args_len < x.len() {
 					return Err(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),
-						message: match (required_args_len, val.args.len()) {
+						message: match (min_args_len, max_args_len) {
 							(1, 1) => String::from("The function expects 1 argument."),
 							(r, t) if r == t => format!("The function expects {r} arguments."),
 							(r, t) => format!("The function expects {r} to {t} arguments."),
