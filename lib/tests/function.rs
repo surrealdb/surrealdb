@@ -2719,7 +2719,7 @@ async fn function_object_entries() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[ [ 'a', 1 ], [ 'b', 2 ] ]");
+	let val = Value::parse("[ [ 'a', 1 ], [ 'b', 2 ] ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2736,7 +2736,7 @@ async fn function_object_from_entries() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("{ a: 1, b: 2 }");
+	let val = Value::parse("{ a: 1, b: 2 }");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2753,7 +2753,7 @@ async fn function_object_keys() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[ 'a', 'b' ]");
+	let val = Value::parse("[ 'a', 'b' ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2770,7 +2770,7 @@ async fn function_object_len() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("2");
+	let val = Value::parse("2");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2787,7 +2787,7 @@ async fn function_object_values() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("[ 1, 2 ]");
+	let val = Value::parse("[ 1, 2 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
