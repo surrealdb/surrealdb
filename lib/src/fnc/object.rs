@@ -63,9 +63,7 @@ pub fn len((object,): (Object,)) -> Result<Value, Error> {
 }
 
 pub fn keys((object,): (Object,)) -> Result<Value, Error> {
-	Ok(Value::Array(Array(
-		object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect(),
-	)))
+	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
 }
 
 pub fn values((object,): (Object,)) -> Result<Value, Error> {
