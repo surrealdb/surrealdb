@@ -174,9 +174,9 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 		}
 	})?;
 	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
-	for (index, (lookup_time, status, value)) in responses.into_iter().enumerate() {
+	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
 		let stats = Stats {
-			lookup_time,
+			execution_time,
 		};
 		match status {
 			Status::Ok => {

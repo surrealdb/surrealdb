@@ -354,25 +354,25 @@ impl WithStats<Response> {
 	///
 	/// // Get the first (and only) user from the first query
 	/// if let Some((stats, result)) = response.take(0) {
-	///     let lookup_time = stats.lookup_time;
+	///     let execution_time = stats.execution_time;
 	///     let user: Option<User> = result?;
 	/// }
 	///
 	/// // Get all users from the second query
 	/// if let Some((stats, result)) = response.take(1) {
-	///     let lookup_time = stats.lookup_time;
+	///     let execution_time = stats.execution_time;
 	///     let users: Vec<User> = result?;
 	/// }
 	///
 	/// // Retrieve John's address without making a special struct for it
 	/// if let Some((stats, result)) = response.take((2, "address")) {
-	///     let lookup_time = stats.lookup_time;
+	///     let execution_time = stats.execution_time;
 	///     let address: Option<String> = result?;
 	/// }
 	///
 	/// // Get all users' addresses
 	/// if let Some((stats, result)) = response.take((3, "address")) {
-	///     let lookup_time = stats.lookup_time;
+	///     let execution_time = stats.execution_time;
 	///     let addresses: Vec<String> = result?;
 	/// }
 	/// #
@@ -484,7 +484,7 @@ mod tests {
 		vec.into_iter()
 			.map(|result| {
 				let stats = Stats {
-					lookup_time: Default::default(),
+					execution_time: Default::default(),
 				};
 				(stats, result)
 			})

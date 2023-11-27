@@ -117,7 +117,7 @@ impl DbResponse {
 					.into_iter()
 					.map(|response| {
 						let stats = Stats {
-							lookup_time: response.time,
+							execution_time: response.time,
 						};
 						let result = match response.status {
 							Status::Ok => Ok(response.result),

@@ -369,7 +369,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		let stats = Stats {
-			lookup_time: response.time,
+			execution_time: response.time,
 		};
 		match response.result {
 			Ok(value) => map.insert(index, (stats, Ok(value))),

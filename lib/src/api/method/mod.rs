@@ -85,7 +85,8 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct Stats {
-	pub lookup_time: Duration,
+	/// The time taken to execute the query
+	pub execution_time: Duration,
 }
 
 /// Responses returned with statistics
