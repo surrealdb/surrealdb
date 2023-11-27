@@ -1,4 +1,4 @@
-use crate::sql::escape::quote_str;
+use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -58,7 +58,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_str(&self.0), f)
+		Display::fmt(&quote_plain_str(&self.0), f)
 	}
 }
 

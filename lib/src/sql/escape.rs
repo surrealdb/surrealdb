@@ -49,7 +49,12 @@ pub fn quote_str(s: &str) -> String {
 	ret.push(quote);
 	escape_into(&mut ret, s, quote == DOUBLE);
 	ret.push(quote);
+	ret
+}
 
+#[inline]
+pub fn quote_plain_str(s: &str) -> String {
+	let mut ret = quote_str(s);
 	#[cfg(not(feature = "experimental_parser"))]
 	{
 		// HACK: We need to prefix strands which look like records, uuids, or datetimes with an `s`
@@ -59,7 +64,7 @@ pub fn quote_str(s: &str) -> String {
 		// directly to avoid having to create a common interface between the old and new parser.
 		if crate::syn::v1::literal::uuid(&ret).is_ok()
 			|| crate::syn::v1::literal::datetime(&ret).is_ok()
-			|| crate::syn::thing_raw(&ret).is_ok()
+			|| crate::syn::thing(&ret).is_ok()
 		{
 			ret.insert(0, 's');
 		}
