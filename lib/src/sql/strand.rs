@@ -130,7 +130,7 @@ pub(crate) mod no_nul_bytes {
 mod test {
 
 	#[cfg(not(feature = "experimental_parser"))]
-	#[cfg(test)]
+	#[test]
 	fn ensure_strands_are_prefixed() {
 		use super::Strand;
 
