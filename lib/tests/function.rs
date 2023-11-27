@@ -6336,7 +6336,7 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	}
 	//
 	match res.remove(0).result {
-		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 3 arguments." => (),
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
 		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.")
 	}
 	//
