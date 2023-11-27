@@ -2,9 +2,16 @@
 mod common;
 
 mod ws_integration {
+	use serde::Deserialize;
 	use std::time::Duration;
 
 	use serde_json::json;
+	use surrealdb::engine::any::Any;
+	use surrealdb::engine::remote::ws::{Client, Ws};
+	use surrealdb::method::Stream;
+	use surrealdb::opt::auth::Root;
+	use surrealdb::sql::Thing;
+	use surrealdb::Surreal;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -1547,5 +1554,72 @@ mod ws_integration {
 		);
 
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn break_lq_mixed_protocol() -> Result<(), Box<dyn std::error::Error>> {
+		// Baseline params
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let table_name = "test_tableBB4B0A788C7E46E798720AEF938CBCF6";
+
+		// Create a text protocol connection
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let socket = &mut common::connect_ws(&addr).await?;
+		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
+		assert!(res.is_ok(), "result: {:?}", res);
+
+		// Create a binary protocol connection
+		let binary: Surreal<Client> = Surreal::new::<Ws>(addr).await.unwrap();
+		binary
+			.signin(Root {
+				username: USER,
+				password: PASS,
+			})
+			.await
+			.unwrap();
+
+		binary.use_ns(&ns).use_db(&db).await.unwrap();
+
+		// Start plaintext Live Query
+		let _live_query_response = common::ws_send_msg_and_wait_response(
+			socket,
+			serde_json::to_string(&json!({
+					"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
+					"method": "live",
+					"params": [
+						table_name
+					],
+			}))
+			.unwrap(),
+		)
+		.await
+		.unwrap_or_else(|e| panic!("Error sending message: {}", e))
+		.as_object()
+		.unwrap_or_else(|| panic!("Expected object, got {:?}", res));
+
+		// Start binary LQ
+		let mut lq: Stream<Client, Vec<RecordId>> = binary.select(table_name).live().await.unwrap();
+
+		// Repeatedly create plaintext updates
+		let pt_publish = async {
+			loop {
+				let query = format!(r#"CREATE {};"#, table_name,);
+				let json = json!({
+					"id": "1",
+					"method": "query",
+					"params": [query],
+				});
+				common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await.unwrap();
+			}
+		};
+		Ok(())
+	}
+
+	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+	struct RecordId {
+		id: Thing,
 	}
 }
