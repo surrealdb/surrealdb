@@ -9,7 +9,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag,
 	character::complete::char,
-	combinator::{map, value},
+	combinator::{cut, map, value},
 	sequence::delimited,
 };
 
@@ -18,11 +18,17 @@ pub fn thing(i: &str) -> IResult<&str, Thing> {
 }
 
 fn thing_single(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\''), thing_raw, char('\''))(i)
+	alt((
+		delimited(tag("r\'"), cut(thing_raw), cut(char('\''))),
+		delimited(char('\''), thing_raw, char('\'')),
+	))(i)
 }
 
 fn thing_double(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\"'), thing_raw, char('\"'))(i)
+	alt((
+		delimited(tag("r\""), cut(thing_raw), cut(char('\"'))),
+		delimited(char('\"'), thing_raw, char('\"')),
+	))(i)
 }
 
 pub fn thing_raw(i: &str) -> IResult<&str, Thing> {

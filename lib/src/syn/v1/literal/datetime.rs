@@ -6,8 +6,14 @@ use super::super::{
 use crate::sql::Datetime;
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use nom::{
-	branch::alt, character::complete::char, combinator::map, error::ErrorKind, error_position,
-	sequence::delimited, Err,
+	branch::alt,
+	bytes::complete::tag,
+	character::complete::char,
+	combinator::{cut, map},
+	error::ErrorKind,
+	error_position,
+	sequence::delimited,
+	Err,
 };
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
@@ -15,11 +21,17 @@ pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 }
 
 fn datetime_single(i: &str) -> IResult<&str, Datetime> {
-	delimited(char('\''), datetime_raw, char('\''))(i)
+	alt((
+		delimited(tag("t\'"), cut(datetime_raw), cut(char('\''))),
+		delimited(char('\''), datetime_raw, char('\'')),
+	))(i)
 }
 
 fn datetime_double(i: &str) -> IResult<&str, Datetime> {
-	delimited(char('\"'), datetime_raw, char('\"'))(i)
+	alt((
+		delimited(tag("t\""), cut(datetime_raw), cut(char('\"'))),
+		delimited(char('\"'), datetime_raw, char('\"')),
+	))(i)
 }
 
 pub fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {

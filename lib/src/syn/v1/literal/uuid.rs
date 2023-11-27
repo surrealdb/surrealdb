@@ -2,9 +2,9 @@ use super::super::{common::is_hex, IResult};
 use crate::sql::Uuid;
 use nom::{
 	branch::alt,
-	bytes::complete::take_while_m_n,
+	bytes::complete::{tag, take_while_m_n},
 	character::complete::char,
-	combinator::recognize,
+	combinator::{cut, recognize},
 	sequence::{delimited, tuple},
 };
 
@@ -13,11 +13,17 @@ pub fn uuid(i: &str) -> IResult<&str, Uuid> {
 }
 
 fn uuid_single(i: &str) -> IResult<&str, Uuid> {
-	delimited(char('\''), uuid_raw, char('\''))(i)
+	alt((
+		delimited(tag("u\'"), cut(uuid_raw), cut(char('\''))),
+		delimited(char('\''), uuid_raw, char('\'')),
+	))(i)
 }
 
 fn uuid_double(i: &str) -> IResult<&str, Uuid> {
-	delimited(char('\"'), uuid_raw, char('\"'))(i)
+	alt((
+		delimited(tag("u\""), cut(uuid_raw), cut(char('\"'))),
+		delimited(char('\"'), uuid_raw, char('\"')),
+	))(i)
 }
 
 fn uuid_raw(i: &str) -> IResult<&str, Uuid> {
