@@ -2711,7 +2711,7 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 #[tokio::test]
 async fn function_object_entries() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::entries({ a: 1, b: 2 });
+		RETURN object::entries({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2728,7 +2728,7 @@ async fn function_object_entries() -> Result<(), Error> {
 #[tokio::test]
 async fn function_object_from_entries() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::from_entries([ [ 'a', 1 ], [ 'b', 2 ] ]);
+		RETURN object::from_entries([ [ 'a', 1 ], [ 'b', 2 ] ]);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2745,7 +2745,7 @@ async fn function_object_from_entries() -> Result<(), Error> {
 #[tokio::test]
 async fn function_object_keys() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::keys({ a: 1, b: 2 });
+		RETURN object::keys({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2762,7 +2762,7 @@ async fn function_object_keys() -> Result<(), Error> {
 #[tokio::test]
 async fn function_object_len() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::len({ a: 1, b: 2 });
+		RETURN object::len({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2779,7 +2779,7 @@ async fn function_object_len() -> Result<(), Error> {
 #[tokio::test]
 async fn function_object_values() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::values({ a: 1, b: 2 });
+		RETURN object::values({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
