@@ -9,7 +9,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag,
 	character::complete::char,
-	combinator::{map, value},
+	combinator::{cut, map, value},
 	sequence::delimited,
 };
 
@@ -18,11 +18,17 @@ pub fn thing(i: &str) -> IResult<&str, Thing> {
 }
 
 fn thing_single(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\''), thing_raw, char('\''))(i)
+	alt((
+		delimited(tag("r\'"), cut(thing_raw), cut(char('\''))),
+		delimited(char('\''), thing_raw, char('\'')),
+	))(i)
 }
 
 fn thing_double(i: &str) -> IResult<&str, Thing> {
-	delimited(char('\"'), thing_raw, char('\"'))(i)
+	alt((
+		delimited(tag("r\""), cut(thing_raw), cut(char('\"'))),
+		delimited(char('\"'), thing_raw, char('\"')),
+	))(i)
 }
 
 pub fn thing_raw(i: &str) -> IResult<&str, Thing> {
@@ -59,6 +65,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::value::Value;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn thing_normal() {
@@ -80,6 +87,37 @@ mod tests {
 		let sql = "test:001";
 		let res = thing(sql);
 		let out = res.unwrap().1;
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_string() {
+		let sql = "'test:001'";
+		let res = Value::parse(sql);
+		let Value::Thing(out) = res else {
+			panic!()
+		};
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
+			}
+		);
+
+		let sql = "r'test:001'";
+		let res = Value::parse(sql);
+		let Value::Thing(out) = res else {
+			panic!()
+		};
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
 			out,

@@ -384,6 +384,23 @@ async fn query_binds() {
 }
 
 #[test_log::test(tokio::test)]
+async fn query_with_stats() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "CREATE foo; SELECT * FROM foo";
+	let mut response = db.query(sql).with_stats().await.unwrap();
+	// First query statement
+	let (stats, result) = response.take(0).unwrap();
+	assert!(stats.execution_time > Duration::ZERO);
+	let _: Value = result.unwrap();
+	// Second query statement
+	let (stats, result) = response.take(1).unwrap();
+	assert!(stats.execution_time > Duration::ZERO);
+	let _: Vec<RecordId> = result.unwrap();
+}
+
+#[test_log::test(tokio::test)]
 async fn query_chaining() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();

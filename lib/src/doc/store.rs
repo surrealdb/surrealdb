@@ -3,6 +3,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::key::key_req::KeyRequirements;
 
 impl<'a> Document<'a> {
 	pub async fn store(
@@ -10,7 +11,7 @@ impl<'a> Document<'a> {
 		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement<'_>,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
 		if !opt.force && !self.changed() {
@@ -26,7 +27,22 @@ impl<'a> Document<'a> {
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
 		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
-		run.set(key, self).await?;
+		//
+		match stm {
+			// This is a CREATE statement so try to insert the key
+			Statement::Create(_) => match run.put(key.key_category(), key, self).await {
+				// The key already exists, so return an error
+				Err(Error::TxKeyAlreadyExistsCategory(_)) => Err(Error::RecordExists {
+					thing: rid.to_string(),
+				}),
+				// Return any other received error
+				Err(e) => Err(e),
+				// Record creation worked fine
+				Ok(v) => Ok(v),
+			},
+			// This is not a CREATE statement, so update the key
+			_ => run.set(key, self).await,
+		}?;
 		// Carry on
 		Ok(())
 	}

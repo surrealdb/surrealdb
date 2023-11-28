@@ -1,7 +1,9 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
+use crate::idx::trees::vector::SharedVector;
 use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
+use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
@@ -218,6 +220,14 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
+	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	InvalidVectorDistance {
+		left: SharedVector,
+		right: SharedVector,
+		dist: f64,
+	},
+
+	/// The size of the vector is incorrect
 	#[error("The vector element ({current}) is not a number.")]
 	InvalidVectorType {
 		current: String,
@@ -229,6 +239,10 @@ pub enum Error {
 	InvalidVectorValue {
 		current: String,
 	},
+
+	/// Invalid regular expression
+	#[error("Invalid regular expression: {0:?}")]
+	InvalidRegex(String),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -361,6 +375,9 @@ pub enum Error {
 	IxNotFound {
 		value: String,
 	},
+
+	#[error("Unsupported distance: {0}")]
+	UnsupportedDistance(Distance),
 
 	/// The requested root user does not exist
 	#[error("The root user '{value}' does not exist")]
@@ -735,6 +752,12 @@ impl From<Base64Error> for Error {
 impl From<JWTError> for Error {
 	fn from(_: JWTError) -> Error {
 		Error::InvalidAuth
+	}
+}
+
+impl From<regex::Error> for Error {
+	fn from(error: regex::Error) -> Self {
+		Error::InvalidRegex(error.to_string())
 	}
 }
 

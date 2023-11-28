@@ -52,6 +52,27 @@ pub fn quote_str(s: &str) -> String {
 }
 
 #[inline]
+pub fn quote_plain_str(s: &str) -> String {
+	let mut ret = quote_str(s);
+	#[cfg(not(feature = "experimental_parser"))]
+	{
+		// HACK: We need to prefix strands which look like records, uuids, or datetimes with an `s`
+		// otherwise the strands will parsed as a different type when parsed again.
+		// This is not required for the new parser.
+		// Because this only required for the old parse we just reference the partial parsers
+		// directly to avoid having to create a common interface between the old and new parser.
+		if crate::syn::v1::literal::uuid(&ret).is_ok()
+			|| crate::syn::v1::literal::datetime(&ret).is_ok()
+			|| crate::syn::thing(&ret).is_ok()
+		{
+			ret.insert(0, 's');
+		}
+	}
+
+	ret
+}
+
+#[inline]
 /// Escapes a key if necessary
 pub fn escape_key(s: &str) -> Cow<'_, str> {
 	escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)

@@ -1,3 +1,5 @@
+use crate::err;
+use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
@@ -9,10 +11,6 @@ use surrealdb::dbs::Notification;
 use surrealdb::sql;
 use surrealdb::sql::Value;
 use tracing::Span;
-
-use crate::err;
-use crate::rpc::CONN_CLOSED_ERR;
-use crate::telemetry::metrics::ws::record_rpc;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OutputFormat {
@@ -73,7 +71,11 @@ impl Response {
 		let mut value = match self.result {
 			Ok(data) => {
 				let value = match data {
-					Data::Query(vec) => sql::to_value(vec).unwrap(),
+					Data::Query(vec) => {
+						let responses: Vec<_> =
+							vec.into_iter().map(dbs::ApiResponse::from).collect();
+						sql::to_value(responses).unwrap()
+					}
 					Data::Live(notification) => sql::to_value(notification).unwrap(),
 					Data::Other(value) => value,
 				};
@@ -104,8 +106,8 @@ impl Response {
 				"otel.status_message",
 				format!("code: {}, message: {}", err.code, err.message),
 			);
-			span.record("rpc.jsonrpc.error_code", err.code);
-			span.record("rpc.jsonrpc.error_message", err.message.as_ref());
+			span.record("rpc.error_code", err.code);
+			span.record("rpc.error_message", err.message.as_ref());
 		}
 
 		let (res_size, message) = match out {
@@ -127,14 +129,9 @@ impl Response {
 			}
 		};
 
-		if let Err(err) = chn.send(message).await {
-			if err.to_string() != CONN_CLOSED_ERR {
-				error!("Error sending response: {}", err);
-				return;
-			}
+		if chn.send(message).await.is_ok() {
+			record_rpc(&TelemetryContext::current(), res_size, is_error);
 		};
-
-		record_rpc(&TelemetryContext::current(), res_size, is_error);
 	}
 }
 

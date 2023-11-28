@@ -1,7 +1,9 @@
+use crate::err;
 use crate::err::Error;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
+use crate::sql::Value;
 
 pub(super) struct Tokens {
 	/// The input string
@@ -64,6 +66,18 @@ impl Tokens {
 
 	pub(super) fn list(&self) -> &Vec<Token> {
 		&self.t
+	}
+}
+
+impl TryFrom<Tokens> for Value {
+	type Error = err::Error;
+
+	fn try_from(tokens: Tokens) -> Result<Self, Error> {
+		let mut vec: Vec<Value> = Vec::with_capacity(tokens.t.len());
+		for token in tokens.t {
+			vec.push(token.get_str(&tokens.i)?.into())
+		}
+		Ok(vec.into())
 	}
 }
 
@@ -310,8 +324,8 @@ impl Splitter {
 mod tests {
 	use crate::idx::ft::analyzer::tests::test_analyzer;
 
-	#[test]
-	fn test_tokenize_blank_class() {
+	#[tokio::test]
+	async fn test_tokenize_blank_class() {
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
 			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
@@ -319,11 +333,12 @@ mod tests {
 				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
 				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456",
 			],
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_tokenize_source_code() {
+	#[tokio::test]
+	async fn test_tokenize_source_code() {
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class,camel,punct FILTERS lowercase",
 			r#"struct MyRectangle {
@@ -366,6 +381,7 @@ static LANGUAGE: &str = "Rust";"#,
 				"\"",
 				";",
 			],
-		);
+		)
+		.await;
 	}
 }

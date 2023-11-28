@@ -168,15 +168,7 @@ pub mod uuid {
 		Ok(Uuid::new_v4().into())
 	}
 
-	#[cfg(uuid_unstable)]
 	pub fn v7(_: ()) -> Result<Value, Error> {
 		Ok(Uuid::new_v7().into())
-	}
-	#[cfg(not(uuid_unstable))]
-	pub fn v7(_: ()) -> Result<Value, Error> {
-		return Err(Error::InvalidFunction {
-			name: String::from("rand::uuid::v7"),
-			message: format!("This function is not enabled in this version of SurrealDB."),
-		});
 	}
 }

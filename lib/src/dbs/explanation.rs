@@ -82,6 +82,10 @@ impl ExplainItem {
 				name: "Iterate Thing".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
+			Iterable::Defer(t) => Self {
+				name: "Iterate Thing".into(),
+				details: vec![("thing", Value::Thing(t.to_owned()))],
+			},
 			Iterable::Range(r) => Self {
 				name: "Iterate Range".into(),
 				details: vec![("table", Value::from(r.tb.to_owned()))],

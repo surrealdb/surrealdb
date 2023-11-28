@@ -2,7 +2,7 @@ use crate::sql::{Datetime, Duration, Idiom, Query, Range, Thing, Value};
 use crate::{err::Error, sql::Subquery};
 use nom::{Err, Finish};
 
-mod literal;
+pub mod literal;
 mod part;
 mod stmt;
 
@@ -89,6 +89,10 @@ pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 
 pub fn duration(input: &str) -> Result<Duration, Error> {
 	parse_impl(input, literal::duration)
+}
+
+pub fn path_like(input: &str) -> Result<Value, Error> {
+	parse_impl(input, value::path_like)
 }
 
 pub fn range(input: &str) -> Result<Range, Error> {

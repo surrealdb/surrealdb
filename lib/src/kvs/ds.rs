@@ -205,6 +205,7 @@ impl Datastore {
 		path: &str,
 		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
+		#[allow(unused_variables)]
 		let default_clock: Arc<RwLock<SizedClock>> =
 			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 

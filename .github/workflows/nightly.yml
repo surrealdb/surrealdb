@@ -48,7 +48,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install cargo-make
-        run: cargo install --debug cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -89,7 +89,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install cargo-make
-        run: cargo install --debug cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Check workspace
         run: cargo make ci-check
@@ -224,16 +224,18 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
         run: |
-          # Change `surrealdb` crate name to `surrealdb-nightly`
-          git apply .patches/surrealdb-nightly.patch
+          # Replace the crate name
+          # We are just going to replace the first occurance of surrealdb
+          sed -i "0,/surrealdb/s//surrealdb-nightly/" lib/Cargo.toml
 
           # Get the date and time of the last commit
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
           time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
 
           # Update the version to a nightly one
-          # This sets the nightly version to something like `1.20231117.130416`
-          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.${time}\"#" lib/Cargo.toml
+          # This sets the nightly version to something like `1.20231117.1130416`
+          # The 1 at the beginning of the patch number is just so it never starts with zero
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
 
           # Get the short commit
           shortRev=$(git rev-parse --short HEAD)
@@ -241,23 +243,19 @@ jobs:
           # Update the description
           sed -i "s#^description = \".*\"#description = \"A nightly release of the surrealdb crate based on commit ${shortRev}\"#" lib/Cargo.toml
 
-          # Configure release-plz
-          cp -v .patches/release-nightly-plz.toml release-plz.toml
-
           # Commit changes
           # We are not going to push these changes. We do this because
           # some git commands `release-plz` runs do not work in detached state.
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add release-plz.toml
           git commit -am 'Prepare nightly release'
           git checkout -b nightly
 
           # Install release-plz
-          cargo install --force --version 0.3.30 release-plz
+          cargo install --force --locked --version 0.3.30 release-plz
 
           # Publish cargo crate
-          /home/runner/.cargo/bin/release-plz release
+          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml
 
   docker:
     name: Build and publish Docker image

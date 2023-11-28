@@ -6,6 +6,7 @@ mod ws_integration {
 
 	use serde_json::json;
 	use test_log::test;
+	use ulid::Ulid;
 
 	use super::common::{self, PASS, USER};
 	use crate::common::error::TestError;
@@ -39,12 +40,15 @@ mod ws_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
 		//
 		// Prepare the connection
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -77,7 +81,7 @@ mod ws_integration {
 
 		// Sign in
 		let res =
-			common::ws_signin(socket, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
+			common::ws_signin(socket, "user", "pass", Some(&ns), Some(&db), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Send the info command
@@ -106,12 +110,15 @@ mod ws_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
 		//
 		// Prepare the connection
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Setup scope
@@ -133,8 +140,8 @@ mod ws_integration {
 				"id": "1",
 				"method": "signup",
 				"params": [{
-					"ns": "N",
-					"db": "D",
+					"ns": ns,
+					"db": db,
 					"sc": "scope",
 					"email": "email@email.com",
 					"pass": "pass",
@@ -164,12 +171,15 @@ mod ws_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
 		//
 		// Prepare the connection
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Setup scope
@@ -191,8 +201,8 @@ mod ws_integration {
 				"id": "1",
 				"method": "signup",
 				"params": [{
-					"ns": "N",
-					"db": "D",
+					"ns": ns,
+					"db": db,
 					"sc": "scope",
 					"email": "email@email.com",
 					"pass": "pass",
@@ -210,8 +220,8 @@ mod ws_integration {
 				"id": "1",
 				"method": "signin",
 				"params": [{
-					"ns": "N",
-					"db": "D",
+					"ns": ns,
+					"db": db,
 					"sc": "scope",
 					"email": "email@email.com",
 					"pass": "pass",
@@ -241,12 +251,15 @@ mod ws_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = &mut common::connect_ws(&addr).await?;
 
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
 		//
 		// Prepare the connection
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Setup scope
@@ -264,8 +277,8 @@ mod ws_integration {
 				"id": "1",
 				"method": "signup",
 				"params": [{
-					"ns": "N",
-					"db": "D",
+					"ns": ns,
+					"db": db,
 					"sc": "scope",
 					"user": "user",
 					"pass": "pass",
@@ -278,7 +291,7 @@ mod ws_integration {
 
 		// Sign in
 		let res =
-			common::ws_signin(socket, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
+			common::ws_signin(socket, "user", "pass", Some(&ns), Some(&db), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 
@@ -308,7 +321,7 @@ mod ws_integration {
 
 		// Signin
 		let res =
-			common::ws_signin(socket2, "user", "pass", Some("N"), Some("D"), Some("scope")).await;
+			common::ws_signin(socket2, "user", "pass", Some(&ns), Some(&db), Some("scope")).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Insert
@@ -348,7 +361,11 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Verify we have a ROOT session
-		let res = common::ws_query(socket, "DEFINE NAMESPACE NS").await;
+		let res = common::ws_query(
+			socket,
+			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+		)
+		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Invalidate session
@@ -364,7 +381,11 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Verify we invalidated the root session
-		let res = common::ws_query(socket, "DEFINE NAMESPACE NS2").await;
+		let res = common::ws_query(
+			socket,
+			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+		)
+		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 
@@ -414,7 +435,11 @@ mod ws_integration {
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Verify we have a ROOT session
-		let res = common::ws_query(socket, "DEFINE NAMESPACE D2").await;
+		let res = common::ws_query(
+			socket,
+			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+		)
+		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 		assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
@@ -428,10 +453,10 @@ mod ws_integration {
 
 		let socket = &mut common::connect_ws(&addr).await?;
 
-		let ns = "DE4E65C08E7248FB851CBB4D939C13C7";
-		let db = "D7C40F656162434DB4888E334032B52C";
 		let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
-		let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+		let _ =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await?;
 
 		// LIVE query via live endpoint
 		let live_res = common::ws_send_msg_and_wait_response(
@@ -504,10 +529,10 @@ mod ws_integration {
 
 		let socket = &mut common::connect_ws(&addr).await?;
 
-		let ns = "3CB1D26373AF45F78D836EF2F78384A2";
-		let db = "622772B60DEB46958B6450EE43ED2515";
 		let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
-		let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+		let _ =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await?;
 
 		// LIVE query via live endpoint
 		let live_res = common::ws_send_msg_and_wait_response(
@@ -581,10 +606,10 @@ mod ws_integration {
 
 		let socket = &mut common::connect_ws(&addr).await?;
 
-		let ns = "3498b03b44b5452a9d3f15252b454db1";
-		let db = "2cf93e52ff0a42f39d271412404a01f6";
 		let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
-		let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+		let _ =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await?;
 
 		// LIVE query via live endpoint
 		let live_res = common::ws_send_msg_and_wait_response(
@@ -662,10 +687,10 @@ mod ws_integration {
 
 		let socket = &mut common::connect_ws(&addr).await?;
 
-		let ns = "3498b03b44b5452a9d3f15252b454db1";
-		let db = "2cf93e52ff0a42f39d271412404a01f6";
 		let _ = common::ws_signin(socket, USER, PASS, None, None, None).await?;
-		let _ = common::ws_use(socket, Some(ns), Some(db)).await?;
+		let _ =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await?;
 
 		// LIVE query via query endpoint
 		let lq_res =
@@ -738,7 +763,9 @@ mod ws_integration {
 		//
 		// Prepare the connection
 		//
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Define variable using let
@@ -790,7 +817,9 @@ mod ws_integration {
 		//
 		// Prepare the connection
 		//
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Define variable
@@ -854,7 +883,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -897,7 +928,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Insert data
@@ -942,7 +975,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Insert data
@@ -981,7 +1016,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1030,7 +1067,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1092,7 +1131,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1166,7 +1207,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1227,7 +1270,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1274,7 +1319,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1334,7 +1381,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1393,7 +1442,9 @@ mod ws_integration {
 		//
 		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some("N"), Some("D")).await;
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		//
@@ -1449,6 +1500,52 @@ mod ws_integration {
 
 		// Verify response
 		assert!(res.starts_with("surrealdb-"), "result: {}", res);
+		Ok(())
+	}
+
+	// Validate that the WebSocket is able to process multiple queries concurrently
+	#[test(tokio::test)]
+	async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let socket = &mut common::connect_ws(&addr).await?;
+
+		//
+		// Prepare the connection
+		//
+		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res =
+			common::ws_use(socket, Some(&Ulid::new().to_string()), Some(&Ulid::new().to_string()))
+				.await;
+		assert!(res.is_ok(), "result: {:?}", res);
+
+		//
+		// Run 5 queries that do a SLEEP and verify they all complete concurrently
+		//
+
+		// Send queries
+		for i in 0..5 {
+			let query = format!("SLEEP 1s; RETURN 'done-{}';", i);
+			let query_msg = json!({
+					"id": "1",
+					"method": "query",
+					"params": [query],
+			});
+			let res = common::ws_send_msg(socket, serde_json::to_string(&query_msg).unwrap()).await;
+			assert!(res.is_ok(), "result: {:?}", res);
+		}
+
+		// Wait for queries to complete and verify they all completed within 2 seconds (assume they are executed concurrently)
+		let msgs = common::ws_recv_all_msgs(socket, 5, Duration::from_secs(2)).await;
+		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
+
+		let msgs = msgs.unwrap();
+		assert!(
+			msgs.iter().all(|v| v["error"].is_null()),
+			"Unexpected error received: {:#?}",
+			msgs
+		);
+
 		Ok(())
 	}
 }

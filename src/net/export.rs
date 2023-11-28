@@ -36,7 +36,7 @@ async fn handler(
 	// Create a chunked response
 	let (mut chn, bdy) = Body::channel();
 	// Create a new bounded channel
-	let (snd, rcv) = surrealdb::channel::new(1);
+	let (snd, rcv) = surrealdb::channel::bounded(1);
 
 	let export_job = db.export(&session, nsv, dbv, snd).await.map_err(Error::from)?;
 	// Spawn a new database export job
