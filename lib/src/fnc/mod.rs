@@ -18,6 +18,7 @@ pub mod http;
 pub mod math;
 pub mod meta;
 pub mod not;
+pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -191,6 +192,12 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"meta::tb" => meta::tb,
 		//
 		"not" => not::not,
+		//
+		"object::entries" => object::entries,
+		"object::from_entries" => object::from_entries,
+		"object::keys" => object::keys,
+		"object::len" => object::len,
+		"object::values" => object::values,
 		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
