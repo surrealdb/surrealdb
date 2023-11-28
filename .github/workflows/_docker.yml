@@ -250,9 +250,9 @@ jobs:
           ECR_IMAGE: ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ env.DOCKER_IMAGE_TAG_CURRENT }}
           DOCKER_IMAGE_CURRENT: docker.io/surrealdb/${{ env.DOCKER_IMAGE_REPO }}:${{ env.DOCKER_IMAGE_TAG_CURRENT }}
         run: |
-          echo docker pull --platform ${{ matrix.platform }} ${{ env.ECR_IMAGE }}
-          echo docker tag ${{ env.ECR_IMAGE }} ${{ env.DOCKER_IMAGE_CURRENT }}
-          echo docker push ${{ env.DOCKER_IMAGE_CURRENT }}
+          docker pull --platform ${{ matrix.platform }} ${{ env.ECR_IMAGE }}
+          docker tag ${{ env.ECR_IMAGE }} ${{ env.DOCKER_IMAGE_CURRENT }}
+          docker push ${{ env.DOCKER_IMAGE_CURRENT }}
       
       # Push the prod image as latest if this workflow is meant to update the latest tag
       - name: Push the Docker image with tag 'latest'
@@ -261,6 +261,6 @@ jobs:
           ECR_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.DOCKER_IMAGE_REPO }}:${{ env.DOCKER_IMAGE_TAG_CURRENT }}
           DOCKER_IMAGE_LATEST: docker.io/surrealdb/${{ env.DOCKER_IMAGE_REPO }}:${{ env.DOCKER_IMAGE_TAG_LATEST }}
         run: |
-          echo docker pull ${{ env.ECR_IMAGE }}
-          echo docker tag ${{ env.ECR_IMAGE }} ${{ env.DOCKER_IMAGE_LATEST }}
-          echo docker push ${{ env.DOCKER_IMAGE_LATEST }}
+          docker pull ${{ env.ECR_IMAGE }}
+          docker tag ${{ env.ECR_IMAGE }} ${{ env.DOCKER_IMAGE_LATEST }}
+          docker push ${{ env.DOCKER_IMAGE_LATEST }}

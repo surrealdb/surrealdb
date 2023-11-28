@@ -300,22 +300,21 @@ jobs:
         with:
           path: artifacts
 
-      # - name: Publish release
-      #   uses: softprops/action-gh-release@v1
-      #   if: ${{ inputs.create-release }}
-      #   with:
-      #     name: "Release ${{ github.ref_name }}"
-      #     files: |
-      #       LICENSE
-      #       artifacts/*.tgz
-      #       artifacts/*.exe
+      - name: Publish release
+        uses: softprops/action-gh-release@v1
+        if: ${{ inputs.create-release }}
+        with:
+          name: "Release ${{ github.ref_name }}"
+          files: |
+            LICENSE
+            artifacts/*.tgz
+            artifacts/*.exe
 
       - name: Set latest version
         if: ${{ inputs.create-release }}
         run: |
           echo ${{ github.ref_name }} > latest.txt
-          # TODO: remove echo
-          echo aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
+          aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -326,8 +325,7 @@ jobs:
 
       - name: Publish binaries
         run: |
-          # TODO: remove echo
-          echo aws s3 cp --cache-control 'no-store' artifacts/* s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          aws s3 cp --cache-control 'no-store' artifacts/* s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
 
   docker-publish:
     needs: [publish, prepare-vars]
@@ -377,9 +375,8 @@ jobs:
       - name: Publish universal MacOS binary
         if: ${{ inputs.publish }}
         run: |
-          # TODO: remove echo
-          echo aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
-          echo aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
 
   propagate:
     name: Propagate binaries to all regions
@@ -398,5 +395,5 @@ jobs:
         run: |
           regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
           for region in ${regions[@]}; do
-              echo aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
+              aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
           done
