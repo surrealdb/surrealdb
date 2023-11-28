@@ -174,7 +174,6 @@ impl<'a> Context<'a> {
 	}
 
 	/// Get the index_store for this context/ds
-	#[allow(dead_code)]
 	pub(crate) fn get_index_stores(&self) -> &IndexStores {
 		&self.index_stores
 	}
