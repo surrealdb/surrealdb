@@ -49,7 +49,14 @@ impl Value {
 				_ => vec![],
 			},
 			// No more parts so get the value
-			None => vec![prev],
+			None => match self {
+				Value::Array(_) => {
+					let mut res = self._each(&[path, &[Part::All]].concat(), prev.clone());
+					res.push(prev.clone());
+					res
+				},
+				_ => vec![prev],
+			},
 		}
 	}
 }

@@ -844,3 +844,55 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn field_definition_array_type_nested_items() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD friends ON person TYPE array<record<person>>;
+		UPDATE person:test CONTENT {
+		    friends: [person:jaime, person:tobie]
+		};
+		SELECT * FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				friends: [
+					person:jaime,
+					person:tobie
+				],
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				friends: [
+					person:jaime,
+					person:tobie
+				],
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
