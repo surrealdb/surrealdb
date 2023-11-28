@@ -109,7 +109,6 @@ impl FtIndex {
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
 		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await
 	}
-
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		run: &mut kvs::Transaction,

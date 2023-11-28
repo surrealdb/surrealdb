@@ -1,6 +1,7 @@
 pub mod cache;
 pub(crate) mod tree;
 
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
@@ -9,6 +10,8 @@ use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::sql::statements::DefineIndexStatement;
+use crate::sql::Index;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -172,7 +175,7 @@ pub trait TreeNode {
 }
 
 #[derive(Clone)]
-pub(crate) struct IndexStores(Arc<Inner>);
+pub struct IndexStores(Arc<Inner>);
 
 struct Inner {
 	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
@@ -221,5 +224,74 @@ impl IndexStores {
 	) -> MTreeStore {
 		let cache = self.0.mtree_caches.get_cache(generation, &keys, cache_size).await;
 		TreeStore::new(keys, cache, tt).await
+	}
+
+	pub(crate) async fn index_removed(
+		&self,
+		opt: &Options,
+		tx: &mut Transaction,
+		tb: &str,
+		ix: &str,
+	) -> Result<(), Error> {
+		self.remove_index(
+			opt,
+			tx.get_and_cache_tb_index(opt.ns(), opt.db(), tb, ix).await?.as_ref(),
+		)
+		.await
+	}
+
+	pub(crate) async fn namespace_removed(
+		&self,
+		opt: &Options,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
+		for tb in tx.all_tb(opt.ns(), opt.db()).await?.iter() {
+			self.table_removed(opt, tx, &tb.name).await?;
+		}
+		Ok(())
+	}
+
+	pub(crate) async fn table_removed(
+		&self,
+		opt: &Options,
+		tx: &mut Transaction,
+		tb: &str,
+	) -> Result<(), Error> {
+		for ix in tx.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
+			self.remove_index(opt, ix).await?;
+		}
+		Ok(())
+	}
+
+	async fn remove_index(&self, opt: &Options, ix: &DefineIndexStatement) -> Result<(), Error> {
+		let ikb = IndexKeyBase::new(opt, ix);
+		match ix.index {
+			Index::Search(_) => {
+				self.remove_search_cache(ikb).await;
+			}
+			Index::MTree(_) => {
+				self.remove_mtree_cache(ikb).await;
+			}
+			_ => {}
+		}
+		Ok(())
+	}
+
+	async fn remove_search_cache(&self, ikb: IndexKeyBase) {
+		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocIds(ikb.clone())).await;
+		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocLengths(ikb.clone())).await;
+		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::Postings(ikb.clone())).await;
+		self.0.btree_fst_caches.remove_cache(&TreeNodeProvider::Terms(ikb)).await;
+	}
+
+	async fn remove_mtree_cache(&self, ikb: IndexKeyBase) {
+		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocIds(ikb.clone())).await;
+		self.0.mtree_caches.remove_cache(&TreeNodeProvider::Vector(ikb.clone())).await;
+	}
+
+	pub async fn is_empty(&self) -> bool {
+		self.0.mtree_caches.is_empty().await
+			&& self.0.btree_fst_caches.is_empty().await
+			&& self.0.btree_trie_caches.is_empty().await
 	}
 }

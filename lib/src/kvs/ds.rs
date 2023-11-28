@@ -395,8 +395,7 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(test)]
-	pub(crate) fn index_store(&self) -> &IndexStores {
+	pub fn index_store(&self) -> &IndexStores {
 		&self.index_stores
 	}
 

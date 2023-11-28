@@ -58,6 +58,15 @@ where
 			}
 		}
 	}
+
+	pub(super) async fn remove_cache(&self, keys: &TreeNodeProvider) {
+		let key = keys.get_key(0);
+		self.0.write().await.remove(&key);
+	}
+
+	pub(crate) async fn is_empty(&self) -> bool {
+		self.0.read().await.is_empty()
+	}
 }
 
 impl<N> Default for TreeCaches<N>
