@@ -54,7 +54,7 @@ impl Value {
 					let mut res = self._each(&[path, &[Part::All]].concat(), prev.clone());
 					res.push(prev.clone());
 					res
-				},
+				}
 				_ => vec![prev],
 			},
 		}
