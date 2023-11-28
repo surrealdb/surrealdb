@@ -157,7 +157,8 @@ mod tests {
 	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::Terms;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionType, TransactionType::*};
+	use crate::kvs::TransactionType::{Read, Write};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use rand::{thread_rng, Rng};
 	use std::collections::HashSet;
 	use test_log::test;
@@ -178,110 +179,74 @@ mod tests {
 		set
 	}
 
+	async fn new_operation(
+		ds: &Datastore,
+		order: u32,
+		tt: TransactionType,
+	) -> (Transaction, Terms) {
+		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let t = Terms::new(ds.index_store(), &mut tx, IndexKeyBase::default(), order, tt, 100)
+			.await
+			.unwrap();
+		(tx, t)
+	}
+
+	async fn finish(mut tx: Transaction, mut t: Terms) {
+		t.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
+	}
+
 	#[test(tokio::test)]
 	async fn test_resolve_terms() {
 		const BTREE_ORDER: u32 = 7;
 
-		let idx = IndexKeyBase::default();
-
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				idx.clone(),
-				BTREE_ORDER,
-				TransactionType::Read,
-				100,
-			)
-			.await
-			.unwrap();
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			// Empty operation
+			let (tx, t) = new_operation(&ds, BTREE_ORDER, Write).await;
+			finish(tx, t).await;
 		}
 
 		// Resolve a first term
 		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				idx.clone(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
+			finish(tx, t).await;
+			let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
 		}
 
 		// Resolve a second term
 		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				idx.clone(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
+			finish(tx, t).await;
+			let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
 		}
 
 		// Resolve two existing terms with new frequencies
 		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				idx.clone(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
 			assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
+			finish(tx, t).await;
 
+			let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
 		}
 
 		// Resolve one existing terms and two new terms
 		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				idx.clone(),
-				BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
-
+			let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 			assert_eq!(t.resolve_term_id(&mut tx, "A").await.unwrap(), 2);
 			assert_eq!(t.resolve_term_id(&mut tx, "C").await.unwrap(), 0);
 			assert_eq!(t.resolve_term_id(&mut tx, "E").await.unwrap(), 3);
+			finish(tx, t).await;
 
+			let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 			assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 4);
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
 		}
 	}
 
@@ -289,34 +254,31 @@ mod tests {
 	async fn test_deletion() {
 		const BTREE_ORDER: u32 = 7;
 
-		let idx = IndexKeyBase::default();
-
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let mut t = Terms::new(
-			ds.index_store(),
-			&mut tx,
-			idx.clone(),
-			BTREE_ORDER,
-			TransactionType::Write,
-			100,
-		)
-		.await
-		.unwrap();
+		{
+			let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 
-		// Check removing an non-existing term id returns None
-		assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
+			// Check removing an non-existing term id returns None
+			assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
 
-		// Create few terms
-		t.resolve_term_id(&mut tx, "A").await.unwrap();
-		t.resolve_term_id(&mut tx, "C").await.unwrap();
-		t.resolve_term_id(&mut tx, "E").await.unwrap();
+			// Create few terms
+			t.resolve_term_id(&mut tx, "A").await.unwrap();
+			t.resolve_term_id(&mut tx, "C").await.unwrap();
+			t.resolve_term_id(&mut tx, "E").await.unwrap();
+			finish(tx, t).await;
+		}
 
 		for term in ["A", "C", "E"] {
+			let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 			let term_id = t.get_term_id(&mut tx, term).await.unwrap();
+
 			if let Some(term_id) = term_id {
+				let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 				t.remove_term_id(&mut tx, term_id).await.unwrap();
+				finish(tx, t).await;
+
+				let (mut tx, t) = new_operation(&ds, BTREE_ORDER, Read).await;
 				assert_eq!(t.get_term_id(&mut tx, term).await.unwrap(), None);
 			} else {
 				panic!("Term ID not found: {}", term);
@@ -324,11 +286,10 @@ mod tests {
 		}
 
 		// Check id recycling
+		let (mut tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 		assert_eq!(t.resolve_term_id(&mut tx, "B").await.unwrap(), 0);
 		assert_eq!(t.resolve_term_id(&mut tx, "D").await.unwrap(), 1);
-
-		t.finish(&mut tx).await.unwrap();
-		tx.commit().await.unwrap();
+		finish(tx, t).await;
 	}
 
 	fn random_term_freq_vec(term_count: usize) -> Vec<(String, TermFrequency)> {
@@ -345,23 +306,12 @@ mod tests {
 	async fn test_resolve_100_docs_with_50_words_one_by_one() {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..100 {
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				IndexKeyBase::default(),
-				100,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut t) = new_operation(&ds, 100, Write).await;
 			let terms_string = random_term_freq_vec(50);
 			for (term, _) in terms_string {
 				t.resolve_term_id(&mut tx, &term).await.unwrap();
 			}
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			finish(tx, t).await;
 		}
 	}
 
@@ -369,25 +319,14 @@ mod tests {
 	async fn test_resolve_100_docs_with_50_words_batch_of_10() {
 		let ds = Datastore::new("memory").await.unwrap();
 		for _ in 0..10 {
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut t = Terms::new(
-				ds.index_store(),
-				&mut tx,
-				IndexKeyBase::default(),
-				100,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, mut t) = new_operation(&ds, 100, Write).await;
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
 				for (term, _) in terms_string {
 					t.resolve_term_id(&mut tx, &term).await.unwrap();
 				}
 			}
-			t.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			finish(tx, t).await;
 		}
 	}
 }

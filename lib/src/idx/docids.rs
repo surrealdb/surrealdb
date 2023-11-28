@@ -197,12 +197,13 @@ impl Resolved {
 mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::IndexKeyBase;
+	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 
 	const BTREE_ORDER: u32 = 7;
 
-	async fn get_doc_ids(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
-		let mut tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
+		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let d =
 			DocIds::new(ds.index_store(), &mut tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100)
 				.await
@@ -221,37 +222,43 @@ mod tests {
 
 		// Resolve a first doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
+			finish(tx, d).await;
+
+			let (mut tx, d) = new_operation(&ds, Read).await;
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
-			finish(tx, d).await;
 			assert_eq!(doc_id, Resolved::New(0));
 		}
 
 		// Resolve the same doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
+			finish(tx, d).await;
+
+			let (mut tx, d) = new_operation(&ds, Read).await;
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
-			finish(tx, d).await;
 			assert_eq!(doc_id, Resolved::Existing(0));
 		}
 
 		// Resolve another single doc key
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			let doc_id = d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap();
+			finish(tx, d).await;
+
+			let (mut tx, d) = new_operation(&ds, Read).await;
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
 			assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
-			finish(tx, d).await;
 			assert_eq!(doc_id, Resolved::New(1));
 		}
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(
 				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
 				Resolved::Existing(0)
@@ -262,12 +269,13 @@ mod tests {
 				Resolved::Existing(1)
 			);
 			assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(3));
-			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
 			finish(tx, d).await;
+			let (mut tx, d) = new_operation(&ds, Read).await;
+			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
 		}
 
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(
 				d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(),
 				Resolved::Existing(0)
@@ -284,12 +292,13 @@ mod tests {
 				d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(),
 				Resolved::Existing(3)
 			);
+			finish(tx, d).await;
+			let (mut tx, d) = new_operation(&ds, Read).await;
 			assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
 			assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
 			assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".into()));
 			assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".into()));
 			assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
-			finish(tx, d).await;
 		}
 	}
 
@@ -299,7 +308,7 @@ mod tests {
 
 		// Create two docs
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::New(0));
 			assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::New(1));
 			finish(tx, d).await;
@@ -307,7 +316,7 @@ mod tests {
 
 		// Remove doc 1
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), Some(0));
 			finish(tx, d).await;
@@ -315,21 +324,21 @@ mod tests {
 
 		// Check 'Foo' has been removed
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 			finish(tx, d).await;
 		}
 
 		// Insert a new doc - should take the available id 1
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(0));
 			finish(tx, d).await;
 		}
 
 		// Remove doc 2
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
 			assert_eq!(d.remove_doc(&mut tx, "Bar".into()).await.unwrap(), Some(1));
 			finish(tx, d).await;
@@ -337,14 +346,14 @@ mod tests {
 
 		// Check 'Bar' has been removed
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 			finish(tx, d).await;
 		}
 
 		// Insert a new doc - should take the available id 2
 		{
-			let (mut tx, mut d) = get_doc_ids(&ds, TransactionType::Write).await;
+			let (mut tx, mut d) = new_operation(&ds, Write).await;
 			assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(1));
 			finish(tx, d).await;
 		}

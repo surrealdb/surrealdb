@@ -118,6 +118,17 @@ where
 	}
 }
 
+#[cfg(debug_assertions)]
+impl<N> Drop for TreeWrite<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	fn drop(&mut self) {
+		assert!(self.updated.is_empty(), "TreeWrite::finish not called?: updated not empty");
+		assert!(self.removed.is_empty(), "TreeWrite::finish not called?: removed not empty");
+	}
+}
+
 pub struct TreeRead<N>
 where
 	N: TreeNode + Debug + Clone,

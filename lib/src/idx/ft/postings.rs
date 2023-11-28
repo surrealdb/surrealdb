@@ -95,8 +95,25 @@ impl Postings {
 mod tests {
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionType, TransactionType::*};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType, TransactionType::*};
 	use test_log::test;
+
+	async fn new_operation(
+		ds: &Datastore,
+		order: u32,
+		tt: TransactionType,
+	) -> (Transaction, Postings) {
+		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let p = Postings::new(ds.index_store(), &mut tx, IndexKeyBase::default(), order, tt, 100)
+			.await
+			.unwrap();
+		(tx, p)
+	}
+
+	async fn finish(mut tx: Transaction, mut p: Postings) {
+		p.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
+	}
 
 	#[test(tokio::test)]
 	async fn test_postings() {
@@ -106,55 +123,36 @@ mod tests {
 
 		{
 			// Check empty state
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut p = Postings::new(
-				ds.index_store(),
-				&mut tx,
-				IndexKeyBase::default(),
-				DEFAULT_BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
+			finish(tx, p).await;
 
+			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
 			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 
 			// Add postings
+			let (mut tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
 			p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
 			p.update_posting(&mut tx, 1, 4, 5).await.unwrap();
+			finish(tx, p).await;
 
-			p.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
-		}
-
-		{
-			let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut p = Postings::new(
-				ds.index_store(),
-				&mut tx,
-				IndexKeyBase::default(),
-				DEFAULT_BTREE_ORDER,
-				TransactionType::Write,
-				100,
-			)
-			.await
-			.unwrap();
+			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
 			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
 			assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));
 			assert_eq!(p.get_term_frequency(&mut tx, 1, 4).await.unwrap(), Some(5));
 
+			let (mut tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
 			// Check removal of doc 2
 			assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));
 			// Again the same
 			assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), None);
 			// Remove doc 4
 			assert_eq!(p.remove_posting(&mut tx, 1, 4).await.unwrap(), Some(5));
+			finish(tx, p).await;
 
 			// The underlying b-tree should be empty now
+			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
 			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
-			tx.commit().await.unwrap();
 		}
 	}
 }

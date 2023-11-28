@@ -138,7 +138,9 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1100 DOC_LENGTHS_ORDER 1200 POSTINGS_ORDER 1300 DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 200 POSTINGS_CACHE 300 TERMS_CACHE 400 HIGHLIGHTS";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) \
+		DOC_IDS_ORDER 1100 DOC_LENGTHS_ORDER 1200 POSTINGS_ORDER 1300 TERMS_ORDER 1400 \
+		DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 200 POSTINGS_CACHE 300 TERMS_CACHE 400 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -165,7 +167,9 @@ mod tests {
 				comment: None,
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) DOC_IDS_ORDER 1000 DOC_LENGTHS_ORDER 1000 POSTINGS_ORDER 1000 TERMS_ORDER 1000 HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) \
+		DOC_IDS_ORDER 1100 DOC_LENGTHS_ORDER 1200 POSTINGS_ORDER 1300 TERMS_ORDER 1400 \
+		DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 200 POSTINGS_CACHE 300 TERMS_CACHE 400 HIGHLIGHTS");
 	}
 
 	#[test]
@@ -196,7 +200,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100"
 		);
 	}
 
@@ -216,7 +220,7 @@ mod tests {
 					distance: Distance::Euclidean,
 					capacity: 40,
 					doc_ids_order: 100,
-					doc_ids_cache: 110,
+					doc_ids_cache: 100,
 					mtree_cache: 100,
 				}),
 				comment: None,

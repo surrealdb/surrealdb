@@ -69,7 +69,7 @@ pub fn terms_order(i: &str) -> IResult<&str, u32> {
 }
 
 pub fn terms_cache(i: &str) -> IResult<&str, u32> {
-	order("CACHE_ORDER", i)
+	order("TERMS_CACHE", i)
 }
 
 pub fn highlights(i: &str) -> IResult<&str, bool> {

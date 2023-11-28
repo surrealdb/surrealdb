@@ -106,13 +106,17 @@ impl Display for Index {
 			Self::Search(p) => {
 				write!(
 					f,
-					"SEARCH ANALYZER {} {} DOC_IDS_ORDER {} DOC_LENGTHS_ORDER {} POSTINGS_ORDER {} TERMS_ORDER {}",
+					"SEARCH ANALYZER {} {} DOC_IDS_ORDER {} DOC_LENGTHS_ORDER {} POSTINGS_ORDER {} TERMS_ORDER {} DOC_IDS_CACHE {} DOC_LENGTHS_CACHE {} POSTINGS_CACHE {} TERMS_CACHE {}",
 					p.az,
 					p.sc,
 					p.doc_ids_order,
 					p.doc_lengths_order,
 					p.postings_order,
-					p.terms_order
+					p.terms_order,
+					p.doc_ids_cache,
+					p.doc_lengths_cache,
+					p.postings_cache,
+					p.terms_cache
 				)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
@@ -122,8 +126,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
 				)
 			}
 		}
