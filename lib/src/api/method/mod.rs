@@ -676,7 +676,7 @@ where
 	/// ```
 	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
 		Select {
-			router: self.router.extract(),
+			client: self,
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
