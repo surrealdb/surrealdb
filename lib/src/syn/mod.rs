@@ -3,7 +3,7 @@
 pub mod common;
 pub mod error;
 
-//#[cfg(not(feature = "experimental_parser"))]
+#[cfg(not(feature = "experimental_parser"))]
 pub mod v1;
 #[cfg(not(feature = "experimental_parser"))]
 pub use v1::{

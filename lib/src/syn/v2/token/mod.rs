@@ -179,7 +179,6 @@ pub enum Delim {
 pub enum DistanceKind {
 	Euclidean,
 	Manhattan,
-	Cosine,
 	Hamming,
 	Minkowski,
 }
@@ -189,7 +188,6 @@ impl DistanceKind {
 		match self {
 			DistanceKind::Euclidean => "EUCLIDEAN",
 			DistanceKind::Manhattan => "MANHATTAN",
-			DistanceKind::Cosine => "COSINE",
 			DistanceKind::Hamming => "HAMMING",
 			DistanceKind::Minkowski => "MINKOWSKI",
 		}

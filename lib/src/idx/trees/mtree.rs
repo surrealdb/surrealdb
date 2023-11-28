@@ -1060,7 +1060,7 @@ impl MTree {
 		// Find node entry Onn € N, e <> 0, for which d(On, Onn) is a minimum
 		for (onn_obj, onn_entry) in n_node.iter() {
 			if onn_entry.node != p.id {
-				let d = self.calculate_distance(on_obj.as_ref(), onn_obj.as_ref())?;
+				let d = self.calculate_distance(&on_obj, onn_obj)?;
 				if min.is_nan() || d < min {
 					onn = Some((onn_obj.clone(), onn_entry.clone()));
 				}
@@ -1264,12 +1264,6 @@ struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
 
 #[derive(PartialEq)]
 struct PriorityNode(f64, NodeId);
-
-impl PartialEq<Self> for PriorityNode {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0 && self.1 == other.1
-	}
-}
 
 impl Eq for PriorityNode {}
 
@@ -2224,6 +2218,7 @@ mod tests {
 				}
 			}
 		}
+		Ok(())
 	}
 
 	enum TestCollection {

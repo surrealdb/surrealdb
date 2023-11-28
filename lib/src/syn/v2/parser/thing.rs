@@ -6,13 +6,13 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, Span, TokenKind},
+		token::{t, TokenKind},
 	},
 };
 use std::ops::Bound;
 
 impl Parser<'_> {
-	pub fn parse_record_string(&mut self, start: Span) -> ParseResult<Thing> {
+	pub fn parse_record_string(&mut self) -> ParseResult<Thing> {
 		let thing = self.parse_thing()?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.

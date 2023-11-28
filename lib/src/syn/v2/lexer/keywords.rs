@@ -272,7 +272,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// Distance
 	UniCase::ascii("EUCLIDEAN") => TokenKind::Distance(DistanceKind::Euclidean),
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
-	UniCase::ascii("COSINE") => TokenKind::Distance(DistanceKind::Cosine),
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 

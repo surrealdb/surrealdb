@@ -522,6 +522,7 @@ impl Parser<'_> {
 		let name = self.parse_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
+			function: None,
 			tokenizers: None,
 			filters: None,
 			comment: None,
@@ -590,6 +591,16 @@ impl Parser<'_> {
 						}
 					}
 					res.tokenizers = Some(tokenizers);
+				}
+				t!("FUNCTION") => {
+					self.pop_peek();
+					expected!(self, "fn");
+					expected!(self, "::");
+					let mut ident = self.parse_token_value::<Ident>()?;
+					while self.eat(t!("::")) {
+						ident.0.push_str(&self.parse_token_value::<Ident>()?);
+					}
+					res.function = Some(ident);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

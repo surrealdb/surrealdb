@@ -444,7 +444,7 @@ fn parse_define_index() {
 fn parse_define_analyzer() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT "#
+		r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar"#
 	).unwrap();
 
 	assert_eq!(
@@ -466,6 +466,7 @@ fn parse_define_analyzer() {
 				Filter::Uppercase,
 			]),
 			comment: None,
+			function: Some(Ident("foo::bar".to_string())),
 		})),
 	)
 }

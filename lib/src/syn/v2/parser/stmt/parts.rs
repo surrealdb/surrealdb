@@ -308,7 +308,6 @@ impl Parser<'_> {
 			TokenKind::Distance(x) => match x {
 				DistanceKind::Euclidean => Distance::Euclidean,
 				DistanceKind::Manhattan => Distance::Manhattan,
-				DistanceKind::Cosine => Distance::Cosine,
 				DistanceKind::Hamming => Distance::Hamming,
 				DistanceKind::Minkowski => {
 					let distance = self.parse_token_value()?;

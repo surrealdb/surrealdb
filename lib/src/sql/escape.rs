@@ -53,9 +53,9 @@ pub fn quote_str(s: &str) -> String {
 
 #[inline]
 pub fn quote_plain_str(s: &str) -> String {
-	let mut ret = quote_str(s);
 	#[cfg(not(feature = "experimental_parser"))]
 	{
+		let mut ret = quote_str(s);
 		// HACK: We need to prefix strands which look like records, uuids, or datetimes with an `s`
 		// otherwise the strands will parsed as a different type when parsed again.
 		// This is not required for the new parser.
@@ -67,9 +67,11 @@ pub fn quote_plain_str(s: &str) -> String {
 		{
 			ret.insert(0, 's');
 		}
+		ret
 	}
 
-	ret
+	#[cfg(feature = "experimental_parser")]
+	quote_str(s)
 }
 
 #[inline]

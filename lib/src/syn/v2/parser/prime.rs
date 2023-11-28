@@ -22,8 +22,8 @@ impl Parser<'_> {
 				Ok(Value::Datetime(datetime))
 			}
 			t!("r\"") => {
-				let span = self.pop_peek().span;
-				Ok(Value::Thing(self.parse_record_string(span)?))
+				self.pop_peek();
+				Ok(Value::Thing(self.parse_record_string()?))
 			}
 			t!("$param") => {
 				let param = self.parse_token_value()?;
@@ -133,8 +133,8 @@ impl Parser<'_> {
 				Value::Datetime(datetime)
 			}
 			t!("r\"") => {
-				let span = self.pop_peek().span;
-				Value::Thing(self.parse_record_string(span)?)
+				self.pop_peek();
+				Value::Thing(self.parse_record_string()?)
 			}
 			t!("$param") => {
 				self.pop_peek();
