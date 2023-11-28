@@ -9,10 +9,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
 use std::fs::File;
+use std::future::Future;
+use std::ops::DerefMut;
 use std::path::Path;
+use std::pin::Pin;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{env, fs};
+use surrealdb::engine::remote::ws::Wss;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
@@ -244,14 +250,49 @@ pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 	Ok(ws_stream)
 }
 
-pub async fn ws_send_msg(socket: &mut WsStream, msg_req: String) -> Result<(), Box<dyn Error>> {
+struct SendTask {
+	socket: Arc<RwLock<WsStream>>,
+	msg_req: String,
+}
+
+impl Future for SendTask {
+	type Output = ();
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		let mut socket = self.socket.write().unwrap();
+		let mut socket = socket.deref_mut();
+		let msg = socket.send(Message::Text(self.msg_req.clone()));
+		match msg {
+			Ok(_) => Poll::Ready(()),
+			Err(e) => {
+				error!("Error sending the message: {}", e);
+				Poll::Pending
+			}
+		}
+	}
+}
+async fn send_task(
+	socket: Arc<RwLock<WsStream>>,
+	msg_req: String,
+) -> futures_util::sink::Send<'_, WsStream, Message> {
+	let mut socket = socket.write().unwrap();
+	return socket.deref_mut().send(Message::Text(msg_req));
+}
+
+pub async fn ws_send_msg(
+	socket: Arc<RwLock<WsStream>>,
+	msg_req: String,
+) -> Result<(), Box<dyn Error>> {
 	let now = time::Instant::now();
 	debug!("Sending message: {msg_req}");
+
+	let send_task = async || -> Result<(), tokio_tungstenite::tungstenite::error::Error> {};
+
 	tokio::select! {
 		_ = time::sleep(time::Duration::from_millis(500)) => {
 			return Err("timeout after 500ms waiting for the request to be sent".into());
 		}
-		res = socket.send(Message::Text(msg_req)) => {
+		res = send_task => {
 			debug!("Message sent in {:?}", now.elapsed());
 			if let Err(err) = res {
 				return Err(format!("Error sending the message: {}", err).into());

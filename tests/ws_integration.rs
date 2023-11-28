@@ -3,6 +3,8 @@ mod common;
 
 mod ws_integration {
 	use serde::Deserialize;
+	use std::ops::{Deref, DerefMut};
+	use std::sync::{Arc, RwLock};
 	use std::time::Duration;
 
 	use serde_json::json;
@@ -10,12 +12,13 @@ mod ws_integration {
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::method::Stream;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::sql::Thing;
+	use surrealdb::sql::{Id, Thing};
 	use surrealdb::Surreal;
 	use test_log::test;
+	use tokio::time::interval;
 	use ulid::Ulid;
 
-	use super::common::{self, PASS, USER};
+	use super::common::{self, RwLockWsStream, PASS, USER};
 	use crate::common::error::TestError;
 
 	#[test(tokio::test)]
@@ -1565,10 +1568,11 @@ mod ws_integration {
 
 		// Create a text protocol connection
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let socket = &mut common::connect_ws(&addr).await?;
-		let res = common::ws_signin(socket, USER, PASS, None, None, None).await;
+		let socket = Arc::new(RwLock::new(common::connect_ws(&addr).await?));
+		let mut write_lock = socket.write().unwrap();
+		let res = common::ws_signin(write_lock.deref_mut(), USER, PASS, None, None, None).await;
 		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(socket, Some(&ns), Some(&db)).await;
+		let res = common::ws_use(write_lock.deref_mut(), Some(&ns), Some(&db)).await;
 		assert!(res.is_ok(), "result: {:?}", res);
 
 		// Create a binary protocol connection
@@ -1584,8 +1588,9 @@ mod ws_integration {
 		binary.use_ns(&ns).use_db(&db).await.unwrap();
 
 		// Start plaintext Live Query
+		let mut write_lock = socket.write().unwrap();
 		let _live_query_response = common::ws_send_msg_and_wait_response(
-			socket,
+			write_lock.deref_mut(),
 			serde_json::to_string(&json!({
 					"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
 					"method": "live",
@@ -1601,20 +1606,49 @@ mod ws_integration {
 		.unwrap_or_else(|| panic!("Expected object, got {:?}", res));
 
 		// Start binary LQ
-		let mut lq: Stream<Client, Vec<RecordId>> = binary.select(table_name).live().await.unwrap();
+		let lq: Stream<Client, Vec<RecordId>> = binary.select(table_name).live().await.unwrap();
 
 		// Repeatedly create plaintext updates
-		let pt_publish = async {
+		let tb = table_name.to_string();
+		let sock = socket.clone();
+		let pt_publish = async move {
+			let mut interval = interval(Duration::from_millis(100));
 			loop {
-				let query = format!(r#"CREATE {};"#, table_name,);
+				interval.tick().await;
+				let query = format!(
+					r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#,
+					tb.clone(),
+					Ulid::new().to_string()
+				);
 				let json = json!({
 					"id": "1",
 					"method": "query",
 					"params": [query],
 				});
-				common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await.unwrap();
+				let sock = Arc::new(sock.write().unwrap());
+				common::ws_send_msg(
+					RwLockWsStream::into(sock),
+					serde_json::to_string(&json).unwrap(),
+				)
+				.await
+				.unwrap();
 			}
 		};
+		tokio::spawn(pt_publish);
+
+		// Repeatedly create binary updates
+		let bin_publish = async move {
+			let mut interval = interval(Duration::from_millis(100));
+			loop {
+				interval.tick().await;
+				let record = RecordId {
+					id: Thing::from((table_name, Id::uuid())),
+				};
+				let _ = binary.query("CREATE {table}").bind(("table", table_name)).await.unwrap();
+			}
+		};
+		tokio::spawn(bin_publish);
+
 		Ok(())
 	}
 
