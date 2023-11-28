@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
+use crate::idx::planner::knn::{cmp_f64, PriorityResult};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
@@ -1283,44 +1284,6 @@ impl Ord for PriorityNode {
 			return cmp;
 		}
 		self.1.cmp(&other.1)
-	}
-}
-
-#[derive(Debug)]
-struct PriorityResult(f64);
-
-impl Eq for PriorityResult {}
-
-impl PartialEq<Self> for PriorityResult {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
-}
-
-impl PartialOrd<Self> for PriorityResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		cmp_f64(&self.0, &other.0)
-	}
-}
-
-fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
-	if let Some(cmp) = f1.partial_cmp(f2) {
-		return cmp;
-	}
-	if f1.is_nan() {
-		if f2.is_nan() {
-			Ordering::Equal
-		} else {
-			Ordering::Less
-		}
-	} else {
-		Ordering::Greater
 	}
 }
 

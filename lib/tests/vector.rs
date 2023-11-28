@@ -145,3 +145,50 @@ async fn index_embedding() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_brut_force_knn() -> Result<(), Error> {
+	let sql = r"
+		CREATE pts:1 SET point = [1,2,3,4];
+		CREATE pts:2 SET point = [4,5,6,7];
+		CREATE pts:3 SET point = [8,9,10,11];
+		LET $pt = [2,3,4,5];
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
+		SELECT id FROM pts WHERE point <2> $pt EXPLAIN;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	for _ in 0..4 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'pts',
+					},
+					operation: 'Iterate Table'
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: pts:1,
+				dist: 2f
+			},
+			{
+				id: pts:2,
+				dist: 4f
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}

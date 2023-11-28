@@ -10,6 +10,7 @@ use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
+use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
@@ -19,10 +20,13 @@ use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Object, Table, Thing, Value};
+use crate::sql::{Array, Expression, Number, Object, Table, Thing, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+pub(super) type KnnEntry = (KnnPriorityList, Arc<Vec<Number>>);
+pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Arc<Vec<Number>>)>;
 
 pub(crate) struct QueryExecutor {
 	table: String,
@@ -32,6 +36,7 @@ pub(crate) struct QueryExecutor {
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
+	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
 }
 
 pub(crate) type IteratorRef = u16;
@@ -63,12 +68,14 @@ impl QueryExecutor {
 		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
+		knns: KnnExpressions,
 	) -> Result<Self, Error> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
 		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
 		let mut mt_entries = HashMap::default();
+		let mut knn_entries = HashMap::with_capacity(knns.len());
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
@@ -137,6 +144,10 @@ impl QueryExecutor {
 			}
 		}
 
+		for (exp, (knn, obj)) in knns {
+			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), obj));
+		}
+
 		Ok(Self {
 			table: table.0.clone(),
 			ft_map,
@@ -145,6 +156,7 @@ impl QueryExecutor {
 			it_entries: Vec::new(),
 			index_definitions: im.definitions,
 			mt_entries,
+			knn_entries,
 		})
 	}
 
@@ -154,10 +166,10 @@ impl QueryExecutor {
 		_thg: &Thing,
 		exp: &Expression,
 	) -> Result<Value, Error> {
-		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
-		})
+		if let Some((p, o)) = self.knn_entries.get(exp) {
+			todo!("Compute distance add add to the priority list ")
+		}
+		Ok(Value::Bool(true))
 	}
 
 	pub(super) fn add_iterator(&mut self, it_entry: IteratorEntry) -> IteratorRef {

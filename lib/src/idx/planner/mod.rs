@@ -1,5 +1,6 @@
 pub(crate) mod executor;
 pub(crate) mod iterators;
+pub(in crate::idx) mod knn;
 pub(crate) mod plan;
 mod tree;
 
@@ -43,8 +44,9 @@ impl<'a> QueryPlanner<'a> {
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
-			Some((node, im, with_indexes)) => {
-				let mut exe = QueryExecutor::new(ctx, self.opt, txn, &t, im).await?;
+			Some((node, im, with_indexes, knn_expressions)) => {
+				let mut exe =
+					QueryExecutor::new(ctx, self.opt, txn, &t, im, knn_expressions).await?;
 				match PlanBuilder::build(node, self.with, with_indexes)? {
 					Plan::SingleIndex(exp, io) => {
 						if io.require_distinct() {

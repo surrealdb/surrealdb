@@ -166,7 +166,7 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-enum IndexOption<'a> {
+enum ExecutorOption<'a> {
 	PreMatch,
 	None,
 	Execute(&'a QueryExecutor, &'a Thing),
@@ -176,22 +176,22 @@ fn get_index_option<'a>(
 	ctx: &'a Context<'_>,
 	doc: Option<&'a CursorDoc<'_>>,
 	exp: &'a Expression,
-) -> IndexOption<'a> {
+) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some(thg) = doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					if let Some(ir) = doc.ir {
 						if exe.is_iterator_expression(ir, exp) {
-							return IndexOption::PreMatch;
+							return ExecutorOption::PreMatch;
 						}
 					}
-					return IndexOption::Execute(exe, thg);
+					return ExecutorOption::Execute(exe, thg);
 				}
 			}
 		}
 	}
-	IndexOption::None
+	ExecutorOption::None
 }
 
 pub(crate) async fn matches(
@@ -201,9 +201,9 @@ pub(crate) async fn matches(
 	exp: &Expression,
 ) -> Result<Value, Error> {
 	match get_index_option(ctx, doc, exp) {
-		IndexOption::PreMatch => Ok(Value::Bool(true)),
-		IndexOption::None => Ok(Value::Bool(false)),
-		IndexOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
+		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
+		ExecutorOption::None => Ok(Value::Bool(false)),
+		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
 	}
 }
 
@@ -214,9 +214,9 @@ pub(crate) async fn knn(
 	exp: &Expression,
 ) -> Result<Value, Error> {
 	match get_index_option(ctx, doc, exp) {
-		IndexOption::PreMatch => Ok(Value::Bool(true)),
-		IndexOption::None => Ok(Value::Bool(false)),
-		IndexOption::Execute(exe, thg) => exe.knn(txn, thg, exp).await,
+		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
+		ExecutorOption::None => Ok(Value::Bool(false)),
+		ExecutorOption::Execute(exe, thg) => exe.knn(txn, thg, exp).await,
 	}
 }
 

@@ -622,7 +622,7 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	/// The query planner did not find an index able to support the match @@ for a given expression
 	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
