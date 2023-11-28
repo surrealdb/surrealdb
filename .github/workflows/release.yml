@@ -1,4 +1,4 @@
-name: Release
+name: Tag release
 
 run-name: "Tag release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'push' }}, latest: ${{ inputs.latest || github.event_name == 'schedule' }})"
 
