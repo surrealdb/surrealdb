@@ -25,12 +25,22 @@ fn bench_index_btree(c: &mut Criterion) {
 
 	group.bench_function("trees-insertion-fst", |b| {
 		b.to_async(Runtime::new().unwrap())
-			.iter(|| bench::<_, FstKeys>(samples_len, |i| get_key_value!(samples[i])))
+			.iter(|| bench::<_, FstKeys>(samples_len, 100, |i| get_key_value!(samples[i])))
 	});
 
 	group.bench_function("trees-insertion-trie", |b| {
 		b.to_async(Runtime::new().unwrap())
-			.iter(|| bench::<_, TrieKeys>(samples_len, |i| get_key_value!(samples[i])))
+			.iter(|| bench::<_, TrieKeys>(samples_len, 100, |i| get_key_value!(samples[i])))
+	});
+
+	group.bench_function("trees-insertion-fst-fullcache", |b| {
+		b.to_async(Runtime::new().unwrap())
+			.iter(|| bench::<_, FstKeys>(samples_len, 0, |i| get_key_value!(samples[i])))
+	});
+
+	group.bench_function("trees-insertion-trie-fullcache", |b| {
+		b.to_async(Runtime::new().unwrap())
+			.iter(|| bench::<_, TrieKeys>(samples_len, 0, |i| get_key_value!(samples[i])))
 	});
 
 	group.finish();
@@ -48,7 +58,7 @@ fn setup() -> (usize, Vec<usize>) {
 	(samples_len, samples)
 }
 
-async fn bench<F, BK>(samples_size: usize, sample_provider: F)
+async fn bench<F, BK>(samples_size: usize, cache_size: usize, sample_provider: F)
 where
 	F: Fn(usize) -> (Key, Payload),
 	BK: BKeys + Clone + Default + Debug,
@@ -56,7 +66,7 @@ where
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, 100);
+	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
 	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Write).await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);

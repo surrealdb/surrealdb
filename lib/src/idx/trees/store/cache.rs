@@ -10,6 +10,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub type CacheGen = u64;
+
 pub(super) struct TreeCaches<N>(Arc<RwLock<HashMap<Key, TreeCache<N>>>>)
 where
 	N: TreeNode + Debug + Clone;
@@ -20,7 +22,7 @@ where
 {
 	pub(super) async fn get_cache(
 		&self,
-		generation: u64,
+		generation: CacheGen,
 		keys: &TreeNodeProvider,
 		cache_size: usize,
 	) -> TreeCache<N> {
@@ -32,7 +34,7 @@ where
 			Entry::Occupied(mut e) => {
 				let c = e.get_mut();
 				// The cache and the store are matching, we can send a clone of the cache.
-				match generation.cmp(&c.generation) {
+				match generation.cmp(&c.generation()) {
 					Ordering::Less => {
 						// The store generation is older than the current cache,
 						// we return an empty cache, but we don't hold it
@@ -66,28 +68,68 @@ where
 		Self(Arc::new(RwLock::new(HashMap::new())))
 	}
 }
-pub struct TreeCache<N>
+
+#[derive(Clone)]
+pub enum TreeCache<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	generation: u64,
-	keys: TreeNodeProvider,
-	cache: Arc<Cache<NodeId, Arc<StoredNode<N>>>>,
+	Lru(CacheGen, TreeLruCache<N>),
+	Full(CacheGen, TreeFullCache<N>),
 }
 
 impl<N> TreeCache<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	pub fn new(generation: u64, keys: TreeNodeProvider, cache_size: usize) -> Self {
+	pub fn new(generation: CacheGen, keys: TreeNodeProvider, cache_size: usize) -> Self {
+		#[cfg(debug_assertions)]
+		info!("New cache - size : {cache_size} - gen: {generation}");
+		if cache_size == 0 {
+			TreeCache::Full(generation, TreeFullCache::new(keys))
+		} else {
+			TreeCache::Lru(generation, TreeLruCache::new(keys, cache_size))
+		}
+	}
+
+	pub(super) async fn get_node(
+		&self,
+		tx: &mut Transaction,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error> {
+		match self {
+			TreeCache::Lru(_, c) => c.get_node(tx, node_id).await,
+			TreeCache::Full(_, c) => c.get_node(tx, node_id).await,
+		}
+	}
+
+	fn generation(&self) -> CacheGen {
+		match self {
+			TreeCache::Lru(gen, _) | TreeCache::Full(gen, _) => *gen,
+		}
+	}
+}
+
+pub struct TreeLruCache<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	keys: TreeNodeProvider,
+	cache: Arc<Cache<NodeId, Arc<StoredNode<N>>>>,
+}
+
+impl<N> TreeLruCache<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	fn new(keys: TreeNodeProvider, cache_size: usize) -> Self {
 		Self {
-			generation,
 			keys,
 			cache: Arc::new(Cache::new(cache_size)),
 		}
 	}
 
-	pub(super) async fn get_node(
+	async fn get_node(
 		&self,
 		tx: &mut Transaction,
 		node_id: NodeId,
@@ -104,13 +146,63 @@ where
 	}
 }
 
-impl<N> Clone for TreeCache<N>
+impl<N> Clone for TreeLruCache<N>
 where
 	N: TreeNode + Debug + Clone,
 {
 	fn clone(&self) -> Self {
 		Self {
-			generation: self.generation,
+			keys: self.keys.clone(),
+			cache: self.cache.clone(),
+		}
+	}
+}
+
+pub struct TreeFullCache<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	keys: TreeNodeProvider,
+	cache: Arc<RwLock<HashMap<NodeId, Arc<StoredNode<N>>>>>,
+}
+
+impl<N> TreeFullCache<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	pub fn new(keys: TreeNodeProvider) -> Self {
+		Self {
+			keys,
+			cache: Arc::new(RwLock::new(HashMap::new())),
+		}
+	}
+
+	pub(super) async fn get_node(
+		&self,
+		tx: &mut Transaction,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error> {
+		// Let's first try with the read lock
+		if let Some(n) = self.cache.read().await.get(&node_id).cloned() {
+			return Ok(n);
+		}
+		match self.cache.write().await.entry(node_id) {
+			Entry::Occupied(e) => Ok(e.get().clone()),
+			Entry::Vacant(e) => {
+				let n = Arc::new(self.keys.load::<N>(tx, node_id).await?);
+				e.insert(n.clone());
+				Ok(n)
+			}
+		}
+	}
+}
+
+impl<N> Clone for TreeFullCache<N>
+where
+	N: TreeNode + Debug + Clone,
+{
+	fn clone(&self) -> Self {
+		Self {
 			keys: self.keys.clone(),
 			cache: self.cache.clone(),
 		}

@@ -800,13 +800,14 @@ mod tests {
 		ds: &Datastore,
 		t: &BTree<BK>,
 		tt: TransactionType,
+		cache_size: usize,
 	) -> (Transaction, BTreeStore<TrieKeys>)
 	where
 		BK: BKeys + Debug + Clone,
 	{
 		let st = ds
 			.index_store()
-			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, 20)
+			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
@@ -849,17 +850,17 @@ mod tests {
 		let mut t = BTree::new(BState::new(6));
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test::<_, TrieKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -910,17 +911,17 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
@@ -957,23 +958,23 @@ mod tests {
 		}
 	}
 
-	#[test(tokio::test)]
-	async fn test_btree_trie_keys_large_order_sequential_insertions() {
+	async fn test_btree_trie_keys_large_order_sequential_insertions(cache_size: usize) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write, cache_size).await;
 			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, cache_size).await;
 			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) =
+				new_operation_trie(&ds, &t, TransactionType::Read, cache_size).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -985,6 +986,16 @@ mod tests {
 			);
 			tx.cancel().await.unwrap();
 		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_large_order_sequential_insertions_lru_cache() {
+		test_btree_trie_keys_large_order_sequential_insertions(20).await
+	}
+
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_large_order_sequential_insertions_full_cache() {
+		test_btree_trie_keys_large_order_sequential_insertions(0).await
 	}
 
 	const REAL_WORLD_TERMS: [&str; 30] = [
@@ -1016,14 +1027,14 @@ mod tests {
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 
@@ -1055,7 +1066,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_trie_keys_real_world_insertions_small_() {
+	async fn test_btree_trie_keys_real_world_insertions_small() {
 		let expected = BStatistics {
 			keys_count: 17,
 			max_depth: 2,
@@ -1113,7 +1124,7 @@ mod tests {
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				t.insert(&mut tx, &mut st, key.into(), payload).await.unwrap();
 			}
@@ -1121,7 +1132,7 @@ mod tests {
 			tx.commit().await.unwrap();
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 
 		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 23);
@@ -1220,7 +1231,7 @@ mod tests {
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 		let mut check_generation = 0;
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
 			}
@@ -1239,7 +1250,7 @@ mod tests {
 			for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
 				{
 					let (mut tx, mut st) =
-						new_operation_trie(&ds, &t, TransactionType::Write).await;
+						new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 					debug!("Delete {}", key);
 					assert_eq!(t.delete(&mut tx, &mut st, key.into()).await?, Some(payload));
 					check_generation = check_finish_commit(
@@ -1253,14 +1264,15 @@ mod tests {
 				}
 				key_count -= 1;
 				{
-					let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+					let (mut tx, mut st) =
+						new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 					let s = t.statistics(&mut tx, &mut st).await?;
 					assert_eq!(s.keys_count, key_count);
 				}
 			}
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 
 		let s = t.statistics(&mut tx, &mut st).await.unwrap();
 		assert_eq!(s.keys_count, 18);
@@ -1333,7 +1345,7 @@ mod tests {
 
 		let mut check_generation = 0;
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
@@ -1349,7 +1361,7 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			print_tree(&mut tx, &mut st, &t).await;
 			tx.cancel().await?;
 		}
@@ -1358,7 +1370,8 @@ mod tests {
 			debug!("------------------------");
 			debug!("Delete {}", key);
 			{
-				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write).await;
+				let (mut tx, mut st) =
+					new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 				t.delete(&mut tx, &mut &mut st, key.into()).await?;
 				check_generation = check_finish_commit(
 					&mut t,
@@ -1374,7 +1387,7 @@ mod tests {
 			expected_keys.remove(key);
 
 			{
-				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
 						t.search(&mut tx, &mut st, &key.as_str().into()).await?,
@@ -1385,7 +1398,7 @@ mod tests {
 			}
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 		let s = t.statistics(&mut tx, &mut st).await?;
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
