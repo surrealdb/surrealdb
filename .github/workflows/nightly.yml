@@ -52,8 +52,6 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          echo "Skipping nightly release while we test" && exit 0
-
           # Replace the crate name
           # We are just going to replace the first occurance of surrealdb
           sed -i "0,/surrealdb/s//surrealdb-nightly/" lib/Cargo.toml
