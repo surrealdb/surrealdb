@@ -5,8 +5,15 @@
 /.github/ @surrealdb/ci
 
 # Configuration for deployment
+.dockerignore @surrealdb/ci
+build.rs @surrealdb/ci
+*.nix @surrealdb/ci
+/.cargo/ @surrealdb/ci
+/.config/ @surrealdb/ci
 /dev/ @surrealdb/ci
 /pkg/ @surrealdb/ci
+Makefile @surrealdb/ci
+Makefile.* @surrealdb/ci
 
 # General owners for the database
 /doc/ @surrealdb/db
@@ -15,6 +22,7 @@
 
 # Code for fuzzing configuration
 /lib/fuzz/ @surrealdb/security
+SECURITY.md @surrealdb/security
 
 # Code and tests for the Rust API
 /lib/CARGO.md @surrealdb/api
