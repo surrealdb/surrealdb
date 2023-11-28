@@ -1,4 +1,4 @@
-mod cache;
+pub mod cache;
 pub(crate) mod tree;
 
 use crate::err::Error;
@@ -86,7 +86,7 @@ where
 		}
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
+	pub async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
 		match self {
 			TreeStore::Write(w) => w.finish(tx).await,
 			_ => Ok(false),

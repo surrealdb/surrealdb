@@ -79,7 +79,7 @@ impl<N> TreeCache<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	fn new(generation: u64, keys: TreeNodeProvider, cache_size: usize) -> Self {
+	pub fn new(generation: u64, keys: TreeNodeProvider, cache_size: usize) -> Self {
 		Self {
 			generation,
 			keys,

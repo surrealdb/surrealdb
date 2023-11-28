@@ -5,7 +5,8 @@ use std::fmt::Debug;
 use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
-use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use surrealdb::idx::trees::store::cache::TreeCache;
+use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
 use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
@@ -50,20 +51,21 @@ fn setup() -> (usize, Vec<usize>) {
 async fn bench<F, BK>(samples_size: usize, sample_provider: F)
 where
 	F: Fn(usize) -> (Key, Payload),
-	BK: BKeys + Default + Debug,
+	BK: BKeys + Clone + Default + Debug,
 {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
-	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
-	let mut s = s.lock().await;
+	let c = TreeCache::new(0, TreeNodeProvider::Debug, 100);
+	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Write).await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);
 		// Insert the sample
 		t.insert(&mut tx, &mut s, key.clone(), payload).await.unwrap();
 		// Search for it
-		black_box(t.search(&mut tx, &mut s, &key).await.unwrap());
+		black_box(t.search_mut(&mut tx, &mut s, &key).await.unwrap());
 	}
+	s.finish(&mut tx).await.unwrap();
 	tx.commit().await.unwrap();
 }
 

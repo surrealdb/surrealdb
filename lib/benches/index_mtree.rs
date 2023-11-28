@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
-use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
+use surrealdb::idx::trees::store::cache::TreeCache;
+use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
 use surrealdb::idx::trees::vector::Vector;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
@@ -100,13 +101,14 @@ async fn insert_objects(ds: &Datastore, samples_size: usize, vector_size: usize)
 	let mut rng = thread_rng();
 	let mut t = mtree();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Write, 20);
-	let mut s = s.lock().await;
+	let c = TreeCache::new(0, TreeNodeProvider::Debug, 100);
+	let mut s = TreeStore::new(TreeNodeProvider::Debug, c.clone(), Write).await;
 	for i in 0..samples_size {
 		let object = random_object(&mut rng, vector_size);
 		// Insert the sample
 		t.insert(&mut tx, &mut s, object, i as DocId).await.unwrap();
 	}
+	s.finish(&mut tx).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -114,8 +116,8 @@ async fn knn_lookup_objects(ds: &Datastore, samples_size: usize, vector_size: us
 	let mut rng = thread_rng();
 	let t = mtree();
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20);
-	let mut s = s.lock().await;
+	let c = TreeCache::new(0, TreeNodeProvider::Debug, 100);
+	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
 	for _ in 0..samples_size {
 		let object = Arc::new(random_object(&mut rng, vector_size));
 		// Insert the sample
