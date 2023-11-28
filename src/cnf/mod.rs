@@ -29,7 +29,7 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 #[cfg(feature = "has-storage")]
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
-/// Set the maximum WebSocket frame size to 16mb
+/// What is the maximum WebSocket frame size (defaults to 16 MiB)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
 	let default = 16 << 20;
@@ -38,7 +38,7 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
 		.unwrap_or(default)
 });
 
-/// Set the maximum WebSocket frame size to 128mb
+/// What is the maximum WebSocket message size (defaults to 128 MiB)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
 	let default = 128 << 20;
@@ -47,11 +47,34 @@ pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
 		.unwrap_or(default)
 });
 
-/// How many concurrent tasks can be handled in a WebSocket
+/// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
 	let default = 24;
 	std::env::var("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
+/// What is the runtime thread memory stack size (defaults to 10MiB)
+#[cfg(feature = "has-storage")]
+pub static RUNTIME_STACK_SIZE: Lazy<usize> = Lazy::new(|| {
+	// Stack frames are generally larger in debug mode.
+	let default = if cfg!(debug_assertions) {
+		20 * 1024 * 1024 // 20MiB in debug mode
+	} else {
+		10 * 1024 * 1024 // 10MiB in release mode
+	};
+	std::env::var("SURREAL_RUNTIME_STACK_SIZE")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});
+
+/// How many threads which can be started for blocking operations (defaults to 512)
+#[cfg(feature = "has-storage")]
+pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> = Lazy::new(|| {
+	let default = 512;
+	std::env::var("SURREAL_RUNTIME_MAX_BLOCKING_THREADS")
 		.map(|v| v.parse::<usize>().unwrap_or(default))
 		.unwrap_or(default)
 });
