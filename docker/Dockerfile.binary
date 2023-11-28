@@ -6,7 +6,7 @@ FROM docker.io/ubuntu:18.04
 
 ARG CARGO_EXTRA_FEATURES="http-compression,storage-tikv"
 
-RUN apt-get update && apt-get install -y curl patch clang gpg build-essential && apt-get clean
+RUN apt-get update && apt-get install -y curl patch clang gpg build-essential git && apt-get clean
 
 # Install rust
 COPY docker/files/rustup-init.sh /tmp/rustup-init.sh
