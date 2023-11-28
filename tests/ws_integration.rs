@@ -2,24 +2,27 @@
 mod common;
 
 mod ws_integration {
+	use futures_util::StreamExt;
 	use serde::Deserialize;
-	use std::ops::{Deref, DerefMut};
-	use std::sync::{Arc, RwLock};
+	use std::ops::DerefMut;
+	use std::sync::mpsc::{Receiver, Sender};
+	use std::sync::{mpsc, Arc, RwLock};
 	use std::time::Duration;
 
 	use serde_json::json;
-	use surrealdb::engine::any::Any;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::method::Stream;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::sql::{Id, Thing};
-	use surrealdb::Surreal;
+	use surrealdb::{Notification, Surreal};
 	use test_log::test;
+	use tokio::task::LocalSet;
 	use tokio::time::interval;
 	use ulid::Ulid;
 
-	use super::common::{self, RwLockWsStream, PASS, USER};
+	use super::common::{self, PASS, USER};
 	use crate::common::error::TestError;
+	use crate::ws_integration;
 
 	#[test(tokio::test)]
 	async fn ping() -> Result<(), Box<dyn std::error::Error>> {
@@ -321,7 +324,7 @@ mod ws_integration {
 		.await
 		.unwrap_or_else(|e| panic!("Error sending message: {}", e))
 		.as_object()
-		.unwrap_or_else(|| panic!("Expected object, got {:?}", res));
+		.unwrap_or_else(|| panic!("Expected object"));
 
 		// Wait 2 seconds for auth to expire
 		tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -1569,11 +1572,13 @@ mod ws_integration {
 		// Create a text protocol connection
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let socket = Arc::new(RwLock::new(common::connect_ws(&addr).await?));
-		let mut write_lock = socket.write().unwrap();
-		let res = common::ws_signin(write_lock.deref_mut(), USER, PASS, None, None, None).await;
-		assert!(res.is_ok(), "result: {:?}", res);
-		let res = common::ws_use(write_lock.deref_mut(), Some(&ns), Some(&db)).await;
-		assert!(res.is_ok(), "result: {:?}", res);
+		{
+			let mut write_lock = socket.write().unwrap();
+			let res = common::ws_signin(write_lock.deref_mut(), USER, PASS, None, None, None).await;
+			assert!(res.is_ok(), "result: {:?}", res);
+			let res = common::ws_use(write_lock.deref_mut(), Some(&ns), Some(&db)).await;
+			assert!(res.is_ok(), "result: {:?}", res);
+		}
 
 		// Create a binary protocol connection
 		let binary: Surreal<Client> = Surreal::new::<Ws>(addr).await.unwrap();
@@ -1588,29 +1593,34 @@ mod ws_integration {
 		binary.use_ns(&ns).use_db(&db).await.unwrap();
 
 		// Start plaintext Live Query
-		let mut write_lock = socket.write().unwrap();
-		let _live_query_response = common::ws_send_msg_and_wait_response(
-			write_lock.deref_mut(),
-			serde_json::to_string(&json!({
-					"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
-					"method": "live",
-					"params": [
-						table_name
-					],
-			}))
-			.unwrap(),
-		)
-		.await
-		.unwrap_or_else(|e| panic!("Error sending message: {}", e))
-		.as_object()
-		.unwrap_or_else(|| panic!("Expected object, got {:?}", res));
+		{
+			let mut write_lock = socket.write().unwrap();
+			let _live_query_response = common::ws_send_msg_and_wait_response(
+				write_lock.deref_mut(),
+				serde_json::to_string(&json!({
+						"id": "66BB05C8-EF4B-4338-BCCD-8F8A19223CB1",
+						"method": "live",
+						"params": [
+							table_name
+						],
+				}))
+				.unwrap(),
+			)
+			.await
+			.unwrap_or_else(|e| panic!("Error sending message: {}", e))
+			.as_object()
+			.unwrap_or_else(|| panic!("Expected object"));
+		}
 
 		// Start binary LQ
-		let lq: Stream<Client, Vec<RecordId>> = binary.select(table_name).live().await.unwrap();
+		let mut lq_binary = binary.clone();
+		let mut lq: Stream<Client, Vec<RecordId>> =
+			lq_binary.select(table_name).live().await.unwrap();
 
 		// Repeatedly create plaintext updates
 		let tb = table_name.to_string();
 		let sock = socket.clone();
+		let local_set = LocalSet::new();
 		let pt_publish = async move {
 			let mut interval = interval(Duration::from_millis(100));
 			loop {
@@ -1625,18 +1635,34 @@ mod ws_integration {
 					"method": "query",
 					"params": [query],
 				});
-				let sock = Arc::new(sock.write().unwrap());
-				common::ws_send_msg(
-					RwLockWsStream::into(sock),
-					serde_json::to_string(&json).unwrap(),
+				let mut write_lock = sock.write().unwrap();
+				common::ws_send_msg(write_lock.deref_mut(), serde_json::to_string(&json).unwrap())
+					.await
+					.unwrap();
+			}
+		};
+		let sock = socket.clone();
+		let (pt_recv_send, pt_recv_recv): (Sender<serde_json::Value>, Receiver<serde_json::Value>) =
+			mpsc::channel();
+		let pt_receive = async move {
+			loop {
+				let vals = common::ws_recv_all_msgs(
+					sock.write().unwrap().deref_mut(),
+					1,
+					Duration::from_secs(1),
 				)
 				.await
 				.unwrap();
+				for val in vals {
+					pt_recv_send.send(val).unwrap();
+				}
 			}
 		};
-		tokio::spawn(pt_publish);
+		local_set.spawn_local(pt_publish);
+		local_set.spawn_local(pt_receive);
 
 		// Repeatedly create binary updates
+		let publish_binary = binary.clone();
 		let bin_publish = async move {
 			let mut interval = interval(Duration::from_millis(100));
 			loop {
@@ -1644,12 +1670,66 @@ mod ws_integration {
 				let record = RecordId {
 					id: Thing::from((table_name, Id::uuid())),
 				};
-				let _ = binary.query("CREATE {table}").bind(("table", table_name)).await.unwrap();
+				let _ = publish_binary
+					.query("CREATE {table}")
+					.bind(("table", table_name))
+					.await
+					.unwrap();
 			}
 		};
-		tokio::spawn(bin_publish);
+		let bin_task = tokio::spawn(bin_publish);
+
+		let (bin_recv_send, bin_recv_recv): (
+			Sender<Notification<RecordId>>,
+			Receiver<Notification<RecordId>>,
+		) = mpsc::channel();
+		let bin_recv = async move {
+			loop {
+				let val = lq.next().await.unwrap().unwrap();
+				bin_recv_send.send(val).unwrap();
+			}
+		};
+		let bin_recv_task = tokio::spawn(bin_recv);
+
+		let check_messages = async move {
+			let mut total_msg_bin: Vec<Notification<RecordId>> = vec![];
+			let mut total_msg_pt: Vec<serde_json::Value> = vec![];
+			loop {
+				// blocking
+				match bin_recv_recv.recv() {
+					Ok(val) => {
+						total_msg_bin.push(val);
+					}
+					Err(e) => panic!("Error receiving message: {:?}", e),
+				}
+				// blocking
+				match pt_recv_recv.recv() {
+					Ok(val) => {
+						total_msg_pt.push(val);
+					}
+					Err(e) => panic!("Error receiving message: {:?}", e),
+				}
+				tokio::time::sleep(Duration::from_millis(100)).await;
+			}
+		};
+		tokio::join!(local_set, bin_task, bin_recv_task, check_messages);
 
 		Ok(())
+	}
+
+	struct OwnedLq<'a> {
+		owned_driver: Surreal<Client>,
+		lq: &'a Stream<'a, Client, Vec<RecordId>>,
+	}
+
+	impl<'a> OwnedLq<'a> {
+		async fn new(driver: Surreal<Client>, table_name: &str) -> OwnedLq<'a> {
+			let lq = driver.select(table_name).live().await.unwrap();
+			OwnedLq {
+				owned_driver: driver,
+				lq: &lq,
+			}
+		}
 	}
 
 	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
