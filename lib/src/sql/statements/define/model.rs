@@ -1,21 +1,16 @@
+use crate::ctx::Context;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent},
-	Permission,
+	Base, Ident, Permission, Strand, Value,
 };
-use async_recursion::async_recursion;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Write;
-
-use crate::{
-	ctx::Context,
-	dbs::{Options, Transaction},
-	doc::CursorDoc,
-	err::Error,
-	sql::{Ident, Strand, Value},
-};
+use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -46,15 +41,28 @@ impl fmt::Display for DefineModelStatement {
 }
 
 impl DefineModelStatement {
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&'async_recursion CursorDoc<'_>>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Unimplemented("Ml model definition not yet implemented".to_string()))
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Clear the cache
+		run.clear_cache();
+		// Process the statement
+		let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Store the model file
+		// TODO
+		// Ok all good
+		Ok(Value::None)
 	}
 }
