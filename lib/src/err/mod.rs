@@ -316,6 +316,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
+		value: String,
+	},
+
 	/// The requested scope does not exist
 	#[error("The scope '{value}' does not exist")]
 	ScNotFound {
