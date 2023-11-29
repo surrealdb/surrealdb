@@ -22,7 +22,7 @@ impl Parser<'_> {
 			TokenKind::Duration => self.token_value(token).map(Value::Duration),
 			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
 			TokenKind::Strand => self.token_value(token).map(Value::Strand),
-			TokenKind::Number => self.token_value(token).map(Value::Number),
+			TokenKind::Number(_) => self.token_value(token).map(Value::Number),
 			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
 			_ => self.parse_thing().map(Value::Thing),
 		}

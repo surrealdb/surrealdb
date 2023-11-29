@@ -27,7 +27,7 @@ mod json;
 mod test;
 mod thing;
 
-pub use error::{NumberParseError, ParseError, ParseErrorKind};
+pub use error::{IntErrorKind, ParseError, ParseErrorKind};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 

@@ -26,10 +26,10 @@ impl<'a> Lexer<'a> {
 			if x.is_ascii() {
 				match x {
 					b'\'' if !is_double => {
-						return Ok(self.finish_string_token(TokenKind::Strand));
+						return Ok(self.finish_token(TokenKind::Strand));
 					}
 					b'"' if is_double => {
-						return Ok(self.finish_string_token(TokenKind::Strand));
+						return Ok(self.finish_token(TokenKind::Strand));
 					}
 					b'\0' => {
 						// null bytes not allowed

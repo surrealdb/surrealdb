@@ -1,6 +1,6 @@
 use crate::{
 	sql::Uuid,
-	syn::v2::token::{DataIndex, Token, TokenKind},
+	syn::v2::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
@@ -91,10 +91,8 @@ impl<'a> Lexer<'a> {
 		// The lexer ensures that the bytes are a valid uuid so this should never panic.
 		let uuid = uuid::Uuid::try_from(uuid_str).unwrap();
 
-		let id = self.datetime.len() as u32;
-		let id = DataIndex::from(id);
-		self.uuid.push(Uuid(uuid));
-		Ok(self.finish_token(TokenKind::Uuid, Some(id)))
+		self.uuid = Some(Uuid(uuid));
+		Ok(self.finish_token(TokenKind::Uuid))
 	}
 
 	/// lexes a given amount of hex characters. returns true if the lexing was successfull, false

@@ -139,7 +139,7 @@ macro_rules! t {
 		$crate::syn::v2::token::TokenKind::Parameter
 	};
 	("123") => {
-		$crate::syn::v2::token::TokenKind::Number
+		$crate::syn::v2::token::TokenKind::Number(_)
 	};
 
 	("!") => {

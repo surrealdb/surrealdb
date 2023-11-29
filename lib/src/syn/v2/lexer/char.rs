@@ -29,6 +29,6 @@ impl<'a> Lexer<'a> {
 			'÷' => t!("÷"),
 			x => return self.invalid_token(Error::UnexpectedCharacter(x)),
 		};
-		self.finish_token(kind, None)
+		self.finish_token(kind)
 	}
 }

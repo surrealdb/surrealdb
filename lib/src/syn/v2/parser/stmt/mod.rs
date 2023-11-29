@@ -355,9 +355,8 @@ impl Parser<'_> {
 			TokenKind::Uuid => self.parse_token_value().map(Value::Uuid)?,
 			t!("$param") => {
 				let token = self.pop_peek();
-				let param =
-					self.lexer.strings[u32::from(token.data_index.unwrap()) as usize].clone();
-				Value::Param(Param(Ident(param)))
+				let param = self.token_value(token)?;
+				Value::Param(param)
 			}
 			x => unexpected!(self, x, "a UUID or a parameter"),
 		};
@@ -436,7 +435,7 @@ impl Parser<'_> {
 		expected!(self, "SINCE");
 		let next = self.next();
 		let since = match next.kind {
-			TokenKind::Number => ShowSince::Versionstamp(self.token_value(next)?),
+			TokenKind::Number(_) => ShowSince::Versionstamp(self.token_value(next)?),
 			TokenKind::DateTime => ShowSince::Timestamp(self.token_value(next)?),
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};

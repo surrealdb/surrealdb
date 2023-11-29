@@ -1,6 +1,6 @@
 //! Module specifying the token representation of the parser.
 
-use std::{hash::Hash, num::NonZeroU32};
+use std::hash::Hash;
 
 mod keyword;
 pub(crate) use keyword::keyword_t;
@@ -194,6 +194,22 @@ impl DistanceKind {
 	}
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum NumberKind {
+	// A plain integer number.
+	Integer,
+	// A number with a decimal postfix.
+	Decimal,
+	// A number with a float postfix.
+	Float,
+	// A number with a `.3` part.
+	Mantissa,
+	// A number with a `.3e10` part.
+	MantissaExponent,
+	// A number with a `.3e10` part.
+	Exponent,
+}
+
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum TokenKind {
@@ -221,7 +237,7 @@ pub enum TokenKind {
 	Parameter,
 	/// A duration.
 	Duration,
-	Number,
+	Number(NumberKind),
 	Identifier,
 	/// `<`
 	LeftChefron,
@@ -265,7 +281,22 @@ pub enum TokenKind {
 	Eof,
 }
 
+/// An assertion statically checking that the size of Tokenkind remains two bytes
+const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
+
 impl TokenKind {
+	pub fn has_data(&self) -> bool {
+		matches!(
+			self,
+			TokenKind::Identifier
+				| TokenKind::Uuid
+				| TokenKind::DateTime
+				| TokenKind::Strand
+				| TokenKind::Parameter
+				| TokenKind::Regex
+		)
+	}
+
 	pub fn can_be_identifier(&self) -> bool {
 		matches!(
 			self,
@@ -300,7 +331,7 @@ impl TokenKind {
 			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
 			TokenKind::Duration => "a duration",
-			TokenKind::Number => "a number",
+			TokenKind::Number(_) => "a number",
 			TokenKind::Identifier => "an identifier",
 			TokenKind::Regex => "a regex",
 			TokenKind::LeftChefron => "'<'",
@@ -327,27 +358,10 @@ impl TokenKind {
 	}
 }
 
-/// A index for extra data associated with the token.
-#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
-pub struct DataIndex(NonZeroU32);
-
-impl From<u32> for DataIndex {
-	fn from(value: u32) -> Self {
-		let idx = NonZeroU32::new(value.checked_add(1).unwrap()).unwrap();
-		DataIndex(idx)
-	}
-}
-impl From<DataIndex> for u32 {
-	fn from(value: DataIndex) -> Self {
-		u32::from(value.0) - 1
-	}
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct Token {
 	pub kind: TokenKind,
 	pub span: Span,
-	pub data_index: Option<DataIndex>,
 }
 
 impl Token {
@@ -355,7 +369,6 @@ impl Token {
 		Token {
 			kind: TokenKind::Invalid,
 			span: Span::empty(),
-			data_index: None,
 		}
 	}
 

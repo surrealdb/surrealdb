@@ -24,7 +24,7 @@ impl Parse<Self> for Param {
 		let mut lexer = Lexer::new(val.as_bytes());
 		let token = lexer.next_token();
 		assert_eq!(token.kind, TokenKind::Parameter);
-		Param(Ident(lexer.strings.pop().unwrap()))
+		Param(Ident(lexer.take_token_data()))
 	}
 }
 

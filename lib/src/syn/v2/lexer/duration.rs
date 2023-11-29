@@ -6,7 +6,7 @@ use crate::{
 		Duration, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 		SECONDS_PER_YEAR,
 	},
-	syn::v2::token::{DataIndex, Token, TokenKind},
+	syn::v2::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
@@ -23,9 +23,8 @@ impl<'a> Lexer<'a> {
 	pub fn lex_duration(&mut self) -> Token {
 		match self.lex_duration_err() {
 			Ok(x) => {
-				let data_index = DataIndex::from(u32::try_from(self.durations.len()).unwrap());
-				self.durations.push(x);
-				self.finish_token(TokenKind::Duration, Some(data_index))
+				self.duration = Some(x);
+				self.finish_token(TokenKind::Duration)
 			}
 			Err(e) => self.invalid_token(LexError::Duration(e)),
 		}

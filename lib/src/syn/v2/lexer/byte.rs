@@ -3,7 +3,7 @@ use crate::syn::v2::{
 		unicode::{byte, chars},
 		Error, Lexer,
 	},
-	token::{t, DataIndex, Token, TokenKind},
+	token::{t, Token, TokenKind},
 };
 
 impl<'a> Lexer<'a> {
@@ -140,9 +140,8 @@ impl<'a> Lexer<'a> {
 		match self.scratch.parse() {
 			Ok(x) => {
 				self.scratch.clear();
-				let idx = u32::try_from(self.regex.len()).unwrap();
-				self.regex.push(x);
-				self.finish_token(TokenKind::Regex, Some(DataIndex::from(idx)))
+				self.regex = Some(x);
+				self.finish_token(TokenKind::Regex)
 			}
 			Err(e) => self.invalid_token(Error::Regex(e)),
 		}
@@ -382,6 +381,6 @@ impl<'a> Lexer<'a> {
 			x => return self.invalid_token(Error::UnexpectedCharacter(x as char)),
 		};
 
-		self.finish_token(kind, None)
+		self.finish_token(kind)
 	}
 }

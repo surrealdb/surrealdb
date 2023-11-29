@@ -116,7 +116,7 @@ impl Parser<'_> {
 				Ok(Id::Array(array))
 			}
 			// TODO: negative numbers.
-			TokenKind::Number => {
+			TokenKind::Number(_) => {
 				let number = self.parse_token_value::<u64>()?;
 				Ok(Id::Number(number as i64))
 			}

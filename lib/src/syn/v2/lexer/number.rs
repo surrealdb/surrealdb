@@ -1,7 +1,7 @@
-use crate::sql::Number;
-use crate::syn::v2::lexer::{unicode::U8Ext, Error as LexError, Lexer};
-use crate::syn::v2::token::Token;
-use rust_decimal::Decimal;
+use crate::syn::v2::{
+	lexer::{unicode::U8Ext, Error as LexError, Lexer},
+	token::{NumberKind, Token, TokenKind},
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,7 +27,7 @@ impl Lexer<'_> {
 		self.scratch.push(start as char);
 		loop {
 			let Some(x) = self.reader.peek() else {
-				return Ok(self.finish_int_token());
+				return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -46,7 +46,7 @@ impl Lexer<'_> {
 					} else {
 						// indexing a number
 						self.reader.backup(backup);
-						return Ok(self.finish_int_token());
+						return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 					}
 				}
 				b'f' | b'd' => return self.lex_suffix(true),
@@ -64,7 +64,7 @@ impl Lexer<'_> {
 					// Eat all remaining identifier like characters.
 				}
 				_ => {
-					return Ok(self.finish_int_token());
+					return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 				}
 			}
 		}
@@ -78,7 +78,7 @@ impl Lexer<'_> {
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
 					Err(Error::InvalidSuffix)
 				} else {
-					Ok(self.finish_float_token())
+					Ok(self.finish_token(TokenKind::Number(NumberKind::Float)))
 				}
 			}
 			Some(b'd') => {
@@ -101,7 +101,7 @@ impl Lexer<'_> {
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
 					Err(Error::InvalidSuffix)
 				} else {
-					Ok(self.finish_dec_token())
+					Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))
 				}
 			}
 			_ => unreachable!(),
@@ -114,7 +114,7 @@ impl Lexer<'_> {
 			// lex_number already checks if there exists a digit after the dot.
 			// So this will never fail the first iteration of the loop.
 			let Some(x) = self.reader.peek() else {
-				return Ok(self.finish_float_token());
+				return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -126,7 +126,7 @@ impl Lexer<'_> {
 					// scientific notation
 					self.reader.next();
 					self.scratch.push('e');
-					return self.lex_exponent();
+					return self.lex_exponent(true);
 				}
 				b'_' => {
 					self.reader.next();
@@ -138,14 +138,14 @@ impl Lexer<'_> {
 					return Err(Error::InvalidSuffix);
 				}
 				_ => {
-					return Ok(self.finish_float_token());
+					return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
 				}
 			}
 		}
 	}
 
 	/// Lexes the exponent of a number, i.e. `e10` in `1.1e10`;
-	fn lex_exponent(&mut self) -> Result<Token, Error> {
+	fn lex_exponent(&mut self, had_mantissa: bool) -> Result<Token, Error> {
 		let mut atleast_one = false;
 		match self.reader.peek() {
 			Some(b'-' | b'+') => {}
@@ -170,36 +170,17 @@ impl Lexer<'_> {
 				Some(b'f' | b'd') => return self.lex_suffix(false),
 				_ => {
 					if atleast_one {
-						return Ok(self.finish_float_token());
+						let kind = if had_mantissa {
+							NumberKind::MantissaExponent
+						} else {
+							NumberKind::Exponent
+						};
+						return Ok(self.finish_token(TokenKind::Number(kind)));
 					} else {
 						return Err(Error::DigitExpectedExponent);
 					}
 				}
 			}
 		}
-	}
-
-	/// Parse the float in the scratch buffer and return it as a token
-	pub fn finish_float_token(&mut self) -> Token {
-		// Lexer should ensure this never panics.
-		let result = self.scratch.parse::<f64>().unwrap();
-		self.scratch.clear();
-		self.finish_number_token(Number::Float(result))
-	}
-
-	/// Parse the float in the scratch buffer and return it as a token
-	pub fn finish_dec_token(&mut self) -> Token {
-		// Lexer should ensure this never panics.
-		let result = self.scratch.parse::<Decimal>().unwrap();
-		self.scratch.clear();
-		self.finish_number_token(Number::Decimal(result))
-	}
-
-	/// Parse the integer in the scratch buffer and return it as a token
-	pub fn finish_int_token(&mut self) -> Token {
-		// TODO: Improve parsing of numbers so that we can use full range of number.
-		let result = self.scratch.parse::<f64>().unwrap() as i64;
-		self.scratch.clear();
-		self.finish_number_token(Number::Int(result))
 	}
 }

@@ -6,10 +6,13 @@ use crate::syn::{
 		token::{Span, TokenKind},
 	},
 };
-use std::fmt::Write;
+use std::{
+	fmt::Write,
+	num::{ParseFloatError, ParseIntError},
+};
 
 #[derive(Debug)]
-pub enum NumberParseError {
+pub enum IntErrorKind {
 	FloatToInt,
 	DecimalToInt,
 	IntegerOverflow,
@@ -30,8 +33,11 @@ pub enum ParseErrorKind {
 		expected: TokenKind,
 		should_close: Span,
 	},
-	InvalidNumber {
-		error: NumberParseError,
+	InvalidInteger {
+		error: ParseIntError,
+	},
+	InvalidFloat {
+		error: ParseFloatError,
 	},
 	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
@@ -151,18 +157,21 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidNumber {
+			ParseErrorKind::InvalidInteger {
 				ref error,
 			} => {
-				let text = match error {
-					NumberParseError::FloatToInt => {
-						"Found a floating point number, expected a integer"
-					}
-					NumberParseError::DecimalToInt => {
-						"Found a large decimal number, expected a integer"
-					}
-					NumberParseError::IntegerOverflow => "Number exceeded maximum allowed value",
-				};
+				let text = format!("failed to parse integer, {error}");
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidFloat {
+				ref error,
+			} => {
+				let text = format!("failed to parse floating point, {error}");
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

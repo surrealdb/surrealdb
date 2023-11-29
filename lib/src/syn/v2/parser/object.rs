@@ -585,9 +585,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Identifier | TokenKind::Strand => {
 				self.pop_peek();
-				let data_index = token.data_index.unwrap();
-				let idx = u32::from(data_index) as usize;
-				let str = self.lexer.strings[idx].clone();
+				let str = self.lexer.take_token_data();
 				Ok(str)
 			}
 			x => unexpected!(self, x, "an object key"),

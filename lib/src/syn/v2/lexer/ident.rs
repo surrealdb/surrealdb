@@ -19,7 +19,7 @@ impl<'a> Lexer<'a> {
 					continue;
 				}
 			}
-			return self.finish_string_token(TokenKind::Parameter);
+			return self.finish_token(TokenKind::Parameter);
 		}
 	}
 
@@ -51,9 +51,9 @@ impl<'a> Lexer<'a> {
 			// If there is one, return it as the keyword. Original identifier can be reconstructed
 			// from the token.
 			if let Some(x) = KEYWORDS.get(&UniCase::ascii(&self.scratch)).copied() {
-				return self.finish_string_token(x);
+				return self.finish_token(x);
 			}
-			return self.finish_string_token(TokenKind::Identifier);
+			return self.finish_token(TokenKind::Identifier);
 		}
 	}
 
@@ -81,7 +81,7 @@ impl<'a> Lexer<'a> {
 			if x.is_ascii() {
 				match x {
 					b'`' if is_backtick => {
-						return Ok(self.finish_string_token(TokenKind::Identifier));
+						return Ok(self.finish_token(TokenKind::Identifier));
 					}
 					b'\0' => {
 						// null bytes not allowed
@@ -139,7 +139,7 @@ impl<'a> Lexer<'a> {
 			} else {
 				let c = self.reader.complete_char(x)?;
 				if !is_backtick && c == '⟩' {
-					return Ok(self.finish_string_token(TokenKind::Identifier));
+					return Ok(self.finish_token(TokenKind::Identifier));
 				}
 				self.scratch.push(c);
 			}

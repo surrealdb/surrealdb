@@ -5,7 +5,7 @@ use crate::{
 	sql::{Array, Dir, Geometry, Ident, Idiom, Mock, Number, Part, Subquery, Table, Value},
 	syn::v2::{
 		parser::{
-			mac::{expected, to_do},
+			mac::{expected, to_do, unexpected},
 			ParseError, ParseErrorKind,
 		},
 		token::{t, Span, TokenKind},
@@ -81,7 +81,15 @@ impl Parser<'_> {
 						let str = self.token_value::<Ident>(token)?.0;
 						self.parse_thing_or_range(str)
 					}
-					_ => Ok(Value::Table(self.token_value(token)?)),
+					x => {
+						if x.has_data() {
+							// x had data and possibly overwrote the data from token, This is
+							// always an invalid production so just return error.
+							unexpected!(self, x, "a value");
+						} else {
+							Ok(Value::Table(self.token_value(token)?))
+						}
+					}
 				}
 			}
 		}
@@ -126,7 +134,7 @@ impl Parser<'_> {
 				let duration = self.token_value(token)?;
 				Value::Duration(duration)
 			}
-			TokenKind::Number => {
+			TokenKind::Number(_) => {
 				self.pop_peek();
 				let number = self.token_value(token)?;
 				Value::Number(number)
@@ -222,8 +230,10 @@ impl Parser<'_> {
 						let str = self.token_value::<Ident>(token)?.0;
 						self.parse_thing_or_range(str)?
 					}
-					_ => {
-						if self.table_as_field {
+					x => {
+						if x.has_data() {
+							unexpected!(self, x, "a value");
+						} else if self.table_as_field {
 							Value::Idiom(Idiom(vec![Part::Field(self.token_value(token)?)]))
 						} else {
 							Value::Table(self.token_value(token)?)

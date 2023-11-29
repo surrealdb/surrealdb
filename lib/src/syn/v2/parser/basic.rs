@@ -3,12 +3,12 @@ use crate::{
 		language::Language, Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
 	},
 	syn::v2::{
-		parser::mac::{to_do, unexpected},
-		token::{t, Token, TokenKind},
+		parser::mac::unexpected,
+		token::{t, NumberKind, Token, TokenKind},
 	},
 };
 
-use super::{NumberParseError, ParseError, ParseErrorKind, ParseResult, Parser};
+use super::{ParseError, ParseErrorKind, ParseResult, Parser};
 
 pub trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self>;
@@ -27,9 +27,7 @@ impl TokenValue for Ident {
 				Ok(Ident(str))
 			}
 			TokenKind::Identifier => {
-				let data_index = token.data_index.unwrap();
-				let idx = u32::from(data_index) as usize;
-				let str = parser.lexer.strings[idx].clone();
+				let str = parser.lexer.take_token_data();
 				Ok(Ident(str))
 			}
 			x => {
@@ -48,29 +46,16 @@ impl TokenValue for Table {
 impl TokenValue for u64 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				match number {
-					Number::Int(x) => {
-						if x < 0 {
-							to_do!(parser)
-						}
-						Ok(x as u64)
-					}
-					Number::Float(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::FloatToInt,
+			TokenKind::Number(NumberKind::Integer) => {
+				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidInteger {
+							error: e,
 						},
 						token.span,
-					)),
-					Number::Decimal(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::DecimalToInt,
-						},
-						token.span,
-					)),
-				}
+					)
+				})?;
+				Ok(number)
 			}
 			x => unexpected!(parser, x, "an integer"),
 		}
@@ -80,40 +65,16 @@ impl TokenValue for u64 {
 impl TokenValue for u32 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				match number {
-					Number::Int(x) => {
-						if x < 0 {
-							to_do!(parser)
-						}
-						let res = match u32::try_from(x) {
-							Ok(x) => x,
-							Err(_) => {
-								return Err(ParseError::new(
-									ParseErrorKind::InvalidNumber {
-										error: NumberParseError::IntegerOverflow,
-									},
-									token.span,
-								))
-							}
-						};
-						Ok(res)
-					}
-					Number::Float(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::FloatToInt,
+			TokenKind::Number(NumberKind::Integer) => {
+				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidInteger {
+							error: e,
 						},
 						token.span,
-					)),
-					Number::Decimal(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::DecimalToInt,
-						},
-						token.span,
-					)),
-				}
+					)
+				})?;
+				Ok(number)
 			}
 			x => unexpected!(parser, x, "an integer"),
 		}
@@ -123,40 +84,16 @@ impl TokenValue for u32 {
 impl TokenValue for u16 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				match number {
-					Number::Int(x) => {
-						if x < 0 {
-							to_do!(parser)
-						}
-						let res = match u16::try_from(x) {
-							Ok(x) => x,
-							Err(_) => {
-								return Err(ParseError::new(
-									ParseErrorKind::InvalidNumber {
-										error: NumberParseError::IntegerOverflow,
-									},
-									token.span,
-								))
-							}
-						};
-						Ok(res)
-					}
-					Number::Float(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::FloatToInt,
+			TokenKind::Number(NumberKind::Integer) => {
+				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidInteger {
+							error: e,
 						},
 						token.span,
-					)),
-					Number::Decimal(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::DecimalToInt,
-						},
-						token.span,
-					)),
-				}
+					)
+				})?;
+				Ok(number)
 			}
 			x => unexpected!(parser, x, "an integer"),
 		}
@@ -166,40 +103,16 @@ impl TokenValue for u16 {
 impl TokenValue for u8 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				match number {
-					Number::Int(x) => {
-						if x < 0 {
-							to_do!(parser)
-						}
-						let res = match u8::try_from(x) {
-							Ok(x) => x,
-							Err(_) => {
-								return Err(ParseError::new(
-									ParseErrorKind::InvalidNumber {
-										error: NumberParseError::IntegerOverflow,
-									},
-									token.span,
-								))
-							}
-						};
-						Ok(res)
-					}
-					Number::Float(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::FloatToInt,
+			TokenKind::Number(NumberKind::Integer) => {
+				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidInteger {
+							error: e,
 						},
 						token.span,
-					)),
-					Number::Decimal(_) => Err(ParseError::new(
-						ParseErrorKind::InvalidNumber {
-							error: NumberParseError::DecimalToInt,
-						},
-						token.span,
-					)),
-				}
+					)
+				})?;
+				Ok(number)
 			}
 			x => unexpected!(parser, x, "an integer"),
 		}
@@ -208,26 +121,25 @@ impl TokenValue for u8 {
 
 impl TokenValue for f32 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let number = match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				match number {
-					Number::Int(x) => x as f32,
-					Number::Float(x) => x as f32,
-					Number::Decimal(_) => {
-						return Err(ParseError::new(
-							ParseErrorKind::InvalidNumber {
-								error: NumberParseError::DecimalToInt,
-							},
-							token.span,
-						))
-					}
-				}
+		match token.kind {
+			TokenKind::Number(
+				NumberKind::Integer
+				| NumberKind::Float
+				| NumberKind::Mantissa
+				| NumberKind::MantissaExponent,
+			) => {
+				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidFloat {
+							error: e,
+						},
+						token.span,
+					)
+				})?;
+				Ok(number)
 			}
 			x => unexpected!(parser, x, "an floating point"),
-		};
-		Ok(number)
+		}
 	}
 }
 
@@ -245,10 +157,22 @@ impl TokenValue for Language {
 impl TokenValue for Number {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::Number => {
-				let number =
-					parser.lexer.numbers[u32::from(token.data_index.unwrap()) as usize].clone();
-				Ok(number)
+			TokenKind::Number(NumberKind::Integer) => {
+				let source = parser.lexer.take_token_data();
+				if let Ok(x) = source.parse() {
+					return Ok(Number::Int(x));
+				}
+				// integer overflowed, fallback to floating point
+				// TODO: Figure out if this can actually fail.
+				let x = source.parse().map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidFloat {
+							error: e,
+						},
+						token.span,
+					)
+				})?;
+				Ok(Number::Float(x))
 			}
 			x => unexpected!(parser, x, "a number"),
 		}
@@ -259,8 +183,7 @@ impl TokenValue for Param {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Parameter => {
-				let index = u32::from(token.data_index.unwrap());
-				let param = parser.lexer.strings[index as usize].clone();
+				let param = parser.lexer.take_token_data();
 				Ok(Param(Ident(param)))
 			}
 			x => unexpected!(parser, x, "a parameter"),
@@ -273,8 +196,7 @@ impl TokenValue for Duration {
 		let TokenKind::Duration = token.kind else {
 			unexpected!(parser, token.kind, "a duration")
 		};
-		let index = u32::from(token.data_index.unwrap());
-		let duration = parser.lexer.durations[index as usize];
+		let duration = parser.lexer.duration.take().expect("token data was already consumed");
 		Ok(duration)
 	}
 }
@@ -284,8 +206,7 @@ impl TokenValue for Datetime {
 		let TokenKind::DateTime = token.kind else {
 			unexpected!(parser, token.kind, "a duration")
 		};
-		let index = u32::from(token.data_index.unwrap());
-		let datetime = parser.lexer.datetime[index as usize].clone();
+		let datetime = parser.lexer.datetime.take().expect("token data was already consumed");
 		Ok(datetime)
 	}
 }
@@ -294,8 +215,7 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Strand => {
-				let index = u32::from(token.data_index.unwrap());
-				let strand = parser.lexer.strings[index as usize].clone();
+				let strand = parser.lexer.take_token_data();
 				Ok(Strand(strand))
 			}
 			x => unexpected!(parser, x, "a strand"),
@@ -308,8 +228,7 @@ impl TokenValue for Uuid {
 		let TokenKind::Uuid = token.kind else {
 			unexpected!(parser, token.kind, "a duration")
 		};
-		let index = u32::from(token.data_index.unwrap());
-		Ok(parser.lexer.uuid[index as usize])
+		Ok(parser.lexer.uuid.take().expect("token data was already consumed"))
 	}
 }
 
@@ -318,8 +237,7 @@ impl TokenValue for Regex {
 		let TokenKind::Regex = token.kind else {
 			unexpected!(parser, token.kind, "a regex")
 		};
-		let index = u32::from(token.data_index.unwrap());
-		Ok(parser.lexer.regex[index as usize].clone())
+		Ok(parser.lexer.regex.take().expect("token data was already consumed"))
 	}
 }
 

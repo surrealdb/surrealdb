@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
 	sql::Datetime,
-	syn::v2::token::{DataIndex, Token, TokenKind},
+	syn::v2::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
@@ -58,9 +58,8 @@ impl<'a> Lexer<'a> {
 	pub fn lex_datetime(&mut self, double: bool) -> Token {
 		match self.lex_datetime_err(double) {
 			Ok(x) => {
-				let id: u32 = self.datetime.len().try_into().unwrap();
-				self.datetime.push(x);
-				self.finish_token(TokenKind::DateTime, Some(DataIndex::from(id)))
+				self.datetime = Some(x);
+				self.finish_token(TokenKind::DateTime)
 			}
 			Err(e) => self.invalid_token(LexError::DateTime(e)),
 		}

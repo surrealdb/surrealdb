@@ -1,6 +1,6 @@
 use crate::{
-	sql::{Datetime, Duration, Number, Regex, Uuid},
-	syn::v2::token::{DataIndex, Span, Token, TokenKind},
+	sql::{Datetime, Duration, Regex, Uuid},
+	syn::v2::token::{Span, Token, TokenKind},
 };
 
 mod byte;
@@ -69,18 +69,15 @@ pub struct Lexer<'a> {
 	ate_whitespace: bool,
 	scratch: String,
 
-	// below are a collection of buffers with values produced by tokens.
+	// below are a collection of storage for values produced by tokens.
 	// For performance reasons we wan't to keep the tokens as small as possible.
 	// As only some tokens have an additional value associated with them we don't store that value
 	// in the token itself but, instead, in the lexer ensureing a smaller size for each individual
 	// token.
-	pub numbers: Vec<Number>,
-	/// Strings build from the source.
-	pub strings: Vec<String>,
-	pub durations: Vec<Duration>,
-	pub datetime: Vec<Datetime>,
-	pub regex: Vec<Regex>,
-	pub uuid: Vec<Uuid>,
+	pub duration: Option<Duration>,
+	pub datetime: Option<Datetime>,
+	pub regex: Option<Regex>,
+	pub uuid: Option<Uuid>,
 	pub error: Option<Error>,
 }
 
@@ -98,12 +95,10 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			ate_whitespace: false,
 			scratch: String::new(),
-			numbers: Vec::new(),
-			strings: Vec::new(),
-			datetime: Vec::new(),
-			durations: Vec::new(),
-			regex: Vec::new(),
-			uuid: Vec::new(),
+			datetime: None,
+			duration: None,
+			regex: None,
+			uuid: None,
 			error: None,
 		}
 	}
@@ -111,12 +106,10 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
-		self.numbers.clear();
-		self.strings.clear();
-		self.durations.clear();
-		self.datetime.clear();
-		self.regex.clear();
-		self.uuid.clear();
+		self.datetime = None;
+		self.duration = None;
+		self.regex = None;
+		self.uuid = None;
 		self.error = None;
 	}
 
@@ -128,10 +121,8 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			ate_whitespace: false,
 			scratch: self.scratch,
-			numbers: self.numbers,
-			strings: self.strings,
 			datetime: self.datetime,
-			durations: self.durations,
+			duration: self.duration,
 			regex: self.regex,
 			uuid: self.uuid,
 			error: self.error,
@@ -172,7 +163,6 @@ impl<'a> Lexer<'a> {
 				offset: self.last_offset.saturating_sub(1),
 				len: 1,
 			},
-			data_index: None,
 		}
 	}
 
@@ -186,7 +176,7 @@ impl<'a> Lexer<'a> {
 	/// Return an invalid token.
 	fn invalid_token(&mut self, error: Error) -> Token {
 		self.error = Some(error);
-		self.finish_token(TokenKind::Invalid, None)
+		self.finish_token(TokenKind::Invalid)
 	}
 
 	// Returns the span for the current token being lexed.
@@ -203,33 +193,14 @@ impl<'a> Lexer<'a> {
 	/// Builds a token from an TokenKind.
 	///
 	/// Attaches a span to the token and returns, updates the new offset.
-	fn finish_token(&mut self, kind: TokenKind, data_index: Option<DataIndex>) -> Token {
+	fn finish_token(&mut self, kind: TokenKind) -> Token {
 		let span = self.current_span();
 		// We make sure that the source is no longer then u32::MAX so this can't overflow.
 		self.last_offset = self.reader.offset() as u32;
 		Token {
 			kind,
 			span,
-			data_index,
 		}
-	}
-
-	/// Finish a token which contains a string like value.
-	///
-	/// Copies out all of the values in scratch and pushes into the data array.
-	/// Attaching it to the token.
-	fn finish_string_token(&mut self, kind: TokenKind) -> Token {
-		let id = self.strings.len() as u32;
-		let string = self.scratch.clone();
-		self.scratch.clear();
-		self.strings.push(string);
-		self.finish_token(kind, Some(id.into()))
-	}
-
-	fn finish_number_token(&mut self, number: Number) -> Token {
-		let id = self.numbers.len() as u32;
-		self.numbers.push(number);
-		self.finish_token(TokenKind::Number, Some(id.into()))
 	}
 
 	/// Moves the lexer state back to before the give span.
@@ -301,20 +272,14 @@ impl<'a> Lexer<'a> {
 					continue;
 				}
 				b'"' => {
-					return self.finish_token(
-						TokenKind::CloseRecordString {
-							double: true,
-						},
-						None,
-					);
+					return self.finish_token(TokenKind::CloseRecordString {
+						double: true,
+					});
 				}
 				b'\'' => {
-					return self.finish_token(
-						TokenKind::CloseRecordString {
-							double: false,
-						},
-						None,
-					);
+					return self.finish_token(TokenKind::CloseRecordString {
+						double: false,
+					});
 				}
 				b'-' => match self.reader.next() {
 					Some(b'-') => {
@@ -376,6 +341,19 @@ impl<'a> Lexer<'a> {
 			}
 			None => Err(Error::UnexpectedEof),
 		}
+	}
+
+	pub fn take_token_data(&mut self) -> String {
+		std::mem::take(&mut self.scratch)
+	}
+
+	pub fn take_token_data_ref<F, R>(&mut self, f: F) -> R
+	where
+		F: FnOnce(&str) -> R,
+	{
+		let r = f(self.scratch.as_str());
+		self.scratch.clear();
+		r
 	}
 }
 

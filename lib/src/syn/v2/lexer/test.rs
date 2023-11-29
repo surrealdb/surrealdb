@@ -1,6 +1,6 @@
 use chrono::{FixedOffset, NaiveDate, Offset, TimeZone, Utc};
 
-use crate::syn::v2::token::{t, TokenKind};
+use crate::syn::v2::token::{t, NumberKind, TokenKind};
 
 macro_rules! test_case(
 	($source:expr => [$($token:expr),*$(,)?]) => {
@@ -123,13 +123,13 @@ fn numbers() {
 			123129decs+39349fs+394393df+32932932def+329239329z
 		"#
 			=> [
-			TokenKind::Number,
+			TokenKind::Number(NumberKind::Integer),
 			t!("+"),
-			TokenKind::Number,
+			TokenKind::Number(NumberKind::Mantissa),
 			t!("+"),
-			TokenKind::Number,
+			TokenKind::Number(NumberKind::Decimal),
 			t!("+"),
-			TokenKind::Number,
+			TokenKind::Number(NumberKind::Float),
 			t!("+"),
 
 			TokenKind::Invalid,
@@ -246,7 +246,7 @@ fn uuid() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::Uuid);
-	let uuid = lexer.uuid[u32::from(token.data_index.unwrap()) as usize];
+	let uuid = lexer.uuid.take().unwrap();
 	assert_eq!(uuid.0.to_string(), "e72bee20-f49b-11ec-b939-0242ac120002");
 
 	let mut lexer = crate::syn::v2::lexer::Lexer::new(
@@ -257,7 +257,7 @@ fn uuid() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::Uuid);
-	let uuid = lexer.uuid[u32::from(token.data_index.unwrap()) as usize];
+	let uuid = lexer.uuid.take().unwrap();
 	assert_eq!(uuid.0.to_string(), "b19bc00b-aa98-486c-ae37-c8e1c54295b1");
 }
 
@@ -269,7 +269,7 @@ fn date_time_just_date() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let expected_datetime = Utc
 		.fix()
 		.from_local_datetime(
@@ -290,7 +290,7 @@ fn date_zone_time() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let expected_datetime = Utc
 		.fix()
 		.from_local_datetime(
@@ -311,7 +311,7 @@ fn date_time_with_time() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let expected_datetime = Utc
 		.fix()
 		.from_local_datetime(
@@ -333,7 +333,7 @@ fn date_time_nanos() {
 		println!("ERROR: {} @ ", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let expected_datetime = Utc
 		.fix()
 		.from_local_datetime(
@@ -357,7 +357,7 @@ fn date_time_timezone_utc() {
 		println!("ERROR: {}", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let expected_datetime = Utc
 		.fix()
 		.from_local_datetime(
@@ -381,7 +381,7 @@ fn date_time_timezone_pacific() {
 		println!("ERROR: {}", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let offset = FixedOffset::west_opt(8 * 3600).unwrap();
 	let expected_datetime = offset
 		.from_local_datetime(
@@ -405,7 +405,7 @@ fn date_time_timezone_pacific_partial() {
 		println!("ERROR: {}", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let offset = FixedOffset::east_opt(8 * 3600 + 30 * 60).unwrap();
 	let expected_datetime = offset
 		.from_local_datetime(
@@ -429,7 +429,7 @@ fn date_time_timezone_utc_nanoseconds() {
 		println!("ERROR: {}", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let offset = Utc.fix();
 	let expected_datetime = offset
 		.from_local_datetime(
@@ -453,7 +453,7 @@ fn date_time_timezone_utc_sub_nanoseconds() {
 		println!("ERROR: {}", error);
 	}
 	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime[u32::from(token.data_index.unwrap()) as usize].clone();
+	let datetime = lexer.datetime.take().unwrap();
 	let offset = Utc.fix();
 	let expected_datetime = offset
 		.from_local_datetime(
