@@ -277,7 +277,7 @@ fn process(
 			.iter()
 			.enumerate()
 			.map(|(i, v)| {
-				format!("-- Query {:?} (took {:?})\n{v:#}", i + 1, stats[i].execution_time)
+				format!("-- Query {:?} (execution time: {:?})\n{v:#}", i + 1, stats[i].execution_time)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
@@ -296,7 +296,7 @@ fn process(
 
 				v.clone().into_json().serialize(&mut serializer).unwrap();
 				let v = String::from_utf8(buf).unwrap();
-				format!("-- Query {:?} (took {:?}\n{v:#}", i + 1, stats[i].execution_time)
+				format!("-- Query {:?} (execution time: {:?}\n{v:#}", i + 1, stats[i].execution_time)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
