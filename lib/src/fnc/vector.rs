@@ -103,3 +103,41 @@ pub mod similarity {
 		})
 	}
 }
+
+impl TryFrom<&Value> for Vec<Number> {
+	type Error = Error;
+
+	fn try_from(val: &Value) -> Result<Self, Self::Error> {
+		if let Value::Array(a) = val {
+			let mut vec = Vec::with_capacity(a.0.len());
+			for v in &a.0 {
+				let n: Number = v.clone().try_into()?;
+				vec.push(n);
+			}
+			Ok(vec)
+		} else {
+			Err(Error::InvalidVectorValue {
+				current: val.to_string(),
+			})
+		}
+	}
+}
+
+impl TryFrom<Value> for Vec<Number> {
+	type Error = Error;
+
+	fn try_from(val: Value) -> Result<Self, Self::Error> {
+		if let Value::Array(a) = val {
+			let mut vec = Vec::with_capacity(a.0.len());
+			for v in a.0 {
+				let n: Number = v.try_into()?;
+				vec.push(n);
+			}
+			Ok(vec)
+		} else {
+			Err(Error::InvalidVectorValue {
+				current: val.to_string(),
+			})
+		}
+	}
+}

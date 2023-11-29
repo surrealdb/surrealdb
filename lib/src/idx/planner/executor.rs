@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
@@ -20,13 +21,13 @@ use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Number, Object, Table, Thing, Value};
+use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type KnnEntry = (KnnPriorityList, Arc<Vec<Number>>);
-pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Arc<Vec<Number>>)>;
+pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>);
+pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>)>;
 
 pub(crate) struct QueryExecutor {
 	table: String,
@@ -144,8 +145,8 @@ impl QueryExecutor {
 			}
 		}
 
-		for (exp, (knn, obj)) in knns {
-			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), obj));
+		for (exp, (knn, id, obj)) in knns {
+			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), id, obj));
 		}
 
 		Ok(Self {
@@ -162,12 +163,17 @@ impl QueryExecutor {
 
 	pub(crate) async fn knn(
 		&self,
-		_txn: &Transaction,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
 		_thg: &Thing,
+		doc: Option<&CursorDoc<'_>>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
-		if let Some((p, o)) = self.knn_entries.get(exp) {
-			todo!("Compute distance add add to the priority list ")
+		if let Some((p, id, val)) = self.knn_entries.get(exp) {
+			let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
+			println!("{v:?} vs {val:?}");
+			todo!("Compute distance add add to the priority list")
 		}
 		Ok(Value::Bool(true))
 	}

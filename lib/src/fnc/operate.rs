@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
@@ -209,6 +209,7 @@ pub(crate) async fn matches(
 
 pub(crate) async fn knn(
 	ctx: &Context<'_>,
+	opt: &Options,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
@@ -216,7 +217,7 @@ pub(crate) async fn knn(
 	match get_index_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.knn(txn, thg, exp).await,
+		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,
 	}
 }
 
