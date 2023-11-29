@@ -262,10 +262,11 @@ fn process(
 	let mut stats = Vec::<Stats>::with_capacity(num_statements);
 	let mut output = Vec::<Value>::with_capacity(num_statements);
 	for index in 0..num_statements {
-        let (stat, result) = response.take(index)
-            .expect(&format!("Expected some result for a query with index {index}, but found none"));
-        stats.push(stat);
-        output.push(result.unwrap_or_else(|e| e.to_string().into()));
+		let (stat, result) = response.take(index).expect(&format!(
+			"Expected some result for a query with index {index}, but found none"
+		));
+		stats.push(stat);
+		output.push(result.unwrap_or_else(|e| e.to_string().into()));
 	}
 
 	// Check if we should emit JSON and/or prettify
@@ -277,7 +278,11 @@ fn process(
 			.iter()
 			.enumerate()
 			.map(|(i, v)| {
-				format!("-- Query {:?} (execution time: {:?})\n{v:#}", i + 1, stats[i].execution_time)
+				format!(
+					"-- Query {:?} (execution time: {:?})\n{v:#}",
+					i + 1,
+					stats[i].execution_time
+				)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
@@ -296,7 +301,11 @@ fn process(
 
 				v.clone().into_json().serialize(&mut serializer).unwrap();
 				let v = String::from_utf8(buf).unwrap();
-				format!("-- Query {:?} (execution time: {:?}\n{v:#}", i + 1, stats[i].execution_time)
+				format!(
+					"-- Query {:?} (execution time: {:?}\n{v:#}",
+					i + 1,
+					stats[i].execution_time
+				)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
