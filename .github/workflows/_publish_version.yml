@@ -138,7 +138,6 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
-      image-prefix: surrealdb
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       build: true
       push: false
@@ -325,14 +324,15 @@ jobs:
 
       - name: Publish binaries
         run: |
-          aws s3 cp --cache-control 'no-store' artifacts/* s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          for file in artifacts/**/*.{tgz,txt,exe}; do
+            aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          done
 
   docker-publish:
     needs: [publish, prepare-vars]
     uses: ./.github/workflows/_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
-      image-prefix: surrealdb
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
       build: false
