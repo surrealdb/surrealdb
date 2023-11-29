@@ -301,7 +301,20 @@ impl<'a> Lexer<'a> {
 					continue;
 				}
 				b'"' => {
-					return self.finish_token(TokenKind::CloseRecordString, None);
+					return self.finish_token(
+						TokenKind::CloseRecordString {
+							double: true,
+						},
+						None,
+					);
+				}
+				b'\'' => {
+					return self.finish_token(
+						TokenKind::CloseRecordString {
+							double: false,
+						},
+						None,
+					);
 				}
 				b'-' => match self.reader.next() {
 					Some(b'-') => {

@@ -1,8 +1,13 @@
+use geo::Point;
+
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Array, Dir, Ident, Idiom, Mock, Part, Subquery, Table, Value},
+	sql::{Array, Dir, Geometry, Ident, Idiom, Mock, Number, Part, Subquery, Table, Value},
 	syn::v2::{
-		parser::mac::{expected, to_do},
+		parser::{
+			mac::{expected, to_do},
+			ParseError, ParseErrorKind,
+		},
 		token::{t, Span, TokenKind},
 	},
 };
@@ -23,7 +28,11 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				Ok(Value::Thing(self.parse_record_string()?))
+				Ok(Value::Thing(self.parse_record_string(true)?))
+			}
+			t!("r'") => {
+				self.pop_peek();
+				Ok(Value::Thing(self.parse_record_string(false)?))
 			}
 			t!("$param") => {
 				let param = self.parse_token_value()?;
@@ -134,7 +143,11 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				Value::Thing(self.parse_record_string()?)
+				Value::Thing(self.parse_record_string(true)?)
+			}
+			t!("r'") => {
+				self.pop_peek();
+				Value::Thing(self.parse_record_string(false)?)
 			}
 			t!("$param") => {
 				self.pop_peek();
@@ -178,7 +191,7 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				self.pop_peek();
-				self.parse_inner_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))?
+				self.parse_inner_subquery_or_coordinate(token.span)?
 			}
 			t!("/") => {
 				self.pop_peek();
@@ -286,6 +299,80 @@ impl Parser<'_> {
 				Ok(Subquery::Ifelse(if_stmt))
 			}
 			_ => self.parse_inner_subquery(None),
+		}
+	}
+
+	pub fn parse_inner_subquery_or_coordinate(&mut self, start: Span) -> ParseResult<Value> {
+		let next = self.peek();
+		let res = match next.kind {
+			t!("RETURN") => {
+				self.pop_peek();
+				let stmt = self.parse_return_stmt()?;
+				Subquery::Output(stmt)
+			}
+			t!("SELECT") => {
+				self.pop_peek();
+				let stmt = self.parse_select_stmt()?;
+				Subquery::Select(stmt)
+			}
+			t!("CREATE") => {
+				self.pop_peek();
+				let stmt = self.parse_create_stmt()?;
+				Subquery::Create(stmt)
+			}
+			t!("UPDATE") => {
+				self.pop_peek();
+				let stmt = self.parse_update_stmt()?;
+				Subquery::Update(stmt)
+			}
+			t!("DELETE") => {
+				self.pop_peek();
+				let stmt = self.parse_delete_stmt()?;
+				Subquery::Delete(stmt)
+			}
+			t!("RELATE") => {
+				self.pop_peek();
+				let stmt = self.parse_relate_stmt()?;
+				Subquery::Relate(stmt)
+			}
+			t!("DEFINE") => {
+				self.pop_peek();
+				let stmt = self.parse_define_stmt()?;
+				Subquery::Define(stmt)
+			}
+			t!("REMOVE") => {
+				self.pop_peek();
+				let stmt = self.parse_remove_stmt()?;
+				Subquery::Remove(stmt)
+			}
+			_ => {
+				let value = self.parse_value_field()?;
+				Subquery::Value(value)
+			}
+		};
+		match res {
+			Subquery::Value(Value::Number(x)) => {
+				if self.eat(t!(",")) {
+					// TODO: Fix number parsing.
+					let b = self.parse_token_value::<Number>()?;
+
+					let a: f64 = x
+						.try_into()
+						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
+					let b: f64 = b
+						.try_into()
+						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
+
+					self.expect_closing_delimiter(t!(")"), start)?;
+					Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))))
+				} else {
+					Ok(Value::Subquery(Box::new(Subquery::Value(Value::Number(x)))))
+				}
+			}
+			x => {
+				self.expect_closing_delimiter(t!(")"), start)?;
+				Ok(Value::Subquery(Box::new(x)))
+			}
 		}
 	}
 

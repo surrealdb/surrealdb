@@ -364,6 +364,17 @@ impl<'a> Lexer<'a> {
 				}
 				return self.lex_ident_from_next_byte(b'u');
 			}
+			b'r' => match self.reader.peek() {
+				Some(b'\"') => {
+					self.reader.next();
+					t!("r\"")
+				}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("r'")
+				}
+				_ => return self.lex_ident_from_next_byte(byte),
+			},
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}

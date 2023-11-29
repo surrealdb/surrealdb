@@ -598,7 +598,9 @@ impl Parser<'_> {
 					expected!(self, "::");
 					let mut ident = self.parse_token_value::<Ident>()?;
 					while self.eat(t!("::")) {
-						ident.0.push_str(&self.parse_token_value::<Ident>()?);
+						let value = self.parse_token_value::<Ident>()?;
+						ident.0.push_str("::");
+						ident.0.push_str(&value);
 					}
 					res.function = Some(ident);
 				}

@@ -58,6 +58,13 @@ pub(crate) static PATHS: phf::Map<&'static str, PathKind> = phf_map! {
 		"array::sort::asc" => PathKind::Function,
 		"array::sort::desc" => PathKind::Function,
 		//
+		"object::entries" => PathKind::Function,
+		"object::from_entries" => PathKind::Function,
+		"object::keys" => PathKind::Function,
+		"object::len" => PathKind::Function,
+		"object::values" => PathKind::Function,
+		"object::matches" => PathKind::Function,
+		//
 		"bytes::len" => PathKind::Function,
 		//
 		"count" => PathKind::Function,
@@ -192,6 +199,7 @@ pub(crate) static PATHS: phf::Map<&'static str, PathKind> = phf_map! {
 		"string::similarity::fuzzy" => PathKind::Function,
 		"string::similarity::jaro" => PathKind::Function,
 		"string::similarity::smithwaterman" => PathKind::Function,
+		"string::matches" => PathKind::Function,
 		//
 		"time::ceil" => PathKind::Function,
 		"time::day" => PathKind::Function,
@@ -244,6 +252,7 @@ pub(crate) static PATHS: phf::Map<&'static str, PathKind> = phf_map! {
 		"type::is::int" => PathKind::Function,
 		"type::is::line" => PathKind::Function,
 		"type::is::null" => PathKind::Function,
+		"type::is::none" => PathKind::Function,
 		"type::is::multiline" => PathKind::Function,
 		"type::is::multipoint" => PathKind::Function,
 		"type::is::multipolygon" => PathKind::Function,
@@ -292,6 +301,7 @@ pub(crate) static PATHS: phf::Map<&'static str, PathKind> = phf_map! {
 		"http::patch" => PathKind::Function,
 		"http::delete" => PathKind::Function,
 		//
+		"search::analyze" => PathKind::Function,
 		"search::score" => PathKind::Function,
 		"search::highlight" => PathKind::Function,
 		"search::offsets" => PathKind::Function,

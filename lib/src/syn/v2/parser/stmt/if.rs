@@ -22,6 +22,7 @@ impl Parser<'_> {
 		match next.kind {
 			t!("THEN") => {
 				let body = self.parse_value_field()?;
+				self.eat(t!(";"));
 				res.exprs.push((condition, body));
 				self.parse_worded_tail(&mut res)?;
 			}
@@ -45,9 +46,11 @@ impl Parser<'_> {
 						let condition = self.parse_value_field()?;
 						expected!(self, "THEN");
 						let body = self.parse_value_field()?;
+						self.eat(t!(";"));
 						res.exprs.push((condition, body));
 					} else {
 						let value = self.parse_value_field()?;
+						self.eat(t!(";"));
 						expected!(self, "END");
 						res.close = Some(value);
 						return Ok(());

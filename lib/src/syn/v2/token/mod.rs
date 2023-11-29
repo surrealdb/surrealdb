@@ -205,10 +205,14 @@ pub enum TokenKind {
 	OpenDelim(Delim),
 	CloseDelim(Delim),
 	// a token denoting the opening of a record string, i.e. `r"`
-	OpenRecordString,
+	OpenRecordString {
+		double: bool,
+	},
 	/// a token denoting the clsoing of a record string, i.e. `"`
 	/// Never produced normally by the lexer.
-	CloseRecordString,
+	CloseRecordString {
+		double: bool,
+	},
 	Regex,
 	Uuid,
 	DateTime,
@@ -285,8 +289,12 @@ impl TokenKind {
 			TokenKind::CloseDelim(Delim::Paren) => ")",
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
-			TokenKind::OpenRecordString => "a record string",
-			TokenKind::CloseRecordString => "a closing record string",
+			TokenKind::OpenRecordString {
+				..
+			} => "a record string",
+			TokenKind::CloseRecordString {
+				..
+			} => "a closing record string",
 			TokenKind::Uuid => "a uuid",
 			TokenKind::DateTime => "a date-time",
 			TokenKind::Strand => "a strand",

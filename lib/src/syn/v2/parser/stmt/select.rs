@@ -134,10 +134,16 @@ impl Parser<'_> {
 		let start = self.parse_basic_idiom()?;
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
-		let direction = match self.next().kind {
-			t!("ASCENDING") => true,
-			t!("DESCENDING") => false,
-			x => unexpected!(self, x, "either 'ASCENDING' or 'DESCENDING'"),
+		let direction = match self.peek_kind() {
+			t!("ASCENDING") => {
+				self.pop_peek();
+				true
+			}
+			t!("DESCENDING") => {
+				self.pop_peek();
+				false
+			}
+			_ => true,
 		};
 		Ok(Order {
 			order: start,

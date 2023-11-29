@@ -1,6 +1,7 @@
 use crate::sql::Number;
 use crate::syn::v2::lexer::{unicode::U8Ext, Error as LexError, Lexer};
 use crate::syn::v2::token::Token;
+use rust_decimal::Decimal;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -100,7 +101,7 @@ impl Lexer<'_> {
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
 					Err(Error::InvalidSuffix)
 				} else {
-					Ok(self.finish_int_token())
+					Ok(self.finish_dec_token())
 				}
 			}
 			_ => unreachable!(),
@@ -184,6 +185,14 @@ impl Lexer<'_> {
 		let result = self.scratch.parse::<f64>().unwrap();
 		self.scratch.clear();
 		self.finish_number_token(Number::Float(result))
+	}
+
+	/// Parse the float in the scratch buffer and return it as a token
+	pub fn finish_dec_token(&mut self) -> Token {
+		// Lexer should ensure this never panics.
+		let result = self.scratch.parse::<Decimal>().unwrap();
+		self.scratch.clear();
+		self.finish_number_token(Number::Decimal(result))
 	}
 
 	/// Parse the integer in the scratch buffer and return it as a token

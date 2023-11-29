@@ -3751,7 +3751,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
 	"#;
 	let dbs = new_ds().await?;
@@ -4255,9 +4255,9 @@ async fn function_string_words() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_ceil() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::ceil("1987-06-22T08:30:45Z", 1w);
-		RETURN time::ceil("1987-06-22T08:30:45Z", 1y);
-		RETURN time::ceil("2023-05-11T03:09:00Z", 1s);
+		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1y);
+		RETURN time::ceil(d"2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4265,15 +4265,15 @@ async fn function_time_ceil() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-25T00:00:00Z'");
+	let val = Value::parse("d'1987-06-25T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-12-28T00:00:00Z'");
+	let val = Value::parse("d'1987-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2023-05-11T03:09:00Z'");
+	let val = Value::parse("d'2023-05-11T03:09:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4283,7 +4283,7 @@ async fn function_time_ceil() -> Result<(), Error> {
 async fn function_time_day() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::day();
-		RETURN time::day("1987-06-22T08:30:45Z");
+		RETURN time::day(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4303,9 +4303,9 @@ async fn function_time_day() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_floor() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::floor("1987-06-22T08:30:45Z", 1w);
-		RETURN time::floor("1987-06-22T08:30:45Z", 1y);
-		RETURN time::floor("2023-05-11T03:09:00Z", 1s);
+		RETURN time::floor(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::floor(d"1987-06-22T08:30:45Z", 1y);
+		RETURN time::floor(d"2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4313,15 +4313,15 @@ async fn function_time_floor() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-18T00:00:00Z'");
+	let val = Value::parse("d'1987-06-18T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1986-12-28T00:00:00Z'");
+	let val = Value::parse("d'1986-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2023-05-11T03:09:00Z'");
+	let val = Value::parse("d'2023-05-11T03:09:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4330,8 +4330,8 @@ async fn function_time_floor() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_format() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::format("1987-06-22T08:30:45Z", "%Y-%m-%d");
-		RETURN time::format("1987-06-22T08:30:45Z", "%T");
+		RETURN time::format(d"1987-06-22T08:30:45Z", "%Y-%m-%d");
+		RETURN time::format(d"1987-06-22T08:30:45Z", "%T");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4339,7 +4339,7 @@ async fn function_time_format() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22'");
+	let val = Value::parse("d'1987-06-22'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -4352,8 +4352,8 @@ async fn function_time_format() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_group() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::group("1987-06-22T08:30:45Z", 'hour');
-		RETURN time::group("1987-06-22T08:30:45Z", 'month');
+		RETURN time::group(d"1987-06-22T08:30:45Z", 'hour');
+		RETURN time::group(d"1987-06-22T08:30:45Z", 'month');
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4361,11 +4361,11 @@ async fn function_time_group() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T08:00:00Z'");
+	let val = Value::parse("d'1987-06-22T08:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-01T00:00:00Z'");
+	let val = Value::parse("d'1987-06-01T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4375,7 +4375,7 @@ async fn function_time_group() -> Result<(), Error> {
 async fn function_time_hour() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::hour();
-		RETURN time::hour("1987-06-22T08:30:45Z");
+		RETURN time::hour(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4395,7 +4395,7 @@ async fn function_time_hour() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_min() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::min(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+		RETURN time::min([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4403,7 +4403,7 @@ async fn function_time_min() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T08:30:45Z'");
+	let val = Value::parse("d'1987-06-22T08:30:45Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4412,7 +4412,7 @@ async fn function_time_min() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_max() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::max(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+		RETURN time::max([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4420,7 +4420,7 @@ async fn function_time_max() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1988-06-22T08:30:45Z'");
+	let val = Value::parse("d'1988-06-22T08:30:45Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4430,7 +4430,7 @@ async fn function_time_max() -> Result<(), Error> {
 async fn function_time_minute() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::minute();
-		RETURN time::minute("1987-06-22T08:30:45Z");
+		RETURN time::minute(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4451,7 +4451,7 @@ async fn function_time_minute() -> Result<(), Error> {
 async fn function_time_month() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::month();
-		RETURN time::month("1987-06-22T08:30:45Z");
+		RETURN time::month(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4472,7 +4472,7 @@ async fn function_time_month() -> Result<(), Error> {
 async fn function_time_nano() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::nano();
-		RETURN time::nano("1987-06-22T08:30:45Z");
+		RETURN time::nano(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4493,7 +4493,7 @@ async fn function_time_nano() -> Result<(), Error> {
 async fn function_time_micros() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::micros();
-		RETURN time::micros("1987-06-22T08:30:45Z");
+		RETURN time::micros(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4514,7 +4514,7 @@ async fn function_time_micros() -> Result<(), Error> {
 async fn function_time_millis() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::millis();
-		RETURN time::millis("1987-06-22T08:30:45Z");
+		RETURN time::millis(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4550,8 +4550,8 @@ async fn function_time_now() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_round() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::round("1987-06-22T08:30:45Z", 1w);
-		RETURN time::round("1987-06-22T08:30:45Z", 1y);
+		RETURN time::round(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::round(d"1987-06-22T08:30:45Z", 1y);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4559,11 +4559,11 @@ async fn function_time_round() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-25T00:00:00Z'");
+	let val = Value::parse("d'1987-06-25T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1986-12-28T00:00:00Z'");
+	let val = Value::parse("d'1986-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4573,7 +4573,7 @@ async fn function_time_round() -> Result<(), Error> {
 async fn function_time_second() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::second();
-		RETURN time::second("1987-06-22T08:30:45Z");
+		RETURN time::second(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4594,7 +4594,7 @@ async fn function_time_second() -> Result<(), Error> {
 async fn function_time_unix() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::unix();
-		RETURN time::unix("1987-06-22T08:30:45Z");
+		RETURN time::unix(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4615,7 +4615,7 @@ async fn function_time_unix() -> Result<(), Error> {
 async fn function_time_wday() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::wday();
-		RETURN time::wday("1987-06-22T08:30:45Z");
+		RETURN time::wday(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4636,7 +4636,7 @@ async fn function_time_wday() -> Result<(), Error> {
 async fn function_time_week() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::week();
-		RETURN time::week("1987-06-22T08:30:45Z");
+		RETURN time::week(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4657,7 +4657,7 @@ async fn function_time_week() -> Result<(), Error> {
 async fn function_time_yday() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::yday();
-		RETURN time::yday("1987-06-22T08:30:45Z");
+		RETURN time::yday(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4678,7 +4678,7 @@ async fn function_time_yday() -> Result<(), Error> {
 async fn function_time_year() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::year();
-		RETURN time::year("1987-06-22T08:30:45Z");
+		RETURN time::year(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4707,11 +4707,11 @@ async fn function_time_from_nanos() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-03T17:49:30.384840Z'");
+	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-01-02T08:28:24.384440Z'");
+	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4729,11 +4729,11 @@ async fn function_time_from_micros() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-03T17:49:30.384840Z'");
+	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-01-02T08:28:24.384440Z'");
+	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4751,11 +4751,11 @@ async fn function_time_from_millis() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-03T17:49:33.840Z'");
+	let val = Value::parse("d'1982-03-03T17:49:33.840Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-01-02T08:28:24.440Z'");
+	let val = Value::parse("d'2060-01-02T08:28:24.440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4773,11 +4773,11 @@ async fn function_time_from_secs() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-04T01:37:20Z'");
+	let val = Value::parse("d'1982-03-04T01:37:20Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-03-05T09:27:20Z'");
+	let val = Value::parse("d'2060-03-05T09:27:20Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4795,11 +4795,11 @@ async fn function_time_from_unix() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-04T01:37:20Z'");
+	let val = Value::parse("d'1982-03-04T01:37:20Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-03-05T09:27:20Z'");
+	let val = Value::parse("d'2060-03-05T09:27:20Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4834,8 +4834,8 @@ async fn function_type_bool() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_datetime() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::datetime("1987-06-22");
-		RETURN type::datetime("2022-08-01");
+		RETURN type::datetime(d"1987-06-22");
+		RETURN type::datetime(d"2022-08-01");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4843,11 +4843,11 @@ async fn function_type_datetime() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T00:00:00Z'");
+	let val = Value::parse("d'1987-06-22T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2022-08-01T00:00:00Z'");
+	let val = Value::parse("d'2022-08-01T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -5039,7 +5039,7 @@ async fn function_type_is_collection() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_datetime() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::is::datetime(<datetime> "2023-09-04T11:22:38.247Z");
+		RETURN type::is::datetime(<datetime> d"2023-09-04T11:22:38.247Z");
 		RETURN type::is::datetime("123");
 	"#;
 	let dbs = new_ds().await?;
@@ -5485,7 +5485,7 @@ async fn function_type_is_string() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::is::uuid(<uuid> "018a6065-a80a-765e-b640-9fcb330a2f4f");
+		RETURN type::is::uuid(<uuid> u"018a6065-a80a-765e-b640-9fcb330a2f4f");
 		RETURN type::is::uuid("123");
 	"#;
 	let dbs = new_ds().await?;

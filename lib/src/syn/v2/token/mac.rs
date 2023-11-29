@@ -26,7 +26,25 @@ macro_rules! t {
 	};
 
 	("r\"") => {
-		$crate::syn::v2::token::TokenKind::OpenRecordString
+		$crate::syn::v2::token::TokenKind::OpenRecordString {
+			double: true,
+		}
+	};
+	("r'") => {
+		$crate::syn::v2::token::TokenKind::OpenRecordString {
+			double: false,
+		}
+	};
+
+	("\"r") => {
+		$crate::syn::v2::token::TokenKind::CloseRecordString {
+			double: true,
+		}
+	};
+	("'r") => {
+		$crate::syn::v2::token::TokenKind::CloseRecordString {
+			double: false,
+		}
 	};
 
 	("<") => {

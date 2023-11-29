@@ -94,27 +94,58 @@ impl Parser<'_> {
 				Ok(Kind::Record(tables))
 			}
 			t!("GEOMETRY") => {
-				let delim = expected!(self, "<").span;
-				let mut kind = vec![self.parse_geometry_kind()?];
-				while self.eat(t!("|")) {
-					kind.push(self.parse_geometry_kind()?);
-				}
-				self.expect_closing_delimiter(t!(">"), delim)?;
+				let kind = match self.peek_kind() {
+					t!("<") => {
+						let delim = self.pop_peek().span;
+						let mut kind = vec![self.parse_geometry_kind()?];
+						while self.eat(t!("|")) {
+							kind.push(self.parse_geometry_kind()?);
+						}
+						self.expect_closing_delimiter(t!(">"), delim)?;
+						kind
+					}
+					t!("(") => {
+						let delim = self.pop_peek().span;
+						let mut kind = vec![self.parse_geometry_kind()?];
+						loop {
+							if self.eat(t!(")")) {
+								break;
+							}
+
+							kind.push(self.parse_geometry_kind()?);
+
+							if !self.eat(t!(",")) {
+								self.expect_closing_delimiter(t!(")"), delim)?;
+								break;
+							}
+						}
+						kind
+					}
+					_ => Vec::new(),
+				};
 				Ok(Kind::Geometry(kind))
 			}
 			t!("ARRAY") => {
-				let delim = expected!(self, "<").span;
-				let kind = self.parse_inner_kind()?;
-				let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
-				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::Array(Box::new(kind), size))
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let kind = self.parse_inner_kind()?;
+					let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Array(Box::new(kind), size))
+				} else {
+					Ok(Kind::Array(Box::new(Kind::Any), None))
+				}
 			}
 			t!("SET") => {
-				let delim = expected!(self, "<").span;
-				let kind = self.parse_inner_kind()?;
-				let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
-				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::Set(Box::new(kind), size))
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let kind = self.parse_inner_kind()?;
+					let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Set(Box::new(kind), size))
+				} else {
+					Ok(Kind::Set(Box::new(Kind::Any), None))
+				}
 			}
 			x => unexpected!(self, x, "a kind name"),
 		}

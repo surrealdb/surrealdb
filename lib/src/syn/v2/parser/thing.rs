@@ -12,7 +12,7 @@ use crate::{
 use std::ops::Bound;
 
 impl Parser<'_> {
-	pub fn parse_record_string(&mut self) -> ParseResult<Thing> {
+	pub fn parse_record_string(&mut self, double: bool) -> ParseResult<Thing> {
 		let thing = self.parse_thing()?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.
@@ -25,7 +25,13 @@ impl Parser<'_> {
 				token.span,
 			));
 		}
-		debug_assert_eq!(token.kind, TokenKind::CloseRecordString);
+		if token.kind == t!("'r") && double {
+			unexpected!(self, token.kind, "a single quote")
+		}
+		if token.kind == t!("\"r") && !double {
+			unexpected!(self, token.kind, "a double quote")
+		}
+		debug_assert!(matches!(token.kind, TokenKind::CloseRecordString { .. }));
 		Ok(thing)
 	}
 
