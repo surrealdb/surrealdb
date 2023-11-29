@@ -172,7 +172,7 @@ enum ExecutorOption<'a> {
 	Execute(&'a QueryExecutor, &'a Thing),
 }
 
-fn get_index_option<'a>(
+fn get_executor_option<'a>(
 	ctx: &'a Context<'_>,
 	doc: Option<&'a CursorDoc<'_>>,
 	exp: &'a Expression,
@@ -200,7 +200,7 @@ pub(crate) async fn matches(
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
-	match get_index_option(ctx, doc, exp) {
+	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
 		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
@@ -214,7 +214,7 @@ pub(crate) async fn knn(
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
-	match get_index_option(ctx, doc, exp) {
+	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
 		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,

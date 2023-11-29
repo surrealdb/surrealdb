@@ -209,12 +209,10 @@ impl<'a> TreeBuilder<'a> {
 						&exp,
 						IdiomPosition::Right,
 					)?;
-				} else {
-					if let Some(id) = left.is_non_indexed_field() {
-						self.eval_knn(id, &right, &exp)?;
-					} else if let Some(id) = right.is_non_indexed_field() {
-						self.eval_knn(id, &left, &exp)?;
-					}
+				} else if let Some(id) = left.is_non_indexed_field() {
+					self.eval_knn(id, &right, &exp)?;
+				} else if let Some(id) = right.is_non_indexed_field() {
+					self.eval_knn(id, &left, &exp)?;
 				}
 				let re = ResolvedExpression {
 					exp: exp.clone(),

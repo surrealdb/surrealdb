@@ -289,7 +289,14 @@ impl Iterator {
 
 		if do_iterate {
 			// Process prepared values
-			self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			if let Some(qp) = ctx.get_query_planner() {
+				while let Some(s) = qp.next_iteration_stage().await {
+					cancel_ctx.set_iteration_stage(s);
+					self.iterate(&cancel_ctx, opt, txn, stm).await?;
+				}
+			} else {
+				self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			}
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);

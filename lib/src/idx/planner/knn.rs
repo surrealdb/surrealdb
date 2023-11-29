@@ -1,54 +1,58 @@
-use crate::sql::Id;
-use std::cmp::Ordering;
+use crate::sql::{Number, Thing};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
-pub(super) struct KnnPriorityList {
+pub(super) struct KnnPriorityList(Arc<Mutex<Inner>>);
+
+struct Inner {
 	knn: usize,
-	docs: HashSet<Id>,
-	priority_list: BTreeMap<PriorityResult, HashSet<Id>>,
+	docs: HashSet<Arc<Thing>>,
+	priority_list: BTreeMap<Number, HashSet<Arc<Thing>>>,
 }
-
 impl KnnPriorityList {
 	pub(super) fn new(knn: usize) -> Self {
-		Self {
+		Self(Arc::new(Mutex::new(Inner {
 			knn,
 			docs: HashSet::new(),
 			priority_list: BTreeMap::default(),
+		})))
+	}
+
+	pub(super) async fn add(&self, dist: Number, thing: &Thing) {
+		let mut i = self.0.lock().await;
+		if i.check_add(&dist) {
+			i.add(dist, thing);
 		}
 	}
-	fn check_add(&self, dist: f64) -> bool {
+}
+
+impl Inner {
+	fn check_add(&self, dist: &Number) -> bool {
 		if self.docs.len() < self.knn {
 			true
-		} else if let Some(pr) = self.priority_list.keys().last() {
-			dist <= pr.0
+		} else if let Some(d) = self.priority_list.keys().last() {
+			d.gt(dist)
 		} else {
 			true
 		}
 	}
 
-	pub(super) fn add(&mut self, dist: f64, id: &Id) {
-		let pr = PriorityResult(dist);
-		match self.priority_list.entry(pr) {
+	pub(super) fn add(&mut self, dist: Number, thg: &Thing) {
+		let thg = Arc::new(thg.clone());
+		match self.priority_list.entry(dist) {
 			Entry::Vacant(e) => {
 				let mut h = HashSet::new();
-				h.insert(id.clone());
+				h.insert(thg.clone());
 				e.insert(h);
-				self.docs.insert(id.clone());
+				self.docs.insert(thg);
 			}
 			Entry::Occupied(mut e) => {
 				let h = e.get_mut();
-				h.insert(id.clone());
+				h.insert(thg);
 			}
 		}
-
-		#[cfg(debug_assertions)]
-		debug!(
-			"KnnPriorityList add - dist: {} - id: {:?} - total: {}",
-			dist,
-			id,
-			self.priority_list.len()
-		);
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
@@ -65,7 +69,7 @@ impl KnnPriorityList {
 		}
 	}
 
-	fn build(self) -> HashSet<Id> {
+	fn build(self) -> HashSet<Arc<Thing>> {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn);
 		#[cfg(debug_assertions)]
 		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
@@ -94,43 +98,5 @@ impl KnnPriorityList {
 			r.insert(id);
 		}
 		r
-	}
-}
-
-#[derive(Debug)]
-pub(in crate::idx) struct PriorityResult(pub(crate) f64);
-
-impl Eq for PriorityResult {}
-
-impl PartialEq<Self> for PriorityResult {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
-}
-
-impl PartialOrd<Self> for PriorityResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		cmp_f64(&self.0, &other.0)
-	}
-}
-
-pub(in crate::idx) fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
-	if let Some(cmp) = f1.partial_cmp(f2) {
-		return cmp;
-	}
-	if f1.is_nan() {
-		if f2.is_nan() {
-			Ordering::Equal
-		} else {
-			Ordering::Less
-		}
-	} else {
-		Ordering::Greater
 	}
 }

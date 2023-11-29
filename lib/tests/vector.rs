@@ -153,8 +153,8 @@ async fn select_where_brut_force_knn() -> Result<(), Error> {
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
 		LET $pt = [2,3,4,5];
-		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
 		SELECT id FROM pts WHERE point <2> $pt EXPLAIN;
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <2> $pt;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -172,6 +172,12 @@ async fn select_where_brut_force_knn() -> Result<(), Error> {
 						table: 'pts',
 					},
 					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'NO INDEX FOUND'
+					},
+					operation: 'Fallback'
 				}
 			]",
 	);

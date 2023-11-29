@@ -15,6 +15,7 @@ use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
+use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
@@ -167,16 +168,31 @@ impl QueryExecutor {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_thg: &Thing,
+		thg: &Thing,
 		doc: Option<&CursorDoc<'_>>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
-		if let Some((p, id, val, dist)) = self.knn_entries.get(exp) {
-			let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
-			let dist = dist.compute(&v, val.as_ref())?;
-			todo!(" add to the priority list")
+		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
+			if let Some(e) = e {
+				if let Some(things) = e.get(exp) {
+					if things.contains(thg) {
+						return Ok(Value::Bool(true));
+					}
+				}
+			}
+			Ok(Value::Bool(false))
+		} else {
+			if let Some((p, id, val, dist)) = self.knn_entries.get(exp) {
+				let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
+				let dist = dist.compute(&v, val.as_ref())?;
+				p.add(dist, thg).await;
+			}
+			Ok(Value::Bool(true))
 		}
-		Ok(Value::Bool(true))
+	}
+
+	pub(super) fn build_knn_set(&self) -> KnnSet {
+		todo!()
 	}
 
 	pub(super) fn add_iterator(&mut self, it_entry: IteratorEntry) -> IteratorRef {

@@ -5,7 +5,7 @@ use crate::dbs::capabilities::FuncTarget;
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
+use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -43,6 +43,8 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// An optional iteration stage
+	iteration_stage: Option<IterationStage>,
 	// The index store
 	index_stores: IndexStores,
 	// Capabilities
@@ -79,6 +81,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
 		};
@@ -96,6 +99,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 		}
@@ -110,6 +114,7 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
+			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 		}
@@ -158,6 +163,11 @@ impl<'a> Context<'a> {
 		self.query_planner = Some(qp);
 	}
 
+	/// Set the query planner
+	pub(crate) fn set_iteration_stage(&mut self, is: IterationStage) {
+		self.iteration_stage = Some(is);
+	}
+
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
@@ -170,6 +180,10 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
 		self.query_planner
+	}
+
+	pub(crate) fn get_iteration_stage(&self) -> Option<&IterationStage> {
+		self.iteration_stage.as_ref()
 	}
 
 	/// Get the index_store for this context/ds
