@@ -65,7 +65,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::value::Value;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[test]
 	fn thing_normal() {

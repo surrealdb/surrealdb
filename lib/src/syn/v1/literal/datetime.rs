@@ -194,7 +194,7 @@ mod tests {
 
 	// use chrono::Date;
 
-	use crate::{sql::Value, syn::test::Parse};
+	use crate::{sql::Value, syn::Parse};
 
 	use super::*;
 

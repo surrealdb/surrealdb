@@ -1047,7 +1047,7 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
-		parent_center: &Option<Arc<Vector>>,
+		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
 		on_obj: SharedVector,
 		p: StoredNode<MTreeNode>,
@@ -1262,8 +1262,13 @@ impl MTree {
 
 struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
 
-#[derive(PartialEq)]
 struct PriorityNode(f64, NodeId);
+
+impl PartialEq<Self> for PriorityNode {
+	fn eq(&self, other: &Self) -> bool {
+		self.0 == other.0 && self.1 == other.1
+	}
+}
 
 impl Eq for PriorityNode {}
 
