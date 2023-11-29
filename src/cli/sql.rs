@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
@@ -205,7 +206,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let res = client.query(query).await;
+				let res = client.query(query).with_stats().await;
 				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
@@ -248,16 +249,26 @@ pub async fn init(
 	Ok(())
 }
 
-fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
+fn process(
+	pretty: bool,
+	json: bool,
+	res: surrealdb::Result<WithStats<Response>>,
+) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
+	let mut stats = Vec::<Stats>::with_capacity(num_statements);
 	let mut output = Vec::<Value>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let result = response.take(index).unwrap_or_else(|e| e.to_string().into());
-		output.push(result);
+		match response.take(index) {
+			Some((stat, result)) => {
+				stats.push(stat);
+				output.push(result.unwrap_or_else(|e| e.to_string().into()));
+			}
+			_ => panic!("Expected some result for a query with index {index}, but found none"),
+		}
 	}
 
 	// Check if we should emit JSON and/or prettify
@@ -268,7 +279,9 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 		(false, true) => output
 			.iter()
 			.enumerate()
-			.map(|(i, v)| format!("-- Query {:?}\n{v:#}", i + 1))
+			.map(|(i, v)| {
+				format!("-- Query {:?} (took {:?})\n{v:#}", i + 1, stats[i].execution_time)
+			})
 			.collect::<Vec<String>>()
 			.join("\n"),
 		// Don't pretty print the JSON response
@@ -286,7 +299,7 @@ fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result
 
 				v.clone().into_json().serialize(&mut serializer).unwrap();
 				let v = String::from_utf8(buf).unwrap();
-				format!("-- Query {:?}\n{v:#}", i + 1)
+				format!("-- Query {:?} (took {:?}\n{v:#}", i + 1, stats[i].execution_time)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
