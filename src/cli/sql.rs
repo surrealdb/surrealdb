@@ -262,13 +262,10 @@ fn process(
 	let mut stats = Vec::<Stats>::with_capacity(num_statements);
 	let mut output = Vec::<Value>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		match response.take(index) {
-			Some((stat, result)) => {
-				stats.push(stat);
-				output.push(result.unwrap_or_else(|e| e.to_string().into()));
-			}
-			_ => panic!("Expected some result for a query with index {index}, but found none"),
-		}
+        let (stat, result) = response.take(index)
+            .expect(&format!("Expected some result for a query with index {index}, but found none"));
+        stats.push(stat);
+        output.push(result.unwrap_or_else(|e| e.to_string().into()));
 	}
 
 	// Check if we should emit JSON and/or prettify
