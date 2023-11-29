@@ -28,7 +28,7 @@ jobs:
     if: ${{ inputs.publish || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     outputs:
-      num-tuesday: ${{ steps.outputs.outputs.git-ref }}
+      num-tuesday: ${{ steps.outputs.outputs.num-tuesday }}
     steps:
       - name: Set outputs
         id: outputs
