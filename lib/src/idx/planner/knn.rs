@@ -27,7 +27,7 @@ impl KnnPriorityList {
 		}
 	}
 
-	fn add(&mut self, dist: f64, id: &Id) {
+	pub(super) fn add(&mut self, dist: f64, id: &Id) {
 		let pr = PriorityResult(dist);
 		match self.priority_list.entry(pr) {
 			Entry::Vacant(e) => {

@@ -150,7 +150,7 @@ pub(super) enum IndexOperator {
 	Union(Array),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
-	Knn(Array, u32),
+	Knn(Array, u16),
 }
 
 impl IndexOption {

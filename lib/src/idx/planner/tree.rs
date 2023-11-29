@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::KnnExpressions;
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
-use crate::sql::index::Index;
+use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{
 	Array, Cond, Expression, Idiom, Number, Operator, Part, Subquery, Table, Value, With,
@@ -272,12 +272,20 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 		id: Arc<Idiom>,
 	) -> Result<Option<IndexOperator>, Error> {
-		if let Operator::Knn(k) = op {
+		if let Operator::Knn(k, d) = op {
 			if let Node::Computed(v) = n {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
-				self.knn_expressions.insert(exp.clone(), (*k, id, Arc::new(vec)));
+				self.knn_expressions.insert(
+					exp.clone(),
+					(*k, id, Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
+				);
 				if let Value::Array(a) = v.as_ref() {
-					return Ok(Some(IndexOperator::Knn(a.clone(), *k)));
+					match d {
+						None | Some(Distance::Euclidean) | Some(Distance::Manhattan) => {
+							return Ok(Some(IndexOperator::Knn(a.clone(), *k)))
+						}
+						_ => {}
+					}
 				}
 			}
 		}
@@ -285,10 +293,13 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn eval_knn(&mut self, id: Arc<Idiom>, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
-		if let Operator::Knn(k) = exp.operator() {
+		if let Operator::Knn(k, d) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
-				self.knn_expressions.insert(exp.clone(), (*k, id, Arc::new(vec)));
+				self.knn_expressions.insert(
+					exp.clone(),
+					(*k, id, Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
+				);
 			}
 		}
 		Ok(())
