@@ -5,17 +5,16 @@ mod common;
 mod ml_integration {
 
 	use super::*;
-	use std::time::Duration;
-	use ulid::Ulid;
-	use test_log::test;
+	use http::header;
+	use hyper::body::to_bytes;
 	use hyper::{Body, Request};
 	use hyper::{Client, Uri};
-	use http::header;
-	use surrealml_core::storage::stream_adapter::StreamAdapter;
-	use hyper::body::to_bytes;
-	use std::sync::atomic::{AtomicBool, Ordering};
 	use serde::{Deserialize, Serialize};
-
+	use std::sync::atomic::{AtomicBool, Ordering};
+	use std::time::Duration;
+	use surrealml_core::storage::stream_adapter::StreamAdapter;
+	use test_log::test;
+	use ulid::Ulid;
 
 	static LOCK: AtomicBool = AtomicBool::new(false);
 
@@ -30,7 +29,9 @@ mod ml_integration {
 
 	impl LockHandle {
 		fn acquire_lock() -> Self {
-			while LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) != Ok(false) {
+			while LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+				!= Ok(false)
+			{
 				std::thread::sleep(Duration::from_millis(100));
 			}
 			LockHandle
@@ -42,7 +43,6 @@ mod ml_integration {
 			LOCK.store(false, Ordering::Release);
 		}
 	}
-
 
 	async fn upload_file(uri: Uri) -> Result<(), Box<dyn std::error::Error>> {
 		let client = Client::new();
@@ -138,5 +138,4 @@ mod ml_integration {
 		}
 		Ok(())
 	}
-
 }
