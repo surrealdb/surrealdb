@@ -1,18 +1,8 @@
 //! Unicode related utilities.
 /// Character constants
 pub mod chars {
-	// Zero width Non-joiner
-	//pub const ZWNJ: char = '\u{200C}';
-	// Zero width Joiner
-	//pub const ZWJ: char = '\u{200D}';
-	// no-break space
-	//pub const NBSP: char = '\u{00A0}';
-	// Zero width no-break space
-	//pub const ZWNBSP: char = '\u{FEFF}';
 	// Character tabulation
 	pub const TAB: char = '\u{0009}';
-	// Line tabulation
-	//pub const VT: char = '\u{000B}';
 	/// Form feed
 	pub const FF: char = '\u{000C}';
 
@@ -22,10 +12,13 @@ pub mod chars {
 	pub const CR: char = '\u{000D}';
 	/// Line separator
 	pub const LS: char = '\u{2020}';
+	/// Backspace
+	pub const BS: char = '\u{0008}';
 	/// Paragraph separator
 	pub const PS: char = '\u{2029}';
-	/// Backspace
-	pub const BS: char = '\u{2029}';
+
+	/// Line terminators for javascript source code.
+	pub const JS_LINE_TERIMATORS: [char; 4] = [LF, CR, LS, PS];
 }
 
 pub mod byte {

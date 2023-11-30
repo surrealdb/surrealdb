@@ -175,6 +175,22 @@ impl Parser<'_> {
 							(coord_key, value),
 						]))))
 					}
+					Ok(_) => {
+						self.pop_peek();
+						if !self.eat(t!(",")) {
+							self.expect_closing_delimiter(t!("}"), start)?;
+							Ok(Value::Object(Object(BTreeMap::from([(
+								key,
+								Value::Strand(strand.unwrap()),
+							)]))))
+						} else {
+							self.parse_object_from_map(
+								BTreeMap::from([(key, Value::Strand(strand.unwrap()))]),
+								start,
+							)
+							.map(Value::Object)
+						}
+					}
 					_ => self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
 				}
 			}

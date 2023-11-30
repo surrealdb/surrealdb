@@ -105,7 +105,8 @@ impl Parser<'_> {
 			| t!("OUTSIDE")
 			| t!("INTERSECTS")
 			| t!("NOT")
-			| t!("IN") => Some((9, 10)),
+			| t!("IN")
+			| t!("KNN") => Some((9, 10)),
 
 			t!("+") | t!("-") => Some((11, 12)),
 			t!("*") | t!("×") | t!("/") | t!("÷") => Some((13, 14)),

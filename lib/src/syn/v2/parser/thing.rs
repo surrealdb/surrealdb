@@ -6,7 +6,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, TokenKind},
+		token::{t, NumberKind, TokenKind},
 	},
 };
 use std::ops::Bound;
@@ -104,43 +104,44 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_id(&mut self) -> ParseResult<Id> {
-		match self.peek_kind() {
+		let token = self.next();
+		match token.kind {
 			t!("{") => {
-				let start = self.pop_peek().span;
-				let object = self.parse_object(start)?;
+				let object = self.parse_object(token.span)?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
-				let start = self.pop_peek().span;
-				let array = self.parse_array(start)?;
+				let array = self.parse_array(token.span)?;
 				Ok(Id::Array(array))
 			}
-			// TODO: negative numbers.
-			TokenKind::Number(_) => {
-				let number = self.parse_token_value::<u64>()?;
-				Ok(Id::Number(number as i64))
+			TokenKind::Number(NumberKind::Integer) => {
+				// Id handle numbers more loose then other parts of the code.
+				// If number can't fit in a i64 it will instead be parsed as a string.
+				let text = self.lexer.string.take().unwrap();
+				if let Ok(number) = text.parse() {
+					Ok(Id::Number(number))
+				} else {
+					Ok(Id::String(text))
+				}
 			}
 			t!("ULID") => {
-				self.pop_peek();
 				// TODO: error message about how to use `ulid` as an identifier.
 				expected!(self, "(");
 				expected!(self, ")");
 				Ok(Id::Generate(Gen::Ulid))
 			}
 			t!("UUID") => {
-				self.pop_peek();
 				expected!(self, "(");
 				expected!(self, ")");
 				Ok(Id::Generate(Gen::Uuid))
 			}
 			t!("RAND") => {
-				self.pop_peek();
 				expected!(self, "(");
 				expected!(self, ")");
 				Ok(Id::Generate(Gen::Rand))
 			}
 			_ => {
-				let ident = self.parse_token_value::<Ident>()?.0;
+				let ident = self.token_value::<Ident>(token)?.0;
 				Ok(Id::String(ident))
 			}
 		}

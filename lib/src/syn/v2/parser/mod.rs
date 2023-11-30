@@ -102,7 +102,7 @@ impl<'a> Parser<'a> {
 	/// Returns the next token and advance the parser one token forward.
 	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
-		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
+		let res = self.token_buffer.pop().unwrap_or_else(|| dbg!(self.lexer.next_token()));
 		self.last_span = res.span;
 		res
 	}
@@ -119,7 +119,7 @@ impl<'a> Parser<'a> {
 	/// Returns the next token without consuming it.
 	pub fn peek(&mut self) -> Token {
 		let Some(x) = self.token_buffer.first() else {
-			let res = self.lexer.next_token();
+			let res = dbg!(self.lexer.next_token());
 			self.token_buffer.push(res);
 			return res;
 		};
@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
 	/// Return the token kind of the next token without consuming it.
 	pub fn peek_kind(&mut self) -> TokenKind {
 		let Some(x) = self.token_buffer.first().map(|x| x.kind) else {
-			let res = self.lexer.next_token();
+			let res = dbg!(self.lexer.next_token());
 			self.token_buffer.push(res);
 			return res.kind;
 		};
@@ -140,7 +140,7 @@ impl<'a> Parser<'a> {
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_token_at(&mut self, at: u8) -> Token {
 		for _ in self.token_buffer.len()..=at {
-			self.token_buffer.push(self.lexer.next_token());
+			self.token_buffer.push(dbg!(self.lexer.next_token()));
 		}
 		self.token_buffer.at(at).unwrap()
 	}

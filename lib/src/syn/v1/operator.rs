@@ -133,6 +133,7 @@ pub fn matches(i: &str) -> IResult<&str, Operator> {
 }
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = opt(tag_no_case("knn"))(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, k) = u32(i)?;
 	let (i, _) = char('>')(i)?;

@@ -13,6 +13,7 @@ mod reader;
 mod unicode;
 
 mod datetime;
+mod js;
 mod strand;
 #[cfg(test)]
 mod test;
@@ -141,7 +142,9 @@ impl<'a> Lexer<'a> {
 	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
 		self.ate_whitespace = false;
-		self.next_token_inner()
+		let res = self.next_token_inner();
+		dbg!(&self.string);
+		res
 	}
 
 	fn next_token_inner(&mut self) -> Token {

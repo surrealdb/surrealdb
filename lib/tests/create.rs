@@ -9,8 +9,6 @@ use surrealdb::sql::Part;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
-// TODO: Revert ignoring once parser refactored.
-#[ignore]
 #[tokio::test]
 async fn create_with_id() -> Result<(), Error> {
 	let sql = "

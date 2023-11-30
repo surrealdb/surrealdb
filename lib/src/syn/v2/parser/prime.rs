@@ -2,10 +2,13 @@ use geo::Point;
 
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Array, Dir, Geometry, Ident, Idiom, Mock, Number, Part, Subquery, Table, Value},
+	sql::{
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Subquery, Table,
+		Value,
+	},
 	syn::v2::{
 		parser::{
-			mac::{expected, to_do, unexpected},
+			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
 		token::{t, Span, TokenKind},
@@ -37,6 +40,10 @@ impl Parser<'_> {
 			t!("$param") => {
 				let param = self.parse_token_value()?;
 				Ok(Value::Param(param))
+			}
+			t!("FUNCTION") => {
+				self.pop_peek();
+				Ok(Value::Function(Box::new(self.parse_script()?)))
 			}
 			t!("IF") => {
 				let stmt = self.parse_if_stmt()?;
@@ -163,7 +170,8 @@ impl Parser<'_> {
 				Value::Param(param)
 			}
 			t!("FUNCTION") => {
-				to_do!(self)
+				self.pop_peek();
+				Value::Function(Box::new(self.parse_script()?))
 			}
 			t!("->") => {
 				self.pop_peek();
@@ -437,5 +445,28 @@ impl Parser<'_> {
 			self.expect_closing_delimiter(t!(")"), start)?;
 		}
 		Ok(res)
+	}
+
+	fn parse_script(&mut self) -> ParseResult<Function> {
+		let start = expected!(self, "(").span;
+		let mut args = Vec::new();
+		loop {
+			if self.eat(t!(")")) {
+				break;
+			}
+
+			args.push(self.parse_value_field()?);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!(")"), start)?;
+				break;
+			}
+		}
+		expected!(self, "{");
+		let body = self
+			.lexer
+			.lex_js_function_body()
+			.map_err(|(e, span)| ParseError::new(ParseErrorKind::InvalidToken(e), span))?;
+		Ok(Function::Script(Script(body), args))
 	}
 }
