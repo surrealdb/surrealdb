@@ -1,5 +1,5 @@
 use crate::kvs;
-use futures::lock::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) type Transaction = Arc<Mutex<kvs::Transaction>>;

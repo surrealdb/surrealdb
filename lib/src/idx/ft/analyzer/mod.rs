@@ -247,8 +247,8 @@ mod tests {
 		sql::{statements::DefineStatement, Statement},
 		syn,
 	};
-	use futures::lock::Mutex;
 	use std::sync::Arc;
+	use tokio::sync::Mutex;
 
 	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
 		let ds = Datastore::new("memory").await.unwrap();

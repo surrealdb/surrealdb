@@ -25,6 +25,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::headers::{DB, ID, NS};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -88,9 +89,9 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		http::header::AUTHORIZATION,
 		http::header::CONTENT_TYPE,
 		http::header::ORIGIN,
-		headers::NS.parse().unwrap(),
-		headers::DB.parse().unwrap(),
-		headers::ID.parse().unwrap(),
+		NS.clone(),
+		DB.clone(),
+		ID.clone(),
 	];
 
 	#[cfg(not(feature = "http-compression"))]
@@ -99,9 +100,9 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		http::header::AUTHORIZATION,
 		http::header::CONTENT_TYPE,
 		http::header::ORIGIN,
-		headers::NS.parse().unwrap(),
-		headers::DB.parse().unwrap(),
-		headers::ID.parse().unwrap(),
+		NS.clone(),
+		DB.clone(),
+		ID.clone(),
 	];
 
 	let service = service

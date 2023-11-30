@@ -17,7 +17,7 @@ use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value
 use crate::syn;
 use crate::vs::Oracle;
 use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
+use futures::Future;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -205,6 +206,7 @@ impl Datastore {
 		path: &str,
 		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
+		#[allow(unused_variables)]
 		let default_clock: Arc<RwLock<SizedClock>> =
 			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore

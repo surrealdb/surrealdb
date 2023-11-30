@@ -2,9 +2,9 @@
 //! This module provides a kind of Hybrid Logical Clock (HLC) based on system time.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -94,7 +94,7 @@ impl SysTimeCounter {
 		// only if the current physical time is the same as the last physical time.
 		// Otherwise, reset the counter to 0 and get the current number as the logical time.
 		// This is to ensure that the logical time is always increasing.
-		let state = self.state.lock();
+		let state = self.state.try_lock();
 		if let Ok(mut state) = state {
 			let (last_physical_time, counter) = *state;
 			let current_physical_time = secs_since_unix_epoch();

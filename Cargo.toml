@@ -41,12 +41,12 @@ axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
-clap = { version = "4.4.7", features = ["env", "derive", "wrap_help", "unicode"] }
+clap = { version = "4.4.8", features = ["env", "derive", "wrap_help", "unicode"] }
 console-subscriber = "0.2.0"
 futures = "0.3.29"
 futures-util = "0.3.29"
 glob = "0.3.1"
-http = "0.2.9"
+http = "0.2.11"
 http-body = "0.4.5"
 hyper = "0.14.27"
 ipnet = "2.9.0"
@@ -57,20 +57,20 @@ pin-project-lite = "0.2.13"
 rand = "0.8.5"
 reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "gzip"] }
 rustyline = { version = "11.0.0", features = ["derive"] }
-serde = { version = "1.0.190", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
-tokio = { version = "1.33.0", features = ["macros", "signal", "tracing"] }
+tokio = { version = "1.34.0", features = ["macros", "signal", "tracing"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
 tracing = "0.1"
 tracing-opentelemetry = "0.19.0"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 
@@ -79,7 +79,7 @@ nix = "0.26.4"
 
 [dev-dependencies]
 assert_fs = "1.0.13"
-env_logger = "0.10.0"
+env_logger = "0.10.1"
 opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
 rcgen = "0.10.0"
 serial_test = "2.0.0"
@@ -89,7 +89,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.20.1" }
 tonic = "0.8.3"
 ulid = "1.1.0"
-wiremock = "0.5.19"
+wiremock = "0.5.21"
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"

@@ -9,7 +9,6 @@ mod api_integration {
 	use std::borrow::Cow;
 	use std::ops::Bound;
 	use std::sync::Arc;
-	use std::sync::Mutex;
 	use std::time::Duration;
 	use surrealdb::dbs::capabilities::Capabilities;
 	use surrealdb::error::Api as ApiError;
@@ -29,6 +28,7 @@ mod api_integration {
 	use surrealdb::sql::Value;
 	use surrealdb::Error;
 	use surrealdb::Surreal;
+	use tokio::sync::Mutex;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;

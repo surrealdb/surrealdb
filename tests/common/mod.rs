@@ -9,10 +9,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
 use std::fs::File;
+use std::future::Future;
+use std::ops::DerefMut;
 use std::path::Path;
+use std::pin::Pin;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{env, fs};
+use surrealdb::engine::remote::ws::Wss;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
@@ -144,6 +150,7 @@ pub struct StartServerArguments {
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
+	pub enable_auth_level: bool,
 	pub tick_interval: time::Duration,
 	pub args: String,
 }
@@ -154,6 +161,7 @@ impl Default for StartServerArguments {
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
+			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
 			args: "--allow-all".to_string(),
 		}
@@ -168,6 +176,14 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 	.await
 }
 
+pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		enable_auth_level: true,
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments::default()).await
 }
@@ -177,6 +193,7 @@ pub async fn start_server(
 		auth,
 		tls,
 		wait_is_ready,
+		enable_auth_level,
 		tick_interval,
 		args,
 	}: StartServerArguments,
@@ -201,6 +218,10 @@ pub async fn start_server(
 
 	if auth {
 		extra_args.push_str(" --auth");
+	}
+
+	if enable_auth_level {
+		extra_args.push_str(" --enable-auth-level");
 	}
 
 	if !tick_interval.is_zero() {
@@ -251,7 +272,7 @@ pub async fn ws_send_msg(socket: &mut WsStream, msg_req: String) -> Result<(), B
 		_ = time::sleep(time::Duration::from_millis(500)) => {
 			return Err("timeout after 500ms waiting for the request to be sent".into());
 		}
-		res = socket.send(Message::Text(msg_req)) => {
+		res = send_task => {
 			debug!("Message sent in {:?}", now.elapsed());
 			if let Err(err) = res {
 				return Err(format!("Error sending the message: {}", err).into());

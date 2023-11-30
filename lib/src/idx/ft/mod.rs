@@ -492,10 +492,10 @@ mod tests {
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Statement, Thing, Value};
 	use crate::syn;
-	use futures::lock::Mutex;
 	use std::collections::HashMap;
 	use std::sync::Arc;
 	use test_log::test;
+	use tokio::sync::Mutex;
 
 	async fn check_hits(
 		txn: &Transaction,

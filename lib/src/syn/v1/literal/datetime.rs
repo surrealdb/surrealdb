@@ -6,8 +6,14 @@ use super::super::{
 use crate::sql::Datetime;
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use nom::{
-	branch::alt, character::complete::char, combinator::map, error::ErrorKind, error_position,
-	sequence::delimited, Err,
+	branch::alt,
+	bytes::complete::tag,
+	character::complete::char,
+	combinator::{cut, map},
+	error::ErrorKind,
+	error_position,
+	sequence::delimited,
+	Err,
 };
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
@@ -15,11 +21,17 @@ pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 }
 
 fn datetime_single(i: &str) -> IResult<&str, Datetime> {
-	delimited(char('\''), datetime_raw, char('\''))(i)
+	alt((
+		delimited(tag("d\'"), cut(datetime_raw), cut(char('\''))),
+		delimited(char('\''), datetime_raw, char('\'')),
+	))(i)
 }
 
 fn datetime_double(i: &str) -> IResult<&str, Datetime> {
-	delimited(char('\"'), datetime_raw, char('\"'))(i)
+	alt((
+		delimited(tag("d\""), cut(datetime_raw), cut(char('\"'))),
+		delimited(char('\"'), datetime_raw, char('\"')),
+	))(i)
 }
 
 pub fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {
@@ -182,6 +194,8 @@ mod tests {
 
 	// use chrono::Date;
 
+	use crate::{sql::Value, syn::test::Parse};
+
 	use super::*;
 
 	#[test]
@@ -252,6 +266,25 @@ mod tests {
 		let sql = "2012-04-23T18:25:43.0000511Z";
 		let res = datetime_raw(sql);
 		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
+	}
+
+	#[test]
+	fn date_time_timezone_utc_sub_nanoseconds_from_value() {
+		let sql = "'2012-04-23T18:25:43.0000511Z'";
+		let res = Value::parse(sql);
+		let Value::Datetime(out) = res else {
+			panic!();
+		};
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
+
+		let sql = "d'2012-04-23T18:25:43.0000511Z'";
+		let res = Value::parse(sql);
+		let Value::Datetime(out) = res else {
+			panic!();
+		};
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 	}

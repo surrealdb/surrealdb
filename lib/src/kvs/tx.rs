@@ -25,7 +25,6 @@ use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
 use channel::Sender;
-use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -45,6 +44,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
