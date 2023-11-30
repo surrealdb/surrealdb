@@ -6,6 +6,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
@@ -23,7 +24,11 @@ impl Iterable {
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
+		if self.iteration_stage_check(ctx) {
+			Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
+		} else {
+			Ok(())
+		}
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -36,7 +41,27 @@ impl Iterable {
 		chn: Sender<Processed>,
 		dis: Option<AsyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
+		if self.iteration_stage_check(ctx) {
+			Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
+		} else {
+			Ok(())
+		}
+	}
+
+	fn iteration_stage_check(&self, ctx: &Context<'_>) -> bool {
+		match self {
+			Iterable::Table(tb) | Iterable::Index(tb, _) => {
+				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
+					if let Some(qp) = ctx.get_query_planner() {
+						if let Some(exe) = qp.get_query_executor(tb) {
+							return exe.has_knn();
+						}
+					}
+				}
+			}
+			_ => {}
+		}
+		true
 	}
 }
 

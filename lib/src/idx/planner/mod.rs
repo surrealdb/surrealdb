@@ -7,7 +7,9 @@ mod tree;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{IteratorEntry, IteratorRef, QueryExecutor};
+use crate::idx::planner::executor::{
+	InnerQueryExecutor, IteratorEntry, IteratorRef, QueryExecutor,
+};
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
@@ -55,7 +57,7 @@ impl<'a> QueryPlanner<'a> {
 			Some((node, im, with_indexes, knn_expressions)) => {
 				is_knn = is_knn || !knn_expressions.is_empty();
 				let mut exe =
-					QueryExecutor::new(ctx, self.opt, txn, &t, im, knn_expressions).await?;
+					InnerQueryExecutor::new(ctx, self.opt, txn, &t, im, knn_expressions).await?;
 				match PlanBuilder::build(node, self.with, with_indexes)? {
 					Plan::SingleIndex(exp, io) => {
 						if io.require_distinct() {
@@ -82,6 +84,7 @@ impl<'a> QueryPlanner<'a> {
 							self.fallbacks.push(fallback);
 						}
 						self.add(t.clone(), None, exe, it);
+						it.ingest(Iterable::Table(t));
 						is_table_iterator = true;
 					}
 				}
@@ -98,8 +101,14 @@ impl<'a> QueryPlanner<'a> {
 		Ok(())
 	}
 
-	fn add(&mut self, tb: Table, irf: Option<IteratorRef>, exe: QueryExecutor, it: &mut Iterator) {
-		self.executors.insert(tb.0.clone(), exe);
+	fn add(
+		&mut self,
+		tb: Table,
+		irf: Option<IteratorRef>,
+		exe: InnerQueryExecutor,
+		it: &mut Iterator,
+	) {
+		self.executors.insert(tb.0.clone(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf));
 		}
@@ -124,16 +133,16 @@ impl<'a> QueryPlanner<'a> {
 		let pos = self.iteration_index.fetch_add(1, Ordering::Relaxed);
 		match self.iteration_workflow.get(pos as usize) {
 			Some(IterationStage::BuildKnn) => {
-				return Some(IterationStage::Iterate(Some(self.build_knn_sets())));
+				return Some(IterationStage::Iterate(Some(self.build_knn_sets().await)));
 			}
 			is => is.cloned(),
 		}
 	}
 
-	fn build_knn_sets(&self) -> KnnSets {
+	async fn build_knn_sets(&self) -> KnnSets {
 		let mut results = HashMap::with_capacity(self.executors.len());
 		for (tb, exe) in &self.executors {
-			results.insert(tb.clone(), exe.build_knn_set());
+			results.insert(tb.clone(), exe.build_knn_set().await);
 		}
 		Arc::new(results)
 	}

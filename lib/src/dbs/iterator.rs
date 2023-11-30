@@ -10,6 +10,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::IterationStage;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -23,6 +24,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
+#[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
@@ -69,6 +71,19 @@ pub(crate) struct Iterator {
 	results: Vec<Value>,
 	// Iterator input values
 	entries: Vec<Iterable>,
+}
+
+impl Clone for Iterator {
+	fn clone(&self) -> Self {
+		Self {
+			run: self.run.clone(),
+			limit: self.limit.clone(),
+			start: self.start.clone(),
+			error: None,
+			results: vec![],
+			entries: self.entries.clone(),
+		}
+	}
 }
 
 impl Iterator {
@@ -291,8 +306,13 @@ impl Iterator {
 			// Process prepared values
 			if let Some(qp) = ctx.get_query_planner() {
 				while let Some(s) = qp.next_iteration_stage().await {
+					let is_last = matches!(s, IterationStage::Iterate(_));
 					cancel_ctx.set_iteration_stage(s);
-					self.iterate(&cancel_ctx, opt, txn, stm).await?;
+					if is_last {
+						self.iterate(&cancel_ctx, opt, txn, stm).await?;
+					} else {
+						self.clone().iterate(&cancel_ctx, opt, txn, stm).await?;
+					};
 				}
 			} else {
 				self.iterate(&cancel_ctx, opt, txn, stm).await?;
@@ -610,7 +630,13 @@ impl Iterator {
 				// If any iterator requires distinct, we new to create a global distinct instance
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
-				for v in mem::take(&mut self.entries) {
+				let entries =
+					if matches!(ctx.get_iteration_stage(), Some(IterationStage::Iterate(_))) {
+						mem::take(&mut self.entries)
+					} else {
+						self.entries.clone()
+					};
+				for v in entries {
 					// Distinct is passed only for iterators that really requires it
 					let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
 					v.iterate(ctx, opt, txn, stm, self, dis).await?;

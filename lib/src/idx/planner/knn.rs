@@ -26,6 +26,10 @@ impl KnnPriorityList {
 			i.add(dist, thing);
 		}
 	}
+
+	pub(super) async fn build(&self) -> HashSet<Arc<Thing>> {
+		self.0.lock().await.build()
+	}
 }
 
 impl Inner {
@@ -69,12 +73,12 @@ impl Inner {
 		}
 	}
 
-	fn build(self) -> HashSet<Arc<Thing>> {
+	fn build(&self) -> HashSet<Arc<Thing>> {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn);
 		#[cfg(debug_assertions)]
 		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
-		for (_, docs) in self.priority_list {
+		for (_, docs) in &self.priority_list {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.into_iter().take(left) {
@@ -95,7 +99,7 @@ impl Inner {
 		debug!("sorted_docs: {:?}", sorted_docs);
 		let mut r = HashSet::with_capacity(sorted_docs.len());
 		for id in sorted_docs {
-			r.insert(id);
+			r.insert(id.clone());
 		}
 		r
 	}
