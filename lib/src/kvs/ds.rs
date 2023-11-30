@@ -92,6 +92,8 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
+	// Whether authentication levels are enabled on this datastore.
+	auth_levels_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -340,6 +342,7 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
+			auth_levels_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -385,6 +388,12 @@ impl Datastore {
 		self
 	}
 
+	/// Set whether authentication levels are enabled for this Datastore
+	pub fn with_auth_levels_enabled(mut self, enabled: bool) -> Self {
+		self.auth_levels_enabled = enabled;
+		self
+	}
+
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
@@ -394,6 +403,11 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	/// Are authentication levels enabled for this Datastore?
+	pub fn is_auth_levels_enabled(&self) -> bool {
+		self.auth_levels_enabled
 	}
 
 	/// Setup the initial credentials

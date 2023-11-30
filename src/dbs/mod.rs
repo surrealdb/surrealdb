@@ -27,6 +27,13 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_AUTH", long = "auth")]
 	#[arg(default_value_t = false)]
 	auth_enabled: bool,
+	#[arg(
+		help = "Whether to enable authentication levels",
+		help_heading = "Authentication Levels"
+	)]
+	#[arg(env = "SURREAL_AUTH_LEVELS", long = "auth-levels")]
+	#[arg(default_value_t = false)]
+	auth_levels_enabled: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
@@ -204,6 +211,7 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		auth_enabled,
+		auth_levels_enabled,
 		caps,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
@@ -224,6 +232,10 @@ pub async fn init(
 		info!("✅🔒 Authentication is enabled 🔒✅");
 	} else {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
+	}
+	// Log whether authentication levels are enabled
+	if auth_levels_enabled {
+		info!("Authentication levels are enabled");
 	}
 
 	let caps = caps.into();
