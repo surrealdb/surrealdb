@@ -50,6 +50,9 @@ async fn import(
 	_maybe_output: Option<TypedHeader<Accept>>,
 	mut stream: BodyStream,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	if false == true {
+		return Err(output::json::<String>(&"Not implemented".to_string()));
+	}
 	let mut buffer = Vec::new();
 	while let Some(chunk) = stream.next().await {
 		let chunk = chunk.unwrap();
@@ -60,7 +63,7 @@ async fn import(
 		Err(err) => return Err(output::json::<String>(&err.to_string())),
 	};
 
-	// define the key and value to be inserted
+	// // define the key and value to be inserted
 	let id = format!("{}-{}", file.header.name.to_string(), file.header.version.to_string());
 	let bytes = file.to_bytes();
 
@@ -68,14 +71,11 @@ async fn import(
 		InsertStatus::Inserted(hash) => hash,
 		InsertStatus::AlreadyExists(hash) => hash,
 	};
-	if false == true {
-		return Err(output::json::<String>(&"Not implemented".to_string()));
-	}
 
-	let ds = Datastore::new("file://ml_cache.db").await.unwrap();
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(id.clone(), file_hash).await.unwrap();
-	let _ = tx.commit().await.unwrap();
+	let ds = Datastore::new("file://ml_cache.db").await.map_err(|e| output::json::<String>(&e.to_string()))?;
+	let mut tx = ds.transaction(Write, Optimistic).await.map_err(|e| output::json::<String>(&e.to_string()))?;
+	tx.set(id.clone(), file_hash).await.map_err(|e| output::json::<String>(&e.to_string()))?;
+	let _ = tx.commit().await.map_err(|e| output::json::<String>(&e.to_string()))?;
 	Ok(output::json(&output::simplify(id)))
 }
 

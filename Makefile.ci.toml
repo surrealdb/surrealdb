@@ -39,6 +39,18 @@ command = "cargo"
 env = { RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "ws_integration", "--", "ws_integration", "--nocapture"]
 
+# [tasks.ci-ml-integration]
+# category = "CI - INTEGRATION TESTS"
+# command = "cargo"
+# env = { RUST_LOG={ value = "ml_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+# args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
+
+[tasks.ci-ml-integration]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+env = { RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
+
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
