@@ -77,8 +77,8 @@ impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
 			run: self.run.clone(),
-			limit: self.limit.clone(),
-			start: self.start.clone(),
+			limit: self.limit,
+			start: self.start,
 			error: None,
 			results: vec![],
 			entries: self.entries.clone(),

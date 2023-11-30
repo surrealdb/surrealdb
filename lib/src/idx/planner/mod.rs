@@ -133,7 +133,7 @@ impl<'a> QueryPlanner<'a> {
 		let pos = self.iteration_index.fetch_add(1, Ordering::Relaxed);
 		match self.iteration_workflow.get(pos as usize) {
 			Some(IterationStage::BuildKnn) => {
-				return Some(IterationStage::Iterate(Some(self.build_knn_sets().await)));
+				Some(IterationStage::Iterate(Some(self.build_knn_sets().await)))
 			}
 			is => is.cloned(),
 		}

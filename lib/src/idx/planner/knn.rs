@@ -78,10 +78,10 @@ impl Inner {
 		#[cfg(debug_assertions)]
 		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
-		for (_, docs) in &self.priority_list {
+		for docs in self.priority_list.values() {
 			let dl = docs.len();
 			if dl > left {
-				for doc_id in docs.into_iter().take(left) {
+				for doc_id in docs.iter().take(left) {
 					sorted_docs.push_back(doc_id);
 				}
 				break;
