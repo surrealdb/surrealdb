@@ -27,11 +27,9 @@ impl SyncDistinct {
 	}
 
 	fn is_distinct(ctx: &Context<'_>, i: &Iterable) -> bool {
-		if let Iterable::Index(t, ir) = i {
-			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&t.0) {
-					return exe.is_distinct(*ir);
-				}
+		if let Iterable::Index(_, ir) = i {
+			if let Some(exe) = ctx.get_query_executor() {
+				return exe.is_distinct(*ir);
 			}
 		}
 		false

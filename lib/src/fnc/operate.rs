@@ -172,23 +172,38 @@ enum ExecutorOption<'a> {
 	Execute(&'a QueryExecutor, &'a Thing),
 }
 
+fn get_executor_and_thing<'a>(
+	ctx: &'a Context<'_>,
+	doc: &'a CursorDoc,
+) -> Option<(&'a QueryExecutor, &'a Thing)> {
+	if let Some(thg) = doc.rid {
+		if let Some(exe) = ctx.get_query_executor() {
+			if exe.is_table(&thg.tb) {
+				return Some((exe, thg));
+			}
+		}
+		if let Some(pla) = ctx.get_query_planner() {
+			if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				return Some((exe, thg));
+			}
+		}
+	}
+	None
+}
+
 fn get_executor_option<'a>(
 	ctx: &'a Context<'_>,
 	doc: Option<&'a CursorDoc<'_>>,
 	exp: &'a Expression,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
-		if let Some(thg) = doc.rid {
-			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
-					if let Some(ir) = doc.ir {
-						if exe.is_iterator_expression(ir, exp) {
-							return ExecutorOption::PreMatch;
-						}
-					}
-					return ExecutorOption::Execute(exe, thg);
+		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
+			if let Some(ir) = doc.ir {
+				if exe.is_iterator_expression(ir, exp) {
+					return ExecutorOption::PreMatch;
 				}
 			}
+			return ExecutorOption::Execute(exe, thg);
 		}
 	}
 	ExecutorOption::None

@@ -31,6 +31,7 @@ pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Dista
 pub(super) type KnnExpressions =
 	HashMap<Arc<Expression>, (u16, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
 
+#[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 
 pub(super) struct InnerQueryExecutor {
@@ -218,6 +219,10 @@ impl QueryExecutor {
 	}
 	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
 		(ir as usize) < self.0.it_entries.len()
+	}
+
+	pub(crate) fn is_table(&self, tb: &str) -> bool {
+		self.0.table.eq(tb)
 	}
 
 	pub(crate) fn has_knn(&self) -> bool {
