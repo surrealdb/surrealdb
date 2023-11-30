@@ -129,7 +129,7 @@ impl<'a> Processor<'a> {
 							return self.process_table(&ctx, opt, txn, stm, v).await;
 						}
 					}
-					self.process_table(&ctx, opt, txn, stm, v).await?
+					self.process_table(ctx, opt, txn, stm, v).await?
 				}
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
