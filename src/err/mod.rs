@@ -1,7 +1,9 @@
+use crate::cli::abstraction::auth::Error as SurrealAuthError;
+use axum::extract::rejection::TypedHeaderRejection;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::DecodeError as Base64Error;
-use http::StatusCode;
+use http::{HeaderName, StatusCode};
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use serde_cbor::error::Error as CborError;
@@ -34,6 +36,9 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
+	#[error("There was a problem parsing the header {0}: {1}")]
+	InvalidHeader(HeaderName, TypedHeaderRejection),
+
 	#[error("The operation is unsupported")]
 	OperationUnsupported,
 
@@ -57,6 +62,9 @@ pub enum Error {
 
 	#[error("There was an error with the node agent")]
 	NodeAgent,
+
+	#[error("There was an error with auth: {0}")]
+	Auth(#[from] SurrealAuthError),
 }
 
 impl From<Error> for String {

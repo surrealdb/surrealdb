@@ -71,7 +71,11 @@ impl Response {
 		let mut value = match self.result {
 			Ok(data) => {
 				let value = match data {
-					Data::Query(vec) => sql::to_value(vec).unwrap(),
+					Data::Query(vec) => {
+						let responses: Vec<_> =
+							vec.into_iter().map(dbs::ApiResponse::from).collect();
+						sql::to_value(responses).unwrap()
+					}
 					Data::Live(notification) => sql::to_value(notification).unwrap(),
 					Data::Other(value) => value,
 				};

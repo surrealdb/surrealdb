@@ -245,7 +245,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run export: {args}"));
+			common::run(&args).output().expect("failed to run export");
 			exported
 		};
 
@@ -266,6 +266,190 @@ mod cli_integration {
 
 			// TODO: Once backups are functional, update this test.
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn with_auth_level() {
+		// Commands with credentials for different auth levels
+		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		info!("* Create users with identical credentials at ROOT, NS and DB levels");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} {creds}");
+			let _ = common::run(&args)
+				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER} ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
+				.output()
+				.expect("success");
+		}
+
+		info!("* Pass root auth level and access root info");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("namespaces: {"),
+				"auth level root should be able to access root info: {output}"
+			);
+		}
+
+		info!("* Pass root auth level and access namespace info");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("databases: {"),
+				"auth level root should be able to access namespace info: {output}"
+			);
+		}
+
+		info!("* Pass root auth level and access database info");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"auth level root should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass namespace auth level and access root info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"auth level namespace should not be able to access root info: {output}"
+			);
+		}
+
+		info!("* Pass namespace auth level and access namespace info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("databases: {"),
+				"auth level namespace should be able to access namespace info: {output}"
+			);
+		}
+
+		info!("* Pass namespace auth level and access database info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"auth level namespace should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass database auth level and access root info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"auth level datbase should not be able to access root info: {output}",
+			);
+		}
+
+		info!("* Pass database auth level and access namespace info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"auth level datbase should not be able to access namespace info: {output}",
+			);
+		}
+
+		info!("* Pass database auth level and access database info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"auth level datbase should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass namespace auth level without specifying namespace");
+		{
+			let args = format!("sql --conn http://{addr} --auth-level database {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("Namespace is needed for authentication but it was not provided"),
+				"auth level namespace requires providing a namespace: {:?}",
+				output
+			);
+		}
+
+		info!("* Pass database auth level without specifying database");
+		{
+			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database {creds}");
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("Database is needed for authentication but it was not provided"),
+				"auth level database requires providing a namespace and database: {:?}",
+				output
+			);
 		}
 	}
 

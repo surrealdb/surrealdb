@@ -299,6 +299,13 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			table => { fn },
 			tb => { fn },
 		},
+		object => {
+			entries => { fn },
+			from_entries => { fn },
+			keys => { fn },
+			len => { fn },
+			values => { fn },
+		},
 		parse => {
 			email => {
 				host => { fn },
