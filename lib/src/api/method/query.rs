@@ -1,10 +1,10 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::sql;
@@ -15,9 +15,11 @@ use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::Surreal;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::Future;
@@ -29,9 +31,22 @@ use std::pin::Pin;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
-	pub(super) router: Result<&'r Router<C>>,
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) query: Vec<Result<Vec<Statement>>>,
 	pub(super) bindings: Result<BTreeMap<String, Value>>,
+}
+
+impl<C> Query<'_, C>
+where
+	C: Connection,
+{
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Query<'static, C> {
+		Query {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
 }
 
 impl<'r, Client> IntoFuture for Query<'r, Client>
@@ -50,7 +65,7 @@ where
 			let query = sql::Query(Statements(statements));
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
-			conn.execute_query(self.router?, param).await
+			conn.execute_query(self.client.router.extract()?, param).await
 		})
 	}
 }
