@@ -136,6 +136,7 @@ pub fn matches(i: &str) -> IResult<&str, Operator> {
 }
 
 pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(',')(i)?;
 	let (i, _) = mightbespace(i)?;
 	alt((
@@ -152,12 +153,12 @@ pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('<')(i)?;
-	cut(|i| {
-		let (i, k) = u16(i)?;
-		let (i, dist) = opt(knn_distance)(i)?;
-		let (i, _) = char('>')(i)?;
-		Ok((i, Operator::Knn(k, dist)))
-	})(i)
+	let (i, _) = mightbespace(i)?;
+	let (i, k) = u16(i)?;
+	let (i, dist) = opt(knn_distance)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, Operator::Knn(k, dist)))
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
@@ -234,11 +235,11 @@ mod tests {
 	}
 
 	#[test]
-	fn test_knn_with_distance_and_spaces() {
-		let res = knn("<3, COSINE>");
+	fn test_knn_with_distance_spaces() {
+		let res = knn("< 10, COSINE >");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<3,COSINE>", format!("{}", out));
-		assert_eq!(out, Operator::Knn(3, Some(Distance::Cosine)));
+		assert_eq!("<10,COSINE>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(10, Some(Distance::Cosine)));
 	}
 }
