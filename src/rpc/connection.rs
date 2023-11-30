@@ -12,13 +12,10 @@ use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{FutureExt, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
-use std::panic;
-use std::panic::UnwindSafe;
-use std::pin::Pin;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::QueryType;
@@ -29,7 +26,7 @@ use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
-use tokio::task::{JoinSet, LocalSet};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing::Span;
@@ -853,30 +850,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn query(&self, sql: Value) -> Result<Vec<Response>, Error> {
-		// let mut res: Result<Vec<Response>, Error> = Ok(vec![]);
-		// let local_set = LocalSet::new();
-		// let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-		// let rt_pin = Pin::new(&rt);
-		let a = self.query_impl(sql).catch_unwind().await;
-		match a {
-			Ok(v) => Ok(v),
-			Err(e) => {
-				error!("Panic while processing query: {:?}", e);
-				Err(Error::Request)
-			}
-		}
-		// let panic_err = std::panic::catch_unwind(|| {
-		// 	res = rt_pin.block_on(self.query_impl(sql));
-		// });
-		// if let Err(err) = panic_err {
-		// 	error!("Panic while processing query: {:?}", err);
-		// 	return Err(Error::Request);
-		// }
-	}
-
-	async fn query_chan(&self, sql: Value) {}
-
-	async fn query_impl(&self, sql: Value) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the query parameters
