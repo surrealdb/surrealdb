@@ -31,9 +31,9 @@ pub struct StartCommandDbsOptions {
 		help = "Whether to enable authentication levels",
 		help_heading = "Authentication Levels"
 	)]
-	// TODO(gguillemas): Remove this argument once the legacy basic auth is deprecated in v2.0.0
 	#[arg(env = "SURREAL_AUTH_LEVELS", long = "auth-levels")]
 	#[arg(default_value_t = false)]
+	// TODO(gguillemas): Remove this argument once the legacy basic auth is deprecated in v2.0.0
 	auth_levels_enabled: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
