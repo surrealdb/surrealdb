@@ -10,6 +10,7 @@ mod ws_integration {
 	use std::time::Duration;
 
 	use serde_json::json;
+	use surreal::cli;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::method::Stream;
 	use surrealdb::opt::auth::Root;
@@ -22,7 +23,6 @@ mod ws_integration {
 
 	use super::common::{self, PASS, USER};
 	use crate::common::error::TestError;
-	use crate::ws_integration;
 
 	#[test(tokio::test)]
 	async fn ping() -> Result<(), Box<dyn std::error::Error>> {
@@ -1614,8 +1614,6 @@ mod ws_integration {
 
 		// Start binary LQ
 		let mut lq_binary = binary.clone();
-		let mut lq: Stream<Client, Vec<RecordId>> =
-			lq_binary.select(table_name).live().await.unwrap();
 
 		// Repeatedly create plaintext updates
 		let tb = table_name.to_string();
@@ -1684,6 +1682,8 @@ mod ws_integration {
 			Receiver<Notification<RecordId>>,
 		) = mpsc::channel();
 		let bin_recv = async move {
+			let mut lq: Stream<Client, Vec<RecordId>> =
+				lq_binary.select(table_name).live().await.unwrap();
 			loop {
 				let val = lq.next().await.unwrap().unwrap();
 				bin_recv_send.send(val).unwrap();
@@ -1715,21 +1715,6 @@ mod ws_integration {
 		tokio::join!(local_set, bin_task, bin_recv_task, check_messages);
 
 		Ok(())
-	}
-
-	struct OwnedLq<'a> {
-		owned_driver: Surreal<Client>,
-		lq: &'a Stream<'a, Client, Vec<RecordId>>,
-	}
-
-	impl<'a> OwnedLq<'a> {
-		async fn new(driver: Surreal<Client>, table_name: &str) -> OwnedLq<'a> {
-			let lq = driver.select(table_name).live().await.unwrap();
-			OwnedLq {
-				owned_driver: driver,
-				lq: &lq,
-			}
-		}
 	}
 
 	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]

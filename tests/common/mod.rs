@@ -257,7 +257,7 @@ pub async fn ws_send_msg(socket: &mut WsStream, msg_req: String) -> Result<(), B
 		_ = time::sleep(time::Duration::from_millis(500)) => {
 			return Err("timeout after 500ms waiting for the request to be sent".into());
 		}
-		res = socket.send(Message::Text(msg_req)) => {
+		res = send_task => {
 			debug!("Message sent in {:?}", now.elapsed());
 			if let Err(err) = res {
 				return Err(format!("Error sending the message: {}", err).into());
