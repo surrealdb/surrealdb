@@ -1,6 +1,6 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::conn::Router;
+use crate::api::method::OnceLockExt;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -8,6 +8,7 @@ use crate::api::Result;
 use crate::method::Live;
 use crate::sql::Id;
 use crate::sql::Value;
+use crate::Surreal;
 use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -18,7 +19,7 @@ use std::pin::Pin;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R> {
-	pub(super) router: Result<&'r Router<C>>,
+	pub(super) client: &'r Surreal<C>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
@@ -28,7 +29,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Select {
-				router,
+				client,
 				resource,
 				range,
 				..
@@ -39,7 +40,7 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Select);
-				conn.$method(router?, Param::new(vec![param])).await
+				conn.$method(client.router.extract()?, Param::new(vec![param])).await
 			})
 		}
 	};
@@ -153,7 +154,7 @@ where
 	/// ```
 	pub fn live(self) -> Live<'r, C, R> {
 		Live {
-			router: self.router,
+			client: self.client,
 			resource: self.resource,
 			range: self.range,
 			response_type: self.response_type,
