@@ -4,7 +4,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::{escaped_transform, is_not, tag, take, take_while_m_n},
 	character::complete::char,
-	combinator::value,
+	combinator::{opt, value},
 	sequence::preceded,
 	Err,
 };
@@ -25,11 +25,13 @@ pub fn strand_raw(i: &str) -> IResult<&str, String> {
 fn strand_blank(i: &str) -> IResult<&str, String> {
 	alt((
 		|i| {
+			let (i, _) = opt(char('s'))(i)?;
 			let (i, _) = char('\'')(i)?;
 			let (i, _) = char('\'')(i)?;
 			Ok((i, String::new()))
 		},
 		|i| {
+			let (i, _) = opt(char('s'))(i)?;
 			let (i, _) = char('\"')(i)?;
 			let (i, _) = char('\"')(i)?;
 			Ok((i, String::new()))
@@ -38,6 +40,7 @@ fn strand_blank(i: &str) -> IResult<&str, String> {
 }
 
 fn strand_single(i: &str) -> IResult<&str, String> {
+	let (i, _) = opt(char('s'))(i)?;
 	let (i, _) = char('\'')(i)?;
 	let (i, v) = escaped_transform(
 		is_not("\'\\\0"),
@@ -59,6 +62,7 @@ fn strand_single(i: &str) -> IResult<&str, String> {
 }
 
 fn strand_double(i: &str) -> IResult<&str, String> {
+	let (i, _) = opt(char('s'))(i)?;
 	let (i, _) = char('\"')(i)?;
 	let (i, v) = escaped_transform(
 		is_not("\"\\\0"),
@@ -159,6 +163,8 @@ fn char_unicode_bracketed(i: &str) -> IResult<&str, char> {
 #[cfg(test)]
 mod tests {
 
+	use crate::{sql::Value, syn::test::Parse};
+
 	use super::*;
 
 	#[test]
@@ -248,5 +254,32 @@ mod tests {
 
 		// Unpaired surrogate.
 		assert!(strand("\"\\u{DBFF}\"").is_err());
+	}
+
+	#[test]
+	fn strand_prefix() {
+		// ensure that strands which match other string like types are actually parsed as strand
+		// when prefixed.
+
+		let v = Value::parse("s'2012-04-23T18:25:43.000051100Z'");
+		if let Value::Strand(x) = v {
+			assert_eq!(x.as_str(), "2012-04-23T18:25:43.000051100Z");
+		} else {
+			panic!("not a strand");
+		}
+
+		let v = Value::parse("s'a:b'");
+		if let Value::Strand(x) = v {
+			assert_eq!(x.as_str(), "a:b");
+		} else {
+			panic!("not a strand");
+		}
+
+		let v = Value::parse("s'e72bee20-f49b-11ec-b939-0242ac120002'");
+		if let Value::Strand(x) = v {
+			assert_eq!(x.as_str(), "e72bee20-f49b-11ec-b939-0242ac120002");
+		} else {
+			panic!("not a strand");
+		}
 	}
 }

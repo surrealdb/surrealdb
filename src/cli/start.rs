@@ -74,6 +74,14 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
+	// TODO(gguillemas): Remove this arg once the legacy basic auth is deprecated in v2.0.0
+	// Explicit level authentication will be enabled by default after the deprecation
+	#[arg(
+		help = "Support specifying the level at which to authenticate",
+		help_heading = "Authentication"
+	)]
+	#[arg(env = "SURREAL_ENABLE_AUTH_LEVEL", long = "enable-auth-level")]
+	pub(crate) enable_auth_level: bool,
 
 	//
 	// Datastore connection
@@ -135,6 +143,7 @@ pub async fn init(
 		path,
 		username: user,
 		password: pass,
+		enable_auth_level,
 		client_ip,
 		listen_addresses,
 		dbs,
@@ -170,6 +179,7 @@ pub async fn init(
 		path,
 		user,
 		pass,
+		enable_auth_level,
 		tick_interval,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),

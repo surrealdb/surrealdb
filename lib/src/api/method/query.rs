@@ -5,6 +5,8 @@ use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::method::Stats;
+use crate::method::WithStats;
 use crate::sql;
 use crate::sql::to_value;
 use crate::sql::Array;
@@ -53,6 +55,21 @@ where
 	}
 }
 
+impl<'r, Client> IntoFuture for WithStats<Query<'r, Client>>
+where
+	Client: Connection,
+{
+	type Output = Result<WithStats<Response>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	fn into_future(self) -> Self::IntoFuture {
+		Box::pin(async move {
+			let response = self.0.await?;
+			Ok(WithStats(response))
+		})
+	}
+}
+
 impl<'r, C> Query<'r, C>
 where
 	C: Connection,
@@ -61,6 +78,11 @@ where
 	pub fn query(mut self, query: impl opt::IntoQuery) -> Self {
 		self.query.push(query.into_query());
 		self
+	}
+
+	/// Return query statistics along with its results
+	pub const fn with_stats(self) -> WithStats<Self> {
+		WithStats(self)
 	}
 
 	/// Binds a parameter or parameters to a query
@@ -135,7 +157,7 @@ pub(crate) type QueryResult = Result<Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
-pub struct Response(pub(crate) IndexMap<usize, QueryResult>);
+pub struct Response(pub(crate) IndexMap<usize, (Stats, QueryResult)>);
 
 impl Response {
 	/// Takes and returns records returned from the database
@@ -228,13 +250,13 @@ impl Response {
 	pub fn take_errors(&mut self) -> HashMap<usize, crate::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0 {
-			if result.is_err() {
+			if result.1.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some(Err(error)) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.0.remove(&key) {
 				errors.insert(key, error);
 			}
 		}
@@ -259,13 +281,13 @@ impl Response {
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.0 {
-			if result.is_err() {
+			if result.1.is_err() {
 				first_error = Some(*key);
 				break;
 			}
 		}
 		if let Some(key) = first_error {
-			if let Some(Err(error)) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.0.remove(&key) {
 				return Err(error);
 			}
 		}
@@ -293,6 +315,154 @@ impl Response {
 	}
 }
 
+impl WithStats<Response> {
+	/// Takes and returns records returned from the database
+	///
+	/// Similar to [Response::take] but this method returns `None` when
+	/// you try taking an index that doesn't correspond to a query
+	/// statement.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use serde::Deserialize;
+	/// use surrealdb::sql;
+	///
+	/// #[derive(Debug, Deserialize)]
+	/// # #[allow(dead_code)]
+	/// struct User {
+	///     id: String,
+	///     balance: String
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// let mut response = db
+	///     // Get `john`'s details
+	///     .query("SELECT * FROM user:john")
+	///     // List all users whose first name is John
+	///     .query("SELECT * FROM user WHERE name.first = 'John'")
+	///     // Get John's address
+	///     .query("SELECT address FROM user:john")
+	///     // Get all users' addresses
+	///     .query("SELECT address FROM user")
+	///     // Return stats along with query results
+	///     .with_stats()
+	///     .await?;
+	///
+	/// // Get the first (and only) user from the first query
+	/// if let Some((stats, result)) = response.take(0) {
+	///     let execution_time = stats.execution_time;
+	///     let user: Option<User> = result?;
+	/// }
+	///
+	/// // Get all users from the second query
+	/// if let Some((stats, result)) = response.take(1) {
+	///     let execution_time = stats.execution_time;
+	///     let users: Vec<User> = result?;
+	/// }
+	///
+	/// // Retrieve John's address without making a special struct for it
+	/// if let Some((stats, result)) = response.take((2, "address")) {
+	///     let execution_time = stats.execution_time;
+	///     let address: Option<String> = result?;
+	/// }
+	///
+	/// // Get all users' addresses
+	/// if let Some((stats, result)) = response.take((3, "address")) {
+	///     let execution_time = stats.execution_time;
+	///     let addresses: Vec<String> = result?;
+	/// }
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Option<(Stats, Result<R>)>
+	where
+		R: DeserializeOwned,
+	{
+		let stats = index.stats(&self.0)?;
+		let result = index.query_result(&mut self.0);
+		Some((stats, result))
+	}
+
+	/// Take all errors from the query response
+	///
+	/// The errors are keyed by the corresponding index of the statement that failed.
+	/// Afterwards the response is left with only statements that did not produce any errors.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::sql;
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// # let mut response = db.query("SELECT * FROM user").await?;
+	/// let errors = response.take_errors();
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, crate::Error)> {
+		let mut keys = Vec::new();
+		for (key, result) in &self.0 .0 {
+			if result.1.is_err() {
+				keys.push(*key);
+			}
+		}
+		let mut errors = HashMap::with_capacity(keys.len());
+		for key in keys {
+			if let Some((stats, Err(error))) = self.0 .0.remove(&key) {
+				errors.insert(key, (stats, error));
+			}
+		}
+		errors
+	}
+
+	/// Check query response for errors and return the first error, if any, or the response
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::sql;
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// # let response = db.query("SELECT * FROM user").await?;
+	/// response.check()?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn check(self) -> Result<Self> {
+		let response = self.0.check()?;
+		Ok(Self(response))
+	}
+
+	/// Returns the number of statements in the query
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::sql;
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// let response = db.query("SELECT * FROM user:john; SELECT * FROM user;").await?;
+	///
+	/// assert_eq!(response.num_statements(), 2);
+	/// #
+	/// # Ok(())
+	/// # }
+	pub fn num_statements(&self) -> usize {
+		self.0.num_statements()
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -310,8 +480,16 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, QueryResult> {
-		vec.into_iter().enumerate().collect()
+	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (Stats, QueryResult)> {
+		vec.into_iter()
+			.map(|result| {
+				let stats = Stats {
+					execution_time: Default::default(),
+				};
+				(stats, result)
+			})
+			.enumerate()
+			.collect()
 	}
 
 	#[test]
@@ -470,7 +648,7 @@ mod tests {
 		else {
 			panic!("silently dropping records not allowed");
 		};
-		let records = map.remove(&0).unwrap().unwrap();
+		let records = map.remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
 

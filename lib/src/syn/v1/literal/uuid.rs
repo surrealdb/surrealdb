@@ -2,9 +2,9 @@ use super::super::{common::is_hex, IResult};
 use crate::sql::Uuid;
 use nom::{
 	branch::alt,
-	bytes::complete::take_while_m_n,
+	bytes::complete::{tag, take_while_m_n},
 	character::complete::char,
-	combinator::recognize,
+	combinator::{cut, recognize},
 	sequence::{delimited, tuple},
 };
 
@@ -13,11 +13,17 @@ pub fn uuid(i: &str) -> IResult<&str, Uuid> {
 }
 
 fn uuid_single(i: &str) -> IResult<&str, Uuid> {
-	delimited(char('\''), uuid_raw, char('\''))(i)
+	alt((
+		delimited(tag("u\'"), cut(uuid_raw), cut(char('\''))),
+		delimited(char('\''), uuid_raw, char('\'')),
+	))(i)
 }
 
 fn uuid_double(i: &str) -> IResult<&str, Uuid> {
-	delimited(char('\"'), uuid_raw, char('\"'))(i)
+	alt((
+		delimited(tag("u\""), cut(uuid_raw), cut(char('\"'))),
+		delimited(char('\"'), uuid_raw, char('\"')),
+	))(i)
 }
 
 fn uuid_raw(i: &str) -> IResult<&str, Uuid> {
@@ -48,6 +54,8 @@ fn uuid_raw(i: &str) -> IResult<&str, Uuid> {
 #[cfg(test)]
 mod tests {
 
+	use crate::{sql::Value, syn::test::Parse};
+
 	use super::*;
 
 	#[test]
@@ -66,6 +74,25 @@ mod tests {
 		let res = uuid_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
+		assert_eq!("'b19bc00b-aa98-486c-ae37-c8e1c54295b1'", format!("{}", out));
+		assert_eq!(out, Uuid::try_from("b19bc00b-aa98-486c-ae37-c8e1c54295b1").unwrap());
+	}
+
+	#[test]
+	fn uuid_v4_from_value() {
+		let sql = "'b19bc00b-aa98-486c-ae37-c8e1c54295b1'";
+		let res = Value::parse(sql);
+		let Value::Uuid(out) = res else {
+			panic!()
+		};
+		assert_eq!("'b19bc00b-aa98-486c-ae37-c8e1c54295b1'", format!("{}", out));
+		assert_eq!(out, Uuid::try_from("b19bc00b-aa98-486c-ae37-c8e1c54295b1").unwrap());
+
+		let sql = "u'b19bc00b-aa98-486c-ae37-c8e1c54295b1'";
+		let res = Value::parse(sql);
+		let Value::Uuid(out) = res else {
+			panic!()
+		};
 		assert_eq!("'b19bc00b-aa98-486c-ae37-c8e1c54295b1'", format!("{}", out));
 		assert_eq!(out, Uuid::try_from("b19bc00b-aa98-486c-ae37-c8e1c54295b1").unwrap());
 	}
