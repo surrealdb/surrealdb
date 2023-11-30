@@ -197,7 +197,7 @@ pub async fn db(
 	let verify_creds = if kvs.is_auth_levels_enabled() {
 		verify_db_creds(kvs, &ns, &db, &user, &pass).await
 	} else {
-		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
 		match verify_creds_legacy(kvs, Some(&ns), Some(&db), &user, &pass).await {
 			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),
@@ -248,7 +248,7 @@ pub async fn ns(
 	let verify_creds = if kvs.is_auth_levels_enabled() {
 		verify_ns_creds(kvs, &ns, &user, &pass).await
 	} else {
-		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
 		match verify_creds_legacy(kvs, Some(&ns), None, &user, &pass).await {
 			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),
@@ -297,7 +297,7 @@ pub async fn root(
 	let verify_creds = if kvs.is_auth_levels_enabled() {
 		verify_root_creds(kvs, &user, &pass).await
 	} else {
-		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
 		match verify_creds_legacy(kvs, None, None, &user, &pass).await {
 			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),

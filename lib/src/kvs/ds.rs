@@ -93,7 +93,7 @@ pub struct Datastore {
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	// Whether authentication levels are enabled on this datastore.
-	// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+	// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
 	auth_levels_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
@@ -343,7 +343,7 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
-			// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+			// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
 			auth_levels_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
