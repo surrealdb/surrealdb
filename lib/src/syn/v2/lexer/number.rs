@@ -2,6 +2,7 @@ use crate::syn::v2::{
 	lexer::{unicode::U8Ext, Error as LexError, Lexer},
 	token::{NumberKind, Token, TokenKind},
 };
+use std::mem;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,9 +25,11 @@ impl Lexer<'_> {
 	/// Expects the digit which started the number as the start argument.
 	pub fn lex_number_err(&mut self, start: u8) -> Result<Token, Error> {
 		debug_assert!(start.is_ascii_digit());
+		debug_assert_eq!(self.scratch, "");
 		self.scratch.push(start as char);
 		loop {
 			let Some(x) = self.reader.peek() else {
+				self.string = Some(mem::take(&mut self.scratch));
 				return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 			};
 			match x {
@@ -46,6 +49,7 @@ impl Lexer<'_> {
 					} else {
 						// indexing a number
 						self.reader.backup(backup);
+						self.string = Some(mem::take(&mut self.scratch));
 						return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 					}
 				}
@@ -59,11 +63,13 @@ impl Lexer<'_> {
 					self.reader.next();
 				}
 				b'a'..=b'z' | b'A'..=b'Z' => {
+					self.scratch.clear();
 					return Err(Error::InvalidSuffix);
 					// invalid token, unexpected identifier character immediatly after number.
 					// Eat all remaining identifier like characters.
 				}
 				_ => {
+					self.string = Some(mem::take(&mut self.scratch));
 					return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 				}
 			}
@@ -76,8 +82,10 @@ impl Lexer<'_> {
 				// float suffix
 				self.reader.next();
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
+					self.scratch.clear();
 					Err(Error::InvalidSuffix)
 				} else {
+					self.string = Some(mem::take(&mut self.scratch));
 					Ok(self.finish_token(TokenKind::Number(NumberKind::Float)))
 				}
 			}
@@ -90,17 +98,21 @@ impl Lexer<'_> {
 						self.reader.backup(checkpoint - 1);
 						return Ok(self.lex_duration());
 					} else {
+						self.scratch.clear();
 						return Err(Error::InvalidSuffix);
 					}
 				}
 
 				if !self.eat(b'c') {
+					self.scratch.clear();
 					return Err(Error::InvalidSuffix);
 				}
 
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
+					self.scratch.clear();
 					Err(Error::InvalidSuffix)
 				} else {
+					self.string = Some(mem::take(&mut self.scratch));
 					Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))
 				}
 			}
@@ -114,6 +126,7 @@ impl Lexer<'_> {
 			// lex_number already checks if there exists a digit after the dot.
 			// So this will never fail the first iteration of the loop.
 			let Some(x) = self.reader.peek() else {
+				self.string = Some(mem::take(&mut self.scratch));
 				return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
 			};
 			match x {
@@ -138,6 +151,7 @@ impl Lexer<'_> {
 					return Err(Error::InvalidSuffix);
 				}
 				_ => {
+					self.string = Some(mem::take(&mut self.scratch));
 					return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
 				}
 			}
@@ -175,6 +189,7 @@ impl Lexer<'_> {
 						} else {
 							NumberKind::Exponent
 						};
+						self.string = Some(mem::take(&mut self.scratch));
 						return Ok(self.finish_token(TokenKind::Number(kind)));
 					} else {
 						return Err(Error::DigitExpectedExponent);

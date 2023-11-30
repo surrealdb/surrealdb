@@ -168,7 +168,7 @@ mod cli_integration {
 			let args = format!("sql --conn http://{addr} {creds}");
 			let output = common::run(&args)
 				.input(&format!(
-					"USE NS {throwaway} DB {throwaway}; CREATE thing:one;\n",
+					"USE NS `{throwaway}` DB `{throwaway}`; CREATE thing:one;\n",
 					throwaway = Ulid::new()
 				))
 				.output()
@@ -181,7 +181,7 @@ mod cli_integration {
 			let throwaway = Ulid::new();
 			let args = format!("sql --conn http://{addr} {creds} --ns {throwaway}");
 			let output = common::run(&args)
-				.input("USE DB {throwaway}; SELECT * FROM thing:one;\n")
+				.input("USE DB `{throwaway}`; SELECT * FROM thing:one;\n")
 				.output()
 				.expect("only ns");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");

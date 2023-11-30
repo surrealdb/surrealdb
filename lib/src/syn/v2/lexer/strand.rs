@@ -1,5 +1,7 @@
 //! Lexing of strand like characters.
 
+use std::mem;
+
 use crate::syn::v2::token::{Token, TokenKind};
 
 use super::{unicode::chars, Error, Lexer};
@@ -26,9 +28,11 @@ impl<'a> Lexer<'a> {
 			if x.is_ascii() {
 				match x {
 					b'\'' if !is_double => {
+						self.string = Some(mem::take(&mut self.scratch));
 						return Ok(self.finish_token(TokenKind::Strand));
 					}
 					b'"' if is_double => {
+						self.string = Some(mem::take(&mut self.scratch));
 						return Ok(self.finish_token(TokenKind::Strand));
 					}
 					b'\0' => {

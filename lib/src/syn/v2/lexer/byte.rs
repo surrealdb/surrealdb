@@ -108,6 +108,7 @@ impl<'a> Lexer<'a> {
 		debug_assert_eq!(token.kind, t!("/"));
 		debug_assert_eq!(token.span.offset + 1, self.last_offset);
 		debug_assert_eq!(token.span.len, 1);
+		debug_assert_eq!(self.scratch, "");
 
 		self.last_offset = token.span.offset;
 		loop {

@@ -1,7 +1,9 @@
+use std::mem;
+
 use unicase::UniCase;
 
 use crate::syn::v2::lexer::{keywords::KEYWORDS, Error, Lexer};
-use crate::syn::v2::token::{Token, TokenKind};
+use crate::syn::v2::token::{NumberKind, Token, TokenKind};
 
 use super::unicode::{chars, U8Ext};
 
@@ -11,6 +13,7 @@ impl<'a> Lexer<'a> {
 	/// # Lexer State
 	/// Expected the lexer to have already eaten the param starting `$`
 	pub fn lex_param(&mut self) -> Token {
+		debug_assert_eq!(self.scratch, "");
 		loop {
 			if let Some(x) = self.reader.peek() {
 				if x.is_ascii_alphanumeric() || x == b'_' {
@@ -19,6 +22,7 @@ impl<'a> Lexer<'a> {
 					continue;
 				}
 			}
+			self.string = Some(mem::take(&mut self.scratch));
 			return self.finish_token(TokenKind::Parameter);
 		}
 	}
@@ -31,6 +35,7 @@ impl<'a> Lexer<'a> {
 	/// by `[a-zA-Z0-9_]*`.
 	pub fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
 		debug_assert!(matches!(start, b'a'..=b'z' | b'A'..=b'Z' | b'_'));
+		debug_assert_eq!(self.scratch, "");
 		self.scratch.push(start as char);
 		self.lex_ident()
 	}
@@ -51,9 +56,17 @@ impl<'a> Lexer<'a> {
 			// If there is one, return it as the keyword. Original identifier can be reconstructed
 			// from the token.
 			if let Some(x) = KEYWORDS.get(&UniCase::ascii(&self.scratch)).copied() {
+				self.scratch.clear();
 				return self.finish_token(x);
 			}
-			return self.finish_token(TokenKind::Identifier);
+
+			if self.scratch == "NaN" {
+				self.scratch.clear();
+				return self.finish_token(TokenKind::Number(NumberKind::NaN));
+			} else {
+				self.string = Some(mem::take(&mut self.scratch));
+				return self.finish_token(TokenKind::Identifier);
+			}
 		}
 	}
 
@@ -81,6 +94,7 @@ impl<'a> Lexer<'a> {
 			if x.is_ascii() {
 				match x {
 					b'`' if is_backtick => {
+						self.string = Some(mem::take(&mut self.scratch));
 						return Ok(self.finish_token(TokenKind::Identifier));
 					}
 					b'\0' => {
@@ -139,6 +153,7 @@ impl<'a> Lexer<'a> {
 			} else {
 				let c = self.reader.complete_char(x)?;
 				if !is_backtick && c == '⟩' {
+					self.string = Some(mem::take(&mut self.scratch));
 					return Ok(self.finish_token(TokenKind::Identifier));
 				}
 				self.scratch.push(c);

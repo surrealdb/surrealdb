@@ -585,8 +585,12 @@ impl Parser<'_> {
 			}
 			TokenKind::Identifier | TokenKind::Strand => {
 				self.pop_peek();
-				let str = self.lexer.take_token_data();
+				let str = self.lexer.string.take().unwrap();
 				Ok(str)
+			}
+			TokenKind::Number(_) => {
+				self.pop_peek();
+				Ok(self.lexer.string.take().unwrap())
 			}
 			x => unexpected!(self, x, "an object key"),
 		}

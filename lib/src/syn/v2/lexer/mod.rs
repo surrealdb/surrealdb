@@ -74,6 +74,7 @@ pub struct Lexer<'a> {
 	// As only some tokens have an additional value associated with them we don't store that value
 	// in the token itself but, instead, in the lexer ensureing a smaller size for each individual
 	// token.
+	pub string: Option<String>,
 	pub duration: Option<Duration>,
 	pub datetime: Option<Datetime>,
 	pub regex: Option<Regex>,
@@ -95,6 +96,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			ate_whitespace: false,
 			scratch: String::new(),
+			string: None,
 			datetime: None,
 			duration: None,
 			regex: None,
@@ -121,6 +123,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			ate_whitespace: false,
 			scratch: self.scratch,
+			string: self.string,
 			datetime: self.datetime,
 			duration: self.duration,
 			regex: self.regex,
@@ -341,19 +344,6 @@ impl<'a> Lexer<'a> {
 			}
 			None => Err(Error::UnexpectedEof),
 		}
-	}
-
-	pub fn take_token_data(&mut self) -> String {
-		std::mem::take(&mut self.scratch)
-	}
-
-	pub fn take_token_data_ref<F, R>(&mut self, f: F) -> R
-	where
-		F: FnOnce(&str) -> R,
-	{
-		let r = f(self.scratch.as_str());
-		self.scratch.clear();
-		r
 	}
 }
 

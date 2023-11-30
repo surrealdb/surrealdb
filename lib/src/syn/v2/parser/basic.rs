@@ -27,7 +27,7 @@ impl TokenValue for Ident {
 				Ok(Ident(str))
 			}
 			TokenKind::Identifier => {
-				let str = parser.lexer.take_token_data();
+				let str = parser.lexer.string.take().unwrap();
 				Ok(Ident(str))
 			}
 			x => {
@@ -47,7 +47,7 @@ impl TokenValue for u64 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Number(NumberKind::Integer) => {
-				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidInteger {
 							error: e,
@@ -66,7 +66,7 @@ impl TokenValue for u32 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Number(NumberKind::Integer) => {
-				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidInteger {
 							error: e,
@@ -85,7 +85,7 @@ impl TokenValue for u16 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Number(NumberKind::Integer) => {
-				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidInteger {
 							error: e,
@@ -104,7 +104,7 @@ impl TokenValue for u8 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Number(NumberKind::Integer) => {
-				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidInteger {
 							error: e,
@@ -122,13 +122,14 @@ impl TokenValue for u8 {
 impl TokenValue for f32 {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
+			TokenKind::Number(NumberKind::NaN) => Ok(f32::NAN),
 			TokenKind::Number(
 				NumberKind::Integer
 				| NumberKind::Float
 				| NumberKind::Mantissa
 				| NumberKind::MantissaExponent,
 			) => {
-				let number = parser.lexer.take_token_data_ref(|x| x.parse()).map_err(|e| {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidFloat {
 							error: e,
@@ -157,8 +158,9 @@ impl TokenValue for Language {
 impl TokenValue for Number {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
+			TokenKind::Number(NumberKind::NaN) => Ok(Number::Float(f64::NAN)),
 			TokenKind::Number(NumberKind::Integer) => {
-				let source = parser.lexer.take_token_data();
+				let source = parser.lexer.string.take().unwrap();
 				if let Ok(x) = source.parse() {
 					return Ok(Number::Int(x));
 				}
@@ -174,6 +176,34 @@ impl TokenValue for Number {
 				})?;
 				Ok(Number::Float(x))
 			}
+			TokenKind::Number(
+				NumberKind::Mantissa | NumberKind::MantissaExponent | NumberKind::Float,
+			) => {
+				let source = parser.lexer.string.take().unwrap();
+				// TODO: Figure out if this can actually fail.
+				let x = source.parse().map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidFloat {
+							error: e,
+						},
+						token.span,
+					)
+				})?;
+				Ok(Number::Float(x))
+			}
+			TokenKind::Number(NumberKind::Decimal) => {
+				let source = parser.lexer.string.take().unwrap();
+				// TODO: Figure out if this can actually fail.
+				let x: rust_decimal::Decimal = source.parse().map_err(|error| {
+					ParseError::new(
+						ParseErrorKind::InvalidDecimal {
+							error,
+						},
+						token.span,
+					)
+				})?;
+				Ok(Number::Decimal(x))
+			}
 			x => unexpected!(parser, x, "a number"),
 		}
 	}
@@ -183,7 +213,7 @@ impl TokenValue for Param {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Parameter => {
-				let param = parser.lexer.take_token_data();
+				let param = parser.lexer.string.take().unwrap();
 				Ok(Param(Ident(param)))
 			}
 			x => unexpected!(parser, x, "a parameter"),
@@ -215,7 +245,7 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
 			TokenKind::Strand => {
-				let strand = parser.lexer.take_token_data();
+				let strand = parser.lexer.string.take().unwrap();
 				Ok(Strand(strand))
 			}
 			x => unexpected!(parser, x, "a strand"),

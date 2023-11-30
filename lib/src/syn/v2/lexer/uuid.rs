@@ -21,12 +21,16 @@ pub enum Error {
 impl<'a> Lexer<'a> {
 	pub fn lex_uuid(&mut self, double: bool) -> Token {
 		match self.lex_uuid_err(double) {
-			Ok(x) => x,
+			Ok(x) => {
+				debug_assert!(self.uuid.is_none());
+				self.uuid = Some(x);
+				self.finish_token(TokenKind::Uuid)
+			}
 			Err(_) => self.invalid_token(LexError::Uuid(Error::MissingDigits)),
 		}
 	}
 
-	pub fn lex_uuid_err(&mut self, double: bool) -> Result<Token, Error> {
+	pub fn lex_uuid_err(&mut self, double: bool) -> Result<Uuid, Error> {
 		if !self.lex_hex(8) {
 			return Err(Error::MissingDigits);
 		}
@@ -89,10 +93,7 @@ impl<'a> Lexer<'a> {
 		// The lexer ensures that the section of bytes is valid utf8 so this should never panic.
 		let uuid_str = std::str::from_utf8(self.reader.span(span)).unwrap();
 		// The lexer ensures that the bytes are a valid uuid so this should never panic.
-		let uuid = uuid::Uuid::try_from(uuid_str).unwrap();
-
-		self.uuid = Some(Uuid(uuid));
-		Ok(self.finish_token(TokenKind::Uuid))
+		Ok(Uuid(uuid::Uuid::try_from(uuid_str).unwrap()))
 	}
 
 	/// lexes a given amount of hex characters. returns true if the lexing was successfull, false

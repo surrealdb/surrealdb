@@ -2673,7 +2673,7 @@ async fn function_math_variance() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_meta_id() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::id("person:tobie");
+		RETURN meta::id(r"person:tobie");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2690,7 +2690,7 @@ async fn function_parse_meta_id() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_meta_table() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::table("person:tobie");
+		RETURN meta::table(r"person:tobie");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4339,7 +4339,7 @@ async fn function_time_format() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("d'1987-06-22'");
+	let val = Value::parse(" '1987-06-22' ");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

@@ -208,6 +208,7 @@ pub enum NumberKind {
 	MantissaExponent,
 	// A number with a `.3e10` part.
 	Exponent,
+	NaN,
 }
 
 /// The type of token

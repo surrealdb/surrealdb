@@ -39,6 +39,9 @@ pub enum ParseErrorKind {
 	InvalidFloat {
 		error: ParseFloatError,
 	},
+	InvalidDecimal {
+		error: rust_decimal::Error,
+	},
 	DisallowedStatement,
 	/// The parser encountered an token which could not be lexed correctly.
 	InvalidToken(LexError),
@@ -172,6 +175,17 @@ impl ParseError {
 				ref error,
 			} => {
 				let text = format!("failed to parse floating point, {error}");
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDecimal {
+				ref error,
+			} => {
+				let text = format!("failed to parse decimal number, {error}");
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
