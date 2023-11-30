@@ -65,7 +65,7 @@ pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let _diving = depth::dive(i)?;
 	let (i, r) = value::value(i)?;
 	let v = match r {
-		Value::Expression(r) => augment(r, l, o),
+		Value::Expression(r) => augment(*r, l, o),
 		_ => Expression::new(l, o, r),
 	};
 	Ok((i, v))
