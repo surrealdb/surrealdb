@@ -630,13 +630,7 @@ impl Iterator {
 				// If any iterator requires distinct, we new to create a global distinct instance
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
-				let entries =
-					if matches!(ctx.get_iteration_stage(), Some(IterationStage::Iterate(_))) {
-						mem::take(&mut self.entries)
-					} else {
-						self.entries.clone()
-					};
-				for v in entries {
+				for v in mem::take(&mut self.entries) {
 					// Distinct is passed only for iterators that really requires it
 					let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
 					v.iterate(ctx, opt, txn, stm, self, dis).await?;
