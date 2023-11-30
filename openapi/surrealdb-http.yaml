@@ -1,0 +1,129 @@
+openapi: 3.0.0
+info:
+  title: SurrealDB HTTP API
+  version: 1.0.0
+paths:
+  /export:
+    get:
+      summary: Exports all data for a specific Namespace and Database
+      responses:
+        '200':
+          description: Successful response
+
+  /health:
+    get:
+      summary: Checks the status of the database server and storage engine
+      responses:
+        '200':
+          description: Success
+        '500':
+          description: Server error
+
+  /import:
+    get:
+      summary: Imports data into a specific Namespace and Database
+      responses:
+        '200':
+          description: Successful import
+
+  /key/{table}:
+    get:
+      summary: Selects all records in a table from the database
+      parameters:
+        - in: path
+          name: table
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+
+    post:
+      summary: Creates a record in a table in the database
+      responses:
+        '200':
+          description: Record created
+
+    delete:
+      summary: Deletes all records in a table from the database
+      responses:
+        '200':
+          description: Records deleted
+
+  /key/{table}/{id}:
+    get:
+      summary: Selects a specific record from the database
+      parameters:
+        - in: path
+          name: table
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+
+    post:
+      summary: Creates a specific record in the database
+      responses:
+        '200':
+          description: Record created
+
+    put:
+      summary: Updates the specified record in the database
+      responses:
+        '200':
+          description: Record updated
+
+    patch:
+      summary: Modifies the specified record in the database
+      responses:
+        '200':
+          description: Record modified
+
+    delete:
+      summary: Deletes the specified record from the database
+      responses:
+        '200':
+          description: Record deleted
+
+  /signup:
+    post:
+      summary: Signs-up as a scope user to a specific scope
+      responses:
+        '200':
+          description: Signup successful
+
+  /signin:
+    post:
+      summary: Signs-in as a root, namespace, database, or scope user
+      responses:
+        '200':
+          description: Signin successful
+
+  /sql:
+    post:
+      summary: Allows custom SurrealQL queries
+      responses:
+        '200':
+          description: Query successful
+
+  /status:
+    post:
+      summary: Checks the status of the database web server
+      responses:
+        '200':
+          description: Status OK
+
+  /version:
+    post:
+      summary: Returns the version of the SurrealDB database server
+      responses:
+        '200':
+          description: Version information retrieved
