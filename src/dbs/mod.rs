@@ -234,6 +234,7 @@ pub async fn init(
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
 	// Log whether authentication levels are enabled
+	// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
 	if auth_levels_enabled {
 		info!("Authentication levels are enabled");
 	}

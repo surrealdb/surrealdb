@@ -195,15 +195,16 @@ pub async fn db(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	let verify_creds = if kvs.is_auth_levels_enabled() {
-		match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
-			Ok(u) => Ok(((&u, Level::Database(ns.to_owned(), db.to_owned())).into(), u)),
+		verify_db_creds(kvs, &ns, &db, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), Some(&db), &user, &pass).await {
+			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),
 		}
-	} else {
-		verify_creds_legacy(kvs, Some(&ns), Some(&db), &user, &pass).await
 	};
 	match verify_creds {
-		Ok((auth, u)) => {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -225,7 +226,7 @@ pub async fn db(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -245,15 +246,16 @@ pub async fn ns(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	let verify_creds = if kvs.is_auth_levels_enabled() {
-		match verify_ns_creds(kvs, &ns, &user, &pass).await {
-			Ok(u) => Ok(((&u, Level::Namespace(ns.to_owned())).into(), u)),
+		verify_ns_creds(kvs, &ns, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),
 		}
-	} else {
-		verify_creds_legacy(kvs, Some(&ns), None, &user, &pass).await
 	};
 	match verify_creds {
-		Ok((auth, u)) => {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -273,7 +275,7 @@ pub async fn ns(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -293,15 +295,16 @@ pub async fn root(
 	pass: String,
 ) -> Result<Option<String>, Error> {
 	let verify_creds = if kvs.is_auth_levels_enabled() {
-		match verify_root_creds(kvs, &user, &pass).await {
-			Ok(u) => Ok(((&u, Level::Root).into(), u)),
+		verify_root_creds(kvs, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, None, None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
 			Err(e) => Err(e),
 		}
-	} else {
-		verify_creds_legacy(kvs, None, None, &user, &pass).await
 	};
 	match verify_creds {
-		Ok((auth, u)) => {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -319,7 +322,7 @@ pub async fn root(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
