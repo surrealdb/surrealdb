@@ -16,11 +16,11 @@ use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 use channel::Receiver;
-use futures::lock::Mutex;
 use futures::StreamExt;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
+use tokio::sync::Mutex;
 use tracing::instrument;
 use trice::Instant;
 #[cfg(target_arch = "wasm32")]

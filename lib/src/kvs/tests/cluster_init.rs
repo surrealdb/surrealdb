@@ -1,4 +1,3 @@
-use futures::lock::Mutex;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -12,6 +11,7 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
 use test_log::test;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use uuid;
 

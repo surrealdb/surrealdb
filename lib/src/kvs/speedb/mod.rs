@@ -8,7 +8,6 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
-use futures::lock::Mutex;
 use speedb::{
 	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -16,6 +15,7 @@ use speedb::{
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Datastore {

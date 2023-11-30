@@ -19,8 +19,8 @@ use std::sync::Arc;
 // We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
 use crate::key::error::KeyCategory;
 use foundationdb::options::MutationType;
-use futures::lock::Mutex;
 use once_cell::sync::Lazy;
+use tokio::sync::Mutex;
 
 // In case you're curious why FDB store doesn't work as you've expected,
 // run a few queries via surrealdb-sql or via the REST API, and

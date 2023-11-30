@@ -16,7 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::QueryType;
 use surrealdb::dbs::Response;
@@ -850,6 +850,8 @@ impl Connection {
 	// ------------------------------
 
 	async fn query(&self, sql: Value) -> Result<Vec<Response>, Error> {
+		trace!("Query method handling request query: {}", sql);
+		self.test_anomaly().await;
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the query parameters
@@ -867,6 +869,21 @@ impl Connection {
 		}
 		// Return the result to the client
 		Ok(res)
+	}
+
+	async fn test_anomaly(&self) {
+		{
+			//panic!("LOG_THIS_ABLCA")
+		}
+		{
+			let m1 = Arc::new(RwLock::new(1));
+			let m2 = Arc::new(RwLock::new(2));
+			trace!("LETS GET CRAYY");
+			let lock1 = m1.write().await;
+			let lock2 = m2.write().await;
+			let lock3 = m1.write().await;
+			let _ = (lock1, lock2, lock3);
+		}
 	}
 
 	async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, Error> {
