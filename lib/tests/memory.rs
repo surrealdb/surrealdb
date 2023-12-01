@@ -52,17 +52,17 @@ mod memory_tests {
 	#[derive(Default)]
 	struct MemCollector {
 		i: usize,
-		start_mem: usize,
-		current_mem: usize,
+		start_mem: isize,
+		current_mem: isize,
 	}
 
 	impl MemCollector {
 		fn collect(&mut self) {
 			self.i += 1;
 			if self.start_mem == 0 {
-				self.start_mem = GLOBAL.current_usage();
+				self.start_mem = GLOBAL.current_usage() as isize;
 			} else {
-				self.current_mem = GLOBAL.current_usage();
+				self.current_mem = GLOBAL.current_usage() as isize;
 				if self.i % 1000 == 0 {
 					println!("{}", GLOBAL.current_usage());
 				}
@@ -81,3 +81,34 @@ mod memory_tests {
 		}
 	}
 }
+
+// mod re_memory_tests {
+// 	use crate::helpers::new_ds;
+// 	use re_memory::accounting_allocator::{set_tracking_callstacks, tracking_stats};
+// 	use re_memory::AccountingAllocator;
+// 	use surrealdb::dbs::Session;
+// 	use surrealdb::err::Error;
+//
+// 	#[global_allocator]
+// 	static GLOBAL: AccountingAllocator<std::alloc::System> =
+// 		AccountingAllocator::new(std::alloc::System);
+//
+// 	#[tokio::test]
+// 	async fn re_memory_test_dbs() -> Result<(), Error> {
+// 		set_tracking_callstacks(true);
+// 		let dbs = new_ds().await?;
+// 		let ses = Session::owner().with_ns("test").with_db("test");
+//
+// 		for _ in 0..10000 {
+// 			let res = &mut dbs.execute("SELECT * FROM nothing", &ses, None).await?;
+// 			assert_eq!(res.len(), 1);
+// 			let _ = res.remove(0).result?;
+// 		}
+// 		if let Some(ts) = tracking_stats() {
+// 			for cs in ts.top_callstacks {
+// 				println!("{}", cs.readable_backtrace);
+// 			}
+// 		}
+// 		Ok(())
+// 	}
+// }
