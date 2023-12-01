@@ -19,6 +19,10 @@ pub fn decimal((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_decimal().map(Value::from)
 }
 
+pub fn bigint((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_bigint().map(Value::from)
+}
+
 pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_duration().map(Value::from)
 }
@@ -155,6 +159,10 @@ pub mod is {
 
 	pub fn decimal((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_decimal().into())
+	}
+
+	pub fn bigint((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_bigint().into())
 	}
 
 	pub fn duration((arg,): (Value,)) -> Result<Value, Error> {

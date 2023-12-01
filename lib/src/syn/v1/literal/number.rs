@@ -9,6 +9,7 @@ use nom::{
 	Err,
 };
 use rust_decimal::Decimal;
+use crate::sql::number::I256;
 use std::str::FromStr;
 
 fn not_nan(i: &str) -> IResult<&str, Number> {
@@ -57,6 +58,14 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 				})
 				.map_err(Err::Failure)?,
 		),
+		Suffix::BigInt => Number::from(
+			I256::from_str(v)
+				.map_err(|e| ParseError::ParseBigInt {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?,
+		),
 	};
 	Ok((i, number))
 }
@@ -70,11 +79,18 @@ enum Suffix {
 	None,
 	Float,
 	Decimal,
+	BigInt
 }
 
 fn suffix(i: &str) -> IResult<&str, Suffix> {
 	let (i, opt_suffix) =
-		opt(alt((value(Suffix::Float, tag("f")), value(Suffix::Decimal, tag("dec")))))(i)?;
+		opt(alt(
+			(
+				value(Suffix::Float, tag("f")), 
+				value(Suffix::Decimal, tag("dec")),
+				value(Suffix::BigInt, tag("bigint")),
+			)
+		))(i)?;
 	Ok((i, opt_suffix.unwrap_or(Suffix::None)))
 }
 

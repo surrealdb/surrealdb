@@ -109,6 +109,7 @@ impl ser::Serializer for Serializer {
 			"Int" => Ok(Number::Int(value.serialize(ser::primitive::i64::Serializer.wrap())?)),
 			"Float" => Ok(Number::Float(value.serialize(ser::primitive::f64::Serializer.wrap())?)),
 			"Decimal" => Ok(Number::Decimal(value.serialize(ser::decimal::Serializer.wrap())?)),
+			"BigInt" => Ok(Number::BigInt(value.serialize(ser::bigint::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}

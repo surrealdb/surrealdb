@@ -57,6 +57,10 @@ pub enum ParseError<I> {
 		tried: I,
 		error: rust_decimal::Error,
 	},
+	ParseBigInt {
+		tried: I,
+		error: alloy_primitives::ParseSignedError,
+	},
 	ParseRegex {
 		tried: I,
 		error: regex::Error,
@@ -114,6 +118,10 @@ impl<I: Clone> ParseError<I> {
 			..
 		}
 		| Self::ParseDecimal {
+			ref tried,
+			..
+		}
+		| Self::ParseBigInt {
 			ref tried,
 			..
 		}
@@ -346,6 +354,19 @@ impl ParseError<&str> {
 				let location = Location::of_in(tried, input);
 				// Writing to a string can't return an error.
 				let text = format!("Failed to parse '{tried}' as decimal: {error}.");
+				let snippet = Snippet::from_source_location(input, location, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseError::ParseBigInt {
+				tried,
+				error,
+			} => {
+				let location = Location::of_in(tried, input);
+				// Writing to a string can't return an error.
+				let text = format!("Failed to parse '{tried}' as big int: {error}.");
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,

@@ -29,6 +29,7 @@ impl<'js> IntoJs<'js> for &Value {
 				true => Ok(js::Value::new_int(ctx.clone(), v.try_into().unwrap_or_default())),
 				false => Ok(js::Value::new_float(ctx.clone(), v.try_into().unwrap_or_default())),
 			},
+			&Value::Number(Number::BigInt(v)) => js::String::from_str(ctx.clone(), v.to_string().as_str())?.into_js(ctx),
 			Value::Datetime(v) => {
 				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))

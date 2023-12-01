@@ -427,6 +427,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 		},
 		r#type = "type" => {
 			r#bool = "bool" => { fn },
+			bigint => { fn },
 			datetime => { fn },
 			decimal => { fn },
 			duration => { fn },
@@ -442,6 +443,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			is => {
 				array => { fn },
 				r#bool = "bool" => { fn },
+				bigint => { fn },
 				bytes => { fn },
 				collection => { fn },
 				datetime => { fn },

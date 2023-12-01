@@ -29,6 +29,7 @@ pub fn simple(i: &str) -> IResult<&str, Kind> {
 		value(Kind::Null, tag("null")),
 		value(Kind::Bytes, tag("bytes")),
 		value(Kind::Datetime, tag("datetime")),
+		value(Kind::BigInt, tag("bigint")),
 		value(Kind::Decimal, tag("decimal")),
 		value(Kind::Duration, tag("duration")),
 		value(Kind::Float, tag("float")),

@@ -53,6 +53,7 @@ targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
+alloy-primitives = "0.5.1"
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.5"

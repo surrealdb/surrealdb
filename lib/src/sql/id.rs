@@ -112,6 +112,7 @@ impl From<Number> for Id {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.to_string().into(),
 			Number::Decimal(v) => v.to_string().into(),
+			Number::BigInt(v) => v.to_string().into(),
 		}
 	}
 }

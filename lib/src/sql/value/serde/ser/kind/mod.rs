@@ -35,6 +35,7 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Any" => Ok(Kind::Any),
 			"Null" => Ok(Kind::Null),
+			"BigInt" => Ok(Kind::BigInt),
 			"Bool" => Ok(Kind::Bool),
 			"Bytes" => Ok(Kind::Bytes),
 			"Datetime" => Ok(Kind::Datetime),

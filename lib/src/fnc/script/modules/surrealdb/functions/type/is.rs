@@ -12,6 +12,7 @@ impl_module_def!(
 	"collection" => run,
 	"datetime" => run,
 	"decimal" => run,
+	"bigint" => run,
 	"duration" => run,
 	"float" => run,
 	"geometry" => run,

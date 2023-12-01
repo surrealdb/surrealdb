@@ -13,6 +13,7 @@ impl_module_def!(
 	"bool" => run,
 	"datetime" => run,
 	"decimal" => run,
+	"bigint" => run,
 	"duration" => run,
 	"field" => fut Async,
 	"fields" => fut Async,
