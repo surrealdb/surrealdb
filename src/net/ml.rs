@@ -1,31 +1,40 @@
 //! This file defines the endpoints for the ML API for uploading models and performing inference on the models for either raw tensors or buffered computes.
-use crate::net::output;
-use axum::extract::{BodyStream, DefaultBodyLimit};
-use axum::response::IntoResponse;
-use axum::routing::{get, post};
-use axum::Extension;
-use axum::Router;
-use axum::TypedHeader;
+// Standard library imports
+use std::collections::HashMap;
+
+// External crates imports
+use axum::{
+	body::{boxed, Body},
+	extract::{BodyStream, DefaultBodyLimit},
+	response::IntoResponse,
+	routing::{get, post},
+	Extension, Router, TypedHeader,
+};
 use bytes::Bytes;
 use futures_util::StreamExt;
+use http::StatusCode;
 use http_body::Body as HttpBody;
+use hyper::Response;
 use serde::Deserialize;
 use serde_json::from_slice;
-use std::collections::HashMap;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::TransactionType::{Read, Write};
+use surrealdb::{
+	dbs::Session,
+	kvs::{
+		Datastore,
+		LockType::Optimistic,
+		TransactionType::{Read, Write},
+	},
+	obs::{
+		get::get_local_file,
+		insert::{insert_local_file, InsertStatus},
+	},
+};
+use surrealml_core::{execution::compute::ModelComputation, storage::surml_file::SurMlFile};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use surrealdb::obs::{
-	get::get_local_file,
-	insert::{insert_local_file, InsertStatus},
-};
-use surrealml_core::execution::compute::ModelComputation;
-use surrealml_core::storage::surml_file::SurMlFile;
-
+// Local module imports
 use super::headers::Accept;
+use crate::net::output;
 
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
@@ -60,27 +69,74 @@ async fn import(
 	}
 	let file = match SurMlFile::from_bytes(buffer) {
 		Ok(file) => file,
-		Err(err) => return Err(output::json::<String>(&err.to_string())),
+		Err(err) => {
+			let file_error_response = Response::builder()
+				.status(StatusCode::BAD_REQUEST)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(file_error_response);
+		}
 	};
 
 	// // define the key and value to be inserted
 	let id = format!("{}-{}", file.header.name.to_string(), file.header.version.to_string());
 	let bytes = file.to_bytes();
 
-	let file_hash = match insert_local_file(bytes).await.unwrap() {
+	let file_hash_result = match insert_local_file(bytes).await {
+		Ok(file_hash_result) => file_hash_result,
+		Err(err) => {
+			let insert_error_response = Response::builder()
+				.status(StatusCode::INTERNAL_SERVER_ERROR)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(insert_error_response);
+		}
+	};
+	let file_hash = match file_hash_result {
 		InsertStatus::Inserted(hash) => hash,
 		InsertStatus::AlreadyExists(hash) => hash,
 	};
 
-	let ds = Datastore::new("file://ml_cache.db")
-		.await
-		.map_err(|e| output::json::<String>(&e.to_string()))?;
-	let mut tx = ds
-		.transaction(Write, Optimistic)
-		.await
-		.map_err(|e| output::json::<String>(&e.to_string()))?;
-	tx.set(id.clone(), file_hash).await.map_err(|e| output::json::<String>(&e.to_string()))?;
-	let _ = tx.commit().await.map_err(|e| output::json::<String>(&e.to_string()))?;
+	let ds = match Datastore::new("file://ml_cache.db").await {
+		Ok(ds) => ds,
+		Err(err) => {
+			let datastore_error_response = Response::builder()
+				.status(StatusCode::FAILED_DEPENDENCY)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(datastore_error_response);
+		}
+	};
+	let mut tx = match ds.transaction(Write, Optimistic).await {
+		Ok(tx) => tx,
+		Err(err) => {
+			let transaction_error_response = Response::builder()
+				.status(StatusCode::INTERNAL_SERVER_ERROR)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(transaction_error_response);
+		}
+	};
+	match tx.set(id.clone(), file_hash).await {
+		Ok(_) => (),
+		Err(err) => {
+			let set_error_response = Response::builder()
+				.status(StatusCode::INTERNAL_SERVER_ERROR)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(set_error_response);
+		}
+	};
+	let _ = match tx.commit().await {
+		Ok(_) => (),
+		Err(err) => {
+			let commit_error_response = Response::builder()
+				.status(StatusCode::INTERNAL_SERVER_ERROR)
+				.body(boxed(Body::from(err.to_string())))
+				.unwrap();
+			return Err(commit_error_response);
+		}
+	};
 	Ok(output::json(&output::simplify(id)))
 }
 
