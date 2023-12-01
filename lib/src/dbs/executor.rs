@@ -141,7 +141,7 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, mut rcv: Receiver<Notification>) {
+	async fn clear(&self, _: &Context<'_>, _rcv: Receiver<Notification>) {
 		// spawn(async move {
 		// 	while rcv.next().await.is_some() {
 		// 		// Ignore notification
