@@ -17,6 +17,7 @@ pub struct Config {
 	pub client_ip: ClientIp,
 	pub user: Option<String>,
 	pub pass: Option<String>,
+	pub enable_auth_level: bool,
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
 	pub tick_interval: Duration,

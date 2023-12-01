@@ -2,6 +2,8 @@
 
 pub mod engine;
 pub mod err;
+#[cfg(feature = "protocol-http")]
+pub mod headers;
 pub mod method;
 pub mod opt;
 
