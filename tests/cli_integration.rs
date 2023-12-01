@@ -454,7 +454,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	// TODO(gguillemas): Remove this test once the legacy basic auth is deprecated in v2.0.0
+	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
 	async fn without_auth_level() {
 		// Commands with credentials for different auth levels
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();

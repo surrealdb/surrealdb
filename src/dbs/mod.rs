@@ -27,7 +27,7 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_AUTH", long = "auth")]
 	#[arg(default_value_t = false)]
 	auth_enabled: bool,
-	// TODO(gguillemas): Remove this argument once the legacy basic auth is deprecated in v2.0.0
+	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
 	#[arg(
 		help = "Whether to enable explicit authentication level selection",
 		help_heading = "Authentication"
@@ -212,7 +212,7 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		auth_enabled,
-		// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
+		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
 	}: StartCommandDbsOptions,
@@ -236,7 +236,7 @@ pub async fn init(
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
 	// Log whether authentication levels are enabled
-	// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
+	// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
 	if auth_level_enabled {
 		info!("Authentication levels are enabled");
 	}
