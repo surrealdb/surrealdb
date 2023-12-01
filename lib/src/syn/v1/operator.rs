@@ -136,9 +136,7 @@ pub fn matches(i: &str) -> IResult<&str, Operator> {
 }
 
 pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
-	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(',')(i)?;
-	let (i, _) = mightbespace(i)?;
 	alt((
 		map(tag_no_case("CHEBYSHEV"), |_| Distance::Chebyshev),
 		map(tag_no_case("COSINE"), |_| Distance::Cosine),
@@ -153,12 +151,12 @@ pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('<')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, k) = u16(i)?;
-	let (i, dist) = opt(knn_distance)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('>')(i)?;
-	Ok((i, Operator::Knn(k, dist)))
+	cut(|i| {
+		let (i, k) = u16(i)?;
+		let (i, dist) = opt(knn_distance)(i)?;
+		let (i, _) = char('>')(i)?;
+		Ok((i, Operator::Knn(k, dist)))
+	})(i)
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
@@ -232,14 +230,5 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
-	}
-
-	#[test]
-	fn test_knn_with_distance_spaces() {
-		let res = knn("< 10, COSINE >");
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<10,COSINE>", format!("{}", out));
-		assert_eq!(out, Operator::Knn(10, Some(Distance::Cosine)));
 	}
 }
