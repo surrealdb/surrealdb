@@ -16,7 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::QueryType;
 use surrealdb::dbs::Response;
@@ -924,10 +924,10 @@ impl Connection {
 	}
 
 	async fn test_anomaly(&self) {
-		{
-			//panic!("LOG_THIS_ABLCA")
+		if false {
+			panic!("LOG_THIS_ABLCA")
 		}
-		{
+		if false {
 			let m1 = Arc::new(RwLock::new(1));
 			let m2 = Arc::new(RwLock::new(2));
 			trace!("LETS GET CRAYY");
