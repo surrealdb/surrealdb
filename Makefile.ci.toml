@@ -192,7 +192,9 @@ script = """
         set -e
 
         echo "ERROR: TiUP Playground is unhealthy! Try again..."
-        kill $(cat /tmp/tiup.pid) || true 
+        kill $(cat /tmp/tiup.pid) || true
+
+        playground_attempts=$((playground_attempts + 1))
     done
 
     echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
