@@ -128,6 +128,7 @@ time = { version = "0.3.30", features = ["serde"] }
 tokio = { version = "1.34.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wiremock = "0.5.21"
+peak_alloc = "0.2.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
